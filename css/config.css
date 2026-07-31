@@ -1,0 +1,9 @@
+.emp-row{display:grid;grid-template-columns:1fr 1fr 120px 40px;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border-soft);font-size:13px;}
+.report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px;}
+.report-item{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;}
+.report-item .rl{font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:600;letter-spacing:.04em;}
+.report-item .rv{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;margin-top:4px;}
+
+@media (max-width: 700px){
+  .emp-row{grid-template-columns:1fr 1fr;}
+}

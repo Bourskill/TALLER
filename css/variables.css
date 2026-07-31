@@ -1,0 +1,101 @@
+:root{
+  /* Fondo de página vs. superficies elevadas: tonos neutros (sin tinte morado)
+     para que el color quede reservado a lo interactivo/semántico y todo lo
+     demás tenga contraste real entre capas. */
+  --bg:#0e1015;
+  --bg-sidebar:#12141b;
+  --surface:#191c25;
+  --surface-2:#20232e;
+  --surface-3:#282c3a;
+  --surface-hover:#2c303f;
+
+  --border:#333747;
+  --border-soft:#262a36;
+  --border-strong:#454a5e;
+
+  /* Texto: tres niveles con salto de contraste suficiente para ser legibles
+     a simple vista sobre --bg y --surface. */
+  --ink:#f4f5f9;
+  --ink-soft:#b3b7ca;
+  --ink-faint:#7d8296;
+
+  --accent:#7c6cff;
+  --accent-dark:#6353e8;
+  --accent-soft:#241f47;
+  --accent-ink:#c9c2ff;
+
+  --danger:#fb5273;
+  --danger-soft:#3a1522;
+  --danger-ink:#ff8fa4;
+
+  --success:#22d48a;
+  --success-soft:#0d2c22;
+  --success-ink:#6ee8b3;
+
+  --warning:#ffb648;
+  --warning-soft:#3a2a0d;
+  --warning-ink:#ffcc80;
+
+  --info:#5b9dff;
+  --info-soft:#152640;
+  --info-ink:#94c0ff;
+
+  --radius:12px;
+  --radius-sm:8px;
+  --radius-lg:16px;
+
+  --shadow-sm:0 1px 2px rgba(0,0,0,.25);
+  --shadow-md:0 8px 24px rgba(0,0,0,.35);
+  --shadow-lg:0 16px 40px rgba(0,0,0,.45);
+
+  --sidebar-w:260px;
+  --sidebar-w-collapsed:72px;
+  --topbar-h:56px;
+}
+
+/* Modo claro: mismas variables semánticas, tonos invertidos. Se activa
+   poniendo data-theme="light" en <html> (ver dom.js render() y la acción
+   "toggle-tema") — todo el resto del CSS ya usa estas variables, así que no
+   hace falta ninguna regla adicional por componente. */
+:root[data-theme="light"]{
+  --bg:#f4f5f8;
+  --bg-sidebar:#ffffff;
+  --surface:#ffffff;
+  --surface-2:#f0f1f5;
+  --surface-3:#e6e8ee;
+  --surface-hover:#e9ebf1;
+
+  --border:#dde0e8;
+  --border-soft:#e7e9ef;
+  --border-strong:#c5c9d4;
+
+  --ink:#1b1d27;
+  --ink-soft:#565b6e;
+  --ink-faint:#8a8f9f;
+
+  --accent:#6a59f0;
+  --accent-dark:#5647d6;
+  --accent-soft:#ece9ff;
+  --accent-ink:#5647d6;
+
+  --danger:#e0334f;
+  --danger-soft:#fce7ea;
+  --danger-ink:#c21f3c;
+
+  --success:#0e9f63;
+  --success-soft:#e3f7ee;
+  --success-ink:#0b7d4e;
+
+  --warning:#c97a12;
+  --warning-soft:#fbeeda;
+  --warning-ink:#9c5f0d;
+
+  --info:#2f6fe0;
+  --info-soft:#e6eefd;
+  --info-ink:#2354b3;
+
+  --shadow-sm:0 1px 2px rgba(20,20,40,.06);
+  --shadow-md:0 8px 24px rgba(20,20,40,.08);
+  --shadow-lg:0 16px 40px rgba(20,20,40,.10);
+}
+

@@ -1,0 +1,28 @@
+.pedido-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;}
+.pedido-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+.pedido-cliente{font-weight:700;font-size:15px;}
+.pedido-meta{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+.pedido-tipo{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent);padding:2px 7px;border-radius:10px;margin-left:6px;}
+.pedido-money{text-align:right;}
+.pedido-money .total{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;}
+.pedido-money .saldo{font-size:11.5px;color:var(--danger-ink);font-family:'IBM Plex Mono',monospace;margin-top:2px;}
+.pedido-money .saldo.ok{color:var(--success-ink);}
+.pedido-money .saldo.neutral{color:var(--ink-soft);}
+
+.tape-track{height:5px;background:var(--surface-3);border-radius:3px;position:relative;margin:14px 0 6px;overflow:hidden;}
+.tape-fill{height:100%;background:var(--accent);border-radius:3px;}
+.tape-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
+.tape-labels span.current{color:var(--accent);}
+.pedido-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;}
+.pedido-actions .accion-grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.pedido-actions .accion-docs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-left:10px;border-left:1px solid var(--border-soft);}
+.pedido-actions .accion-peligro{margin-left:auto;padding-left:10px;border-left:1px solid var(--border-soft);}
+
+/* panel secundario (dinero / pdf), oculto por defecto para reducir el ruido
+   visual de la tarjeta — solo se ve al desplegarlo */
+.pedido-panel{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);}
+.pedido-panel-col{min-width:0;}
+
+@media (max-width: 780px){
+  .pedido-panel{grid-template-columns:1fr;gap:16px;}
+}

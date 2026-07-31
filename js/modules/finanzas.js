@@ -1,0 +1,259 @@
+import { state, persist, notify } from "../core/store.js";
+import { esc, opt, num, uid, todayStr, fmt, norm } from "../core/utils.js";
+import { clienteById, periodoKey } from "../core/calc.js";
+import { renderHelp } from "../core/components.js";
+
+var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
+var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
+
+export function render() {
+  if (state.filtroTxVista === "papelera") return renderPapelera();
+
+  var f = state.formTx;
+  var datalist = '<datalist id="dl-personas">' +
+    (state.config.nomina || []).map(function (e) { return '<option value="' + esc(e.nombre) + '">'; }).join("") +
+    "</datalist>";
+
+  var html = datalist + '<div class="card"><div class="section-title small">Registrar movimiento</div><div class="form-grid">' +
+    '<div class="field"><label>Tipo</label><select data-form="tx" data-field="tipo">' +
+    opt("ingreso", "Ingreso", f.tipo) + opt("gasto", "Gasto", f.tipo) + opt("nomina", "Nómina", f.tipo) +
+    "</select></div>" +
+    '<div class="field"><label>Concepto</label><input data-form="tx" data-field="concepto" value="' + esc(f.concepto) + '" placeholder="Ej. Tela, corte, cliente X" /></div>' +
+    '<div class="field"><label>Monto</label><input type="number" data-form="tx" data-field="monto" value="' + esc(f.monto) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Persona / cliente</label><input list="dl-personas" data-form="tx" data-field="contraparte" value="' + esc(f.contraparte) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Fecha</label><input type="date" data-form="tx" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
+    '<div class="field wide"><label>Pedido relacionado (categoriza y agrupa el movimiento)' + renderHelp("Vincula este movimiento a un pedido para poder agruparlo y encontrarlo luego buscando por N.º de OP, cédula, nombre de la producción o fecha.") + '</label><select data-form="tx" data-field="pedidoId">' +
+    '<option value="">Sin pedido (movimiento suelto)</option>' +
+    state.pedidos.map(function (p) { return '<option value="' + p.id + '" ' + (f.pedidoId === p.id ? "selected" : "") + '>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente) + " — " + esc(p.descripcion) + "</option>"; }).join("") +
+    "</select></div>" +
+    '<button class="btn" data-action="add-tx">Agregar</button>' +
+    "</div></div>";
+
+  html += '<div class="field" style="max-width:360px;margin-bottom:10px;"><input id="inp-buscar-tx" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, producción o fecha…" value="' + esc(state.buscarTx || "") + '" data-live-filter="buscarTx" /></div>';
+
+  html += '<div class="filters">';
+  [["todos", "Todos"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["nomina", "Nómina"], ["comision", "Comisiones"]].forEach(function (c) {
+    html += '<button class="chip ' + (state.filtroTx === c[0] ? "active" : "") + '" data-action="filtro-tx" data-val="' + c[0] + '">' + c[1] + "</button>";
+  });
+  html += '<select class="mini-input" style="width:auto;" data-action-change="set-tx-periodo">' +
+    Object.keys(PERIODOS_TX).map(function (k) { return '<option value="' + k + '" ' + (state.filtroTxPeriodo === k ? "selected" : "") + '>' + PERIODOS_TX[k] + "</option>"; }).join("") +
+    "</select>" +
+    renderHelp("Filtra los movimientos que caen dentro del periodo actual (según el periodo de pago configurado), igual que el cálculo de nómina pendiente.") +
+    '<button class="btn ghost small" style="margin-left:auto;" data-action="ver-papelera">🗑 Papelera' + (state.txPapelera.length ? " (" + state.txPapelera.length + ")" : "") + "</button>" +
+    "</div>";
+
+  var filtered = filtrarTx();
+
+  var conPedido = {}, sinPedido = [];
+  filtered.forEach(function (t) {
+    if (t.pedidoId) { (conPedido[t.pedidoId] = conPedido[t.pedidoId] || []).push(t); }
+    else sinPedido.push(t);
+  });
+
+  if (filtered.length === 0) {
+    html += '<div class="card"><div class="empty">Aún no hay movimientos <b>que coincidan con estos filtros</b>.</div></div>';
+    return html;
+  }
+
+  var gruposOrdenados = Object.keys(conPedido).map(function (pid) {
+    var pedido = state.pedidos.filter(function (p) { return p.id === pid; })[0];
+    return { pedido: pedido, pid: pid, txs: conPedido[pid] };
+  }).sort(function (a, b) {
+    var fa = a.txs[0] ? a.txs[0].fecha : "", fb = b.txs[0] ? b.txs[0].fecha : "";
+    return fa < fb ? 1 : -1;
+  });
+
+  // Cada grupo agrupa TODOS los movimientos de un mismo pedido (abonos,
+  // sobrecostos, comisiones, estimados...) en un solo panel, con el total
+  // neto de ese pedido a la vista.
+  gruposOrdenados.forEach(function (g) {
+    var cliente = g.pedido && g.pedido.clienteId ? clienteById(g.pedido.clienteId) : null;
+    var neto = g.txs.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
+    html += '<div class="card" style="margin-bottom:14px;">';
+    html += '<div class="cot-col-title" style="margin-top:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;">' + esc(g.pedido ? g.pedido.numeroOp : "OP-????") + '</span>' +
+      '<span>' + esc(g.pedido ? g.pedido.cliente : "Pedido eliminado") + (g.pedido ? " — " + esc(g.pedido.descripcion) : "") + "</span>" +
+      (cliente && cliente.cedula ? '<span class="tag" style="background:var(--surface-3);">CC/NIT ' + esc(cliente.cedula) + "</span>" : "") +
+      '<span class="amount ' + (neto >= 0 ? "pos" : "neg") + '" style="margin-left:auto;">Neto: ' + (neto >= 0 ? "+" : "-") + fmt(Math.abs(neto)) + "</span>" +
+      "</div>";
+    html += renderTablaTx(g.txs);
+    html += "</div>";
+  });
+
+  if (sinPedido.length > 0) {
+    html += '<div class="card"><div class="cot-col-title" style="margin-top:0;">Movimientos sueltos (sin pedido)</div>' + renderTablaTx(sinPedido) + "</div>";
+  }
+
+  return html;
+}
+
+function filtrarTx() {
+  var list = state.filtroTx === "todos" ? state.tx : state.tx.filter(function (t) { return t.tipo === state.filtroTx; });
+
+  var periodo = state.filtroTxPeriodo || "todos";
+  if (periodo !== "todos") {
+    var miPeriodo = periodoKey(todayStr(), periodo);
+    list = list.filter(function (t) { return periodoKey(t.fecha, periodo) === miPeriodo; });
+  }
+
+  var q = norm(state.buscarTx || "").trim();
+  if (q) {
+    list = list.filter(function (t) {
+      var pedido = t.pedidoId ? state.pedidos.filter(function (p) { return p.id === t.pedidoId; })[0] : null;
+      var cliente = pedido && pedido.clienteId ? clienteById(pedido.clienteId) : null;
+      var cedula = cliente ? cliente.cedula : "";
+      var haystack = [t.concepto, t.contraparte, t.fecha, pedido ? pedido.numeroOp : "", pedido ? pedido.cliente : "", pedido ? pedido.descripcion : "", cedula]
+        .map(norm).join(" | ");
+      return haystack.indexOf(q) >= 0;
+    });
+  }
+  return list;
+}
+
+function renderTablaTx(lista) {
+  var html = '<div class="tx-row head"><span>Fecha</span><span>Concepto</span><span>Persona</span><span>Tipo</span><span>Monto</span><span></span></div>';
+  lista.forEach(function (t) {
+    html += t.id === state.txEditando ? renderFilaEdicion(t) : renderFila(t);
+  });
+  return html;
+}
+
+function renderFila(t) {
+  return '<div class="tx-row">' +
+    "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
+    "<span>" + esc(t.concepto) + "</span>" +
+    '<span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
+    '<span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
+    '<span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
+    '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+    '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
+    '<button class="btn danger small" data-action="remove-tx" data-id="' + t.id + '" title="Se mueve a la papelera, no se borra para siempre">🗑</button>' +
+    "</span>" +
+    "</div>";
+}
+
+// Fila en modo edición: reemplaza cada celda por un input/select editable.
+// Se guarda con "guardar-tx-edit" (lee estos mismos campos por data-role) o
+// se cancela con "cancelar-edicion-tx", sin perder los demás movimientos.
+function renderFilaEdicion(t) {
+  return '<div class="tx-row" style="background:var(--surface-2);" data-tx-edit-row="' + t.id + '">' +
+    '<span><input type="date" class="mini-input" style="width:100%" data-role="edit-fecha" value="' + esc(t.fecha) + '" /></span>' +
+    '<span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(t.concepto) + '" /></span>' +
+    '<span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(t.contraparte || "") + '" /></span>' +
+    '<span><select class="mini-input" style="width:100%" data-role="edit-tipo">' +
+    Object.keys(TIPOS_TX).map(function (k) { return opt(k, TIPOS_TX[k], t.tipo); }).join("") +
+    "</select></span>" +
+    '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>' +
+    '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+    '<button class="btn small" data-action="guardar-tx-edit" data-id="' + t.id + '">Guardar</button>' +
+    '<button class="btn ghost small" data-action="cancelar-edicion-tx">Cancelar</button>' +
+    "</span>" +
+    "</div>";
+}
+
+function renderPapelera() {
+  var html = '<div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">' +
+    '<div class="section-title small" style="margin:0;">Papelera de movimientos' + renderHelp("Los movimientos eliminados quedan aquí (no se borran para siempre) para poder restaurarlos si fue un error.") + "</div>" +
+    '<button class="btn ghost small" data-action="ver-papelera">← Volver a movimientos</button>' +
+    "</div>";
+
+  if (!state.txPapelera.length) {
+    html += '<div class="card"><div class="empty">La papelera está vacía.</div></div>';
+    return html;
+  }
+
+  html += '<div class="card">';
+  html += '<div class="tx-row head"><span>Fecha</span><span>Concepto</span><span>Persona</span><span>Tipo</span><span>Monto</span><span></span></div>';
+  state.txPapelera.forEach(function (t) {
+    html += '<div class="tx-row">' +
+      "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
+      "<span>" + esc(t.concepto) + "</span>" +
+      '<span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
+      '<span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
+      '<span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
+      '<span style="display:flex;align-items:center;gap:6px;">' +
+      '<button class="btn ghost small" data-action="restaurar-tx" data-id="' + t.id + '">Restaurar</button>' +
+      '<button class="btn danger small" data-action="eliminar-tx-definitivo" data-id="' + t.id + '">Eliminar definitivo</button>' +
+      "</span>" +
+      "</div>";
+  });
+  html += "</div>";
+  return html;
+}
+
+export var actions = {
+  "filtro-tx": function (el) {
+    state.filtroTx = el.getAttribute("data-val");
+    notify();
+  },
+  "set-tx-periodo": function (el) {
+    state.filtroTxPeriodo = el.value;
+    notify();
+  },
+  "ver-papelera": function () {
+    state.filtroTxVista = state.filtroTxVista === "papelera" ? "activos" : "papelera";
+    notify();
+  },
+  "add-tx": function () {
+    var f = state.formTx;
+    if (!f.concepto || !f.monto) return;
+    state.tx.unshift({ id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha, pedidoId: f.pedidoId || "" });
+    state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" };
+    persist("tx"); notify();
+  },
+  "editar-tx": function (el) {
+    state.txEditando = el.getAttribute("data-id");
+    notify();
+  },
+  "cancelar-edicion-tx": function () {
+    state.txEditando = "";
+    notify();
+  },
+  "guardar-tx-edit": function (el) {
+    var id = el.getAttribute("data-id");
+    var fila = el.closest('[data-tx-edit-row]');
+    if (!fila) return;
+    var g = function (role) { var i = fila.querySelector('[data-role="' + role + '"]'); return i ? i.value : ""; };
+    var concepto = g("edit-concepto");
+    var monto = num(g("edit-monto"));
+    if (!concepto || monto <= 0) return;
+    state.tx = state.tx.map(function (t) {
+      if (t.id !== id) return t;
+      return Object.assign({}, t, {
+        fecha: g("edit-fecha") || t.fecha,
+        concepto: concepto,
+        contraparte: g("edit-contraparte"),
+        tipo: g("edit-tipo") || t.tipo,
+        monto: monto
+      });
+    });
+    state.txEditando = "";
+    persist("tx"); notify();
+  },
+  // "Eliminar" ya no borra para siempre: mueve el movimiento a la papelera,
+  // de donde se puede restaurar si fue un error.
+  "remove-tx": function (el) {
+    var id = el.getAttribute("data-id");
+    var item = state.tx.filter(function (t) { return t.id === id; })[0];
+    if (!item) return;
+    state.tx = state.tx.filter(function (t) { return t.id !== id; });
+    state.txPapelera.unshift(Object.assign({}, item, { eliminadoEl: todayStr() }));
+    persist("tx"); persist("txPapelera"); notify();
+  },
+  "restaurar-tx": function (el) {
+    var id = el.getAttribute("data-id");
+    var item = state.txPapelera.filter(function (t) { return t.id === id; })[0];
+    if (!item) return;
+    state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
+    var restaurado = Object.assign({}, item);
+    delete restaurado.eliminadoEl;
+    state.tx.unshift(restaurado);
+    persist("tx"); persist("txPapelera"); notify();
+  },
+  "eliminar-tx-definitivo": function (el) {
+    var id = el.getAttribute("data-id");
+    if (!window.confirm("Esto elimina el movimiento para siempre y no se puede deshacer. ¿Continuar?")) return;
+    state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
+    persist("txPapelera"); notify();
+  }
+};

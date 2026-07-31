@@ -1,0 +1,21 @@
+.cliente-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:16px 18px;margin-bottom:12px;}
+.cliente-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+.cliente-nombre{font-weight:700;font-size:14.5px;}
+.cliente-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 16px;margin-top:8px;font-size:12.5px;color:var(--ink-soft);}
+.cliente-grid b{color:var(--ink);font-weight:600;}
+
+.search-bar{margin-bottom:14px;}
+.search-bar input{font-family:'Inter',sans-serif;font-size:13px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);width:100%;max-width:320px;}
+.search-bar input:focus{outline:none;border-color:var(--accent);}
+.client-count{font-size:11.5px;color:var(--ink-faint);margin-top:6px;}
+
+/* combobox de búsqueda de clientes, reutilizado en Pedidos y Cotizaciones */
+.combo-wrap{position:relative;}
+.combo-suggestions{position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 8px 20px rgba(0,0,0,.35);}
+.combo-item{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--border-soft);}
+.combo-item:last-child{border-bottom:none;}
+.combo-item:hover{background:var(--surface-2);}
+.combo-item b{color:var(--ink);}
+.combo-item span{color:var(--ink-faint);font-size:11px;display:block;margin-top:1px;}
+.combo-empty{padding:9px 10px;font-size:12px;color:var(--ink-faint);}
+.combo-linked{font-size:11px;color:var(--success-ink);display:flex;align-items:center;gap:5px;margin-top:4px;}

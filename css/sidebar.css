@@ -1,0 +1,100 @@
+/* ==========================================================================
+   Menú lateral: categorizado, plegable por sección, y colapsable a modo
+   "riel de íconos" para ganar espacio. En móvil se convierte en un cajón
+   (drawer) que se abre desde el botón ☰ de la topbar.
+   ========================================================================== */
+
+.sidebar{
+  width:var(--sidebar-w);
+  flex:0 0 var(--sidebar-w);
+  background:var(--bg-sidebar);
+  border-right:1px solid var(--border-soft);
+  position:sticky;
+  top:0;
+  align-self:flex-start;
+  height:100vh;
+  overflow-y:auto;
+  overflow-x:hidden;
+  transition:width .18s ease, flex-basis .18s ease;
+  z-index:40;
+}
+.sidebar-inner{display:flex;flex-direction:column;height:100%;min-height:100%;padding:18px 14px 22px;}
+
+/* ---------- cabecera: logo + nombre editable + botón de colapsar ---------- */
+.sidebar-head{display:flex;align-items:center;gap:10px;padding:4px 4px 18px;margin-bottom:10px;border-bottom:1px solid var(--border-soft);}
+.sidebar-logo{
+  flex:0 0 36px;width:36px;height:36px;border-radius:10px;
+  background:linear-gradient(155deg,var(--accent),var(--accent-dark));
+  color:#fff;font-family:'Inter',sans-serif;font-weight:800;font-size:13px;
+  display:flex;align-items:center;justify-content:center;letter-spacing:.02em;
+  box-shadow:var(--shadow-sm);
+  border:none;cursor:pointer;padding:0;overflow:hidden;
+  transition:filter .15s ease;
+}
+.sidebar-logo:hover{filter:brightness(1.08);}
+.sidebar-logo img{width:100%;height:100%;object-fit:cover;}
+.sidebar-brandwrap{flex:1;min-width:0;}
+.sidebar-brand{
+  font-family:'Inter',sans-serif;font-weight:800;font-size:15px;letter-spacing:-0.01em;
+  background:transparent;border:none;color:var(--ink);padding:1px 0;width:100%;
+  border-bottom:1px dashed transparent;
+}
+.sidebar-brand:focus{outline:none;border-bottom:1px dashed var(--accent);}
+.sidebar-brand-sub{font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;text-transform:uppercase;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sidebar-collapse-btn{
+  flex:0 0 26px;width:26px;height:26px;border-radius:7px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--ink-faint);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.sidebar-collapse-btn:hover{color:var(--ink);border-color:var(--border-strong);background:var(--surface-3);}
+.sidebar-collapse-btn svg{width:14px;height:14px;}
+
+/* ---------- navegación por categorías ---------- */
+.nav{flex:1;display:flex;flex-direction:column;gap:4px;margin-top:6px;}
+.nav-group{display:flex;flex-direction:column;}
+.nav-group-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  width:100%;background:none;border:none;cursor:pointer;
+  padding:10px 8px 6px;
+}
+.nav-group-title{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-faint);}
+.nav-group-chevron{color:var(--ink-faint);display:flex;transition:transform .15s ease;}
+.nav-group-chevron svg{width:13px;height:13px;}
+.nav-group.open .nav-group-chevron{transform:rotate(180deg);}
+.nav-group-items{display:flex;flex-direction:column;gap:2px;overflow:hidden;max-height:0;transition:max-height .18s ease;}
+.nav-group.open .nav-group-items{max-height:400px;}
+
+.nav-item{
+  display:flex;align-items:center;gap:11px;
+  width:100%;padding:9px 10px;border-radius:var(--radius-sm);
+  background:none;border:none;cursor:pointer;text-align:left;
+  font-family:'Inter',sans-serif;font-size:13.5px;font-weight:600;color:var(--ink-soft);
+  border-left:2.5px solid transparent;
+}
+.nav-item:hover{background:var(--surface-2);color:var(--ink);}
+.nav-item.active{background:var(--accent-soft);color:var(--accent-ink);border-left-color:var(--accent);}
+.nav-icon{flex:0 0 20px;width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:inherit;opacity:.85;}
+.nav-icon svg{width:18px;height:18px;}
+.nav-item.active .nav-icon{opacity:1;}
+.nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.sidebar-overlay{display:none;}
+
+/* ==========================================================================
+   Modo colapsado (solo escritorio): riel angosto de íconos, sin categorías
+   visibles ni texto. El nombre del taller también se abrevia al logo.
+   ========================================================================== */
+.shell.sidebar-collapsed .sidebar{width:var(--sidebar-w-collapsed);flex-basis:var(--sidebar-w-collapsed);}
+.shell.sidebar-collapsed .sidebar-brandwrap,
+.shell.sidebar-collapsed .nav-group-title,
+.shell.sidebar-collapsed .nav-group-chevron,
+.shell.sidebar-collapsed .nav-label{display:none;}
+.shell.sidebar-collapsed .sidebar-head{justify-content:center;gap:0;}
+.shell.sidebar-collapsed .sidebar-collapse-btn{position:absolute;top:14px;right:-11px;background:var(--surface-2);border:1px solid var(--border);box-shadow:var(--shadow-sm);}
+.shell.sidebar-collapsed .sidebar-collapse-btn svg{transform:rotate(180deg);}
+.shell.sidebar-collapsed .sidebar-inner{position:relative;align-items:center;padding-left:10px;padding-right:10px;}
+.shell.sidebar-collapsed .nav-group-head{justify-content:center;padding:8px 0 2px;pointer-events:none;}
+.shell.sidebar-collapsed .nav-group-items{max-height:none;overflow:visible;}
+.shell.sidebar-collapsed .nav-item{justify-content:center;padding:10px;gap:0;border-left:none;border-radius:10px;}
+.shell.sidebar-collapsed .nav-item.active{box-shadow:inset 0 0 0 1.5px var(--accent);}
+.shell.sidebar-collapsed .nav{gap:2px;}

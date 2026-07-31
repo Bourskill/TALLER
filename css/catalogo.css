@@ -1,0 +1,3 @@
+/* La pestaña Catálogo reutiliza .tx-row, .mini-input, .report-grid y .report-item
+   ya definidos en tables.css / forms.css / config.css — no necesita clases propias.
+   Este archivo queda como punto de extensión si más adelante gana su propio look. */

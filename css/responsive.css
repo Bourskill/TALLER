@@ -1,0 +1,57 @@
+/* ==========================================================================
+   Móvil / pantallas angostas: la sidebar deja de ocupar espacio fijo y se
+   convierte en un cajón (drawer) que se desliza desde la izquierda, con un
+   botón ☰ en la topbar para abrirlo y un overlay para cerrarlo al tocar fuera.
+   ========================================================================== */
+@media (max-width: 880px){
+  .main-inner{padding:16px 16px 80px;}
+  .topbar{margin-bottom:16px;}
+  .topbar-title{font-size:18px;}
+  .topbar-date{display:none;}
+  .sidebar-mobile-toggle{
+    display:flex;align-items:center;justify-content:center;
+    width:34px;height:34px;border-radius:9px;flex:0 0 34px;
+    background:var(--surface);border:1px solid var(--border);color:var(--ink);
+  }
+  .sidebar-mobile-toggle svg{width:18px;height:18px;}
+
+  .sidebar{
+    position:fixed;top:0;left:0;bottom:0;z-index:60;
+    width:min(78vw,300px);flex-basis:auto;
+    transform:translateX(-100%);
+    box-shadow:var(--shadow-lg);
+    transition:transform .2s ease;
+  }
+  .shell.sidebar-mobile-open .sidebar{transform:translateX(0);}
+  /* En móvil, el modo "colapsado" de escritorio no aplica: el cajón siempre
+     se abre completo para que se lea todo. */
+  .shell.sidebar-collapsed .sidebar{width:min(78vw,300px);}
+  .shell.sidebar-collapsed .sidebar-brandwrap,
+  .shell.sidebar-collapsed .nav-group-title,
+  .shell.sidebar-collapsed .nav-group-chevron,
+  .shell.sidebar-collapsed .nav-label{display:revert;}
+  .shell.sidebar-collapsed .sidebar-head{justify-content:flex-start;gap:10px;}
+  .shell.sidebar-collapsed .sidebar-collapse-btn{position:static;box-shadow:none;}
+  .shell.sidebar-collapsed .sidebar-collapse-btn svg{transform:none;}
+  .shell.sidebar-collapsed .nav-item{justify-content:flex-start;padding:9px 10px;gap:11px;border-left:2.5px solid transparent;border-radius:var(--radius-sm);}
+  .shell.sidebar-collapsed .nav-item.active{box-shadow:none;border-left-color:var(--accent);}
+  .sidebar-collapse-btn{display:none;}
+
+  .sidebar-overlay{
+    display:none;position:fixed;inset:0;background:rgba(6,7,11,.55);z-index:50;
+  }
+  .shell.sidebar-mobile-open .sidebar-overlay{display:block;}
+
+  .kpis{grid-template-columns:repeat(2,1fr);gap:10px;}
+  .kpi{padding:13px 14px 12px;}
+  .kpi-value{font-size:20px;}
+
+  .two-col{grid-template-columns:1fr;}
+  .tx-row{grid-template-columns:1fr;gap:2px;padding:12px 4px;}
+  .tx-row.head{display:none;}
+}
+
+@media (max-width: 480px){
+  .kpis{grid-template-columns:1fr 1fr;}
+  .main-inner{padding:14px 12px 76px;}
+}

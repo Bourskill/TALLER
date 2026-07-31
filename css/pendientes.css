@@ -1,0 +1,9 @@
+.pend-group{margin-bottom:22px;}
+.pend-item{display:flex;align-items:center;gap:10px;padding:11px 6px;border-bottom:1px solid var(--border-soft);}
+.pend-item:hover{background:var(--surface-2);border-radius:8px;}
+.pend-item.done .pend-text{text-decoration:line-through;color:var(--ink-faint);}
+.pend-text{flex:1;font-size:13px;}
+.prio{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;}
+.prio.alta{background:var(--danger-soft);color:var(--danger-ink);}
+.prio.media{background:var(--warning-soft);color:var(--warning-ink);}
+.prio.baja{background:var(--success-soft);color:var(--success-ink);}

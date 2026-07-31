@@ -1,0 +1,374 @@
+// Este es el único archivo que conoce a la vez el estado y el DOM.
+// Ensambla el layout fijo (sidebar categorizada + topbar + KPIs) + el contenido
+// de la pestaña activa, y arma un "registro de acciones" combinando lo que cada
+// módulo expone en `actions`.
+//
+// Para agregar una pestaña nueva en el futuro: crear js/modules/<nombre>.js con
+// `export function render(){...}` y opcionalmente `export var actions = {...}`,
+// añadirlo a TAB_MODULES aquí abajo, agregarlo a la lista de TABS, sumarlo dentro
+// de la categoría correspondiente en NAV_GROUPS, y darle un ícono en core/icons.js.
+// Nada más necesita cambiar.
+
+import { state, persist, notify } from "./store.js";
+import { esc } from "./utils.js";
+import { calcCaja, calcPorCobrar, calcResumenPorPagar, calcPedidosActivos, clienteById } from "./calc.js";
+import { ICONS } from "./icons.js";
+
+import * as resumen from "../modules/resumen.js";
+import * as finanzas from "../modules/finanzas.js";
+import * as pedidos from "../modules/pedidos.js";
+import * as cotizaciones from "../modules/cotizaciones.js";
+import * as catalogo from "../modules/catalogo.js";
+import * as plantillas from "../modules/plantillas.js";
+import * as clientes from "../modules/clientes.js";
+import * as pendientes from "../modules/pendientes.js";
+import * as notas from "../modules/notas.js";
+import * as config from "../modules/config.js";
+
+var TABS = [
+  ["resumen", "Resumen", resumen],
+  ["finanzas", "Finanzas", finanzas],
+  ["pedidos", "Pedidos", pedidos],
+  ["cotizaciones", "Cotizaciones", cotizaciones],
+  ["catalogo", "Catálogo", catalogo],
+  ["plantillas", "Plantillas", plantillas],
+  ["clientes", "Clientes", clientes],
+  ["pendientes", "Pendientes", pendientes],
+  ["notas", "Notas", notas],
+  ["config", "Configuración", config]
+];
+var TAB_MODULES = TABS.reduce(function (acc, t) { acc[t[0]] = t[2]; return acc; }, {});
+
+// Categorías del menú lateral. Cada grupo es [clave, título, [claves de pestaña]].
+// La clave del grupo debe existir en DEFAULT_UI.navGroups (constants.js) para
+// que se recuerde si el usuario lo dejó abierto o cerrado.
+var NAV_GROUPS = [
+  ["general", "Panel", ["resumen", "notas"]],
+  ["ventas", "Ventas", ["pedidos", "cotizaciones", "clientes"]],
+  ["produccion", "Producción", ["catalogo", "plantillas"]],
+  ["gestion", "Gestión", ["finanzas", "pendientes"]],
+  ["sistema", "Sistema", ["config"]]
+];
+var TAB_LABEL = TABS.reduce(function (acc, t) { acc[t[0]] = t[1]; return acc; }, {});
+
+// Timers de debounce por campo de búsqueda en vivo (ver bindEvents). Vive a nivel
+// de módulo, no dentro de bindEvents, para que sobreviva entre renders sucesivos.
+var liveFilterTimers = {};
+
+// Acciones que no pertenecen a un módulo de pestaña porque son transversales
+// (cambiar de pestaña, o vincular un cliente sugerido desde el combobox
+// compartido entre Pedidos y Cotizaciones).
+var coreActions = {
+  tab: function (el) {
+    state.tab = el.getAttribute("data-tab");
+    state.sidebarMobileOpen = false; // al elegir una pestaña en móvil, cerrar el cajón
+    if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; }
+    if (state.tab !== "pedidos") { state.filtroPedidosVista = "activos"; }
+    notify();
+  },
+  "kpi-nav": function (el) {
+    state.tab = el.getAttribute("data-tab");
+    state.sidebarMobileOpen = false;
+    state.filtroTxVista = "activos";
+    state.txEditando = "";
+    state.filtroPedidosVista = "activos";
+    var filtroTx = el.getAttribute("data-filtro-tx");
+    if (filtroTx) state.filtroTx = filtroTx;
+    if (el.getAttribute("data-filtro-saldo")) state.filtroPedidosSoloSaldo = true;
+    notify();
+  },
+  "toggle-sidebar": function () {
+    state.ui.sidebarCollapsed = !state.ui.sidebarCollapsed;
+    persist("ui");
+    notify();
+  },
+  "toggle-tema": function () {
+    state.ui.tema = state.ui.tema === "claro" ? "oscuro" : "claro";
+    document.documentElement.setAttribute("data-theme", state.ui.tema === "claro" ? "light" : "dark");
+    persist("ui");
+    notify();
+  },
+  "toggle-sidebar-mobile": function () {
+    state.sidebarMobileOpen = !state.sidebarMobileOpen;
+    notify();
+  },
+  "toggle-nav-group": function (el) {
+    var g = el.getAttribute("data-group");
+    if (state.ui.sidebarCollapsed) return; // colapsado: no hay categorías que plegar
+    state.ui.navGroups[g] = !state.ui.navGroups[g];
+    persist("ui");
+    notify();
+  },
+  "select-cliente": function (el) {
+    var form = el.getAttribute("data-form");
+    var c = clienteById(el.getAttribute("data-id"));
+    if (c) {
+      var target = form === "pedido" ? state.formPedido : state.formCotizacion;
+      target.clienteId = c.id;
+      target.cliente = c.nombre;
+    }
+    notify();
+  },
+  "edit-logo": function () {
+    var actual = state.config.logoUrl || "";
+    var nuevo = window.prompt("Ícono del taller: pega un emoji corto (ej. 🧵) o el link a una imagen.\nDéjalo vacío para volver a las iniciales.", actual);
+    if (nuevo === null) return;
+    state.config.logoUrl = nuevo.trim();
+    persist("config");
+    notify();
+  }
+};
+
+var actionRegistry = Object.assign(
+  {},
+  coreActions,
+  resumen.actions, finanzas.actions, pedidos.actions, cotizaciones.actions,
+  catalogo.actions, plantillas.actions,
+  clientes.actions, pendientes.actions, notas.actions, config.actions
+);
+
+// form -> clave en `state` que guarda su borrador.
+var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte" };
+
+export function render() {
+  document.documentElement.setAttribute("data-theme", state.ui.tema === "claro" ? "light" : "dark");
+  var active = document.activeElement;
+  var activeId = active && active.id ? active.id : null;
+  var selStart = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
+
+  try {
+    var app = document.getElementById("app");
+    var mod = TAB_MODULES[state.tab];
+    var tabHtml = mod && mod.render ? mod.render() : "";
+
+    var mainInner = "";
+    if (state.lastError) {
+      mainInner += '<div class="error-box">Ocurrió un error inesperado y se muestra aquí para poder corregirlo:\n' + esc(state.lastError) + "</div>";
+    }
+    mainInner += renderTopbar();
+    mainInner += renderKpis();
+    mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
+
+    var html = "" +
+      '<div class="shell' + (state.ui.sidebarCollapsed ? " sidebar-collapsed" : "") + (state.sidebarMobileOpen ? " sidebar-mobile-open" : "") + '">' +
+      renderSidebar() +
+      '<div class="sidebar-overlay" data-action="toggle-sidebar-mobile"></div>' +
+      '<main class="main"><div class="main-inner">' + mainInner + "</div></main>" +
+      "</div>";
+
+    app.innerHTML = html;
+    bindEvents();
+
+    if (activeId) {
+      var el2 = document.getElementById(activeId);
+      if (el2) {
+        el2.focus();
+        if (selStart != null && el2.setSelectionRange) { try { el2.setSelectionRange(selStart, selStart); } catch (e) {} }
+      }
+    }
+  } catch (e) {
+    console.error(e);
+    state.lastError = e && e.message ? e.message : String(e);
+    var app2 = document.getElementById("app");
+    if (app2) app2.innerHTML = '<div class="error-box">Ocurrió un error y el panel no pudo dibujarse:\n' + esc(state.lastError) + "</div>";
+  }
+}
+
+function renderSidebar() {
+  var collapsed = state.ui.sidebarCollapsed;
+  var initials = (state.config.nombre || "MT").trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join("").toUpperCase();
+  var logo = (state.config.logoUrl || "").trim();
+  var isImg = /^(https?:|data:)/.test(logo);
+  var logoInner = isImg ? '<img src="' + esc(logo) + '" alt="" />' : esc(logo || initials || "MT");
+
+  var html = '<aside class="sidebar">' +
+    '<div class="sidebar-inner">' +
+    '<div class="sidebar-head">' +
+    '<button class="sidebar-logo" data-action="edit-logo" title="Cambiar ícono del taller">' + logoInner + "</button>" +
+    '<div class="sidebar-brandwrap">' +
+    '<input class="sidebar-brand" id="inp-nombre" value="' + esc(state.config.nombre) + '" />' +
+    '<div class="sidebar-brand-sub">Panel de gestión</div>' +
+    "</div>" +
+    '<button class="sidebar-collapse-btn" data-action="toggle-sidebar" title="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '" aria-label="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '">' + collapseIcon() + "</button>" +
+    "</div>" +
+    '<nav class="nav">';
+
+  NAV_GROUPS.forEach(function (g) {
+    var groupKey = g[0], groupLabel = g[1], tabs = g[2];
+    var open = !!state.ui.navGroups[groupKey];
+    html += '<div class="nav-group' + (open ? " open" : "") + '">';
+    html += '<button class="nav-group-head" data-action="toggle-nav-group" data-group="' + groupKey + '">' +
+      '<span class="nav-group-title">' + esc(groupLabel) + "</span>" +
+      '<span class="nav-group-chevron">' + chevronIcon() + "</span>" +
+      "</button>";
+    html += '<div class="nav-group-items">';
+    tabs.forEach(function (key) {
+      var label = TAB_LABEL[key];
+      var active = state.tab === key;
+      html += '<button class="nav-item' + (active ? " active" : "") + '" data-action="tab" data-tab="' + key + '" title="' + esc(label) + '">' +
+        '<span class="nav-icon">' + (ICONS[key] || "") + "</span>" +
+        '<span class="nav-label">' + esc(label) + "</span>" +
+        "</button>";
+    });
+    html += "</div></div>";
+  });
+
+  html += "</nav></div></aside>";
+  return html;
+}
+
+function collapseIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>';
+}
+function chevronIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+}
+function menuIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/></svg>';
+}
+
+function sunIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>';
+}
+function moonIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z"/></svg>';
+}
+
+function renderTopbar() {
+  var fecha = new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  var titulo = TAB_LABEL[state.tab] || "";
+  var esClaro = state.ui.tema === "claro";
+  return "" +
+    '<div class="topbar">' +
+    '<button class="sidebar-mobile-toggle" data-action="toggle-sidebar-mobile" aria-label="Abrir menú">' + menuIcon() + "</button>" +
+    '<div class="topbar-title">' + esc(titulo) + "</div>" +
+    '<div class="topbar-date">' + esc(fecha) + "</div>" +
+    '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
+    "</div>";
+}
+
+function renderKpis() {
+  var caja = calcCaja(), porCobrar = calcPorCobrar(), activos = calcPedidosActivos();
+  var resumenPago = calcResumenPorPagar();
+  var html = "" +
+    '<div class="kpis">' +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmtLocal(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmtLocal(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
+    renderKpiPorPagar(resumenPago) +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
+    "</div>";
+  return html;
+}
+
+// KPI "Por pagar" inteligente: en vez del total acumulado, muestra lo más
+// urgente — obligaciones vencidas (si las hay) o el próximo vencimiento.
+// El total general de todo lo pendiente sigue viviendo solo en la pestaña
+// Pendientes (módulo de cuentas por pagar), no aquí.
+function renderKpiPorPagar(r) {
+  if (r.estado === "aldia") {
+    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Por pagar</div><div class="kpi-value success">Al día</div><div class="kpi-note">Sin obligaciones pendientes</div></div>';
+  }
+  if (r.estado === "vencidas") {
+    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Obligaciones vencidas</div><div class="kpi-value danger">' + fmtLocal(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación vencida" : " obligaciones vencidas") + "</div></div>";
+  }
+  var fechaCorta = r.fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }).replace(".", "");
+  return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Próximo vencimiento</div><div class="kpi-value warning">' + esc(fechaCorta) + " · " + fmtLocal(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación" : " obligaciones") + "</div></div>";
+}
+
+function fmtLocal(n) { return "$" + Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }); }
+
+function bindEvents() {
+  var app = document.getElementById("app");
+
+  // El nombre del taller vive en el header (fuera de cualquier módulo de pestaña).
+  var nombreInput = document.getElementById("inp-nombre");
+  if (nombreInput) {
+    nombreInput.addEventListener("change", function () {
+      state.config.nombre = nombreInput.value || "Mi Taller";
+      persist("config");
+    });
+  }
+
+  // Patrón genérico 1: data-form + data-field -> escribe en state.form<X>.
+  app.querySelectorAll("[data-form]").forEach(function (el) {
+    el.addEventListener("input", function () { handleFormInput(el); });
+  });
+
+  // Patrón genérico 2: data-live-filter -> escribe directo en state[key] y re-renderiza
+  // poco después de que el usuario deja de escribir (no en cada tecla: con listas
+  // grandes, redibujar toda la app en cada carácter se siente lento y es trabajo
+  // de sobra si el usuario sigue escribiendo).
+  app.querySelectorAll("[data-live-filter]").forEach(function (el) {
+    el.addEventListener("input", function () {
+      var key = el.getAttribute("data-live-filter");
+      state[key] = el.value;
+      clearTimeout(liveFilterTimers[key]);
+      liveFilterTimers[key] = setTimeout(notify, 150);
+    });
+  });
+
+  // Patrón genérico 3: data-action-change -> dispara una acción del registro en "change".
+  app.querySelectorAll("[data-action-change]").forEach(function (el) {
+    el.addEventListener("change", function () {
+      dispatch(el.getAttribute("data-action-change"), el);
+    });
+  });
+
+  // Patrón genérico 4: data-action -> dispara una acción del registro en "click".
+  app.querySelectorAll("[data-action]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      dispatch(el.getAttribute("data-action"), el);
+    });
+  });
+}
+
+function handleFormInput(el) {
+  var form = el.getAttribute("data-form");
+  var field = el.getAttribute("data-field");
+  var stateKey = FORM_STATE_KEY[form];
+  if (!stateKey) return;
+
+  // Caso especial: el campo "cliente" de pedido/cotización limpia el vínculo
+  // (clienteId) al escribir y necesita re-render inmediato para refrescar el combobox.
+  if ((form === "pedido" || form === "cotizacion") && field === "cliente") {
+    state[stateKey].cliente = el.value;
+    state[stateKey].clienteId = "";
+    notify();
+    return;
+  }
+  state[stateKey][field] = el.value;
+}
+
+function dispatch(action, el) {
+  var handler = actionRegistry[action];
+  if (handler) handler(el);
+}
+
+// Cualquier notify() de cualquier módulo termina aquí, sin que ese módulo
+// necesite importar este archivo.
+document.addEventListener("app:render", render);
+
+// Navegación por teclado (y por "Enter/Ir" del teclado táctil) en TODA la
+// app: al presionar Enter en un campo, salta al siguiente campo visible en
+// vez de no hacer nada (o de disparar un submit accidental). Se registra
+// UNA sola vez sobre `document` (no dentro de bindEvents, que se ejecuta en
+// cada render) porque el contenedor #app persiste entre renders aunque su
+// contenido interno se reemplace por completo.
+document.addEventListener("keydown", function (e) {
+  if (e.key !== "Enter") return;
+  var el = e.target;
+  if (!el || (el.tagName !== "INPUT" && el.tagName !== "SELECT")) return;
+  if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return; // su Enter/Espacio nativo ya funciona bien
+  var app = document.getElementById("app");
+  if (!app || !app.contains(el)) return;
+  e.preventDefault();
+  var focusables = Array.prototype.slice.call(
+    app.querySelectorAll('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
+  ).filter(function (f) { return f.offsetParent !== null; }); // solo los visibles
+  var idx = focusables.indexOf(el);
+  if (idx >= 0 && idx < focusables.length - 1) {
+    var next = focusables[idx + 1];
+    next.focus();
+    if (typeof next.select === "function" && next.tagName === "INPUT") next.select();
+  }
+});

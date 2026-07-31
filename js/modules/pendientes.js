@@ -1,0 +1,449 @@
+// Pestaña "Pendientes": todo lo financiero que se debe definir y vigilar pero
+// que no es un movimiento puntual — nómina y equipo, gastos fijos (cada uno con
+// su propio periodo), la meta del taller, y deudas. Todo esto vivía antes
+// repartido en Configuración; se unificó aquí para que "Configuración" quede
+// solo con datos de marca/PDF, y este apartado concentre las obligaciones que
+// alimentan el KPI "Por pagar". Las notas (tareas/mejoras) se movieron a la
+// pestaña "Notas" (ver modules/notas.js).
+
+import { state, persist, notify } from "../core/store.js";
+import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe } from "../core/utils.js";
+import {
+  calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
+  calcDeudaValorCuota, calcDeudaSaldoPendiente
+} from "../core/calc.js";
+import { PERIODOS_PAGO } from "../core/constants.js";
+import { renderHelp } from "../core/components.js";
+
+export function render() {
+  var cfg = state.config;
+  var totalPorPagar = calcPorPagar();
+  var desglose = calcPorPagarDesglose();
+  var html = '<div class="card">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">' +
+    '<div><div class="section-title small" style="margin:0;">Cuentas por pagar' + renderHelp("Suma de TODO lo pendiente: gastos fijos, nómina, comisiones y deudas, agrupado por categoría abajo. El dashboard principal ya no muestra este total — solo lo más urgente (próximo vencimiento u obligaciones vencidas); este es el detalle completo.") + '</div></div>' +
+    '<div class="kpi-value danger" style="font-size:22px;">' + fmt(totalPorPagar) + "</div>" +
+    "</div>";
+  if (desglose.length === 0) {
+    html += '<div class="empty" style="margin-top:10px;">No hay obligaciones pendientes. 🎉</div>';
+  } else {
+    html += '<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">';
+    desglose.forEach(function (cat) {
+      html += '<div><div style="display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:12.5px;color:var(--ink-soft);"><span>' + esc(cat.categoria) + '</span><span class="amount">' + fmt(cat.monto) + "</span></div>";
+      cat.items.forEach(function (it) {
+        // Para deudas: "monto" ya es el valor de la cuota que vence (no el
+        // saldo total), con un contador discreto tipo "2/6". El saldo total
+        // de la deuda queda disponible al pasar el mouse.
+        html += '<div class="tx-row" style="grid-template-columns:1fr 110px 90px;padding:4px 0;">' +
+          "<span>" + esc(it.concepto) + (it.contador ? ' <span style="font-size:10px;font-weight:700;color:var(--ink-faint);background:var(--surface-3);padding:1px 6px;border-radius:8px;">' + esc(it.contador) + "</span>" : "") + "</span>" +
+          "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-faint);\">" + (it.fecha ? fechaCorta(it.fecha) : "Sin fecha") + "</span>" +
+          '<span class="amount"' + (it.montoTotal !== undefined && it.montoTotal !== it.monto ? ' title="Saldo total de la deuda: ' + fmt(it.montoTotal) + '"' : "") + '>' + fmt(it.monto) + "</span>" +
+          "</div>";
+      });
+      html += "</div>";
+    });
+    html += "</div>";
+  }
+  html += "</div>";
+
+  // ---------- Nómina y equipo ----------
+  var fe = state.formEmp;
+  html += '<div class="card"><div class="section-title small">Nómina y equipo' +
+    renderHelp("Define quién trabaja contigo y su salario MENSUAL. El periodo de pago define cada cuánto se considera \"pendiente\" en el KPI Por pagar.") +
+    '</div>';
+  html += '<div class="emp-row" style="font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario</span><span></span></div>';
+  (cfg.nomina || []).forEach(function (e) {
+    html += '<div class="emp-row"><span>' + esc(e.nombre) + "</span><span>" + esc(e.cargo || "—") + '</span><span class="amount">' + fmt(e.salario) + "</span>" +
+      '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button></div>';
+  });
+  if ((cfg.nomina || []).length === 0) { html += '<div class="empty">Aún no registras personas en nómina.</div>'; }
+  html += '<div class="form-grid" style="margin-top:12px;">' +
+    '<div class="field"><label>Nombre</label><input data-form="emp" data-field="nombre" value="' + esc(fe.nombre) + '" /></div>' +
+    '<div class="field"><label>Cargo</label><input data-form="emp" data-field="cargo" value="' + esc(fe.cargo) + '" placeholder="Ej. Costurera" /></div>' +
+    '<div class="field"><label>Salario mensual</label><input type="number" data-form="emp" data-field="salario" value="' + esc(fe.salario) + '" placeholder="0" /></div>' +
+    '<button class="btn" data-action="add-emp">Agregar a nómina</button>' +
+    "</div>" +
+    '<div class="form-grid" style="margin-top:14px;">' +
+    '<div class="field"><label>Periodo de pago</label><select data-action-change="set-periodo-pago">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], cfg.periodoPago || "mensual"); }).join("") +
+    "</select></div>" +
+    '<div class="field"><label>Otras personas que colaboran (sin nómina fija)</label><input type="number" id="inp-numextra" data-action-change="set-numextra" value="' + esc(cfg.numExtra) + '" /></div>' +
+    '<div class="field"><label>Día(s) de pago' + renderHelp(cfg.periodoPago === "semanal" ? "Puedes elegir varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"2,6\" para martes y sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input id="inp-dia-pago-nomina" data-action-change="set-dia-pago-nomina" value="' + esc((diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina })).join(",")) + '" placeholder="' + (cfg.periodoPago === "semanal" ? "Ej. 6 (sábado)" : "Ej. 1,15") + '" /></div>' +
+    "</div>" +
+    '<div class="section-sub" style="margin-top:6px;margin-bottom:0;">Próximo pago de nómina: <b style="color:var(--ink);">' + fechaCorta(calcFechaVencimientoPeriodo(cfg.periodoPago || "mensual", diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina }))) + "</b></div>" +
+    "</div>";
+
+  // ---------- Gastos fijos (periodizables) ----------
+  var gf = state.formGastoFijo;
+  html += '<div class="card"><div class="section-title small">Gastos fijos' +
+    renderHelp("Arriendo, servicios, internet, software, etc. Cada uno define su propio periodo (mensual, quincenal o semanal) y, si quieres, un día de pago específico (ej. el arriendo el 1.º de cada mes) — así el KPI \"Por pagar\" puede avisarte cuándo vence de verdad. Márcalos como pagados cuando corresponda; si no, cuentan como pendientes.") +
+    "</div>";
+  html += '<div class="emp-row" style="grid-template-columns:1fr 100px 110px 140px 130px 40px;font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Concepto</span><span>Monto</span><span>Periodo</span><span>Día(s) de pago</span><span>Estado</span><span></span></div>';
+  (cfg.gastosFijos || []).forEach(function (g) {
+    var pendiente = calcGastoFijoPendiente(g) > 0;
+    var periodo = g.periodo || "mensual";
+    var dias = diasPagoDe(g);
+    html += '<div class="emp-row" style="grid-template-columns:1fr 100px 110px 140px 130px 40px;">' +
+      "<span>" + esc(g.nombre) + '</span><span class="amount">' + fmt(g.monto) + "</span>" +
+      '<span><select class="mini-input" style="width:100%" data-action-change="set-gasto-fijo-periodo" data-id="' + g.id + '">' +
+      Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodo); }).join("") +
+      "</select></span>" +
+      '<span><input class="mini-input" style="width:100%" value="' + esc(dias.join(",")) + '" placeholder="' + (periodo === "semanal" ? "Ej. 6" : "Ej. 1,15") + '" data-action-change="set-gasto-fijo-dia" data-id="' + g.id + '" title="Próximo: ' + fechaCorta(calcFechaVencimientoPeriodo(periodo, dias)) + '" /></span>' +
+      '<span><button class="status-pill ' + (pendiente ? "pendiente" : "pagado") + '" data-action="toggle-gasto-fijo-pagado" data-id="' + g.id + '">' + (pendiente ? "pendiente" : "pagado este periodo") + "</button></span>" +
+      '<button class="btn danger small" data-action="remove-gasto-fijo" data-id="' + g.id + '">✕</button></div>';
+  });
+  if ((cfg.gastosFijos || []).length === 0) { html += '<div class="empty">Aún no registras gastos fijos.</div>'; }
+  html += '<div class="form-grid" style="margin-top:12px;">' +
+    '<div class="field wide"><label>Concepto</label><input data-form="gastoFijo" data-field="nombre" value="' + esc(gf.nombre) + '" placeholder="Ej. Arriendo del taller" /></div>' +
+    '<div class="field"><label>Monto</label><input type="number" data-form="gastoFijo" data-field="monto" value="' + esc(gf.monto) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Periodo</label><select data-form="gastoFijo" data-field="periodo">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], gf.periodo || "mensual"); }).join("") +
+    "</select></div>" +
+    '<div class="field"><label>Día(s) de pago (opcional)' + renderHelp("Puedes poner varios separados por coma. Ej. \"1,15\" (día del mes) o, si el periodo es semanal, \"6\" para sábado.") + '</label><input data-form="gastoFijo" data-field="diasPago" value="' + esc(gf.diasPago) + '" placeholder="Ej. 1,15" /></div>' +
+    '<button class="btn" data-action="add-gasto-fijo">Agregar gasto fijo</button>' +
+    "</div>" +
+    "</div>";
+
+  // ---------- Meta (periodo graduable) ----------
+  var meta = cfg.meta || { label: "", monto: 0, periodo: "mensual" };
+  var balancePeriodo = calcBalancePeriodo(meta.periodo || "mensual");
+  var progresoMeta = num(meta.monto) > 0 ? Math.max(0, Math.min(100, (balancePeriodo / num(meta.monto)) * 100)) : null;
+  html += '<div class="card"><div class="section-title small">Meta' +
+    renderHelp("Define una meta de balance neto para el periodo que elijas (semana, quincena o mes). El progreso se ve en detalle en Configuración → Reporte financiero; aquí solo la defines.") +
+    '</div><div class="form-grid">' +
+    '<div class="field wide"><label>Etiqueta</label><input id="inp-meta-label" value="' + esc(meta.label) + '" placeholder="Ej. Meta de balance neto" /></div>' +
+    '<div class="field"><label>Monto objetivo</label><input type="number" id="inp-meta-monto" value="' + esc(meta.monto) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Periodo</label><select id="inp-meta-periodo">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], meta.periodo || "mensual"); }).join("") +
+    "</select></div>" +
+    '<button class="btn" data-action="save-meta">Guardar meta</button>' +
+    "</div>";
+  if (progresoMeta !== null) {
+    html += '<div class="section-sub" style="margin-top:10px;margin-bottom:0;">Progreso de este periodo: <b style="color:var(--ink);">' + progresoMeta.toFixed(0) + "%</b> (" + fmt(balancePeriodo) + " de " + fmt(meta.monto) + ")</div>";
+  }
+  html += "</div>";
+
+  // ---------- Deudas ----------
+  var fd = state.formDeuda;
+  html += '<div class="card"><div class="section-title small">Deudas' +
+    renderHelp("Préstamos, proveedores u otras deudas del taller. Define cuotas, periodo y día(s) de pago desde ya (si aplica); \"Pagar\" registra la cuota siguiente (o el saldo completo si es pago único) como gasto en Finanzas. En cuanto queda pagada por completo, la deuda sale de esta lista y se mueve entera al Historial de deudas.") +
+    "</div>";
+  html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Concepto</span><span>Con quién</span><span>Saldo</span><span>Cuotas</span><span>Periodo</span><span></span></div>';
+  state.deudas.forEach(function (d) {
+    if (state.deudaEditando === d.id) { html += renderFilaEdicionDeuda(d); return; }
+    var cuotas = num(d.cuotas) || 1;
+    var pagadas = Math.min(num(d.cuotasPagadas) || 0, cuotas);
+    var valorCuota = calcDeudaValorCuota(d);
+    var saldo = calcDeudaSaldoPendiente(d);
+    var periodo = d.periodo || "mensual";
+    var dias = diasPagoDe(d);
+    // Aquí solo hay deudas pendientes: en cuanto se paga la última cuota, la
+    // deuda se mueve entera al historial de abajo (ver acción "pagar-deuda").
+    html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;">' +
+      "<span>" + esc(d.concepto) + "</span><span>" + esc(d.contraparte || "—") + '</span>' +
+      '<span class="amount" title="Monto total: ' + fmt(d.monto) + '">' + fmt(saldo) + "</span>" +
+      "<span>" + (cuotas > 1 ? (pagadas + "/" + cuotas) : "Único") + "</span>" +
+      "<span>" + (dias.length ? (PERIODOS_PAGO[periodo] + " · " + dias.join(",")) : PERIODOS_PAGO[periodo]) + "</span>" +
+      '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+      '<button class="btn small" data-action="pagar-deuda" data-id="' + d.id + '">Pagar</button>' +
+      '<button class="btn ghost small" data-action="editar-deuda" data-id="' + d.id + '">Editar</button>' +
+      '<button class="btn danger small" data-action="remove-deuda" data-id="' + d.id + '">✕</button>' +
+      "</span></div>";
+    html += '<div class="section-sub" style="margin:2px 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+      (cuotas > 1 ? ("Valor por cuota: " + fmt(valorCuota)) : "") +
+      (d.fechaVencimiento ? " · Vence: " + esc(d.fechaVencimiento) : "") +
+      "</div>";
+  });
+  if (state.deudas.length === 0) { html += '<div class="empty">Sin deudas pendientes.</div>'; }
+  html += '<div class="form-grid" style="margin-top:12px;">' +
+    '<div class="field wide"><label>Concepto</label><input data-form="deuda" data-field="concepto" value="' + esc(fd.concepto) + '" placeholder="Ej. Préstamo máquina plana" /></div>' +
+    '<div class="field"><label>Con quién</label><input data-form="deuda" data-field="contraparte" value="' + esc(fd.contraparte) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Monto total</label><input type="number" data-form="deuda" data-field="monto" value="' + esc(fd.monto) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Cuotas (opcional)</label><input type="number" min="1" data-form="deuda" data-field="cuotas" value="' + esc(fd.cuotas) + '" placeholder="Ej. 6" /></div>' +
+    '<div class="field"><label>Periodo</label><select data-action-change="set-deuda-form-periodo">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], fd.periodo || "mensual"); }).join("") +
+    "</select></div>" +
+    '<div class="field"><label>Día(s) de pago (opcional)' + renderHelp(fd.periodo === "semanal" ? "Puedes elegir uno o varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"6\" para sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input data-form="deuda" data-field="diasPago" value="' + esc(fd.diasPago) + '" placeholder="' + (fd.periodo === "semanal" ? "Ej. 6" : "Ej. 1,15") + '" /></div>' +
+    '<div class="field"><label>Vence (opcional, si no usas periodo)</label><input type="date" data-form="deuda" data-field="fechaVencimiento" value="' + esc(fd.fechaVencimiento) + '" /></div>' +
+    '<button class="btn" data-action="add-deuda">Agregar deuda</button>' +
+    "</div>" +
+    "</div>";
+
+  // ---------- Historial de deudas (pagadas por completo) ----------
+  // A diferencia del historial de PAGOS de una deuda activa (que ya no se
+  // muestra suelto), esto es un registro de DEUDAS completas: cuando una
+  // deuda termina de pagarse, se saca por completo de la tabla de arriba y
+  // aparece aquí — no es una bitácora de movimientos, es "a dónde se van"
+  // las deudas ya saldadas.
+  html += '<div class="card"><div class="section-title small">Historial de deudas' +
+    renderHelp("Deudas ya pagadas por completo. En cuanto \"Pagar\" salda la última cuota (o el pago único), la deuda se mueve aquí entera y deja de contar como pendiente.") +
+    "</div>";
+  if (state.deudasHistorial.length === 0) {
+    html += '<div class="empty">Aún no hay deudas pagadas por completo.</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">';
+    state.deudasHistorial.slice().reverse().forEach(function (d) {
+      var cuotas = num(d.cuotas) || 1;
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;">' +
+        '<div style="min-width:0;">' +
+        '<div style="font-weight:700;font-size:13px;">' + esc(d.concepto) + "</div>" +
+        '<div style="font-size:11.5px;color:var(--ink-faint);margin-top:2px;">' +
+        (d.contraparte ? esc(d.contraparte) + " · " : "") +
+        (cuotas > 1 ? cuotas + (cuotas === 1 ? " cuota" : " cuotas") + " · " : "Pago único · ") +
+        "Saldada el " + (d.fechaCompletada ? fechaCorta(new Date(d.fechaCompletada + "T00:00:00")) : "—") +
+        "</div></div>" +
+        '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+        '<span class="amount">' + fmt(d.monto) + "</span>" +
+        '<button class="btn ghost small" data-action="remove-deuda-historial" data-id="' + d.id + '" title="Quitar del historial (no borra los movimientos ya creados en Finanzas)">✕</button>' +
+        "</div></div>";
+    });
+    html += "</div>";
+  }
+  html += "</div>";
+
+  // La comisión de vendedores ya no tiene panel aparte: aparece agrupada por
+  // vendedor dentro del desglose de "Cuentas por pagar" de arriba (categoría
+  // "Comisiones de vendedores"). Para pagar o definir la fecha de pago de
+  // cada comisión, se sigue haciendo desde la tarjeta del pedido o cotización
+  // correspondiente.
+
+  return html;
+}
+
+function fechaCorta(fecha) {
+  return fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }).replace(".", "");
+}
+
+// Fila de deuda en modo edición: todos los campos (incluido periodo/días,
+// que antes solo se podían tocar después de crear la deuda) quedan editables
+// aquí mismo, con Guardar/Cancelar — así "editar" es un modo explícito y no
+// inputs sueltos siempre activos en la tabla.
+function renderFilaEdicionDeuda(d) {
+  var dias = diasPagoDe(d);
+  return '<div data-deuda-edit-row="' + d.id + '">' +
+    '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 90px 150px;background:var(--surface-2);">' +
+    '<span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(d.concepto) + '" /></span>' +
+    '<span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(d.contraparte || "") + '" /></span>' +
+    '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(d.monto) + '" /></span>' +
+    '<span><input type="number" min="1" class="mini-input" style="width:100%" data-role="edit-cuotas" value="' + esc(d.cuotas || "") + '" /></span>' +
+    '<span><select class="mini-input" style="width:100%" data-role="edit-periodo">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], d.periodo || "mensual"); }).join("") +
+    "</select></span>" +
+    '<span><input class="mini-input" style="width:100%" data-role="edit-dias" value="' + esc(dias.join(",")) + '" placeholder="Días de pago" /></span>' +
+    '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+    '<button class="btn small" data-action="guardar-deuda-edit" data-id="' + d.id + '">Guardar</button>' +
+    '<button class="btn ghost small" data-action="cancelar-edicion-deuda">Cancelar</button>' +
+    "</span></div>" +
+    '<div class="section-sub" style="margin:2px 0 8px;">Vence (opcional, si no usas periodo) <input type="date" class="mini-input" data-role="edit-fecha" value="' + esc(d.fechaVencimiento || "") + '" /></div>' +
+    "</div>";
+}
+
+export var actions = {
+  "add-emp": function () {
+    var fe = state.formEmp;
+    if (!fe.nombre || !fe.salario) return;
+    state.config.nomina = (state.config.nomina || []).concat([{ id: uid(), nombre: fe.nombre, cargo: fe.cargo, salario: num(fe.salario) }]);
+    state.formEmp = { nombre: "", cargo: "", salario: "" };
+    persist("config"); notify();
+  },
+  "remove-emp": function (el) {
+    var id = el.getAttribute("data-id");
+    var e = (state.config.nomina || []).filter(function (e) { return e.id === id; })[0];
+    if (!e) return;
+    if (!window.confirm('¿Quitar a "' + e.nombre + '" de la nómina?\n\nDeja de contar en "Por pagar". No borra los pagos que ya se le hayan registrado en Finanzas.')) return;
+    state.config.nomina = (state.config.nomina || []).filter(function (e) { return e.id !== id; });
+    persist("config"); notify();
+  },
+  "set-numextra": function (el) {
+    state.config.numExtra = num(el.value);
+    persist("config"); notify();
+  },
+  "set-periodo-pago": function (el) {
+    state.config.periodoPago = el.value;
+    state.config.diaPagoNomina = ""; // el día anterior puede no aplicar al nuevo periodo
+    persist("config"); notify();
+  },
+  "set-dia-pago-nomina": function (el) {
+    state.config.diasPagoNomina = parseDias(el.value);
+    state.config.diaPagoNomina = ""; // ya no se usa el campo legado tras editar
+    persist("config"); notify();
+  },
+  "add-gasto-fijo": function () {
+    var gf = state.formGastoFijo;
+    if (!gf.nombre || !gf.monto) return;
+    state.config.gastosFijos = (state.config.gastosFijos || []).concat([{ id: uid(), nombre: gf.nombre, monto: num(gf.monto), periodo: gf.periodo || "mensual", diasPago: parseDias(gf.diasPago), pagadoHasta: "" }]);
+    state.formGastoFijo = { nombre: "", monto: "", periodo: "mensual", diasPago: "" };
+    persist("config"); notify();
+  },
+  "remove-gasto-fijo": function (el) {
+    var id = el.getAttribute("data-id");
+    var g = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
+    if (!g) return;
+    if (!window.confirm('¿Eliminar el gasto fijo "' + g.nombre + '"?\n\nDeja de contar en "Por pagar". No borra los pagos que ya se le hayan registrado en Finanzas.')) return;
+    state.config.gastosFijos = (state.config.gastosFijos || []).filter(function (g) { return g.id !== id; });
+    persist("config"); notify();
+  },
+  "set-gasto-fijo-periodo": function (el) {
+    var id = el.getAttribute("data-id");
+    state.config.gastosFijos = (state.config.gastosFijos || []).map(function (g) {
+      return g.id === id ? Object.assign({}, g, { periodo: el.value, diasPago: [], diaPago: "", pagadoHasta: "" }) : g;
+    });
+    persist("config"); notify();
+  },
+  "set-gasto-fijo-dia": function (el) {
+    var id = el.getAttribute("data-id");
+    state.config.gastosFijos = (state.config.gastosFijos || []).map(function (g) {
+      return g.id === id ? Object.assign({}, g, { diasPago: parseDias(el.value), diaPago: "" }) : g;
+    });
+    persist("config"); notify();
+  },
+  // Al marcar un gasto fijo como pagado, además de actualizar su periodo,
+  // se registra el movimiento correspondiente en Finanzas con la fecha de
+  // hoy — así queda constancia (antes solo se marcaba el estado, sin dejar
+  // registro ni fecha).
+  "toggle-gasto-fijo-pagado": function (el) {
+    var id = el.getAttribute("data-id");
+    var gastoFijo = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
+    if (!gastoFijo) return;
+    var pendiente = calcGastoFijoPendiente(gastoFijo) > 0;
+    state.config.gastosFijos = (state.config.gastosFijos || []).map(function (g) {
+      if (g.id !== id) return g;
+      // Misma lógica de "clave de periodo" que periodoKey() en core/calc.js.
+      var periodo = g.periodo || "mensual";
+      var hoy = new Date();
+      var y = hoy.getFullYear(), m = String(hoy.getMonth() + 1).padStart(2, "0"), d = hoy.getDate();
+      var clave = y + "-" + m;
+      if (periodo === "quincenal") clave = y + "-" + m + "-" + (d <= 15 ? "Q1" : "Q2");
+      if (periodo === "semanal") {
+        var inicioAno = new Date(hoy.getFullYear(), 0, 1);
+        var dias = Math.floor((hoy - inicioAno) / 86400000);
+        var semana = Math.ceil((dias + inicioAno.getDay() + 1) / 7);
+        clave = y + "-W" + semana;
+      }
+      return Object.assign({}, g, { pagadoHasta: pendiente ? clave : "" });
+    });
+    if (pendiente) {
+      state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Gasto fijo — " + gastoFijo.nombre, monto: num(gastoFijo.monto), contraparte: gastoFijo.nombre, fecha: todayStr(), pedidoId: "" });
+      persist("tx");
+    }
+    persist("config"); notify();
+  },
+  "save-meta": function () {
+    var labelEl = document.getElementById("inp-meta-label");
+    var montoEl = document.getElementById("inp-meta-monto");
+    var periodoEl = document.getElementById("inp-meta-periodo");
+    state.config.meta = {
+      label: labelEl ? labelEl.value : state.config.meta.label,
+      monto: num(montoEl ? montoEl.value : state.config.meta.monto),
+      periodo: periodoEl ? periodoEl.value : state.config.meta.periodo
+    };
+    persist("config"); notify();
+  },
+  "add-deuda": function () {
+    var fd = state.formDeuda;
+    if (!fd.concepto || !fd.monto) return;
+    state.deudas.unshift({
+      id: uid(), concepto: fd.concepto, contraparte: fd.contraparte, monto: num(fd.monto),
+      fechaVencimiento: fd.fechaVencimiento || "", cuotas: num(fd.cuotas) || 1, cuotasPagadas: 0,
+      periodo: fd.periodo || "mensual", diasPago: parseDias(fd.diasPago), historial: []
+    });
+    state.formDeuda = { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: "" };
+    persist("deudas"); notify();
+  },
+  "set-deuda-form-periodo": function (el) {
+    state.formDeuda.periodo = el.value;
+    state.formDeuda.diasPago = ""; // el día anterior puede no aplicar al nuevo periodo
+    notify();
+  },
+  "editar-deuda": function (el) {
+    state.deudaEditando = el.getAttribute("data-id");
+    notify();
+  },
+  "cancelar-edicion-deuda": function () {
+    state.deudaEditando = "";
+    notify();
+  },
+  "guardar-deuda-edit": function (el) {
+    var id = el.getAttribute("data-id");
+    var fila = el.closest("[data-deuda-edit-row]");
+    if (!fila) return;
+    var g = function (role) { var i = fila.querySelector('[data-role="' + role + '"]'); return i ? i.value : ""; };
+    var concepto = g("edit-concepto");
+    var monto = num(g("edit-monto"));
+    if (!concepto || monto <= 0) return;
+    var nuevasCuotas = num(g("edit-cuotas")) || 1;
+    state.deudas = state.deudas.map(function (d) {
+      if (d.id !== id) return d;
+      return Object.assign({}, d, {
+        concepto: concepto,
+        contraparte: g("edit-contraparte"),
+        monto: monto,
+        cuotas: nuevasCuotas,
+        cuotasPagadas: Math.min(num(d.cuotasPagadas) || 0, nuevasCuotas),
+        periodo: g("edit-periodo") || d.periodo,
+        diasPago: parseDias(g("edit-dias")),
+        fechaVencimiento: g("edit-fecha") || ""
+      });
+    });
+    state.deudaEditando = "";
+    persist("deudas"); notify();
+  },
+  "remove-deuda": function (el) {
+    var id = el.getAttribute("data-id");
+    var d = state.deudas.filter(function (d) { return d.id === id; })[0];
+    if (!d) return;
+    var tieneHistorial = d.historial && d.historial.length;
+    var msg = '¿Eliminar la deuda "' + d.concepto + '"?\n\nNo se puede deshacer.' +
+      (tieneHistorial ? " Se pierde su historial de " + d.historial.length + (d.historial.length === 1 ? " pago registrado" : " pagos registrados") + " (los movimientos ya creados en Finanzas NO se eliminan)." : "");
+    if (!window.confirm(msg)) return;
+    state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
+    persist("deudas"); notify();
+  },
+  // "Pagar": un solo botón que registra el pago de la cuota programada
+  // siguiente (o el saldo completo si es pago único). Crea el movimiento de
+  // gasto en Finanzas y deja una línea en el historial de la deuda — ya no
+  // hay un botón de "estado" que se pueda tocar por accidente sin dejar
+  // rastro de cuándo ni cuánto se pagó.
+  "pagar-deuda": function (el) {
+    var id = el.getAttribute("data-id");
+    var deuda = state.deudas.filter(function (d) { return d.id === id; })[0];
+    if (!deuda) return;
+    var cuotas = num(deuda.cuotas) || 1;
+    var pagadas = Math.min(num(deuda.cuotasPagadas) || 0, cuotas);
+    var esUltima = pagadas + 1 >= cuotas;
+    var valor = esUltima ? calcDeudaSaldoPendiente(deuda) : calcDeudaValorCuota(deuda);
+    if (valor <= 0) return;
+    var etiqueta = cuotas > 1 ? ("cuota " + (pagadas + 1) + " de " + cuotas) : "el saldo completo";
+    if (!window.confirm('¿Registrar el pago de ' + etiqueta + " (" + fmt(valor) + ') de "' + deuda.concepto + '"?\n\nEsto crea un movimiento de gasto en Finanzas.' + (esUltima ? " Al quedar saldada, la deuda se mueve al historial." : ""))) return;
+    var nuevasPagadas = pagadas + 1;
+    var fechaPago = todayStr();
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "" });
+    if (nuevasPagadas >= cuotas) {
+      // Deuda saldada por completo: sale de "deudas" y se mueve entera (no
+      // solo un renglón de bitácora) al historial de deudas pagadas.
+      var historial = (deuda.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
+      state.deudasHistorial = state.deudasHistorial.concat([Object.assign({}, deuda, {
+        cuotasPagadas: nuevasPagadas, historial: historial, fechaCompletada: fechaPago
+      })]);
+      state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
+      persist("deudasHistorial");
+    } else {
+      state.deudas = state.deudas.map(function (d) {
+        if (d.id !== id) return d;
+        var historial = (d.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
+        return Object.assign({}, d, { cuotasPagadas: nuevasPagadas, historial: historial });
+      });
+    }
+    persist("tx"); persist("deudas"); notify();
+  },
+  // Quita una deuda del historial de deudas pagadas (solo el registro; los
+  // movimientos de gasto que ya se crearon en Finanzas NO se tocan).
+  "remove-deuda-historial": function (el) {
+    var id = el.getAttribute("data-id");
+    var d = state.deudasHistorial.filter(function (d) { return d.id === id; })[0];
+    if (!d) return;
+    if (!window.confirm('¿Quitar "' + d.concepto + '" del historial de deudas?\n\nNo borra los movimientos de gasto ya creados en Finanzas.')) return;
+    state.deudasHistorial = state.deudasHistorial.filter(function (d) { return d.id !== id; });
+    persist("deudasHistorial"); notify();
+  }
+};

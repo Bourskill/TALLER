@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel del Taller</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Generador de PDF de cotizaciones (Cotizaciones → "Generar PDF para el cliente").
+     Scripts clásicos (no ES module): quedan disponibles como window.jspdf. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- CSS modular: variables primero, luego base/layout, luego por área de negocio.
+     El orden importa poco (las clases no se pisan entre archivos), pero mantenerlo
+     así facilita ubicar cada regla. -->
+<link rel="stylesheet" href="css/variables.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/sidebar.css">
+<link rel="stylesheet" href="css/help.css">
+<link rel="stylesheet" href="css/forms.css">
+<link rel="stylesheet" href="css/tables.css">
+<link rel="stylesheet" href="css/pedidos.css">
+<link rel="stylesheet" href="css/cotizaciones.css">
+<link rel="stylesheet" href="css/catalogo.css">
+<link rel="stylesheet" href="css/plantillas.css">
+<link rel="stylesheet" href="css/clientes.css">
+<link rel="stylesheet" href="css/pendientes.css">
+<link rel="stylesheet" href="css/config.css">
+<link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+<div id="app"><div class="empty">Cargando tu panel…</div></div>
+
+<!-- type="module" habilita import/export nativo del navegador: no se necesita
+     bundler ni paso de compilación para trabajar con el código dividido en js/. -->
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+/* La pestaña Plantillas reutiliza .card.nested, .ins-table/.ins-row y .mini-input
+   ya definidos en cotizaciones.css / forms.css — no necesita clases propias.
+   Este archivo queda como punto de extensión si más adelante gana su propio look. */

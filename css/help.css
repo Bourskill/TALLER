@@ -1,0 +1,30 @@
+/* Icono de ayuda ("?") reutilizable: reemplaza párrafos explicativos largos
+   en la UI principal. Se revela con :hover o :focus (click/tap), así funciona
+   igual con mouse que en pantallas táctiles. */
+.help-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;margin-left:6px;outline:none;vertical-align:middle;}
+.help-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;border-radius:50%;
+  background:var(--surface-3);color:var(--ink-faint);
+  font-size:11px;font-weight:700;line-height:1;cursor:help;
+  border:1px solid var(--border-strong);
+  transition:background .15s ease,color .15s ease;
+}
+.help-tip:hover .help-icon,.help-tip:focus .help-icon{background:var(--accent);color:#fff;border-color:var(--accent);}
+.help-bubble{
+  position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%) translateY(4px);
+  width:240px;max-width:60vw;padding:9px 11px;border-radius:var(--radius-sm);
+  background:var(--surface-3);border:1px solid var(--border-strong);color:var(--ink-soft);
+  font-size:12px;line-height:1.4;font-weight:400;text-transform:none;letter-spacing:normal;
+  box-shadow:var(--shadow-md);
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .12s ease,transform .12s ease;z-index:40;
+}
+.help-tip.align-right .help-bubble{left:auto;right:0;transform:translateY(4px);}
+.help-tip.align-right:hover .help-bubble,.help-tip.align-right:focus .help-bubble{transform:translateY(0);}
+.help-tip:hover .help-bubble,.help-tip:focus .help-bubble{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+
+/* KPIs seleccionables (ver core/dom.js): dan la sensación de ser un control,
+   no solo un dato de lectura. */
+.kpi.kpi-clickable{cursor:pointer;}
+.kpi.kpi-clickable:hover{border-color:var(--accent);background:var(--surface-2);}
