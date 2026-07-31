@@ -8,6 +8,7 @@ export function render() {
     '<div class="field"><label>Nombre</label><input data-form="cliente" data-field="nombre" value="' + esc(f.nombre) + '" placeholder="Nombre completo" /></div>' +
     '<div class="field"><label>Cédula / RUT</label><input data-form="cliente" data-field="cedula" value="' + esc(f.cedula) + '" placeholder="Documento" /></div>' +
     '<div class="field"><label>Teléfono</label><input data-form="cliente" data-field="telefono" value="' + esc(f.telefono) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Correo</label><input type="email" data-form="cliente" data-field="correo" value="' + esc(f.correo) + '" placeholder="Opcional" /></div>' +
     '<div class="field wide"><label>Dirección</label><input data-form="cliente" data-field="direccion" value="' + esc(f.direccion) + '" placeholder="Para envíos" /></div>' +
     '<div class="field"><label>Ciudad</label><input data-form="cliente" data-field="ciudad" value="' + esc(f.ciudad) + '" /></div>' +
     '<div class="field"><label>Código postal</label><input data-form="cliente" data-field="cp" value="' + esc(f.cp) + '" /></div>' +
@@ -33,6 +34,7 @@ export function render() {
       '<div class="cliente-grid">' +
       "<div><b>Cédula/RUT:</b> " + esc(c.cedula || "—") + "</div>" +
       "<div><b>Teléfono:</b> " + esc(c.telefono || "—") + "</div>" +
+      "<div><b>Correo:</b> " + esc(c.correo || "—") + "</div>" +
       "<div><b>Dirección:</b> " + esc(c.direccion || "—") + "</div>" +
       "<div><b>Ciudad / CP:</b> " + esc(c.ciudad || "—") + (c.cp ? " / " + esc(c.cp) : "") + "</div>" +
       "<div><b>Cuenta:</b> " + esc(c.cuenta || "—") + "</div>" +
@@ -47,8 +49,8 @@ export var actions = {
   "add-cliente": function () {
     var fcli = state.formCliente;
     if (!fcli.nombre) return;
-    state.clientes.unshift({ id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono });
-    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "" };
+    state.clientes.unshift({ id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo });
+    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "" };
     persist("clientes"); notify();
   },
   "remove-cliente": function (el) {

@@ -12,6 +12,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
+<!-- Login con Google (core/auth.js). Script clásico: expone window.google. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
 <!-- CSS modular: variables primero, luego base/layout, luego por área de negocio.
      El orden importa poco (las clases no se pisan entre archivos), pero mantenerlo
      así facilita ubicar cada regla. -->
@@ -29,6 +32,7 @@
 <link rel="stylesheet" href="css/clientes.css">
 <link rel="stylesheet" href="css/pendientes.css">
 <link rel="stylesheet" href="css/config.css">
+<link rel="stylesheet" href="css/auth.css">
 <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>

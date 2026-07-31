@@ -90,7 +90,7 @@ export const state = {
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
   formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" },
   formPedido: { clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "" },
-  formCliente: { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "" },
+  formCliente: { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "" },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },

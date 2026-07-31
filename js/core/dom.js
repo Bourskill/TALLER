@@ -6,13 +6,15 @@
 // Para agregar una pestaña nueva en el futuro: crear js/modules/<nombre>.js con
 // `export function render(){...}` y opcionalmente `export var actions = {...}`,
 // añadirlo a TAB_MODULES aquí abajo, agregarlo a la lista de TABS, sumarlo dentro
-// de la categoría correspondiente en NAV_GROUPS, y darle un ícono en core/icons.js.
+// de la categoría correspondiente en NAV_GROUPS_ADMIN (y en NAV_GROUPS_VENDEDOR
+// si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
 import { state, persist, notify } from "./store.js";
 import { esc } from "./utils.js";
 import { calcCaja, calcPorCobrar, calcResumenPorPagar, calcPedidosActivos, clienteById } from "./calc.js";
 import { ICONS } from "./icons.js";
+import { getSession, logout } from "./auth.js";
 
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
@@ -24,9 +26,11 @@ import * as clientes from "../modules/clientes.js";
 import * as pendientes from "../modules/pendientes.js";
 import * as notas from "../modules/notas.js";
 import * as config from "../modules/config.js";
+import * as misVentas from "../modules/mis-ventas.js";
 
 var TABS = [
   ["resumen", "Resumen", resumen],
+  ["mis-ventas", "Mis ventas", misVentas],
   ["finanzas", "Finanzas", finanzas],
   ["pedidos", "Pedidos", pedidos],
   ["cotizaciones", "Cotizaciones", cotizaciones],
@@ -42,13 +46,29 @@ var TAB_MODULES = TABS.reduce(function (acc, t) { acc[t[0]] = t[2]; return acc; 
 // Categorías del menú lateral. Cada grupo es [clave, título, [claves de pestaña]].
 // La clave del grupo debe existir en DEFAULT_UI.navGroups (constants.js) para
 // que se recuerde si el usuario lo dejó abierto o cerrado.
-var NAV_GROUPS = [
+//
+// Hay dos variantes: admin ve todo (igual que siempre existió esta app);
+// vendedor (ver core/auth.js) ve solo su propia venta — sin Finanzas ni
+// Pendientes (caja, gastos fijos, nómina, deudas son datos del taller, no
+// suyos) ni Configuración. Si no hay sesión (ej. test/smoke.mjs, que nunca
+// llama a auth.login()) se trata como admin: es el comportamiento de
+// siempre para quien no pasa por el flujo de login real.
+var NAV_GROUPS_ADMIN = [
   ["general", "Panel", ["resumen", "notas"]],
   ["ventas", "Ventas", ["pedidos", "cotizaciones", "clientes"]],
   ["produccion", "Producción", ["catalogo", "plantillas"]],
   ["gestion", "Gestión", ["finanzas", "pendientes"]],
   ["sistema", "Sistema", ["config"]]
 ];
+var NAV_GROUPS_VENDEDOR = [
+  ["general", "Panel", ["mis-ventas"]],
+  ["ventas", "Ventas", ["pedidos", "cotizaciones", "clientes"]],
+  ["produccion", "Producción", ["catalogo", "plantillas"]]
+];
+function navGroupsActivo() {
+  var session = getSession();
+  return (session && session.rol === "vendedor") ? NAV_GROUPS_VENDEDOR : NAV_GROUPS_ADMIN;
+}
 var TAB_LABEL = TABS.reduce(function (acc, t) { acc[t[0]] = t[1]; return acc; }, {});
 
 // Timers de debounce por campo de búsqueda en vivo (ver bindEvents). Vive a nivel
@@ -116,6 +136,11 @@ var coreActions = {
     state.config.logoUrl = nuevo.trim();
     persist("config");
     notify();
+  },
+  "logout": function () {
+    if (!window.confirm("¿Cerrar sesión?")) return;
+    logout();
+    window.location.reload();
   }
 };
 
@@ -124,7 +149,8 @@ var actionRegistry = Object.assign(
   coreActions,
   resumen.actions, finanzas.actions, pedidos.actions, cotizaciones.actions,
   catalogo.actions, plantillas.actions,
-  clientes.actions, pendientes.actions, notas.actions, config.actions
+  clientes.actions, pendientes.actions, notas.actions, config.actions,
+  misVentas.actions
 );
 
 // form -> clave en `state` que guarda su borrador.
@@ -145,8 +171,13 @@ export function render() {
     if (state.lastError) {
       mainInner += '<div class="error-box">Ocurrió un error inesperado y se muestra aquí para poder corregirlo:\n' + esc(state.lastError) + "</div>";
     }
+    var sesionActiva = getSession();
+    var esVendedor = sesionActiva && sesionActiva.rol === "vendedor";
     mainInner += renderTopbar();
-    mainInner += renderKpis();
+    // Los KPIs de la franja superior (caja, por cobrar/pagar) son datos
+    // financieros del taller — un vendedor no debe verlos aquí aunque esté
+    // en otra pestaña; su propio resumen vive dentro de "Mis ventas".
+    if (!esVendedor) mainInner += renderKpis();
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
@@ -193,7 +224,7 @@ function renderSidebar() {
     "</div>" +
     '<nav class="nav">';
 
-  NAV_GROUPS.forEach(function (g) {
+  navGroupsActivo().forEach(function (g) {
     var groupKey = g[0], groupLabel = g[1], tabs = g[2];
     var open = !!state.ui.navGroups[groupKey];
     html += '<div class="nav-group' + (open ? " open" : "") + '">';
@@ -234,16 +265,23 @@ function moonIcon() {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z"/></svg>';
 }
 
+function logoutIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17l5-5-5-5"/><path d="M20 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg>';
+}
+
 function renderTopbar() {
   var fecha = new Date().toLocaleDateString("es-CO", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   var titulo = TAB_LABEL[state.tab] || "";
   var esClaro = state.ui.tema === "claro";
+  var session = getSession();
   return "" +
     '<div class="topbar">' +
     '<button class="sidebar-mobile-toggle" data-action="toggle-sidebar-mobile" aria-label="Abrir menú">' + menuIcon() + "</button>" +
     '<div class="topbar-title">' + esc(titulo) + "</div>" +
     '<div class="topbar-date">' + esc(fecha) + "</div>" +
+    (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
     '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
+    '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
     "</div>";
 }
 

@@ -6,6 +6,7 @@ var S = 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="ro
 
 export var ICONS = {
   resumen: '<svg viewBox="0 0 24 24" ' + S + '><path d="M4 21V10.5L12 4l8 6.5V21"/><path d="M9.5 21v-7h5v7"/></svg>',
+  "mis-ventas": '<svg viewBox="0 0 24 24" ' + S + '><path d="M3.5 18.5 9 12l4 3 7.5-8.5"/><path d="M15.3 6h5.2v5.2"/></svg>',
   finanzas: '<svg viewBox="0 0 24 24" ' + S + '><rect x="3" y="6.5" width="18" height="12" rx="2.2"/><path d="M3 10.2h18"/><circle cx="16.7" cy="14.7" r="1.15" fill="currentColor" stroke="none"/></svg>',
   pedidos: '<svg viewBox="0 0 24 24" ' + S + '><path d="M12 3.3 20.5 8 12 12.7 3.5 8 12 3.3Z"/><path d="M3.5 8v8.2L12 20.9l8.5-4.7V8"/><path d="M12 12.7V20.9"/></svg>',
   cotizaciones: '<svg viewBox="0 0 24 24" ' + S + '><path d="M13.5 3H7a1.6 1.6 0 0 0-1.6 1.6v14.8A1.6 1.6 0 0 0 7 21h10a1.6 1.6 0 0 0 1.6-1.6V8.1L13.5 3Z"/><path d="M13.3 3v4.6a1 1 0 0 0 1 1H18.6"/><path d="M8.4 13h7.2M8.4 16.2h7.2M8.4 9.8h3"/></svg>',

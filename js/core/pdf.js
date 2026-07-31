@@ -274,6 +274,52 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
 }
 
 
+// Reporte en PDF para UN vendedor (pestaña "Mis ventas"): sus pedidos y
+// cotizaciones con el estado de su comisión en cada uno, más el resumen de
+// totales. Mismo patrón que generarPDFReporteFinanciero pero la fuente de
+// filas es state.pedidos/cotizaciones filtrados por vendedor, no state.tx.
+export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) {
+  var jsPDFCtor = window.jspdf.jsPDF;
+  var doc = new jsPDFCtor({ unit: "pt", format: "letter" });
+  var docNum = String(await siguienteNumeroPdf()).padStart(4, "0");
+  var h = drawHeaderBasic(doc, "REPORTE DE VENTAS", docNum);
+  var y = h.y, marginX = h.marginX, pageW = h.pageW;
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+  doc.text("Vendedor: " + nombreVendedor, marginX, y);
+  y += 20;
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
+  var resumenY = y;
+  [["Total vendido", money(resumen.totalVendido)], ["Comisión pendiente", money(resumen.comisionPendiente)], ["Comisión pagada", money(resumen.comisionPagada)]].forEach(function (item, i) {
+    var colW = (pageW - marginX * 2) / 3;
+    var x = marginX + colW * i;
+    doc.setTextColor(140, 140, 140); doc.setFontSize(7.5); doc.text(item[0].toUpperCase(), x, resumenY);
+    doc.setTextColor(20, 20, 20); doc.setFontSize(11); doc.text(item[1], x, resumenY + 15);
+  });
+  y = resumenY + 34;
+  doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 16;
+
+  var body = filas.map(function (f) {
+    return [f.cliente || "—", f.descripcion || "—", money(f.total), money(f.comision), f.pagado ? "Pagada" : "Pendiente"];
+  });
+
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Cliente", "Descripción", "Total", "Comisión", "Estado"]],
+    body: body.length ? body : [["—", "Sin pedidos ni cotizaciones registrados", "—", "—", "—"]],
+    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
+    theme: "grid"
+  });
+
+  doc.save(docNum + "-reporte-" + slugify(nombreVendedor) + ".pdf");
+}
+
 export async function generarPDFInternoCotizacion(cot, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   opts = opts || {};

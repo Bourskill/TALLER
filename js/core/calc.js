@@ -394,6 +394,27 @@ export function calcComisionesPendientesCot() {
   }, 0);
 }
 
+// Resumen de ventas/comisión de UN vendedor puntual (por nombre), para su
+// propio panel "Mis ventas" (ver modules/mis-ventas.js). Mismo criterio que
+// calcComisionesPendientes/Cot para no contar dos veces una cotización ya
+// convertida en pedido: solo se suman las NO convertidas.
+export function calcVentasVendedor(nombre) {
+  var totalVendido = 0, comisionPendiente = 0, comisionPagada = 0;
+  state.pedidos.forEach(function (p) {
+    if (!p.vendedor || p.vendedor.nombre !== nombre) return;
+    totalVendido += num(p.total);
+    var valor = calcComisionValor(p);
+    if (p.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
+  });
+  state.cotizaciones.forEach(function (c) {
+    if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
+    totalVendido += calcCotizacionTotales(c).precioTotal;
+    var valor = calcComisionValorCot(c);
+    if (c.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
+  });
+  return { totalVendido: totalVendido, comisionPendiente: comisionPendiente, comisionPagada: comisionPagada };
+}
+
 // ---------- deudas del taller ----------
 // Valor de cada cuota (monto total repartido entre el número de cuotas, 1 si
 // no se definieron varias).

@@ -68,7 +68,50 @@ Ronda de correcciones reportadas por el usuario:
   producción" (mezclaba conceptualmente pedidos con cotizaciones) por "Solo
   pedidos (no cuenta cotizaciones)" — el cálculo en sí ya solo contaba
   pedidos, nunca sumó cotizaciones.
+- **Clientes**: se agregó el campo "Correo".
 
+## Login con Google + roles + Google Sheets como base de datos
+
+`window.storage` (de donde la app leía/guardaba todo) **nunca existió en el
+sitio publicado** — solo funcionaba dentro del entorno donde se escribió el
+código originalmente. En Netlify, nada se guardaba entre recargas. Esto ya
+se resolvió: ahora la app pide login con Google y usa una Google Sheet
+compartida como base de datos real (ver `js/core/sheetsStorage.js`), y de
+paso controla quién ve qué (panel completo para admin, una vista acotada de
+ventas para vendedores — ver `js/modules/mis-ventas.js` y el filtrado de
+menú en `js/core/dom.js`).
+
+Para dejarlo funcionando hace falta un setup de una sola vez en Google
+Cloud, fuera del código:
+
+1. **Google Cloud Console** → crear un proyecto → habilitar la **Google
+   Sheets API**.
+2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
+   (evita el proceso de verificación de Google) → agregar como *test users*
+   tu correo y el de cada vendedor que vaya a entrar.
+3. **Credenciales** → crear un **OAuth Client ID** de tipo "Web application"
+   → en "Authorized JavaScript origins" agregar `https://criyeak.netlify.app`
+   y `http://localhost:8080` (o el origen que uses en desarrollo).
+4. **Google Sheets** → crear una hoja nueva (ej. "Panel del Taller — datos")
+   → compartirla como **Editor** con tu cuenta y con la de cada vendedor →
+   crear dos pestañas dentro:
+   - `kv` con encabezados `key` | `value` (queda vacía; la app la llena sola).
+   - `roles` con encabezados `correo` | `rol` | `vendedor_nombre`. Agrega ahí
+     tu propio correo con `rol = admin`, y uno por vendedor con
+     `rol = vendedor` y el mismo nombre que uses en el campo "Vendedor" de
+     Pedidos/Cotizaciones (así "Mis ventas" cruza sus datos correctamente).
+5. Copiar el **Client ID** (paso 3) y el **ID de la spreadsheet** (se ve en
+   su URL, entre `/d/` y `/edit`) en `js/core/google-config.js`. Ninguno de
+   los dos es secreto — el acceso real lo controla a quién compartiste la
+   hoja, no quién conoce estos valores.
+
+Con eso completo, recargar la app: debe pedir "Continuar con Google", un
+solo consentimiento (Sheets + tu correo), y entrar según lo que diga tu fila
+en `roles`. Un correo que no esté en esa pestaña ve "Acceso no autorizado".
+
+Drive (fotos), Gmail (enviar PDFs), Calendar (vencimientos) y Contacts
+(sync de Clientes) quedan para cuando se aborden esas fases — cada uno
+suma su propio scope en `google-config.js` sin tocar lo ya armado acá.
 
 ## Estructura
 
@@ -87,17 +130,21 @@ css/
   config.css               solo pestaña Configuración
   responsive.css       media queries transversales
 js/
-  app.js              punto de entrada: carga datos y pinta la primera vez
+  app.js              punto de entrada: login con Google, luego carga datos y pinta
   core/
     constants.js       ESTADOS, KEYS de storage, config por defecto
     utils.js            funciones puras: fmt, esc, uid, num...
+    google-config.js      Client ID + ID de la Sheet (completar tras el setup, ver abajo)
+    auth.js                login/logout con Google + resuelve el rol contra la pestaña "roles"
+    googleRest.js           fetch genérico contra la API de Google Sheets
+    sheetsStorage.js          adaptador get/set contra la pestaña "kv" (reemplaza window.storage)
     store.js             *el* estado global + persistencia + notify()
-    calc.js               todo lo derivado del estado (caja, márgenes...)
+    calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)
-    dom.js                 orquestador: layout fijo + registro de acciones
+    dom.js                 orquestador: layout fijo + registro de acciones + filtro por rol
   modules/
     resumen.js, finanzas.js, pedidos.js, cotizaciones.js,
-    clientes.js, pendientes.js, config.js
+    clientes.js, pendientes.js, config.js, mis-ventas.js (solo rol vendedor)
                          una pestaña = un archivo = su render() + sus actions
 test/
   smoke.mjs            recorre la app simulando clicks reales (Node + jsdom)
@@ -189,9 +236,15 @@ para cuando entremos módulo por módulo:
   por área, un módulo `reportes.js` que cruce pedidos + cotizaciones + finanzas
   (ej. rentabilidad real por cliente, tiempo promedio de producción por estado)
   es agregar un archivo nuevo, no tocar los existentes.
-- **Multiusuario/roles**: si en algún punto más de una persona usa el panel a
-  la vez, conviene revisar el patrón "last-write-wins" de `window.storage`
-  para evitar que dos personas se pisen guardando el mismo pedido.
+- **Multiusuario/roles**: ya implementado (login con Google + Sheets como
+  base de datos, ver la sección de arriba). Sigue pendiente el patrón
+  "last-write-wins" si dos personas guardan el mismo pedido a la vez — no es
+  un problema nuevo de esta fase, pero ahora es más real al haber varios
+  vendedores conectados a la misma hoja simultáneamente.
+- **Drive / Gmail / Calendar / Contacts**: siguientes fases de la
+  integración con Google (fotos de referencia en Drive, enviar PDFs por
+  Gmail, vencimientos de Pendientes en Calendar, sync de Clientes con
+  Contacts) — cada una es aditiva sobre el login que ya existe.
 
 Ninguno de estos se implementó en esta entrega — la prioridad pedida fue
 dividir primero. Dime por cuál área empezamos y la llevamos a fondo.
