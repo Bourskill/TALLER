@@ -5,6 +5,7 @@ import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe } from "../
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura } from "../core/pdf.js";
+import { enviarCorreoConAdjunto } from "../core/gmail.js";
 
 // Todos los números de OP usados, activos Y en la papelera — para que un
 // pedido restaurado o uno nuevo nunca choque con uno que ya existió.
@@ -125,6 +126,7 @@ function renderPanelPedido(p, saldo) {
   html += '<div class="inline-form">' +
     '<button class="btn ghost small" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
     '<button class="btn ghost small" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
+    '<button class="btn ghost small" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Clientes)">✉ Enviar factura</button>' +
     "</div>";
   html += '<div class="field" style="margin-top:10px;"><label>Observaciones generales del pedido' +
     renderHelp("Para una nota que aplica a todo el pedido, no a una talla en particular (esas se editan en la cotización de origen). Se incluye en el PDF de orden de producción.") +
@@ -221,6 +223,7 @@ function renderAbonosPedido(p) {
         '<span style="display:flex;gap:6px;">' +
         '<button class="btn ghost small" data-action="editar-abono" data-id="' + a.id + '">Editar</button>' +
         '<button class="btn ghost small" data-action="generar-pdf-recibo" data-id="' + p.id + '" data-abono="' + a.id + '">Recibo</button>' +
+        '<button class="btn ghost small" data-action="enviar-recibo-correo" data-id="' + p.id + '" data-abono="' + a.id + '" title="Envía el recibo al correo del cliente">✉</button>' +
         "</span></div>";
     }
   });
@@ -470,6 +473,50 @@ export var actions = {
     if (!ped) return;
     var abono = (ped.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
     if (abono) generarPDFRecibo(ped, abono);
+  },
+  "enviar-factura-correo": async function (el) {
+    var id = el.getAttribute("data-id");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped) return;
+    var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
+    var correo = cliente && cliente.correo;
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    try {
+      var pdf = await generarPDFFactura(ped, { enviarPorCorreo: true });
+      await enviarCorreoConAdjunto({
+        to: correo,
+        subject: "Factura — " + (ped.descripcion || state.config.nombre),
+        body: "Hola " + (ped.cliente || "") + ",\n\nAdjuntamos tu factura.\n\n" + (state.config.nombre || ""),
+        filename: pdf.nombreArchivo,
+        bytes: pdf.bytes
+      });
+      window.alert("Correo enviado a " + correo + ".");
+    } catch (e) {
+      window.alert("No se pudo enviar el correo: " + (e && e.message ? e.message : e));
+    }
+  },
+  "enviar-recibo-correo": async function (el) {
+    var id = el.getAttribute("data-id"), abonoId = el.getAttribute("data-abono");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped) return;
+    var abono = (ped.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
+    if (!abono) return;
+    var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
+    var correo = cliente && cliente.correo;
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    try {
+      var pdf = await generarPDFRecibo(ped, abono, { enviarPorCorreo: true });
+      await enviarCorreoConAdjunto({
+        to: correo,
+        subject: "Recibo de abono — " + (ped.descripcion || state.config.nombre),
+        body: "Hola " + (ped.cliente || "") + ",\n\nAdjuntamos el recibo de tu abono.\n\n" + (state.config.nombre || ""),
+        filename: pdf.nombreArchivo,
+        bytes: pdf.bytes
+      });
+      window.alert("Correo enviado a " + correo + ".");
+    } catch (e) {
+      window.alert("No se pudo enviar el correo: " + (e && e.message ? e.message : e));
+    }
   },
   "set-vendedor-fecha-pago": function (el) {
     var id = el.getAttribute("data-id");

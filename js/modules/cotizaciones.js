@@ -1,9 +1,10 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
+import { enviarCorreoConAdjunto } from "../core/gmail.js";
 import { todosNumerosOp } from "./pedidos.js";
 import { ESTADOS_DEFAULT } from "../core/constants.js";
 
@@ -118,6 +119,7 @@ function renderCotCard(c) {
     (iva.activo ? '<input type="number" class="mini-input" style="width:60px" value="' + esc(iva.porcentaje) + '" data-action-change="set-cot-iva" data-campo="porcentaje" data-id="' + c.id + '" title="Porcentaje de IVA" />%' : "") +
     renderHelp("El IVA es opcional: act\u00edvalo aqu\u00ed (o desde el pedido convertido) y define el %. Si est\u00e1 apagado, el PDF no lo cobra.") +
     '<button class="btn ghost small" data-action="generar-pdf" data-id="' + c.id + '">Generar PDF para el cliente</button>' +
+    '<button class="btn ghost small" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Clientes)">✉ Enviar por correo</button>' +
     (c.estado !== "convertida"
       ? (c.pedidoOrigenId
           ? '<button class="btn small" data-action="aplicar-cotizacion-a-pedido" data-id="' + c.id + '" title="Reemplaza el total, descripción, cantidad y vendedor del pedido original con estos valores. Los abonos ya cobrados se conservan.">Aplicar a pedido \u2192</button>'
@@ -558,6 +560,27 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (cot) generarPDFCotizacion(cot);
+  },
+  "enviar-cotizacion-correo": async function (el) {
+    var id = el.getAttribute("data-id");
+    var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+    if (!cot) return;
+    var cliente = cot.clienteId ? clienteById(cot.clienteId) : null;
+    var correo = cliente && cliente.correo;
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    try {
+      var pdf = await generarPDFCotizacion(cot, { enviarPorCorreo: true });
+      await enviarCorreoConAdjunto({
+        to: correo,
+        subject: "Cotización — " + (cot.descripcion || state.config.nombre),
+        body: "Hola " + (cot.cliente || "") + ",\n\nAdjuntamos tu cotización.\n\n" + (state.config.nombre || ""),
+        filename: pdf.nombreArchivo,
+        bytes: pdf.bytes
+      });
+      window.alert("Correo enviado a " + correo + ".");
+    } catch (e) {
+      window.alert("No se pudo enviar el correo: " + (e && e.message ? e.message : e));
+    }
   },
   "set-cot-vendedor": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");

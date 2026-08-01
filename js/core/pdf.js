@@ -12,6 +12,19 @@ import { num, slugify } from "./utils.js";
 function money(n) { return "$" + Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }); }
 function numFmt(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 }); }
 
+// Los PDF que le van al cliente (cotización, factura, recibo — no los
+// internos ni los reportes) terminan acá: por defecto se descargan como
+// siempre, pero con opts.enviarPorCorreo devuelven los bytes en vez de
+// descargar, para adjuntarlos a un correo (ver "Enviar por correo" en
+// Cotizaciones/Pedidos y core/gmail.js).
+function finalizarPDF(doc, nombreArchivo, opts) {
+  if (opts && opts.enviarPorCorreo) {
+    return { bytes: doc.output("arraybuffer"), nombreArchivo: nombreArchivo };
+  }
+  doc.save(nombreArchivo);
+  return null;
+}
+
 var STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
 
 async function siguienteNumeroPdf() {
@@ -53,7 +66,7 @@ function cargarImagenDataUrl(url) {
   return Promise.race([fetchPromise, timeout]);
 }
 
-export async function generarPDFCotizacion(cot) {
+export async function generarPDFCotizacion(cot, opts) {
   if (!window.jspdf) {
     window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet).");
     return;
@@ -172,7 +185,7 @@ export async function generarPDFCotizacion(cot) {
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
-  doc.save(docNum + "-" + nombreSeguro + ".pdf");
+  return finalizarPDF(doc, docNum + "-" + nombreSeguro + ".pdf", opts);
 }
 
 // ---------- helpers compartidos por los demás PDFs (pedido, recibo, factura, interno) ----------
@@ -539,7 +552,7 @@ export async function generarPDFPedido(p) {
 }
 
 // PDF de RECIBO DE ABONO: uno por cada abono registrado, para claridad con el cliente.
-export async function generarPDFRecibo(p, abono) {
+export async function generarPDFRecibo(p, abono, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
@@ -579,12 +592,12 @@ export async function generarPDFRecibo(p, abono) {
   doc.text("Gracias por su pago", pageW / 2, y, { align: "center" });
 
   var nombreSeguro = slugify(p.cliente || "recibo");
-  doc.save(docNum + "-recibo-" + nombreSeguro + ".pdf");
+  return finalizarPDF(doc, docNum + "-recibo-" + nombreSeguro + ".pdf", opts);
 }
 
 // PDF de FACTURA: documento final, con desglose (si viene de una cotización
 // usa sus referencias como líneas), IVA si aplica, y saldo pendiente/pagado.
-export async function generarPDFFactura(p) {
+export async function generarPDFFactura(p, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
@@ -655,5 +668,5 @@ export async function generarPDFFactura(p) {
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
 
   var nombreSeguro = slugify(p.cliente || "factura");
-  doc.save(docNum + "-factura-" + nombreSeguro + ".pdf");
+  return finalizarPDF(doc, docNum + "-factura-" + nombreSeguro + ".pdf", opts);
 }

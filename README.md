@@ -85,7 +85,7 @@ Para dejarlo funcionando hace falta un setup de una sola vez en Google
 Cloud, fuera del código:
 
 1. **Google Cloud Console** → crear un proyecto → habilitar la **Google
-   Sheets API** y la **Google Drive API**.
+   Sheets API**, la **Google Drive API** y la **Gmail API**.
 2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
    (evita el proceso de verificación de Google) → agregar como *test users*
    tu correo y el de cada vendedor que vaya a entrar.
@@ -141,9 +141,24 @@ Ver `js/core/drive.js`. Detalles a tener en cuenta:
   subió un vendedor, va a decir su cuenta, no la tuya — y ese archivo cuenta
   contra el almacenamiento de esa cuenta, no el tuyo.
 
-Gmail (enviar PDFs), Calendar (vencimientos) y Contacts (sync de Clientes)
-quedan para cuando se aborden esas fases — cada uno suma su propio scope en
-`google-config.js` sin tocar lo ya armado acá.
+### Enviar PDFs al cliente por Gmail
+
+En Cotizaciones ("✉ Enviar por correo") y en Pedidos ("✉ Enviar factura" /
+✉ junto a cada recibo) hay un botón para mandarle el PDF al cliente por
+correo en vez de solo descargarlo. Ver `js/core/gmail.js`.
+
+- Usa el correo del **cliente registrado** (el campo "Correo" que se agregó
+  en Clientes) — si la cotización/pedido no tiene un cliente vinculado con
+  correo, el botón avisa y no manda nada.
+- El correo sale de la cuenta de Gmail de quien esté logueado (admin o
+  vendedor) usando el scope `gmail.send` — que solo permite ENVIAR, no leer
+  la bandeja de entrada de nadie.
+- El PDF se arma en el momento (igual que "Descargar PDF") y se adjunta
+  directo al mensaje — no pasa por Drive ni se sube a ningún lado intermedio.
+
+Calendar (vencimientos) y Contacts (sync de Clientes) quedan para cuando se
+aborden esas fases — cada uno suma su propio scope en `google-config.js`
+sin tocar lo ya armado acá.
 
 ## Estructura
 
@@ -170,7 +185,8 @@ js/
     auth.js                login/logout con Google + resuelve el rol contra la pestaña "roles"
     googleRest.js           fetch genérico contra la API de Google Sheets
     sheetsStorage.js          adaptador get/set contra la pestaña "kv" (reemplaza window.storage)
-    drive.js                   sube imágenes de referencia al Drive de quien las suba
+    drive.js                   sube imágenes de referencia a la carpeta compartida del admin
+    gmail.js                    envía PDFs (cotización/factura/recibo) al correo del cliente
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)
@@ -274,12 +290,11 @@ para cuando entremos módulo por módulo:
   "last-write-wins" si dos personas guardan el mismo pedido a la vez — no es
   un problema nuevo de esta fase, pero ahora es más real al haber varios
   vendedores conectados a la misma hoja simultáneamente.
-- **Drive**: ya implementado (fotos de referencia en Cotizaciones, ver la
-  sección de arriba).
-- **Gmail / Calendar / Contacts**: siguientes fases de la integración con
-  Google (enviar PDFs por Gmail, vencimientos de Pendientes en Calendar,
-  sync de Clientes con Contacts) — cada una es aditiva sobre el login que ya
-  existe.
+- **Drive / Gmail**: ya implementados (fotos de referencia en Cotizaciones,
+  enviar PDFs por correo — ver las secciones de arriba).
+- **Calendar / Contacts**: siguientes fases de la integración con Google
+  (vencimientos de Pendientes en Calendar, sync de Clientes con Contacts) —
+  cada una es aditiva sobre el login que ya existe.
 
 Ninguno de estos se implementó en esta entrega — la prioridad pedida fue
 dividir primero. Dime por cuál área empezamos y la llevamos a fondo.
