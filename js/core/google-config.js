@@ -23,13 +23,18 @@ export const SPREADSHEET_ID = "1piZGAqi3F0YP5becUPT0mX_yMyAkXFnX4v8wfiXv9DY";
 // core/drive.js para el porqué). "gmail.send" solo permite ENVIAR correos
 // (no leer la bandeja de entrada) — lo usa "Enviar por correo" en
 // Cotizaciones/Pedidos (ver core/gmail.js) para mandarle el PDF al cliente
-// desde la cuenta de quien esté logueado. Calendar/Contacts se agregan acá
-// cuando se aborden esas fases (cada scope nuevo pide un nuevo
-// consentimiento la próxima vez que el usuario inicie sesión).
+// desde la cuenta de quien esté logueado. "calendar.events" solo permite
+// crear/editar/borrar EVENTOS (no ver la lista de calendarios ni su
+// configuración) — lo usa la sincronización automática de vencimientos de
+// Pendientes (deudas, gastos fijos) contra el Calendar del admin (ver
+// core/calendar.js). Contacts se agrega acá cuando se aborde esa fase (cada
+// scope nuevo pide un nuevo consentimiento la próxima vez que el usuario
+// inicie sesión).
 //
-// "drive" y "gmail.send" son scopes "sensibles"/"restringidos" de Google:
-// mientras la pantalla de consentimiento OAuth siga en modo Testing (ver
-// README) no hace falta verificación, pero si en algún momento pasan a modo
-// "En producción" con más de 100 usuarios, Google va a pedir verificar la
-// app (para gmail.send, incluso una revisión de seguridad más exigente).
-export const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.send email profile";
+// "drive", "gmail.send" y "calendar.events" son scopes "sensibles"/
+// "restringidos" de Google: mientras la pantalla de consentimiento OAuth
+// siga en modo Testing (ver README) no hace falta verificación, pero si en
+// algún momento pasan a modo "En producción" con más de 100 usuarios,
+// Google va a pedir verificar la app (para gmail.send, incluso una revisión
+// de seguridad más exigente).
+export const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events email profile";

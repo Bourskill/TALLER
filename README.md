@@ -85,7 +85,8 @@ Para dejarlo funcionando hace falta un setup de una sola vez en Google
 Cloud, fuera del código:
 
 1. **Google Cloud Console** → crear un proyecto → habilitar la **Google
-   Sheets API**, la **Google Drive API** y la **Gmail API**.
+   Sheets API**, la **Google Drive API**, la **Gmail API** y la **Google
+   Calendar API**.
 2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
    (evita el proceso de verificación de Google) → agregar como *test users*
    tu correo y el de cada vendedor que vaya a entrar.
@@ -156,9 +157,44 @@ correo en vez de solo descargarlo. Ver `js/core/gmail.js`.
 - El PDF se arma en el momento (igual que "Descargar PDF") y se adjunta
   directo al mensaje — no pasa por Drive ni se sube a ningún lado intermedio.
 
-Calendar (vencimientos) y Contacts (sync de Clientes) quedan para cuando se
-aborden esas fases — cada uno suma su propio scope en `google-config.js`
-sin tocar lo ya armado acá.
+### Vencimientos de Pendientes → Google Calendar
+
+En Pendientes, cada deuda y cada gasto fijo se sincroniza automáticamente
+(sin ningún botón que apretar) con el Calendar de quien esté logueado como
+admin — es el único rol que ve esta pestaña, así que siempre es el Calendar
+del admin, nunca el de un vendedor. Ver `js/core/calendar.js` (envoltorio
+genérico de la API) y los helpers `sincronizarEventoDeuda`/
+`sincronizarEventoGastoFijo` en `js/modules/pendientes.js`.
+
+- **No es una serie recurrente**: cada obligación tiene, como mucho, UN
+  evento de un solo día con su PRÓXIMO vencimiento (el mismo que ya calcula
+  `calcFechaVencimientoPeriodo()` para el KPI "Por pagar"). Ese evento se
+  mueve hacia adelante, se actualiza o se borra solo cada vez que agregas,
+  editas, pagas o eliminas la deuda/el gasto fijo — no hace falta un cron ni
+  un backend para "adivinar" cuándo crear el siguiente, porque cada acción
+  del usuario ya dispara el recálculo. La contrapartida honesta: si nadie
+  toca Pendientes durante varios periodos seguidos, el evento no avanza
+  solo con el paso del tiempo (recién se actualiza la próxima vez que
+  interactúes con esa obligación).
+- Una deuda con cuotas muestra el contador en el título del evento (ej.
+  "cuota 2/6"); al pagar la última cuota, el evento se borra (la deuda se
+  mueve entera al historial, donde ya no hace falta recordatorio).
+- Un gasto fijo marcado como "pagado este periodo" borra su evento (no tiene
+  sentido seguir recordando algo que ya se pagó); en cuanto vuelve a estar
+  pendiente (nuevo periodo), se vuelve a crear con la fecha del siguiente
+  vencimiento.
+- Usa el scope `calendar.events` (solo crear/editar/borrar eventos, no ver
+  la lista de calendarios de nadie).
+- Requiere habilitar la **Google Calendar API** en el mismo proyecto de
+  Google Cloud Console (paso 1 de arriba) — si no está habilitada, la
+  sincronización falla en silencio (queda solo en la consola del navegador,
+  con `console.error`) sin bloquear el guardado real de la deuda/gasto fijo.
+  Si el admin ya tenía sesión iniciada antes de este cambio, necesita
+  cerrar sesión y volver a entrar una vez para que Google le pida el nuevo
+  permiso de Calendar.
+
+Contacts (sync de Clientes) queda para cuando se aborde esa fase — suma su
+propio scope en `google-config.js` sin tocar lo ya armado acá.
 
 ## Estructura
 
@@ -187,6 +223,7 @@ js/
     sheetsStorage.js          adaptador get/set contra la pestaña "kv" (reemplaza window.storage)
     drive.js                   sube imágenes de referencia a la carpeta compartida del admin
     gmail.js                    envía PDFs (cotización/factura/recibo) al correo del cliente
+    calendar.js                   crea/actualiza/borra eventos de vencimiento en el Calendar del admin
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)
@@ -290,11 +327,12 @@ para cuando entremos módulo por módulo:
   "last-write-wins" si dos personas guardan el mismo pedido a la vez — no es
   un problema nuevo de esta fase, pero ahora es más real al haber varios
   vendedores conectados a la misma hoja simultáneamente.
-- **Drive / Gmail**: ya implementados (fotos de referencia en Cotizaciones,
-  enviar PDFs por correo — ver las secciones de arriba).
-- **Calendar / Contacts**: siguientes fases de la integración con Google
-  (vencimientos de Pendientes en Calendar, sync de Clientes con Contacts) —
-  cada una es aditiva sobre el login que ya existe.
+- **Drive / Gmail / Calendar**: ya implementados (fotos de referencia en
+  Cotizaciones, enviar PDFs por correo, vencimientos de Pendientes como
+  eventos — ver las secciones de arriba).
+- **Contacts**: siguiente fase de la integración con Google (sync de
+  Clientes con los Contactos del admin) — aditiva sobre el login que ya
+  existe, igual que las anteriores.
 
 Ninguno de estos se implementó en esta entrega — la prioridad pedida fue
 dividir primero. Dime por cuál área empezamos y la llevamos a fondo.

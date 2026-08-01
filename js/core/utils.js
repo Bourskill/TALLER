@@ -5,6 +5,17 @@ export function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Convierte un Date a "YYYY-MM-DD" en hora LOCAL (a diferencia de
+// Date#toISOString, que usa UTC y puede correr la fecha un día según la
+// zona horaria del navegador). Se usa para mandar fechas de un solo día a
+// servicios como Google Calendar, donde el vencimiento calculado con
+// calcFechaVencimientoPeriodo() debe llegar como el mismo día que se ve en
+// la app.
+export function fechaISOLocal(fecha) {
+  var y = fecha.getFullYear(), m = String(fecha.getMonth() + 1).padStart(2, "0"), d = String(fecha.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + d;
+}
+
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }

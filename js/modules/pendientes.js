@@ -7,13 +7,15 @@
 // pestaña "Notas" (ver modules/notas.js).
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe } from "../core/utils.js";
+import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe, fechaISOLocal } from "../core/utils.js";
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
   calcDeudaValorCuota, calcDeudaSaldoPendiente
 } from "../core/calc.js";
 import { PERIODOS_PAGO } from "../core/constants.js";
 import { renderHelp } from "../core/components.js";
+import { getSession } from "../core/auth.js";
+import { sincronizarEvento, eliminarEvento } from "../core/calendar.js";
 
 export function render() {
   var cfg = state.config;
@@ -238,6 +240,76 @@ function renderFilaEdicionDeuda(d) {
     "</div>";
 }
 
+// ---------- Sincronización de vencimientos con Google Calendar (admin) ----------
+// Cada deuda o gasto fijo con una fecha de vencimiento vigente (fija, o la
+// PRÓXIMA calculada por su periodo) tiene como mucho UN evento en el
+// Calendar de quien esté logueado — no una serie recurrente: el evento se
+// crea, se mueve hacia adelante o se borra automáticamente cada vez que se
+// agrega, edita, paga o elimina la obligación (ver los actions de abajo).
+// Como solo el rol admin ve esta pestaña, esto siempre corre contra SU
+// propio Calendar, nunca el de un vendedor. Los fallos (sin conexión, scope
+// todavía no otorgado porque el admin no volvió a iniciar sesión desde que
+// se agregó esta integración, etc.) solo quedan en consola: nunca deben
+// bloquear la operación real (guardar la deuda/el gasto fijo).
+function eventoUnDia(titulo, descripcion, fecha) {
+  var fin = new Date(fecha);
+  fin.setDate(fin.getDate() + 1);
+  return { summary: titulo, description: descripcion, start: { date: fechaISOLocal(fecha) }, end: { date: fechaISOLocal(fin) } };
+}
+
+function sincronizarEventoDeuda(deuda) {
+  var session = getSession();
+  if (!session || session.rol !== "admin") return;
+  var dias = diasPagoDe(deuda);
+  var fecha = dias.length ? calcFechaVencimientoPeriodo(deuda.periodo || "mensual", dias)
+    : (deuda.fechaVencimiento ? new Date(deuda.fechaVencimiento + "T00:00:00") : null);
+  if (!fecha) {
+    if (deuda.calendarEventId) {
+      eliminarEvento(deuda.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la deuda", e); });
+      state.deudas = state.deudas.map(function (d) { return d.id === deuda.id ? Object.assign({}, d, { calendarEventId: "" }) : d; });
+      persist("deudas");
+    }
+    return;
+  }
+  var cuotas = num(deuda.cuotas) || 1;
+  var pagadas = Math.min(num(deuda.cuotasPagadas) || 0, cuotas);
+  var titulo = "💳 " + deuda.concepto + (cuotas > 1 ? " (cuota " + (pagadas + 1) + "/" + cuotas + ")" : "");
+  var descripcion = "Vence: " + fmt(calcDeudaValorCuota(deuda)) + (deuda.contraparte ? " · Con: " + deuda.contraparte : "");
+  sincronizarEvento(deuda.calendarEventId, eventoUnDia(titulo, descripcion, fecha)).then(function (eventId) {
+    var idx = state.deudas.findIndex(function (d) { return d.id === deuda.id; });
+    if (idx === -1 || state.deudas[idx].calendarEventId === eventId) return;
+    state.deudas = state.deudas.map(function (d) { return d.id === deuda.id ? Object.assign({}, d, { calendarEventId: eventId }) : d; });
+    persist("deudas");
+  }).catch(function (e) { console.error("No se pudo sincronizar la deuda con Calendar", e); });
+}
+
+// A diferencia de la deuda (que se borra del todo cuando ya no aplica), el
+// gasto fijo sigue existiendo aunque ya esté pagado este periodo — solo se
+// borra su evento (no tiene sentido seguir recordando algo que ya se pagó);
+// la próxima vez que vuelva a estar pendiente, este mismo helper lo vuelve a
+// crear con la fecha del siguiente vencimiento.
+function sincronizarEventoGastoFijo(g) {
+  var session = getSession();
+  if (!session || session.rol !== "admin") return;
+  if (calcGastoFijoPendiente(g) <= 0) {
+    if (g.calendarEventId) {
+      eliminarEvento(g.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del gasto fijo", e); });
+      state.config.gastosFijos = (state.config.gastosFijos || []).map(function (x) { return x.id === g.id ? Object.assign({}, x, { calendarEventId: "" }) : x; });
+      persist("config");
+    }
+    return;
+  }
+  var fecha = calcFechaVencimientoPeriodo(g.periodo || "mensual", diasPagoDe(g));
+  var titulo = "🏠 " + g.nombre;
+  var descripcion = "Gasto fijo · " + fmt(g.monto);
+  sincronizarEvento(g.calendarEventId, eventoUnDia(titulo, descripcion, fecha)).then(function (eventId) {
+    var idx = (state.config.gastosFijos || []).findIndex(function (x) { return x.id === g.id; });
+    if (idx === -1 || state.config.gastosFijos[idx].calendarEventId === eventId) return;
+    state.config.gastosFijos = state.config.gastosFijos.map(function (x) { return x.id === g.id ? Object.assign({}, x, { calendarEventId: eventId }) : x; });
+    persist("config");
+  }).catch(function (e) { console.error("No se pudo sincronizar el gasto fijo con Calendar", e); });
+}
+
 export var actions = {
   "add-emp": function () {
     var fe = state.formEmp;
@@ -271,9 +343,10 @@ export var actions = {
   "add-gasto-fijo": function () {
     var gf = state.formGastoFijo;
     if (!gf.nombre || !gf.monto) return;
-    state.config.gastosFijos = (state.config.gastosFijos || []).concat([{ id: uid(), nombre: gf.nombre, monto: num(gf.monto), periodo: gf.periodo || "mensual", diasPago: parseDias(gf.diasPago), pagadoHasta: "" }]);
+    state.config.gastosFijos = (state.config.gastosFijos || []).concat([{ id: uid(), nombre: gf.nombre, monto: num(gf.monto), periodo: gf.periodo || "mensual", diasPago: parseDias(gf.diasPago), pagadoHasta: "", calendarEventId: "" }]);
     state.formGastoFijo = { nombre: "", monto: "", periodo: "mensual", diasPago: "" };
     persist("config"); notify();
+    sincronizarEventoGastoFijo(state.config.gastosFijos[state.config.gastosFijos.length - 1]);
   },
   "remove-gasto-fijo": function (el) {
     var id = el.getAttribute("data-id");
@@ -282,6 +355,7 @@ export var actions = {
     if (!window.confirm('¿Eliminar el gasto fijo "' + g.nombre + '"?\n\nDeja de contar en "Por pagar". No borra los pagos que ya se le hayan registrado en Finanzas.')) return;
     state.config.gastosFijos = (state.config.gastosFijos || []).filter(function (g) { return g.id !== id; });
     persist("config"); notify();
+    if (g.calendarEventId) eliminarEvento(g.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del gasto fijo", e); });
   },
   "set-gasto-fijo-periodo": function (el) {
     var id = el.getAttribute("data-id");
@@ -289,6 +363,8 @@ export var actions = {
       return g.id === id ? Object.assign({}, g, { periodo: el.value, diasPago: [], diaPago: "", pagadoHasta: "" }) : g;
     });
     persist("config"); notify();
+    var actualizado = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
+    if (actualizado) sincronizarEventoGastoFijo(actualizado);
   },
   "set-gasto-fijo-dia": function (el) {
     var id = el.getAttribute("data-id");
@@ -296,6 +372,8 @@ export var actions = {
       return g.id === id ? Object.assign({}, g, { diasPago: parseDias(el.value), diaPago: "" }) : g;
     });
     persist("config"); notify();
+    var actualizado = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
+    if (actualizado) sincronizarEventoGastoFijo(actualizado);
   },
   // Al marcar un gasto fijo como pagado, además de actualizar su periodo,
   // se registra el movimiento correspondiente en Finanzas con la fecha de
@@ -327,6 +405,8 @@ export var actions = {
       persist("tx");
     }
     persist("config"); notify();
+    var actualizado = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
+    if (actualizado) sincronizarEventoGastoFijo(actualizado);
   },
   "save-meta": function () {
     var labelEl = document.getElementById("inp-meta-label");
@@ -345,10 +425,11 @@ export var actions = {
     state.deudas.unshift({
       id: uid(), concepto: fd.concepto, contraparte: fd.contraparte, monto: num(fd.monto),
       fechaVencimiento: fd.fechaVencimiento || "", cuotas: num(fd.cuotas) || 1, cuotasPagadas: 0,
-      periodo: fd.periodo || "mensual", diasPago: parseDias(fd.diasPago), historial: []
+      periodo: fd.periodo || "mensual", diasPago: parseDias(fd.diasPago), historial: [], calendarEventId: ""
     });
     state.formDeuda = { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: "" };
     persist("deudas"); notify();
+    sincronizarEventoDeuda(state.deudas[0]);
   },
   "set-deuda-form-periodo": function (el) {
     state.formDeuda.periodo = el.value;
@@ -387,6 +468,8 @@ export var actions = {
     });
     state.deudaEditando = "";
     persist("deudas"); notify();
+    var actualizada = state.deudas.filter(function (d) { return d.id === id; })[0];
+    if (actualizada) sincronizarEventoDeuda(actualizada);
   },
   "remove-deuda": function (el) {
     var id = el.getAttribute("data-id");
@@ -398,6 +481,7 @@ export var actions = {
     if (!window.confirm(msg)) return;
     state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
     persist("deudas"); notify();
+    if (d.calendarEventId) eliminarEvento(d.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la deuda", e); });
   },
   // "Pagar": un solo botón que registra el pago de la cuota programada
   // siguiente (o el saldo completo si es pago único). Crea el movimiento de
@@ -420,19 +504,24 @@ export var actions = {
     state.tx.unshift({ id: uid(), tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "" });
     if (nuevasPagadas >= cuotas) {
       // Deuda saldada por completo: sale de "deudas" y se mueve entera (no
-      // solo un renglón de bitácora) al historial de deudas pagadas.
+      // solo un renglón de bitácora) al historial de deudas pagadas. Ya no
+      // tiene sentido un recordatorio de vencimiento, así que el evento de
+      // Calendar (si existía) se borra en vez de moverse al historial.
       var historial = (deuda.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
       state.deudasHistorial = state.deudasHistorial.concat([Object.assign({}, deuda, {
-        cuotasPagadas: nuevasPagadas, historial: historial, fechaCompletada: fechaPago
+        cuotasPagadas: nuevasPagadas, historial: historial, fechaCompletada: fechaPago, calendarEventId: ""
       })]);
       state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
       persist("deudasHistorial");
+      if (deuda.calendarEventId) eliminarEvento(deuda.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la deuda", e); });
     } else {
       state.deudas = state.deudas.map(function (d) {
         if (d.id !== id) return d;
         var historial = (d.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
         return Object.assign({}, d, { cuotasPagadas: nuevasPagadas, historial: historial });
       });
+      var actualizada = state.deudas.filter(function (d) { return d.id === id; })[0];
+      if (actualizada) sincronizarEventoDeuda(actualizada);
     }
     persist("tx"); persist("deudas"); notify();
   },
