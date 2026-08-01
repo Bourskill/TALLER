@@ -20,6 +20,18 @@ export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// Código corto NO secuencial para mostrarle al CLIENTE en vez del número
+// interno del documento (ver README "PDF: código público en vez de N.º
+// secuencial"): dos letras + 6 dígitos, generado una sola vez por pedido/
+// cotización y guardado ahí — así nunca revela cuántos documentos se han
+// generado. Internamente se sigue usando el N.º de OP secuencial de siempre.
+export function codigoPublico() {
+  var letras = "ABCDEFGHJKMNPQRSTUVWXYZ"; // sin I/O/L: se confunden con 1/0
+  var l = letras[Math.floor(Math.random() * letras.length)] + letras[Math.floor(Math.random() * letras.length)];
+  var n = Math.floor(100000 + Math.random() * 900000);
+  return "#" + l + n;
+}
+
 // Número de OP: código corto legible (ej. "OP-4821") para identificar un pedido
 // de un vistazo (impresión, comunicación con el cliente, búsquedas). `existentes`
 // debe incluir TODOS los números ya usados (pedidos activos + papelera) para

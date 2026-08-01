@@ -142,7 +142,7 @@ Ver `js/core/drive.js`. Detalles a tener en cuenta:
   subió un vendedor, va a decir su cuenta, no la tuya — y ese archivo cuenta
   contra el almacenamiento de esa cuenta, no el tuyo.
 
-### Enviar PDFs al cliente por Gmail
+### Enviar PDFs al cliente por Gmail (correo HTML)
 
 En Cotizaciones ("✉ Enviar por correo") y en Pedidos ("✉ Enviar factura" /
 ✉ junto a cada recibo) hay un botón para mandarle el PDF al cliente por
@@ -153,43 +153,109 @@ correo en vez de solo descargarlo. Ver `js/core/gmail.js`.
   correo, el botón avisa y no manda nada.
 - El correo sale de la cuenta de Gmail de quien esté logueado (admin o
   vendedor) usando el scope `gmail.send` — que solo permite ENVIAR, no leer
-  la bandeja de entrada de nadie.
+  la bandeja de entrada de nadie. **Funciona con cualquier destinatario**
+  (Outlook, Yahoo, un correo corporativo, lo que sea) — el scope solo
+  controla desde qué cuenta *sale* el correo, no a dónde puede llegar.
+- El cuerpo del correo es HTML (`plantillaCorreoHtml()` en `gmail.js`), no
+  texto plano: encabezado con el nombre del taller y tu color de acento
+  (configurable, ver "Personalización de PDF y correos" más abajo), saludo,
+  mensaje y un aviso del PDF adjunto — en vez del "Hola cliente, adjuntamos
+  tu cotización" de antes.
 - El PDF se arma en el momento (igual que "Descargar PDF") y se adjunta
   directo al mensaje — no pasa por Drive ni se sube a ningún lado intermedio.
 
-### Vencimientos de Pendientes → Google Calendar
+### PDF: código público en vez de N.º secuencial
 
-En Pendientes, cada deuda y cada gasto fijo se sincroniza automáticamente
-(sin ningún botón que apretar) con el Calendar de quien esté logueado como
-admin — es el único rol que ve esta pestaña, así que siempre es el Calendar
-del admin, nunca el de un vendedor. Ver `js/core/calendar.js` (envoltorio
-genérico de la API) y los helpers `sincronizarEventoDeuda`/
-`sincronizarEventoGastoFijo` en `js/modules/pendientes.js`.
+Cotización, factura y recibo (los 3 documentos que le llegan al cliente) ya
+no muestran el N.º de PDF secuencial ni el N.º de OP interno — en su lugar
+muestran un **código corto no secuencial** (ej. `#FA326468`), para que nadie
+pueda deducir cuántos documentos generás. Ver `codigoPublico()` en
+`core/utils.js` y `asegurarCodigoPublico()` en `core/pdf.js`.
 
-- **No es una serie recurrente**: cada obligación tiene, como mucho, UN
-  evento de un solo día con su PRÓXIMO vencimiento (el mismo que ya calcula
-  `calcFechaVencimientoPeriodo()` para el KPI "Por pagar"). Ese evento se
-  mueve hacia adelante, se actualiza o se borra solo cada vez que agregas,
-  editas, pagas o eliminas la deuda/el gasto fijo — no hace falta un cron ni
-  un backend para "adivinar" cuándo crear el siguiente, porque cada acción
-  del usuario ya dispara el recálculo. La contrapartida honesta: si nadie
-  toca Pendientes durante varios periodos seguidos, el evento no avanza
-  solo con el paso del tiempo (recién se actualiza la próxima vez que
-  interactúes con esa obligación).
-- Una deuda con cuotas muestra el contador en el título del evento (ej.
-  "cuota 2/6"); al pagar la última cuota, el evento se borra (la deuda se
-  mueve entera al historial, donde ya no hace falta recordatorio).
-- Un gasto fijo marcado como "pagado este periodo" borra su evento (no tiene
-  sentido seguir recordando algo que ya se pagó); en cuanto vuelve a estar
-  pendiente (nuevo periodo), se vuelve a crear con la fecha del siguiente
-  vencimiento.
+- Se genera UNA sola vez (al crear el pedido/cotización) y queda guardado en
+  el propio registro — el mismo código se ve siempre que regeneres ese PDF,
+  no cambia en cada descarga. Los pedidos/cotizaciones que ya existían antes
+  de este cambio reciben su código la primera vez que generás su PDF (y
+  queda guardado desde ahí).
+- El nombre del archivo descargado/adjunto también usa este código en vez
+  del número secuencial (ej. `FA326468-factura-camisetas.pdf`).
+- El recibo de abono, que antes mostraba "OP: OP-4821" al cliente, ya no
+  muestra ningún N.º de OP.
+- **Internamente seguís viendo el N.º de OP secuencial de siempre** (tarjeta
+  del pedido, búsquedas, orden de producción) — esto solo cambia lo que
+  aparece en los 3 PDF que salen del taller. Los documentos internos
+  (reportes, orden de producción, cotización de uso interno) siguen usando
+  el contador secuencial de PDF como antes.
+
+### Personalización de PDF y correos (Configuración)
+
+En Configuración → "Personalización de PDF y correos": un campo de **pie de
+página** (texto libre, se imprime al final de cotización/factura/recibo/
+orden de producción) y un **color de acento** (se usa en el encabezado de
+los correos HTML de arriba). Ambos usan la acción genérica
+`set-config-campo` que ya existía — no hizo falta código nuevo de guardado.
+
+### Respaldo diario de la Sheet a Drive
+
+La Google Sheet que usás como base de datos (`js/core/sheetsStorage.js`) ya
+es persistente y compartida — esto agrega, ADEMÁS, una **copia de seguridad
+completa** del archivo a una carpeta aparte de tu Drive ("Panel del Taller —
+respaldos"), por si algún día la Sheet en uso se corrompe o se borra por
+error. Ver `js/core/backup.js`.
+
+- **No es un cron real**: la app no tiene backend, así que "cada 24h" es un
+  chequeo oportunista — cada vez que vos (admin) abrís la app, si ya pasaron
+  24h desde el último respaldo, se dispara uno nuevo en segundo plano (no
+  bloquea el primer render). Si un día no abrís la app, ese día no hay
+  respaldo nuevo — la Sheet real no corre ningún riesgo, solo se atrasa la
+  copia. Un respaldo verdaderamente diario sin depender de que alguien entre
+  necesitaría un Google Apps Script con disparador de tiempo, que queda
+  fuera de este código si en algún momento lo querés agregar.
+- Usa `files.copy` de la Drive API (ya tenías el scope `drive` por las
+  imágenes de referencia — no hizo falta pedir uno nuevo): cada copia es un
+  archivo de Sheets independiente, con fecha en el nombre, que nunca se
+  borra solo (no hay política de limpieza automática — si con el tiempo se
+  acumulan muchas copias y querés borrar las viejas, se hace a mano desde
+  Drive).
+- En Configuración se ve la fecha del último respaldo y hay un botón
+  "Respaldar ahora" para forzarlo sin esperar las 24h.
+- Solo corre para el admin (es quien tiene la Sheet real en su Drive) — un
+  vendedor logueado no dispara ningún respaldo.
+
+### Vencimientos y fechas → Google Calendar
+
+Todo lo que maneja una fecha relevante se sincroniza automáticamente (sin
+ningún botón que apretar) con Google Calendar: deudas y gastos fijos en
+Pendientes, notas con fecha, y la fecha de entrega de un pedido. Ver
+`js/core/calendar.js` (envoltorio genérico de la API + `eventoUnDia()`,
+compartido) y los helpers `sincronizarEvento*` en cada módulo
+(`pendientes.js`, `notas.js`, `pedidos.js`).
+
+- **No son series recurrentes**: cada obligación/nota/pedido tiene, como
+  mucho, UN evento de un solo día con su próxima fecha relevante. Ese
+  evento se mueve hacia adelante, se actualiza o se borra solo cada vez que
+  agregas, editas o eliminas el registro — no hace falta un cron para
+  "adivinar" cuándo crear el siguiente, porque cada acción del usuario ya
+  dispara el recálculo. La contrapartida honesta: si nadie toca la app
+  durante un tiempo, el evento no avanza solo con el paso del tiempo.
+- **Pendientes** (deudas, gastos fijos): solo lo ve el admin, así que
+  siempre corre contra SU Calendar. Una deuda con cuotas muestra el
+  contador en el título (ej. "cuota 2/6"); al pagarla por completo o
+  marcar un gasto fijo como pagado este periodo, el evento se borra.
+- **Notas**: solo lo ve el admin (igual que Pendientes). Una nota sin fecha,
+  o ya marcada como hecha, no tiene evento.
+- **Pedidos**: a diferencia de los dos anteriores, lo gestionan tanto el
+  admin como un vendedor — el evento se crea en el Calendar de **quien esté
+  logueado en ese momento**, igual que ya hace Gmail con el envío de PDFs
+  (cada quien ve en su propia agenda lo que él mismo está gestionando). Se
+  sincroniza al crear/eliminar/restaurar un pedido con fecha de entrega.
 - Usa el scope `calendar.events` (solo crear/editar/borrar eventos, no ver
   la lista de calendarios de nadie).
 - Requiere habilitar la **Google Calendar API** en el mismo proyecto de
   Google Cloud Console (paso 1 de arriba) — si no está habilitada, la
   sincronización falla en silencio (queda solo en la consola del navegador,
-  con `console.error`) sin bloquear el guardado real de la deuda/gasto fijo.
-  Si el admin ya tenía sesión iniciada antes de este cambio, necesita
+  con `console.error`) sin bloquear el guardado real del registro. Si el
+  admin/vendedor ya tenía sesión iniciada antes de este cambio, necesita
   cerrar sesión y volver a entrar una vez para que Google le pida el nuevo
   permiso de Calendar.
 
@@ -222,8 +288,9 @@ js/
     googleRest.js           fetch genérico contra la API de Google Sheets
     sheetsStorage.js          adaptador get/set contra la pestaña "kv" (reemplaza window.storage)
     drive.js                   sube imágenes de referencia a la carpeta compartida del admin
-    gmail.js                    envía PDFs (cotización/factura/recibo) al correo del cliente
-    calendar.js                   crea/actualiza/borra eventos de vencimiento en el Calendar del admin
+    gmail.js                    envía PDFs por correo (HTML) al correo del cliente
+    calendar.js                   crea/actualiza/borra eventos de vencimiento/entrega en Calendar
+    backup.js                     copia de seguridad diaria de la Sheet a una carpeta de Drive
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)

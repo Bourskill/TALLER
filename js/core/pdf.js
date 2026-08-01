@@ -2,10 +2,10 @@
 // (no como módulo ES) y quedan disponibles en window.jspdf. Este archivo solo
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
-import { state } from "./store.js";
+import { state, persist } from "./store.js";
 import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
-import { num, slugify } from "./utils.js";
+import { num, slugify, codigoPublico } from "./utils.js";
 
 // Formatea dinero igual que el resto de la app ($1.234). Para cantidades (no
 // dinero) usamos numFmt, que no antepone el símbolo de pesos.
@@ -23,6 +23,32 @@ function finalizarPDF(doc, nombreArchivo, opts) {
   }
   doc.save(nombreArchivo);
   return null;
+}
+
+// Los documentos que le llegan al cliente (cotización, factura, recibo) NO
+// muestran el N.º de PDF secuencial ni el N.º de OP interno — en su lugar
+// usan un código corto no secuencial (ver utils.js: codigoPublico()) para
+// que nadie pueda deducir cuántos documentos se han generado. Se genera UNA
+// sola vez y se guarda en el propio pedido/cotización; si un registro viejo
+// (de antes de esta función) todavía no lo tiene, se genera y se guarda acá
+// mismo para que quede estable de ahí en adelante.
+async function asegurarCodigoPublico(obj, persistKey) {
+  if (obj.codigoPublico) return obj.codigoPublico;
+  obj.codigoPublico = codigoPublico();
+  await persist(persistKey);
+  return obj.codigoPublico;
+}
+
+// Pie de página opcional (Configuración → Personalización de PDF), impreso
+// centrado y pequeño al final de los documentos que salen del taller
+// (cliente o piso de producción) — ver DEFAULT_CONFIG.pdfPiePagina.
+function drawPiePagina(doc, y, marginX, pageW) {
+  var pie = (state.config.pdfPiePagina || "").trim();
+  if (!pie) return y;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(160, 160, 160);
+  var lineas = doc.splitTextToSize(pie, pageW - marginX * 2);
+  lineas.forEach(function (l) { y += 12; doc.text(l, pageW / 2, y, { align: "center" }); });
+  return y;
 }
 
 var STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
@@ -77,8 +103,7 @@ export async function generarPDFCotizacion(cot, opts) {
   var marginX = 42;
   var y = 54;
 
-  var n = await siguienteNumeroPdf();
-  var docNum = "COT" + String(n).padStart(4, "0");
+  var codigo = await asegurarCodigoPublico(cot, "cotizaciones");
 
   var cfg = state.config;
   var logo = (cfg.logoUrl || "").trim();
@@ -97,7 +122,7 @@ export async function generarPDFCotizacion(cot, opts) {
   doc.text("COTIZACIÓN", tituloX, y);
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
-  doc.text("N.º " + docNum, pageW - marginX, y - 13, { align: "right" });
+  doc.text("N.º " + codigo, pageW - marginX, y - 13, { align: "right" });
   var fecha = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
   doc.text("Fecha  " + fecha, pageW - marginX, y, { align: "right" });
 
@@ -183,9 +208,10 @@ export async function generarPDFCotizacion(cot, opts) {
   finalY += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
+  drawPiePagina(doc, finalY, marginX, pageW);
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
-  return finalizarPDF(doc, docNum + "-" + nombreSeguro + ".pdf", opts);
+  return finalizarPDF(doc, codigo.replace("#", "") + "-" + nombreSeguro + ".pdf", opts);
 }
 
 // ---------- helpers compartidos por los demás PDFs (pedido, recibo, factura, interno) ----------
@@ -546,6 +572,7 @@ export async function generarPDFPedido(p) {
   doc.setFont("helvetica", "italic"); doc.setFontSize(9.5); doc.setTextColor(150, 150, 150);
   if (y + 14 > pageH - 30) { doc.addPage(); y = 54; }
   doc.text("Documento de uso interno para producción — no incluye precios ni datos del cliente.", marginX, y);
+  drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.descripcion || "pedido");
   doc.save(docNum + "-orden-" + nombreSeguro + ".pdf");
@@ -556,13 +583,12 @@ export async function generarPDFRecibo(p, abono, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
-  var n = await siguienteNumeroPdf();
-  var docNum = "REC" + String(n).padStart(4, "0");
-  var head = drawHeaderBasic(doc, "RECIBO DE ABONO", docNum);
+  var codigo = await asegurarCodigoPublico(p, "pedidos");
+  var head = drawHeaderBasic(doc, "RECIBO DE ABONO", codigo);
   var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var cfg = state.config;
 
-  y = drawParties(doc, y, marginX, pageW, negocioLinesFrom(cfg), [p.cliente, "OP: " + (p.numeroOp || "—")].filter(Boolean), "RECIBIDO DE");
+  y = drawParties(doc, y, marginX, pageW, negocioLinesFrom(cfg), [p.cliente].filter(Boolean), "RECIBIDO DE");
 
   var saldoActual = calcSaldoPedido(p);
   doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(60, 60, 60);
@@ -590,9 +616,10 @@ export async function generarPDFRecibo(p, abono, opts) {
   y += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su pago", pageW / 2, y, { align: "center" });
+  drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "recibo");
-  return finalizarPDF(doc, docNum + "-recibo-" + nombreSeguro + ".pdf", opts);
+  return finalizarPDF(doc, codigo.replace("#", "") + "-recibo-" + nombreSeguro + ".pdf", opts);
 }
 
 // PDF de FACTURA: documento final, con desglose (si viene de una cotización
@@ -601,9 +628,8 @@ export async function generarPDFFactura(p, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
-  var n = await siguienteNumeroPdf();
-  var docNum = "FAC" + String(n).padStart(4, "0");
-  var head = drawHeaderBasic(doc, "FACTURA", docNum);
+  var codigo = await asegurarCodigoPublico(p, "pedidos");
+  var head = drawHeaderBasic(doc, "FACTURA", codigo);
   var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var cfg = state.config;
   var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
@@ -666,7 +692,8 @@ export async function generarPDFFactura(p, opts) {
   finalY += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
+  drawPiePagina(doc, finalY, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "factura");
-  return finalizarPDF(doc, docNum + "-factura-" + nombreSeguro + ".pdf", opts);
+  return finalizarPDF(doc, codigo.replace("#", "") + "-factura-" + nombreSeguro + ".pdf", opts);
 }

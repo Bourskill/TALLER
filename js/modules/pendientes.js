@@ -7,7 +7,7 @@
 // pestaña "Notas" (ver modules/notas.js).
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe, fechaISOLocal } from "../core/utils.js";
+import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe } from "../core/utils.js";
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
   calcDeudaValorCuota, calcDeudaSaldoPendiente
@@ -15,7 +15,7 @@ import {
 import { PERIODOS_PAGO } from "../core/constants.js";
 import { renderHelp } from "../core/components.js";
 import { getSession } from "../core/auth.js";
-import { sincronizarEvento, eliminarEvento } from "../core/calendar.js";
+import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 
 export function render() {
   var cfg = state.config;
@@ -251,12 +251,6 @@ function renderFilaEdicionDeuda(d) {
 // todavía no otorgado porque el admin no volvió a iniciar sesión desde que
 // se agregó esta integración, etc.) solo quedan en consola: nunca deben
 // bloquear la operación real (guardar la deuda/el gasto fijo).
-function eventoUnDia(titulo, descripcion, fecha) {
-  var fin = new Date(fecha);
-  fin.setDate(fin.getDate() + 1);
-  return { summary: titulo, description: descripcion, start: { date: fechaISOLocal(fecha) }, end: { date: fechaISOLocal(fin) } };
-}
-
 function sincronizarEventoDeuda(deuda) {
   var session = getSession();
   if (!session || session.rol !== "admin") return;

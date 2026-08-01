@@ -95,7 +95,21 @@ export const DEFAULT_CONFIG = {
   // Carpeta de Drive (en la cuenta del admin) donde caen las imágenes de
   // referencia que suba cualquiera (admin o vendedor) — ver core/drive.js.
   // Vacío hasta que el admin sube la primera imagen (ahí se crea).
-  driveFolderId: ""
+  driveFolderId: "",
+  // Carpeta de Drive (en la cuenta del admin) donde caen las copias diarias
+  // de respaldo de la Google Sheet — ver core/backup.js. Vacía hasta el
+  // primer respaldo (ahí se crea).
+  backupFolderId: "",
+  // Fecha/hora ISO del último respaldo — controla el chequeo de "ya pasaron
+  // 24h" en core/backup.js (no hay cron: se revisa cada vez que el admin
+  // abre la app).
+  ultimoBackupISO: "",
+  // Texto libre que se imprime al final de los PDF que le llegan al cliente
+  // o a producción (cotización, factura, recibo, orden de producción).
+  pdfPiePagina: "",
+  // Color de acento (hex) del encabezado de los correos HTML que le llegan
+  // al cliente — ver core/gmail.js.
+  colorAcento: "#6a59f0"
 };
 
 // Formas de calcular el costo por prenda de un insumo dentro de una referencia.

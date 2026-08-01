@@ -8,6 +8,7 @@ import { esc, fmt, num, todayStr } from "../core/utils.js";
 import { calcIngresosTotales, calcGastosTotales, calcNominaPagada, calcCaja, calcGastosFijosMensuales, calcBalancePeriodo } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
+import { respaldarSiCorresponde } from "../core/backup.js";
 
 export function render() {
   var cfg = state.config;
@@ -28,6 +29,20 @@ export function render() {
     '<div class="field"><label>Ciudad</label><input value="' + esc(cfg.ciudad) + '" data-action-change="set-config-campo" data-campo="ciudad" /></div>' +
     '<div class="field"><label>Teléfono</label><input value="' + esc(cfg.telefono) + '" data-action-change="set-config-campo" data-campo="telefono" /></div>' +
     "</div></div>";
+
+  html += '<div class="card"><div class="section-title small">Personalización de PDF y correos' +
+    renderHelp("El pie de página se imprime al final de cotizaciones, facturas, recibos y la orden de producción. El color de acento se usa en el encabezado de los correos HTML que le llegan al cliente cuando envías un PDF por correo.") +
+    '</div><div class="form-grid">' +
+    '<div class="field wide"><label>Pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
+    '<div class="field"><label>Color de acento (correos)</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
+    "</div></div>";
+
+  html += '<div class="card"><div class="section-title small">Respaldo de datos' +
+    renderHelp("Copia completa de la Google Sheet (todo lo que gestiona la app) a una carpeta aparte en tu Drive — un respaldo de seguridad, no la base de datos en uso (esa sigue siendo la Sheet). Se actualiza sola como mucho una vez cada 24 horas, al abrir la app, para no generar llamadas de más a la API.") +
+    '</div>' +
+    '<div class="section-sub" style="margin:0 0 10px;">Último respaldo: <b style="color:var(--ink);">' + (cfg.ultimoBackupISO ? fechaHoraCorta(cfg.ultimoBackupISO) : "Aún no se ha hecho ninguno") + "</b></div>" +
+    '<button class="btn ghost small" data-action="respaldar-ahora">Respaldar ahora</button>' +
+    "</div>";
 
   var ingresos = calcIngresosTotales(), gastos = calcGastosTotales(), nominaPagada = calcNominaPagada(), caja = calcCaja();
   var gastosFijosTotal = calcGastosFijosMensuales();
@@ -119,8 +134,16 @@ export var actions = {
     var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
     var etiqueta = fr.desde === fr.hasta ? fr.desde : (fr.desde + " a " + fr.hasta);
     await generarPDFReporteFinanciero(movimientos, fr.desde, fr.hasta, etiqueta);
+  },
+  "respaldar-ahora": async function () {
+    await respaldarSiCorresponde(true);
+    notify();
   }
 };
+
+function fechaHoraCorta(iso) {
+  return new Date(iso).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(".", "");
+}
 
 function isoDate(d) {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");

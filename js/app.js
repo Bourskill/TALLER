@@ -49,6 +49,11 @@ async function entrarConSesion(session) {
   if (session.rol === "vendedor") store.state.tab = "mis-ventas";
   await store.loadAll();
   domMod.render();
+  // Chequeo oportunista del respaldo diario (ver core/backup.js): no bloquea
+  // el primer render, y no hace nada si ya se corrió en las últimas 24h o si
+  // quien entra no es admin.
+  var backup = await import("./core/backup.js");
+  backup.respaldarSiCorresponde();
 }
 
 async function intentarLogin() {

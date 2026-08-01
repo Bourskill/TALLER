@@ -1,11 +1,13 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, generarNumeroOp } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura } from "../core/pdf.js";
-import { enviarCorreoConAdjunto } from "../core/gmail.js";
+import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
+import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
+import { getSession } from "../core/auth.js";
 
 // Todos los números de OP usados, activos Y en la papelera — para que un
 // pedido restaurado o uno nuevo nunca choque con uno que ya existió.
@@ -230,6 +232,32 @@ function renderAbonosPedido(p) {
   return html;
 }
 
+// ---------- Sincronización de fecha de entrega con Google Calendar ----------
+// A diferencia de Pendientes (solo admin), Pedidos lo gestiona tanto el
+// admin como un vendedor — el evento se crea en el Calendar de quien esté
+// logueado en ese momento (cada quien ve en su propia agenda lo que él mismo
+// está gestionando), igual que ya hace Gmail con el envío de PDFs.
+function sincronizarEventoPedido(p) {
+  if (!getSession()) return;
+  if (!p.fechaEntrega) {
+    if (p.calendarEventId) {
+      eliminarEvento(p.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del pedido", e); });
+      state.pedidos = state.pedidos.map(function (x) { return x.id === p.id ? Object.assign({}, x, { calendarEventId: "" }) : x; });
+      persist("pedidos");
+    }
+    return;
+  }
+  var fecha = new Date(p.fechaEntrega + "T00:00:00");
+  var titulo = "📦 Entrega: " + (p.numeroOp || p.descripcion);
+  var descripcion = (p.descripcion || "") + (p.cliente ? " · Cliente: " + p.cliente : "");
+  sincronizarEvento(p.calendarEventId, eventoUnDia(titulo, descripcion, fecha)).then(function (eventId) {
+    var idx = state.pedidos.findIndex(function (x) { return x.id === p.id; });
+    if (idx === -1 || state.pedidos[idx].calendarEventId === eventId) return;
+    state.pedidos = state.pedidos.map(function (x) { return x.id === p.id ? Object.assign({}, x, { calendarEventId: eventId }) : x; });
+    persist("pedidos");
+  }).catch(function (e) { console.error("No se pudo sincronizar el pedido con Calendar", e); });
+}
+
 export var actions = {
   "filtro-pedidos": function (el) {
     state.filtroPedidos = el.getAttribute("data-val");
@@ -248,7 +276,8 @@ export var actions = {
       cantidad: fp.cantidad, total: num(fp.total), costo: num(fp.costo), abono: abonoInicial, abonos: [],
       fechaEntrega: fp.fechaEntrega, estado: "cotizacion",
       numeroOp: generarNumeroOp(todosNumerosOp()),
-      vendedor: fp.vendedorNombre ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null
+      vendedor: fp.vendedorNombre ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
+      codigoPublico: codigoPublico(), calendarEventId: ""
     };
     if (abonoInicial > 0) {
       var abonoInicialId = uid();
@@ -259,6 +288,7 @@ export var actions = {
     state.pedidos.unshift(nuevoPedido);
     state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "" };
     persist("pedidos"); notify();
+    sincronizarEventoPedido(nuevoPedido);
   },
   // "Escalar" un pedido rápido: crea una cotización de arranque (una
   // referencia con lo que ya se sabe) para poder detallar insumos, tallas y
@@ -275,7 +305,8 @@ export var actions = {
       id: cotId, clienteId: p.clienteId || "", cliente: p.cliente, descripcion: p.descripcion, fecha: todayStr(),
       estado: "borrador", pedidoOrigenId: p.id,
       referencias: [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [] }],
-      gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: p.vendedor ? Object.assign({}, p.vendedor) : null
+      gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: p.vendedor ? Object.assign({}, p.vendedor) : null,
+      codigoPublico: codigoPublico()
     };
     state.cotizaciones.unshift(nuevaCot);
     state.pedidos = state.pedidos.map(function (x) { return x.id === id ? Object.assign({}, x, { cotizacionId: cotId }) : x; });
@@ -429,6 +460,7 @@ export var actions = {
     state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
     persist("pedidos"); persist("pedidosPapelera"); notify();
+    if (pedido.calendarEventId) eliminarEvento(pedido.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del pedido", e); });
   },
   "restaurar-pedido": function (el) {
     var id = el.getAttribute("data-id");
@@ -437,6 +469,7 @@ export var actions = {
     state.pedidosPapelera = state.pedidosPapelera.filter(function (p) { return p.id !== id; });
     var restaurado = Object.assign({}, pedido);
     delete restaurado.eliminadoEl;
+    restaurado.calendarEventId = ""; // el evento anterior ya se borró al eliminar el pedido
     // Si en el tiempo que estuvo en la papelera se creó otro pedido con el
     // mismo N.º de OP, se le asigna uno nuevo para evitar duplicados.
     var otrosNumeros = state.pedidos.map(function (p) { return p.numeroOp; });
@@ -445,6 +478,7 @@ export var actions = {
     }
     state.pedidos.unshift(restaurado);
     persist("pedidos"); persist("pedidosPapelera"); notify();
+    sincronizarEventoPedido(restaurado);
   },
   "eliminar-pedido-definitivo": function (el) {
     var id = el.getAttribute("data-id");
@@ -486,7 +520,12 @@ export var actions = {
       await enviarCorreoConAdjunto({
         to: correo,
         subject: "Factura — " + (ped.descripcion || state.config.nombre),
-        body: "Hola " + (ped.cliente || "") + ",\n\nAdjuntamos tu factura.\n\n" + (state.config.nombre || ""),
+        bodyHtml: plantillaCorreoHtml({
+          cfg: state.config,
+          saludo: "Hola " + (ped.cliente || "") + ",",
+          mensaje: "Adjuntamos la factura de \"" + (ped.descripcion || "tu pedido") + "\". Gracias por tu confianza.",
+          docTitulo: "Factura"
+        }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
       });
@@ -509,7 +548,12 @@ export var actions = {
       await enviarCorreoConAdjunto({
         to: correo,
         subject: "Recibo de abono — " + (ped.descripcion || state.config.nombre),
-        body: "Hola " + (ped.cliente || "") + ",\n\nAdjuntamos el recibo de tu abono.\n\n" + (state.config.nombre || ""),
+        bodyHtml: plantillaCorreoHtml({
+          cfg: state.config,
+          saludo: "Hola " + (ped.cliente || "") + ",",
+          mensaje: "Adjuntamos el recibo correspondiente a tu abono. Gracias por tu pago.",
+          docTitulo: "Recibo de abono"
+        }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
       });

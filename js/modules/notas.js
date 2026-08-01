@@ -4,6 +4,8 @@
 
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, uid } from "../core/utils.js";
+import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
+import { getSession } from "../core/auth.js";
 
 export function render() {
   var f = state.formPend;
@@ -41,22 +43,52 @@ function grupoPend(titulo, items) {
   return html + "</div>";
 }
 
+// ---------- Sincronización de la fecha de la nota con Google Calendar ----------
+// Igual que Pedidos (y a diferencia de Pendientes, que es solo admin): el
+// evento se crea en el Calendar de quien esté logueado en ese momento. Una
+// nota SIN fecha, o ya marcada como hecha, no tiene evento (se borra si lo
+// tenía) — al desmarcarla como hecha, si sigue teniendo fecha, se recrea.
+function sincronizarEventoNota(nota) {
+  if (!getSession()) return;
+  if (!nota.fecha || nota.hecho) {
+    if (nota.calendarEventId) {
+      eliminarEvento(nota.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la nota", e); });
+      state.pendientes = state.pendientes.map(function (x) { return x.id === nota.id ? Object.assign({}, x, { calendarEventId: "" }) : x; });
+      persist("pendientes");
+    }
+    return;
+  }
+  var fecha = new Date(nota.fecha + "T00:00:00");
+  var titulo = (nota.categoria === "mejora" ? "💡 " : "📝 ") + nota.texto;
+  sincronizarEvento(nota.calendarEventId, eventoUnDia(titulo, "Prioridad: " + nota.prioridad, fecha)).then(function (eventId) {
+    var idx = state.pendientes.findIndex(function (x) { return x.id === nota.id; });
+    if (idx === -1 || state.pendientes[idx].calendarEventId === eventId) return;
+    state.pendientes = state.pendientes.map(function (x) { return x.id === nota.id ? Object.assign({}, x, { calendarEventId: eventId }) : x; });
+    persist("pendientes");
+  }).catch(function (e) { console.error("No se pudo sincronizar la nota con Calendar", e); });
+}
+
 export var actions = {
   "add-pend": function () {
     var fpe = state.formPend;
     if (!fpe.texto) return;
-    state.pendientes.unshift({ id: uid(), texto: fpe.texto, categoria: fpe.categoria, prioridad: fpe.prioridad, fecha: fpe.fecha || "", hecho: false });
+    state.pendientes.unshift({ id: uid(), texto: fpe.texto, categoria: fpe.categoria, prioridad: fpe.prioridad, fecha: fpe.fecha || "", hecho: false, calendarEventId: "" });
     state.formPend = { texto: "", categoria: "tarea", prioridad: "media", fecha: "" };
     persist("pendientes"); notify();
+    sincronizarEventoNota(state.pendientes[0]);
   },
   "toggle-pend": function (el) {
     var id = el.getAttribute("data-id");
     state.pendientes = state.pendientes.map(function (p) { return p.id === id ? Object.assign({}, p, { hecho: !p.hecho }) : p; });
     persist("pendientes"); notify();
+    var actualizada = state.pendientes.filter(function (p) { return p.id === id; })[0];
+    if (actualizada) sincronizarEventoNota(actualizada);
   },
   "remove-pend": function (el) {
     var id = el.getAttribute("data-id");
+    var nota = state.pendientes.filter(function (p) { return p.id === id; })[0];
     state.pendientes = state.pendientes.filter(function (p) { return p.id !== id; });
     persist("pendientes"); notify();
+    if (nota && nota.calendarEventId) eliminarEvento(nota.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la nota", e); });
   }
 };

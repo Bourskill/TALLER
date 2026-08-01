@@ -1,10 +1,10 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
-import { enviarCorreoConAdjunto } from "../core/gmail.js";
+import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp } from "./pedidos.js";
 import { ESTADOS_DEFAULT } from "../core/constants.js";
 
@@ -368,7 +368,7 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!fc.cliente || !fc.descripcion) return;
-    state.cotizaciones.unshift({ id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null });
+    state.cotizaciones.unshift({ id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico() });
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
     persist("cotizaciones"); notify();
   },
@@ -573,7 +573,12 @@ export var actions = {
       await enviarCorreoConAdjunto({
         to: correo,
         subject: "Cotización — " + (cot.descripcion || state.config.nombre),
-        body: "Hola " + (cot.cliente || "") + ",\n\nAdjuntamos tu cotización.\n\n" + (state.config.nombre || ""),
+        bodyHtml: plantillaCorreoHtml({
+          cfg: state.config,
+          saludo: "Hola " + (cot.cliente || "") + ",",
+          mensaje: "Adjuntamos la cotización de \"" + (cot.descripcion || "tu pedido") + "\". Cualquier duda, quedamos atentos.",
+          docTitulo: "Cotización"
+        }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
       });

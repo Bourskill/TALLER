@@ -7,6 +7,7 @@
 // "primary" a partir del payload que le pasen.
 
 import { getAccessToken } from "./auth.js";
+import { fechaISOLocal } from "./utils.js";
 
 async function calendarFetch(path, options) {
   var res = await fetch("https://www.googleapis.com/calendar/v3/" + path, Object.assign({}, options, {
@@ -47,4 +48,14 @@ export async function sincronizarEvento(eventId, payload) {
 export async function eliminarEvento(eventId) {
   if (!eventId) return;
   await calendarFetch("calendars/primary/events/" + eventId, { method: "DELETE" });
+}
+
+// Arma el payload de un evento de UN día (recordatorio de vencimiento/
+// entrega) a partir de un Date en hora local. Compartido por
+// modules/pendientes.js, modules/notas.js y modules/pedidos.js — cada uno
+// decide cuándo llamar a sincronizarEvento()/eliminarEvento() con esto.
+export function eventoUnDia(titulo, descripcion, fecha) {
+  var fin = new Date(fecha);
+  fin.setDate(fin.getDate() + 1);
+  return { summary: titulo, description: descripcion, start: { date: fechaISOLocal(fecha) }, end: { date: fechaISOLocal(fin) } };
 }
