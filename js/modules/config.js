@@ -9,6 +9,7 @@ import { calcIngresosTotales, calcGastosTotales, calcNominaPagada, calcCaja, cal
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
+import { subirImagenReferencia } from "../core/drive.js";
 
 export function render() {
   var cfg = state.config;
@@ -31,9 +32,10 @@ export function render() {
     "</div></div>";
 
   html += '<div class="card"><div class="section-title small">Personalización de PDF y correos' +
-    renderHelp("El pie de página se imprime al final de cotizaciones, facturas, recibos y la orden de producción. El color de acento se usa en el encabezado de los correos HTML que le llegan al cliente cuando envías un PDF por correo.") +
+    renderHelp("La imagen (logo, sello, firma) y el texto del pie de página se imprimen al final de cotizaciones, facturas, recibos y la orden de producción. El color de acento se usa en el encabezado de los correos HTML que le llegan al cliente cuando envías un PDF por correo.") +
     '</div><div class="form-grid">' +
-    '<div class="field wide"><label>Pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
+    '<div class="field"><label>Imagen del pie de página (PDF)</label>' + renderPiePaginaImg(cfg) + "</div>" +
+    '<div class="field wide"><label>Texto del pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
     '<div class="field"><label>Color de acento (correos)</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
     "</div></div>";
 
@@ -67,6 +69,22 @@ export function render() {
 
   html += renderReportePeriodo();
   return html;
+}
+
+// Igual patrón que la miniatura de imagen de referencia en Cotizaciones
+// (renderThumb en cotizaciones.js): sube a la misma carpeta compartida de
+// Drive del admin, con un estado "Subiendo…" mientras tanto.
+function renderPiePaginaImg(cfg) {
+  if (state.configPiePaginaSubiendo) {
+    return '<div class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</div>';
+  }
+  if (cfg.pdfPiePaginaImagenUrl) {
+    return '<div class="ref-thumb" data-action="set-pie-imagen" title="Clic para subir otra imagen desde tu dispositivo">' +
+      '<img src="' + esc(cfg.pdfPiePaginaImagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-remove" data-action="quitar-pie-imagen" title="Quitar imagen">✕</button>' +
+      "</div>";
+  }
+  return '<div class="ref-thumb ref-thumb-empty" data-action="set-pie-imagen" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</div>';
 }
 
 // Selector de rango de fechas para el reporte en PDF — mismos atajos de
@@ -138,6 +156,32 @@ export var actions = {
   "respaldar-ahora": async function () {
     await respaldarSiCorresponde(true);
     notify();
+  },
+  "set-pie-imagen": function () {
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      state.configPiePaginaSubiendo = true;
+      notify();
+      try {
+        var url = await subirImagenReferencia(file);
+        state.configPiePaginaSubiendo = false;
+        state.config.pdfPiePaginaImagenUrl = url;
+        persist("config"); notify();
+      } catch (e) {
+        state.configPiePaginaSubiendo = false;
+        window.alert("No se pudo subir la imagen a Drive: " + (e && e.message ? e.message : e));
+        notify();
+      }
+    });
+    input.click();
+  },
+  "quitar-pie-imagen": function () {
+    state.config.pdfPiePaginaImagenUrl = "";
+    persist("config"); notify();
   }
 };
 

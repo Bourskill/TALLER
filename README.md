@@ -85,8 +85,8 @@ Para dejarlo funcionando hace falta un setup de una sola vez en Google
 Cloud, fuera del código:
 
 1. **Google Cloud Console** → crear un proyecto → habilitar la **Google
-   Sheets API**, la **Google Drive API**, la **Gmail API** y la **Google
-   Calendar API**.
+   Sheets API**, la **Google Drive API**, la **Gmail API**, la **Google
+   Calendar API** y la **People API** (para Google Contacts).
 2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
    (evita el proceso de verificación de Google) → agregar como *test users*
    tu correo y el de cada vendedor que vaya a entrar.
@@ -189,11 +189,15 @@ pueda deducir cuántos documentos generás. Ver `codigoPublico()` en
 
 ### Personalización de PDF y correos (Configuración)
 
-En Configuración → "Personalización de PDF y correos": un campo de **pie de
-página** (texto libre, se imprime al final de cotización/factura/recibo/
-orden de producción) y un **color de acento** (se usa en el encabezado de
-los correos HTML de arriba). Ambos usan la acción genérica
-`set-config-campo` que ya existía — no hizo falta código nuevo de guardado.
+En Configuración → "Personalización de PDF y correos": una **imagen de pie
+de página** (logo, sello, firma — se sube igual que las imágenes de
+referencia de Cotizaciones, a la carpeta compartida de Drive del admin, ver
+`subirImagenReferencia()` en `core/drive.js`), un **texto de pie de página**
+(libre) y un **color de acento** (se usa en el encabezado de los correos
+HTML de arriba). La imagen se imprime centrada arriba del texto, al final de
+cotización/factura/recibo/orden de producción (ver `drawPiePagina()` en
+`core/pdf.js`) — ninguna de las dos es obligatoria, podés usar solo una, las
+dos, o ninguna.
 
 ### Respaldo diario de la Sheet a Drive
 
@@ -259,8 +263,59 @@ compartido) y los helpers `sincronizarEvento*` en cada módulo
   cerrar sesión y volver a entrar una vez para que Google le pida el nuevo
   permiso de Calendar.
 
-Contacts (sync de Clientes) queda para cuando se aborde esa fase — suma su
-propio scope en `google-config.js` sin tocar lo ya armado acá.
+### Clientes → Google Contacts
+
+Cada cliente registrado se sincroniza automáticamente con los Contactos de
+Google de quien esté logueado — igual que Pedidos con Calendar: **no hay una
+lista compartida** (la People API de Google no tiene un equivalente a la
+carpeta de Drive compartida entre cuentas distintas), así que cada quien
+(admin o vendedor) ve en sus propios Contactos/celular a los clientes que él
+mismo gestiona. Ver `js/core/contacts.js` y los hooks en
+`js/modules/clientes.js`.
+
+- Se sincronizan nombre, teléfono, correo y dirección; la cédula/RUT y los
+  datos de cuenta bancaria quedan en la nota del contacto (campo
+  "biography"), no como campos estructurados (Google Contacts no tiene un
+  campo nativo para eso).
+- Se crea al agregar el cliente, se actualiza al editarlo (ver más abajo) y
+  se borra al eliminarlo.
+- A diferencia de Drive/Calendar, la People API exige mandar el `etag`
+  vigente del contacto en cada actualización — por eso actualizar un
+  contacto primero pide el contacto actual (para tener su etag fresco)
+  antes de mandar el cambio.
+- Usa el scope `contacts` (lectura/escritura completa de Contactos — no hay
+  un scope más acotado tipo "solo los contactos creados por esta app").
+- Es **unidireccional** (la app manda cambios a Contacts, no al revés): si
+  editás el contacto directamente desde Google Contacts, ese cambio no
+  vuelve a la app.
+
+### Clientes: editar después de agregado
+
+Antes solo se podía agregar o eliminar un cliente — ahora hay un botón
+"Editar" en cada tarjeta que abre un modo de edición explícito (todos los
+campos editables a la vez, con Guardar/Cancelar), mismo patrón que ya usaba
+la edición de deudas en Pendientes. Guardar también dispara la
+sincronización con Contacts de arriba.
+
+### Sesión: no volver a loguearse en cada recarga
+
+El access token de Google dura ~1 hora (la sesión antes vivía solo en
+memoria: recargar la página SIEMPRE pedía volver a entrar, incluso a los
+2 segundos). Ahora, mientras el token no venza, la sesión se guarda en
+`sessionStorage` — recargar la pestaña (o volver a abrirla) entra directo,
+sin pantalla de login ni popup de Google. Ver `restaurarSesion()` en
+`js/core/auth.js`, llamada desde `app.js` antes de mostrar el login.
+
+- `sessionStorage`, no `localStorage`: sobrevive a recargar la pestaña, pero
+  se borra sola al cerrar el navegador — más prudente que dejar un token de
+  acceso guardado indefinidamente en el disco.
+- **Límite honesto**: pasada la hora, si necesitás volver a entrar, Google
+  igual resuelve el login rápido y sin pantalla de permisos (la cuenta ya
+  los concedió antes) — pero sí hace falta el clic en "Continuar con
+  Google", porque los navegadores bloquean el popup de OAuth de Google si no
+  lo dispara un clic real del usuario. No hay forma de saltarse eso sin
+  romper la seguridad del flujo (sería justamente el tipo de cosa que un
+  sitio malicioso querría hacer).
 
 ## Estructura
 
@@ -290,6 +345,7 @@ js/
     drive.js                   sube imágenes de referencia a la carpeta compartida del admin
     gmail.js                    envía PDFs por correo (HTML) al correo del cliente
     calendar.js                   crea/actualiza/borra eventos de vencimiento/entrega en Calendar
+    contacts.js                    sincroniza Clientes con los Contactos de Google de quien esté logueado
     backup.js                     copia de seguridad diaria de la Sheet a una carpeta de Drive
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
@@ -394,12 +450,12 @@ para cuando entremos módulo por módulo:
   "last-write-wins" si dos personas guardan el mismo pedido a la vez — no es
   un problema nuevo de esta fase, pero ahora es más real al haber varios
   vendedores conectados a la misma hoja simultáneamente.
-- **Drive / Gmail / Calendar**: ya implementados (fotos de referencia en
-  Cotizaciones, enviar PDFs por correo, vencimientos de Pendientes como
-  eventos — ver las secciones de arriba).
-- **Contacts**: siguiente fase de la integración con Google (sync de
-  Clientes con los Contactos del admin) — aditiva sobre el login que ya
-  existe, igual que las anteriores.
+- **Drive / Gmail / Calendar / Contacts**: ya implementados (fotos de
+  referencia en Cotizaciones, enviar PDFs por correo HTML, vencimientos y
+  fechas como eventos, Clientes sincronizados con Contactos — ver las
+  secciones de arriba). Con esto se completó el roadmap original de
+  integraciones "familiares" de Google (login, Sheets, Drive, Gmail,
+  Calendar, Contacts).
 
 Ninguno de estos se implementó en esta entrega — la prioridad pedida fue
 dividir primero. Dime por cuál área empezamos y la llevamos a fondo.

@@ -107,6 +107,11 @@ export const DEFAULT_CONFIG = {
   // Texto libre que se imprime al final de los PDF que le llegan al cliente
   // o a producción (cotización, factura, recibo, orden de producción).
   pdfPiePagina: "",
+  // Imagen/vector (logo, sello, firma...) que se imprime centrada al final
+  // de esos mismos PDF, arriba del texto del pie de página si también hay
+  // uno. Se sube igual que las imágenes de referencia de Cotizaciones (a la
+  // carpeta compartida de Drive del admin) — ver core/drive.js.
+  pdfPiePaginaImagenUrl: "",
   // Color de acento (hex) del encabezado de los correos HTML que le llegan
   // al cliente — ver core/gmail.js.
   colorAcento: "#6a59f0"

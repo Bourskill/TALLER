@@ -40,14 +40,37 @@ async function asegurarCodigoPublico(obj, persistKey) {
 }
 
 // Pie de página opcional (Configuración → Personalización de PDF), impreso
-// centrado y pequeño al final de los documentos que salen del taller
-// (cliente o piso de producción) — ver DEFAULT_CONFIG.pdfPiePagina.
-function drawPiePagina(doc, y, marginX, pageW) {
+// centrado al final de los documentos que salen del taller (cliente o piso
+// de producción) — imagen/vector (logo, sello, firma...) arriba, y debajo el
+// texto libre, si hay alguno de los dos. Ver DEFAULT_CONFIG.pdfPiePagina /
+// pdfPiePaginaImagenUrl. cargarImagenDataUrl() ya es best-effort (si la
+// imagen falla o tarda, simplemente no se incluye) así que esto nunca
+// bloquea la generación del PDF.
+async function drawPiePagina(doc, y, marginX, pageW) {
+  var imgUrl = (state.config.pdfPiePaginaImagenUrl || "").trim();
+  if (imgUrl) {
+    var durl = await cargarImagenDataUrl(imgUrl);
+    if (durl) {
+      var anchoImg = 90; // ancho fijo discreto: es un pie de página, no debe dominar la hoja
+      var altoImg = anchoImg;
+      try {
+        var props = doc.getImageProperties(durl);
+        if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
+      } catch (e) { /* se usa el alto por defecto */ }
+      var pageH = doc.internal.pageSize.getHeight();
+      if (y + 20 + altoImg > pageH - 30) { doc.addPage(); y = 54; }
+      try {
+        doc.addImage(durl, formatoImagen(durl), pageW / 2 - anchoImg / 2, y + 10, anchoImg, altoImg);
+        y += altoImg + 10;
+      } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
+    }
+  }
   var pie = (state.config.pdfPiePagina || "").trim();
-  if (!pie) return y;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(160, 160, 160);
-  var lineas = doc.splitTextToSize(pie, pageW - marginX * 2);
-  lineas.forEach(function (l) { y += 12; doc.text(l, pageW / 2, y, { align: "center" }); });
+  if (pie) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(160, 160, 160);
+    var lineas = doc.splitTextToSize(pie, pageW - marginX * 2);
+    lineas.forEach(function (l) { y += 12; doc.text(l, pageW / 2, y, { align: "center" }); });
+  }
   return y;
 }
 
@@ -208,7 +231,7 @@ export async function generarPDFCotizacion(cot, opts) {
   finalY += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
-  drawPiePagina(doc, finalY, marginX, pageW);
+  await drawPiePagina(doc, finalY, marginX, pageW);
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
   return finalizarPDF(doc, codigo.replace("#", "") + "-" + nombreSeguro + ".pdf", opts);
@@ -572,7 +595,7 @@ export async function generarPDFPedido(p) {
   doc.setFont("helvetica", "italic"); doc.setFontSize(9.5); doc.setTextColor(150, 150, 150);
   if (y + 14 > pageH - 30) { doc.addPage(); y = 54; }
   doc.text("Documento de uso interno para producción — no incluye precios ni datos del cliente.", marginX, y);
-  drawPiePagina(doc, y, marginX, pageW);
+  await drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.descripcion || "pedido");
   doc.save(docNum + "-orden-" + nombreSeguro + ".pdf");
@@ -616,7 +639,7 @@ export async function generarPDFRecibo(p, abono, opts) {
   y += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su pago", pageW / 2, y, { align: "center" });
-  drawPiePagina(doc, y, marginX, pageW);
+  await drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "recibo");
   return finalizarPDF(doc, codigo.replace("#", "") + "-recibo-" + nombreSeguro + ".pdf", opts);
@@ -692,7 +715,7 @@ export async function generarPDFFactura(p, opts) {
   finalY += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
   doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
-  drawPiePagina(doc, finalY, marginX, pageW);
+  await drawPiePagina(doc, finalY, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "factura");
   return finalizarPDF(doc, codigo.replace("#", "") + "-factura-" + nombreSeguro + ".pdf", opts);

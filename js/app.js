@@ -10,7 +10,7 @@
 // importara con un `import` estático arriba de este archivo, se evaluaría
 // antes del login y STORAGE_OK quedaría en `false` para siempre.
 
-import { login } from "./core/auth.js";
+import { login, restaurarSesion } from "./core/auth.js";
 import { sheetsStorage } from "./core/sheetsStorage.js";
 import { esc } from "./core/utils.js";
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID } from "./core/google-config.js";
@@ -79,5 +79,13 @@ function mostrarAccesoDenegado(email) {
 if (GOOGLE_CLIENT_ID.indexOf("PENDIENTE") === 0 || SPREADSHEET_ID.indexOf("PENDIENTE") === 0) {
   app.innerHTML = renderConfigPendiente();
 } else {
-  intentarLogin();
+  // Si hay una sesión guardada (sessionStorage) con un token que todavía no
+  // vence, entra directo — sin pantalla de login, sin popup de Google. Ver
+  // el comentario de restaurarSesion() en core/auth.js.
+  var restaurada = restaurarSesion();
+  if (restaurada && restaurada.rol) {
+    entrarConSesion(restaurada);
+  } else {
+    intentarLogin();
+  }
 }

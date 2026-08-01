@@ -2,13 +2,27 @@
 // en index.html) + resolución de rol contra la pestaña "roles" de la Google
 // Sheet configurada en google-config.js.
 //
-// Un solo consentimiento pide todos los scopes de GOOGLE_SCOPES a la vez —
-// hoy solo Sheets + identificar el correo. La sesión vive en memoria: al
-// recargar la página hay que volver a entrar (Google lo resuelve rápido,
-// sin pantalla de permisos de nuevo, si la cuenta ya los concedió antes).
+// Un solo consentimiento pide todos los scopes de GOOGLE_SCOPES a la vez.
+// El access token de Google dura ~1h (lo dice `expires_in` en la respuesta):
+// mientras no venza, la sesión se guarda en sessionStorage para que
+// recargar la página (o volver a abrir la pestaña) entre directo, sin
+// pasar por la pantalla de login ni abrir ningún popup de Google — ver
+// restaurarSesion(), llamada desde app.js antes de mostrar el login. Pasada
+// esa hora, si o cuando la cuenta ya lo tenía concedido, Google igual
+// resuelve el siguiente login rápido y sin pantalla de permisos, pero sí
+// necesita el clic en "Continuar con Google" (los navegadores bloquean el
+// popup de OAuth si no lo dispara un clic real).
+// sessionStorage (no localStorage): sobrevive a recargar la pestaña, pero
+// se borra sola al cerrar el navegador/pestaña — más prudente para no dejar
+// un token de acceso guardado indefinidamente en el disco.
 
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID, GOOGLE_SCOPES } from "./google-config.js";
 import { sheetsValuesGet } from "./googleRest.js";
+
+var SESSION_STORAGE_KEY = "taller_sesion_v1";
+// Margen de seguridad: se considera vencido 2 minutos antes de la hora real,
+// para no arrancar a usar un token que expira a mitad de la carga inicial.
+var MARGEN_EXPIRACION_MS = 2 * 60 * 1000;
 
 var session = null; // { email, rol: "admin"|"vendedor", vendedorNombre } | { email, rol: null } | null
 var accessToken = null;
@@ -16,6 +30,36 @@ var tokenClient = null;
 
 export function getSession() { return session; }
 export function getAccessToken() { return accessToken; }
+
+function guardarSesion(expiraEn) {
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+      session: session, accessToken: accessToken, expiraEl: Date.now() + (Number(expiraEn) || 3600) * 1000
+    }));
+  } catch (e) { /* almacenamiento no disponible (modo privado, etc.) — no es crítico */ }
+}
+
+// Se llama al arrancar la app, ANTES de mostrar la pantalla de login: si hay
+// una sesión guardada y su token todavía no vence, la restaura en memoria y
+// la devuelve (sin ningún llamado a Google) — si no, devuelve null y sigue
+// el flujo normal de login.
+export function restaurarSesion() {
+  try {
+    var raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    var datos = JSON.parse(raw);
+    if (!datos || !datos.session || !datos.accessToken || !datos.expiraEl) return null;
+    if (Date.now() + MARGEN_EXPIRACION_MS >= datos.expiraEl) {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    session = datos.session;
+    accessToken = datos.accessToken;
+    return session;
+  } catch (e) {
+    return null;
+  }
+}
 
 function ensureTokenClient() {
   if (tokenClient) return tokenClient;
@@ -40,6 +84,7 @@ export function login() {
       accessToken = resp.access_token;
       try {
         session = await resolverSesion(accessToken);
+        guardarSesion(resp.expires_in);
         resolve(session);
       } catch (e) {
         reject(e);
@@ -55,6 +100,7 @@ export function logout() {
   }
   session = null;
   accessToken = null;
+  try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* nada que limpiar */ }
 }
 
 function leerFilasRoles(token) {

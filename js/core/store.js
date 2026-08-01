@@ -114,6 +114,10 @@ export const state = {
   // Qué pedidos tienen desplegado el panel de "dinero + pdf" (colapsado por
   // defecto para que la tarjeta muestre solo lo básico). Objeto {[id]: bool}.
   pedidoPanelAbierto: {},
+  clienteEditando: "", // id del cliente actualmente en modo edición (o "")
+  // true mientras la imagen del pie de página (Configuración) se sube a
+  // Drive — nunca se persiste, es puramente visual (igual que refImagenSubiendo).
+  configPiePaginaSubiendo: false,
   filtroClientes: "",
   filtroCatalogoCategoria: "todos",
   buscarPedidos: "",
