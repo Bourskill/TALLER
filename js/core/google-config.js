@@ -16,8 +16,16 @@ export const GOOGLE_CLIENT_ID = "934965200548-8ft5rk4lu06m45g5k5pgu31n9n408uq1.a
 // rol, vendedor_nombre).
 export const SPREADSHEET_ID = "1piZGAqi3F0YP5becUPT0mX_yMyAkXFnX4v8wfiXv9DY";
 
-// Scopes pedidos en un solo consentimiento. Fase 1 solo necesita Sheets +
-// identificar el correo de quien entra; Drive/Gmail/Calendar/Contacts se
-// agregan acá cuando se aborden esas fases (cada scope nuevo pide un nuevo
+// Scopes pedidos en un solo consentimiento. El scope de Drive es el amplio
+// ("drive", no "drive.file"): un vendedor necesita poder escribir dentro de
+// la carpeta compartida del admin, que él no creó — "drive.file" no permite
+// eso, solo ve archivos que el propio usuario creó/abrió con esta app (ver
+// core/drive.js para el porqué). Gmail/Calendar/Contacts se agregan acá
+// cuando se aborden esas fases (cada scope nuevo pide un nuevo
 // consentimiento la próxima vez que el usuario inicie sesión).
-export const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets email profile";
+//
+// "drive" es un scope "sensible" de Google: mientras la pantalla de
+// consentimiento OAuth siga en modo Testing (ver README) no hace falta
+// verificación, pero si en algún momento pasan a modo "En producción" con
+// más de 100 usuarios, Google va a pedir verificar la app para este scope.
+export const GOOGLE_SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive email profile";

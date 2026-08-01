@@ -57,16 +57,31 @@ export function logout() {
   accessToken = null;
 }
 
+function leerFilasRoles(token) {
+  return sheetsValuesGet(token, SPREADSHEET_ID, "roles!A2:C1000");
+}
+
 async function resolverSesion(token) {
   var userInfo = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: "Bearer " + token }
   }).then(function (r) { return r.json(); });
 
   var email = (userInfo.email || "").toLowerCase();
-  var filas = await sheetsValuesGet(token, SPREADSHEET_ID, "roles!A2:C1000");
+  var filas = await leerFilasRoles(token);
   var fila = filas.find(function (f) { return (f[0] || "").trim().toLowerCase() === email; });
 
   if (!fila) return { email: email, rol: null };
   var rol = (fila[1] || "").trim().toLowerCase();
   return { email: email, rol: rol === "admin" ? "admin" : "vendedor", vendedorNombre: (fila[2] || "").trim() };
+}
+
+// Correos de todos los vendedores en la pestaña "roles" — lo usa
+// core/drive.js para compartir automáticamente la carpeta de imágenes del
+// admin con cada uno la primera vez que se crea.
+export async function listarVendedoresEmail() {
+  var filas = await leerFilasRoles(accessToken);
+  return filas
+    .filter(function (f) { return (f[1] || "").trim().toLowerCase() === "vendedor"; })
+    .map(function (f) { return (f[0] || "").trim(); })
+    .filter(Boolean);
 }

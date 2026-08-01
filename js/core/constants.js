@@ -91,7 +91,11 @@ export const DEFAULT_CONFIG = {
   nit: "",
   direccion: "",
   ciudad: "",
-  telefono: ""
+  telefono: "",
+  // Carpeta de Drive (en la cuenta del admin) donde caen las imágenes de
+  // referencia que suba cualquiera (admin o vendedor) — ver core/drive.js.
+  // Vacío hasta que el admin sube la primera imagen (ahí se crea).
+  driveFolderId: ""
 };
 
 // Formas de calcular el costo por prenda de un insumo dentro de una referencia.

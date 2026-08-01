@@ -105,6 +105,7 @@ export const state = {
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")
   flujoEstadosAbierto: "", // id del flujo de producción con sus etapas desplegadas en Plantillas (o "")
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
+  refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
 
   filtroTx: "todos",
   filtroPedidos: "todos",

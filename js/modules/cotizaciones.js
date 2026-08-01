@@ -3,6 +3,7 @@ import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCS
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
+import { subirImagenReferencia } from "../core/drive.js";
 import { todosNumerosOp } from "./pedidos.js";
 import { ESTADOS_DEFAULT } from "../core/constants.js";
 
@@ -332,13 +333,16 @@ function renderDetalleReferencia(cotId, ref) {
 }
 
 function renderThumb(cotId, ref) {
+  if (state.refImagenSubiendo[ref.id]) {
+    return '<span class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</span>';
+  }
   if (ref.imagenUrl) {
-    return '<span class="ref-thumb" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Clic para cambiar la imagen">' +
+    return '<span class="ref-thumb" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Clic para subir otra imagen desde tu dispositivo">' +
       '<img src="' + esc(ref.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
       '<button class="ref-thumb-remove" data-action="quitar-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Quitar imagen">✕</button>' +
       "</span>";
   }
-  return '<span class="ref-thumb ref-thumb-empty" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Pegar el link de una imagen">+ imagen</span>';
+  return '<span class="ref-thumb ref-thumb-empty" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</span>';
 }
 
 function renderListaCompras(compras) {
@@ -405,15 +409,25 @@ export var actions = {
   },
   "set-ref-imagen": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
-    var actual = "";
-    var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
-    if (cot) {
-      var ref = (cot.referencias || []).filter(function (r) { return r.id === refId; })[0];
-      if (ref) actual = ref.imagenUrl || "";
-    }
-    var url = window.prompt("Pega el link de la imagen de referencia:", actual);
-    if (url === null) return;
-    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { imagenUrl: url.trim() }); });
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      state.refImagenSubiendo[refId] = true;
+      notify();
+      try {
+        var url = await subirImagenReferencia(file);
+        delete state.refImagenSubiendo[refId];
+        mapRef(cotId, refId, function (r) { return Object.assign({}, r, { imagenUrl: url }); });
+      } catch (e) {
+        delete state.refImagenSubiendo[refId];
+        window.alert("No se pudo subir la imagen a Drive: " + (e && e.message ? e.message : e));
+        notify();
+      }
+    });
+    input.click();
   },
   "quitar-ref-imagen": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");

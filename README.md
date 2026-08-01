@@ -85,7 +85,7 @@ Para dejarlo funcionando hace falta un setup de una sola vez en Google
 Cloud, fuera del código:
 
 1. **Google Cloud Console** → crear un proyecto → habilitar la **Google
-   Sheets API**.
+   Sheets API** y la **Google Drive API**.
 2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
    (evita el proceso de verificación de Google) → agregar como *test users*
    tu correo y el de cada vendedor que vaya a entrar.
@@ -106,12 +106,44 @@ Cloud, fuera del código:
    hoja, no quién conoce estos valores.
 
 Con eso completo, recargar la app: debe pedir "Continuar con Google", un
-solo consentimiento (Sheets + tu correo), y entrar según lo que diga tu fila
-en `roles`. Un correo que no esté en esa pestaña ve "Acceso no autorizado".
+solo consentimiento (Sheets + Drive + tu correo), y entrar según lo que diga
+tu fila en `roles`. Un correo que no esté en esa pestaña ve "Acceso no
+autorizado".
 
-Drive (fotos), Gmail (enviar PDFs), Calendar (vencimientos) y Contacts
-(sync de Clientes) quedan para cuando se aborden esas fases — cada uno
-suma su propio scope en `google-config.js` sin tocar lo ya armado acá.
+### Imágenes de referencia → Google Drive (carpeta del admin)
+
+En Cotizaciones, la miniatura de cada referencia ("+ imagen") ahora sube un
+archivo desde el dispositivo (antes solo se podía pegar un link externo).
+Ver `js/core/drive.js`. Detalles a tener en cuenta:
+
+- Todas las imágenes (las subas vos o un vendedor) caen en **una sola
+  carpeta "Panel del Taller — imágenes" dentro de tu Drive** (el del admin),
+  no en el Drive personal de cada vendedor. La crea automáticamente la
+  primera vez que **vos** (admin) subís una imagen — si un vendedor la sube
+  antes de que exista, ve un aviso pidiéndole que esperes a que la crees.
+- Al crearla, la comparte automáticamente (permiso de Editor, sin mandar
+  correo de aviso) con cada correo que figure como `rol = vendedor` en la
+  pestaña `roles` — así sus subidas también van a esa misma carpeta sin que
+  tengas que compartir nada a mano.
+- Cada imagen queda además con permiso "cualquiera con el link puede ver" —
+  así la miniatura y los PDF la pueden mostrar sin pedir login, igual que
+  antes con un link externo cualquiera.
+- Por esto necesita el scope amplio `drive` (no `drive.file`): un vendedor
+  tiene que poder escribir dentro de una carpeta que no creó él. Es un scope
+  "sensible" de Google — no pide verificación mientras seas de las cuentas
+  agregadas como *test user* (paso 2 de arriba), pero si algún día publicás
+  la app "en producción" con más de 100 usuarios, Google sí la va a pedir.
+- **Matiz honesto**: Google no deja transferir por API la propiedad de un
+  archivo a otra cuenta personal (@gmail.com) sin que esa cuenta la acepte a
+  mano — no existe forma de automatizar eso sin un backend propio. En la
+  práctica esto no importa (todo queda organizado y visible desde tu cuenta,
+  en esa carpeta), pero si te fijás en el "propietario" de un archivo que
+  subió un vendedor, va a decir su cuenta, no la tuya — y ese archivo cuenta
+  contra el almacenamiento de esa cuenta, no el tuyo.
+
+Gmail (enviar PDFs), Calendar (vencimientos) y Contacts (sync de Clientes)
+quedan para cuando se aborden esas fases — cada uno suma su propio scope en
+`google-config.js` sin tocar lo ya armado acá.
 
 ## Estructura
 
@@ -138,6 +170,7 @@ js/
     auth.js                login/logout con Google + resuelve el rol contra la pestaña "roles"
     googleRest.js           fetch genérico contra la API de Google Sheets
     sheetsStorage.js          adaptador get/set contra la pestaña "kv" (reemplaza window.storage)
+    drive.js                   sube imágenes de referencia al Drive de quien las suba
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)
@@ -241,10 +274,12 @@ para cuando entremos módulo por módulo:
   "last-write-wins" si dos personas guardan el mismo pedido a la vez — no es
   un problema nuevo de esta fase, pero ahora es más real al haber varios
   vendedores conectados a la misma hoja simultáneamente.
-- **Drive / Gmail / Calendar / Contacts**: siguientes fases de la
-  integración con Google (fotos de referencia en Drive, enviar PDFs por
-  Gmail, vencimientos de Pendientes en Calendar, sync de Clientes con
-  Contacts) — cada una es aditiva sobre el login que ya existe.
+- **Drive**: ya implementado (fotos de referencia en Cotizaciones, ver la
+  sección de arriba).
+- **Gmail / Calendar / Contacts**: siguientes fases de la integración con
+  Google (enviar PDFs por Gmail, vencimientos de Pendientes en Calendar,
+  sync de Clientes con Contacts) — cada una es aditiva sobre el login que ya
+  existe.
 
 Ninguno de estos se implementó en esta entrega — la prioridad pedida fue
 dividir primero. Dime por cuál área empezamos y la llevamos a fondo.
