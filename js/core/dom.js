@@ -212,12 +212,24 @@ function renderSidebar() {
   var isImg = /^(https?:|data:)/.test(logo);
   var logoInner = isImg ? '<img src="' + esc(logo) + '" alt="" />' : esc(logo || initials || "MT");
 
+  // El ícono y el nombre del taller son de marca del negocio — un vendedor
+  // no debe poder cambiarlos aunque los vea. Sin sesión (ej. smoke test) se
+  // trata como admin, igual que el resto del filtrado por rol de este archivo.
+  var session = getSession();
+  var puedeEditarMarca = !session || session.rol !== "vendedor";
+  var logoHtml = puedeEditarMarca
+    ? '<button class="sidebar-logo" data-action="edit-logo" title="Cambiar ícono del taller">' + logoInner + "</button>"
+    : '<div class="sidebar-logo" style="cursor:default;" title="' + esc(state.config.nombre) + '">' + logoInner + "</div>";
+  var nombreHtml = puedeEditarMarca
+    ? '<input class="sidebar-brand" id="inp-nombre" value="' + esc(state.config.nombre) + '" />'
+    : '<div class="sidebar-brand" style="cursor:default;">' + esc(state.config.nombre) + "</div>";
+
   var html = '<aside class="sidebar">' +
     '<div class="sidebar-inner">' +
     '<div class="sidebar-head">' +
-    '<button class="sidebar-logo" data-action="edit-logo" title="Cambiar ícono del taller">' + logoInner + "</button>" +
+    logoHtml +
     '<div class="sidebar-brandwrap">' +
-    '<input class="sidebar-brand" id="inp-nombre" value="' + esc(state.config.nombre) + '" />' +
+    nombreHtml +
     '<div class="sidebar-brand-sub">Panel de gestión</div>' +
     "</div>" +
     '<button class="sidebar-collapse-btn" data-action="toggle-sidebar" title="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '" aria-label="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '">' + collapseIcon() + "</button>" +

@@ -1,16 +1,50 @@
-import { state, persist, notify } from "../core/store.js";
+import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
 import { esc, num, uid, fmt } from "../core/utils.js";
 import { TIPOS_COSTO } from "../core/constants.js";
 import { renderTipoCostoOptions } from "../core/components.js";
 import { renderHelp } from "../core/components.js";
+import { getSession } from "../core/auth.js";
 
 var COLS = "1fr 150px 90px 110px 170px 40px";
+var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
+
+function renderPropuestasPendientes(session) {
+  var propuestas = state.catalogoPropuestas || [];
+  var esAdmin = !session || session.rol !== "vendedor";
+  // El admin ve TODAS las propuestas de todos los vendedores; un vendedor
+  // solo ve si la suya propia sigue pendiente (para saber que aún no aplicó).
+  var visibles = esAdmin ? propuestas : propuestas.filter(function (p) { return p.autor === (session.vendedorNombre || session.email); });
+  if (!visibles.length) return "";
+
+  if (!esAdmin) {
+    return '<div class="card" style="border-color:var(--warning);"><div class="section-title small">Cambios pendientes de aprobación</div>' +
+      '<div class="section-sub">Ya podés seguir usando tu edición mientras tanto — el admin todavía no aprueba tu cambio de ' +
+      visibles.map(function (p) { return CAMPO_LABEL[p.key] || p.key; }).join(" y ") + ".</div></div>";
+  }
+
+  var html = '<div class="card" style="border-color:var(--warning);"><div class="section-title small">Cambios pendientes de aprobación' +
+    renderHelp("Un vendedor editó el catálogo. Su cambio ya lo puede usar él en el momento, pero no queda guardado para todos hasta que lo apruebes acá — es una medida de seguridad porque el catálogo define el costo de producción del taller.") +
+    "</div>";
+  visibles.forEach(function (p) {
+    html += '<div class="tx-row" style="grid-template-columns:1fr 140px 160px;">' +
+      "<span>" + esc(p.autor) + " propuso cambios en " + esc(CAMPO_LABEL[p.key] || p.key) + "</span>" +
+      '<span class="tag" style="background:var(--surface-3);">' + esc(new Date(p.fecha).toLocaleString("es-CO")) + "</span>" +
+      '<span style="display:flex;gap:6px;justify-content:flex-end;">' +
+      '<button class="btn success small" data-action="aprobar-propuesta-catalogo" data-id="' + p.id + '">Aprobar</button>' +
+      '<button class="btn danger small" data-action="descartar-propuesta-catalogo" data-id="' + p.id + '">Descartar</button>' +
+      "</span></div>";
+  });
+  html += "</div>";
+  return html;
+}
 
 export function render() {
+  var session = getSession();
   var lista = state.catalogoInsumos || [];
   var categorias = state.catalogoCategorias || [];
   var ayudaTipos = Object.keys(TIPOS_COSTO).map(function (k) { return TIPOS_COSTO[k].label + ": " + TIPOS_COSTO[k].ayuda; }).join(" · ");
-  var html = '<div class="card"><div class="section-title small">Catálogo de insumos' +
+  var html = renderPropuestasPendientes(session);
+  html += '<div class="card"><div class="section-title small">Catálogo de insumos' +
     renderHelp("Guarda aquí tus telas e insumos con su costo y tipo de cálculo. Luego los agregas a cualquier referencia de una cotización con un clic, en vez de escribir el costo cada vez. Agrupa por categoría (ej. Telas, Hilos, Empaques) para encontrarlos más rápido. Tipos de costo — " + ayudaTipos) +
     "</div>";
 
@@ -112,5 +146,14 @@ export var actions = {
     state.catalogoCategorias = (state.catalogoCategorias || []).filter(function (c) { return c.id !== id; });
     if (state.filtroCatalogoCategoria === id) state.filtroCatalogoCategoria = "todos";
     persist("catalogoCategorias"); persist("catalogoInsumos"); notify();
+  },
+  "aprobar-propuesta-catalogo": async function (el) {
+    await aprobarPropuesta(el.getAttribute("data-id"));
+    notify();
+  },
+  "descartar-propuesta-catalogo": async function (el) {
+    if (!window.confirm("¿Descartar esta propuesta? El catálogo real no cambia.")) return;
+    await descartarPropuesta(el.getAttribute("data-id"));
+    notify();
   }
 };

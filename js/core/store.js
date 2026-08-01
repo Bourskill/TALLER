@@ -7,9 +7,10 @@
 // del orquestador de render, y viceversa) y deja la puerta abierta a que en
 // el futuro varias partes de la UI reaccionen al mismo cambio sin acoplarse.
 
-import { KEYS, DEFAULT_CONFIG, DEFAULT_UI } from "./constants.js";
-import { todayStr } from "./utils.js";
+import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./constants.js";
+import { todayStr, uid } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
+import { getSession } from "./auth.js";
 
 export const STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
 
@@ -85,6 +86,10 @@ export const state = {
   catalogoCategorias: [], // { id, nombre } — para clasificar el catálogo de insumos
   plantillasPrendas: plantillasPrendasDefault(),
   plantillasEstados: [], // { id, nombre, estados: [{id,label}] } — flujos de producción reutilizables
+  // Cambios de catálogo hechos por un vendedor, a la espera de que el admin
+  // los apruebe (ver persist()/proponerCambio() más abajo). Cada uno:
+  // { id, key: "catalogoInsumos"|"catalogoCategorias", autor, valor, fecha }.
+  catalogoPropuestas: [],
 
   // Borradores de formularios. Viven en el estado (no en el DOM) para sobrevivir
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
@@ -152,6 +157,7 @@ export async function loadAll() {
     catalogoCategorias: KEYS.catalogoCategorias,
     plantillasPrendas: KEYS.plantillasPrendas,
     plantillasEstados: KEYS.plantillasEstados,
+    catalogoPropuestas: KEYS.catalogoPropuestas,
     ui: KEYS.ui
   };
   var nombres = Object.keys(claves);
@@ -187,6 +193,7 @@ export async function loadAll() {
     if (datos.catalogoCategorias) state.catalogoCategorias = datos.catalogoCategorias;
     if (datos.plantillasPrendas && datos.plantillasPrendas.length) state.plantillasPrendas = datos.plantillasPrendas;
     if (datos.plantillasEstados) state.plantillasEstados = datos.plantillasEstados;
+    if (datos.catalogoPropuestas) state.catalogoPropuestas = datos.catalogoPropuestas;
     if (datos.ui) state.ui = Object.assign({}, DEFAULT_UI, datos.ui, { navGroups: Object.assign({}, DEFAULT_UI.navGroups, datos.ui.navGroups || {}) });
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora
@@ -218,12 +225,56 @@ export async function loadAll() {
 // key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...).
 export async function persist(key) {
   if (!STORAGE_OK) return;
+  var session = getSession();
+  // Un vendedor puede seguir usando su edición en el momento (ya quedó
+  // aplicada en `state[key]` antes de llamar a persist()), pero para las
+  // claves de APPROVAL_REQUIRED_KEYS (hoy, el catálogo: define el costo de
+  // producción de todo el taller) el cambio no se guarda directo — queda
+  // como propuesta a la espera de que el admin la apruebe desde Catálogo.
+  if (session && session.rol === "vendedor" && APPROVAL_REQUIRED_KEYS.indexOf(key) !== -1) {
+    return proponerCambio(key, session);
+  }
   try {
     await window.storage.set(KEYS[key], JSON.stringify(state[key]), false);
     if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
   } catch (e) {
     console.error("No se pudo guardar", key, e);
   }
+}
+
+// Un vendedor solo puede tener UNA propuesta pendiente por clave a la vez:
+// si sigue editando el catálogo, se actualiza la misma propuesta en vez de
+// acumular una por cada campo que toque. "catalogoPropuestas" en sí NO es
+// una clave de APPROVAL_REQUIRED_KEYS, así que este persist("catalogoPropuestas")
+// de acá abajo sí se guarda directo (es lo que le permite al admin verla
+// desde su propia sesión, en otro dispositivo).
+async function proponerCambio(key, session) {
+  var autor = session.vendedorNombre || session.email || "Vendedor";
+  var lista = (state.catalogoPropuestas || []).slice();
+  var idx = lista.findIndex(function (p) { return p.key === key && p.autor === autor; });
+  var propuesta = { id: idx >= 0 ? lista[idx].id : uid(), key: key, autor: autor, valor: state[key], fecha: new Date().toISOString() };
+  if (idx >= 0) lista[idx] = propuesta; else lista.push(propuesta);
+  state.catalogoPropuestas = lista;
+  await persist("catalogoPropuestas");
+}
+
+// Admin aprueba: la propuesta pasa a ser el valor real de esa clave (ya
+// visible para todos) y sale de la lista de pendientes.
+export async function aprobarPropuesta(id) {
+  var propuesta = (state.catalogoPropuestas || []).filter(function (p) { return p.id === id; })[0];
+  if (!propuesta) return;
+  state[propuesta.key] = propuesta.valor;
+  await persist(propuesta.key);
+  state.catalogoPropuestas = (state.catalogoPropuestas || []).filter(function (p) { return p.id !== id; });
+  await persist("catalogoPropuestas");
+}
+
+// Admin descarta: desaparece de la lista sin tocar el catálogo real (el
+// vendedor que la propuso sigue viendo su edición en su sesión hasta que
+// recargue la página, ahí vuelve a traer el catálogo real).
+export async function descartarPropuesta(id) {
+  state.catalogoPropuestas = (state.catalogoPropuestas || []).filter(function (p) { return p.id !== id; });
+  await persist("catalogoPropuestas");
 }
 
 // Cualquier módulo llama a notify() tras mutar `state` para pedir un re-render,

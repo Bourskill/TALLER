@@ -47,8 +47,16 @@ export const KEYS = {
   plantillasPrendas: "cotizaciones:plantillas",
   plantillasEstados: "cotizaciones:plantillas-estados",
   pdfContador: "cotizaciones:pdf-contador",
-  ui: "ui:preferencias"
+  ui: "ui:preferencias",
+  catalogoPropuestas: "cotizaciones:catalogo-propuestas" // cambios de catálogo hechos por un vendedor, a la espera de aprobación del admin
 };
+
+// Claves de `state` que, si las edita alguien con rol "vendedor", no se
+// guardan directo — quedan como propuesta pendiente de aprobación del admin
+// (ver proponerCambio() en store.js). El catálogo define el costo de
+// producción de todo el taller, por eso un cambio ahí no se toma a la
+// ligera aunque el vendedor sí pueda seguir usando su edición en el momento.
+export const APPROVAL_REQUIRED_KEYS = ["catalogoInsumos", "catalogoCategorias"];
 
 // Preferencias de interfaz (menú lateral): colapsado sí/no y qué categorías
 // del menú quedan abiertas. Se persiste igual que cualquier otra área de datos.
