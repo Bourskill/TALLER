@@ -23,6 +23,7 @@
 
 import { state, persist } from "./store.js";
 import { getAccessToken, getSession, listarVendedoresEmail } from "./auth.js";
+import { SPREADSHEET_ID } from "./google-config.js";
 
 var FOLDER_NAME = "Panel del Taller — imágenes";
 
@@ -50,10 +51,19 @@ async function obtenerCarpetaCompartida() {
     throw new Error("El admin todavía no configuró la carpeta compartida de Drive para las imágenes. Pídele que suba la primera imagen para crearla.");
   }
 
+  // La carpeta se crea junto a la Google Sheet (misma carpeta que la
+  // contiene), no suelta en la raíz de "Mi unidad" — así queda ordenada
+  // dentro de la carpeta del proyecto en vez de perdida en otro lugar.
+  var sheetMeta = await driveFetch("files/" + SPREADSHEET_ID + "?fields=parents", { method: "GET" });
+  var carpetaPadre = sheetMeta.parents && sheetMeta.parents[0];
+
   var creada = await driveFetch("files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" })
+    body: JSON.stringify(Object.assign(
+      { name: FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" },
+      carpetaPadre ? { parents: [carpetaPadre] } : {}
+    ))
   });
   var folderId = creada.id;
 
@@ -103,5 +113,10 @@ export async function subirImagenReferencia(file) {
   }
   var creado = await res.json();
   await hacerPublica(creado.id);
-  return "https://drive.google.com/uc?export=view&id=" + creado.id;
+  // "uc?export=view" (el link "clásico" para hotlinkear Drive) muchas veces
+  // ya no sirve para <img src> directo: Google intercala una página de
+  // aviso en vez de servir el binario. El dominio de imágenes de Google sí
+  // sirve el archivo real y con CORS abierto (lo necesita pdf.js para
+  // descargarlo con fetch al armar el PDF).
+  return "https://lh3.googleusercontent.com/d/" + creado.id;
 }
