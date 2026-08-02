@@ -94,8 +94,17 @@ export const state = {
   // Borradores de formularios. Viven en el estado (no en el DOM) para sobrevivir
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
   formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" },
-  formPedido: { clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "" },
-  formCliente: { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "" },
+  formPedido: {
+    clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
+    vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
+    // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
+    esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: ""
+  },
+  formCliente: {
+    nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
+    // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).
+    tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: ""
+  },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },

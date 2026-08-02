@@ -76,7 +76,7 @@ export function listaDeudores() {
 // registradas. Ya no incluye "gastos sueltos pendientes" de Finanzas, porque
 // ese estado ya no existe ahí (ver arriba).
 export function calcPorPagar() {
-  return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes();
+  return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes() + calcComisionesConsignacionPendientes();
 }
 // Desglose de "Por pagar" por categoría, con el detalle de cada obligación
 // (concepto + monto + fecha si aplica) — para mostrar la lista resumida en
@@ -122,6 +122,17 @@ export function calcPorPagarDesglose() {
       monto: saldosVendedores.reduce(function (a, v) { return a + v.monto; }, 0),
       items: saldosVendedores.map(function (v) {
         return { concepto: v.nombre + " (" + v.cantidad + (v.cantidad === 1 ? " pedido" : " pedidos") + ")", monto: v.monto, fecha: v.fechaPago ? new Date(v.fechaPago + "T00:00:00") : null };
+      })
+    });
+  }
+
+  var saldosConsignacion = calcSaldosConsignacion();
+  if (saldosConsignacion.length) {
+    categorias.push({
+      categoria: "Comisiones de consignación",
+      monto: saldosConsignacion.reduce(function (a, v) { return a + v.monto; }, 0),
+      items: saldosConsignacion.map(function (v) {
+        return { concepto: v.nombre + " (" + v.cantidad + (v.cantidad === 1 ? " venta" : " ventas") + ")", monto: v.monto, fecha: null };
       })
     });
   }
@@ -235,6 +246,16 @@ export function calcResumenPorPagar() {
       if (c.vendedor.fechaPago) items.push({ monto: calcComisionValorCot(c), fecha: new Date(c.vendedor.fechaPago + "T00:00:00") });
       else items.push({ monto: calcComisionValorCot(c), vencida: true });
     }
+  });
+
+  // Comisiones de consignación pendientes: como una venta ya ocurrió (el
+  // punto ya vendió la mercancía), se tratan como urgentes desde ya, igual
+  // que las comisiones de vendedor sin fecha de pago propia.
+  state.pedidos.forEach(function (p) {
+    if (!p.consignacion) return;
+    (p.consignacion.ventas || []).forEach(function (v) {
+      if (!v.comisionPagada) items.push({ monto: num(v.comisionMonto), vencida: true });
+    });
   });
 
   if (!items.length) return { estado: "aldia" };
@@ -413,6 +434,55 @@ export function calcVentasVendedor(nombre) {
     if (c.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
   });
   return { totalVendido: totalVendido, comisionPendiente: comisionPendiente, comisionPagada: comisionPagada };
+}
+
+// ---------- consignación (puntos de venta externos con comisión) ----------
+// Un pedido en consignación no tiene "saldo por cobrar" tradicional: el
+// dinero entra recién cuando el punto reporta una venta real (ver
+// modules/pedidos.js, acción "registrar-venta-consignacion"). Mientras
+// tanto, lo único que importa es cuánto queda disponible en el punto.
+export function calcConsignacionVendida(p) {
+  if (!p.consignacion) return 0;
+  return (p.consignacion.ventas || []).reduce(function (a, v) { return a + num(v.cantidad); }, 0);
+}
+export function calcConsignacionRetirada(p) {
+  if (!p.consignacion) return 0;
+  return (p.consignacion.retiros || []).reduce(function (a, r) { return a + num(r.cantidad); }, 0);
+}
+export function calcConsignacionDisponible(p) {
+  if (!p.consignacion) return 0;
+  return Math.max(0, num(p.consignacion.cantidadEnviada) - calcConsignacionVendida(p) - calcConsignacionRetirada(p));
+}
+// La comisión se calcula en el momento de CADA venta (no del pedido
+// completo): así una comisión por % siempre es sobre lo que de verdad se
+// vendió esa vez, no sobre el envío total.
+export function calcConsignacionComision(consignacion, cantidad, montoTotal) {
+  var tipo = consignacion.comisionTipo || "porcentaje";
+  if (tipo === "fijo") return num(consignacion.comisionValor) * cantidad;
+  return num(montoTotal) * (num(consignacion.comisionValor) / 100);
+}
+export function calcComisionesConsignacionPendientes() {
+  return state.pedidos.reduce(function (a, p) {
+    if (!p.consignacion) return a;
+    var pend = (p.consignacion.ventas || []).filter(function (v) { return !v.comisionPagada; }).reduce(function (s, v) { return s + num(v.comisionMonto); }, 0);
+    return a + pend;
+  }, 0);
+}
+// Agrupado por punto de consignación, mismo patrón que calcSaldosVendedores.
+export function calcSaldosConsignacion() {
+  var mapa = {};
+  function agregar(nombre, monto) {
+    if (!mapa[nombre]) mapa[nombre] = { nombre: nombre, monto: 0, cantidad: 0 };
+    mapa[nombre].monto += monto;
+    mapa[nombre].cantidad += 1;
+  }
+  state.pedidos.forEach(function (p) {
+    if (!p.consignacion) return;
+    (p.consignacion.ventas || []).forEach(function (v) {
+      if (!v.comisionPagada) agregar(p.cliente || "Punto de consignación", num(v.comisionMonto));
+    });
+  });
+  return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
 
 // ---------- deudas del taller ----------

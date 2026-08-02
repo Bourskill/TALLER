@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura } from "../core/pdf.js";
@@ -31,19 +31,30 @@ export function render() {
     renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
     '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
     '<div class="field wide"><label>Descripción</label><input data-form="pedido" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. 40 camisetas algodón" /></div>' +
-    '<div class="field"><label>Cantidad</label><input type="number" data-form="pedido" data-field="cantidad" value="' + esc(f.cantidad) + '" /></div>' +
+    '<div class="field"><label>' + (f.esConsignacion ? "Cantidad enviada" : "Cantidad") + '</label><input type="number" data-form="pedido" data-field="cantidad" value="' + esc(f.cantidad) + '" /></div>' +
     '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
     "</div>";
-  html += '<div class="section-sub" style="margin:12px 0 6px;">Dinero</div><div class="form-grid">' +
-    '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Abono inicial recibido</label><input type="number" data-form="pedido" data-field="abono" value="' + esc(f.abono) + '" placeholder="0" /></div>' +
-    "</div>" + gananciaHint;
-  html += '<div class="section-sub" style="margin:12px 0 6px;">Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
-    '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
-    '<div class="field"><label>Tipo de comisión</label><select data-form="pedido" data-field="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + '</select></div>' +
-    '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
-    "</div>";
+  html += '<div class="field" style="margin-top:10px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+    '<input type="checkbox" data-action="toggle-es-consignacion" ' + (f.esConsignacion ? "checked" : "") + ' /> 🏬 Es consignación (enviar a un punto de venta externo, sin cobrar de una vez)' +
+    "</label></div>";
+  if (f.esConsignacion) {
+    html += '<div class="section-sub" style="margin:12px 0 6px;">Consignación' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (registralo antes en Clientes, con su comisión por defecto, y así queda vinculado). El precio unitario es lo que el punto cobra al público por cada unidad; la comisión se calcula por cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
+      '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
+      '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
+      '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
+      "</div>";
+  } else {
+    html += '<div class="section-sub" style="margin:12px 0 6px;">Dinero</div><div class="form-grid">' +
+      '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
+      '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
+      '<div class="field"><label>Abono inicial recibido</label><input type="number" data-form="pedido" data-field="abono" value="' + esc(f.abono) + '" placeholder="0" /></div>' +
+      "</div>" + gananciaHint;
+    html += '<div class="section-sub" style="margin:12px 0 6px;">Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
+      '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
+      '<div class="field"><label>Tipo de comisión</label><select data-form="pedido" data-field="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + '</select></div>' +
+      '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
+      "</div>";
+  }
   html += '<div style="margin-top:14px;"><button class="btn" data-action="add-pedido">Crear pedido</button></div>' +
     '<div class="section-sub" style="margin-top:8px;margin-bottom:0;">Se le asigna un número de OP único al crearlo.</div></div>';
 
@@ -71,6 +82,7 @@ export function render() {
   if (filtered.length === 0) { html += '<div class="empty">No hay pedidos <b>' + (state.filtroPedidos !== "todos" || q ? "que coincidan" : "todavía") + "</b>.</div>"; }
 
   filtered.forEach(function (p) {
+    if (p.consignacion) { html += renderPedidoConsignacion(p); return; }
     var estadosDef = estadosDefDe(p);
     var estadoIds = estadosDef.map(function (e) { return e.id; });
     var idx = estadoIds.indexOf(p.estado);
@@ -108,6 +120,61 @@ export function render() {
       (abierto ? renderPanelPedido(p, saldo) : "") +
       "</div>";
   });
+  return html;
+}
+
+// Tarjeta de un pedido en consignación: no usa el "tape" de etapas de
+// producción (ya está producido, lo que se sigue acá es cuánto queda en el
+// punto) ni el panel de dinero/saldo normal (el dinero entra recién cuando
+// el punto reporta una venta real, no de una vez al crear el pedido).
+function renderPedidoConsignacion(p) {
+  var c = p.consignacion;
+  var disponible = calcConsignacionDisponible(p);
+  var vendida = calcConsignacionVendida(p);
+  var retirada = calcConsignacionRetirada(p);
+  var ventas = (c.ventas || []).slice().reverse();
+
+  var html = '<div class="pedido-card" data-pedido-id="' + p.id + '">' +
+    '<div class="pedido-top"><div>' +
+    '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;">' + esc(p.numeroOp || "—") + "</span> " +
+    '<span class="pedido-cliente">' + esc(p.cliente) + "</span>" +
+    '<span class="pedido-tipo">🏬 Consignación</span>' +
+    '<div class="pedido-meta">' + esc(p.descripcion) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + "</div>" +
+    "</div><div class=\"pedido-money\">" +
+    '<div class="total">' + disponible + " disp.</div>" +
+    '<div class="saldo ' + (disponible > 0 ? "" : "ok") + '">' + vendida + " vendidas · " + retirada + " retiradas</div>" +
+    "</div></div>" +
+    '<div class="pedido-actions" style="flex-wrap:wrap;">' +
+    '<span class="inline-form" style="flex-wrap:wrap;">' +
+    '<input type="number" class="mini-input" data-role="consig-venta-cantidad" placeholder="Cantidad vendida" style="width:130px" min="1" />' +
+    '<input type="date" class="mini-input" data-role="consig-venta-fecha" style="width:135px" value="' + todayStr() + '" />' +
+    '<button class="btn small" data-action="registrar-venta-consignacion" data-id="' + p.id + '">Registrar venta</button>' +
+    "</span>" +
+    '<span class="inline-form" style="flex-wrap:wrap;">' +
+    '<input type="number" class="mini-input" data-role="consig-retiro-cantidad" placeholder="Cantidad retirada" style="width:130px" min="1" />' +
+    '<button class="btn ghost small" data-action="registrar-retiro-consignacion" data-id="' + p.id + '">Registrar retiro</button>' +
+    "</span>" +
+    '<button class="btn danger small" style="margin-left:auto;" data-action="remove-pedido" data-id="' + p.id + '">Eliminar</button>' +
+    "</div>";
+
+  html += '<div class="section-sub" style="margin:10px 0 4px;">Precio unitario ' + fmt(c.precioUnitario) + " · Comisión del punto " + (c.comisionTipo === "fijo" ? fmt(c.comisionValor) + " por unidad" : c.comisionValor + "% por venta") + "</div>";
+
+  if (ventas.length) {
+    html += '<div class="tx-row head" style="grid-template-columns:90px 70px 100px 100px 110px;"><span>Fecha</span><span>Cant.</span><span>Monto</span><span>Comisión</span><span></span></div>';
+    ventas.forEach(function (v) {
+      html += '<div class="tx-row" style="grid-template-columns:90px 70px 100px 100px 110px;">' +
+        "<span>" + esc(v.fecha || "—") + "</span>" +
+        "<span>" + esc(v.cantidad) + "</span>" +
+        '<span class="amount">' + fmt(v.montoTotal) + "</span>" +
+        '<span class="amount">' + fmt(v.comisionMonto) + "</span>" +
+        "<span>" + (v.comisionPagada
+          ? '<span class="status-pill pagado">pagada</span>'
+          : '<button class="btn ghost small" data-action="pagar-comision-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '">Pagar comisión</button>') +
+        "</span></div>";
+    });
+  }
+
+  html += "</div>";
   return html;
 }
 
@@ -267,16 +334,39 @@ export var actions = {
     state.filtroPedidosSoloSaldo = !state.filtroPedidosSoloSaldo;
     notify();
   },
+  "toggle-es-consignacion": function () {
+    var fp = state.formPedido;
+    fp.esConsignacion = !fp.esConsignacion;
+    // Si el cliente elegido ya tiene una comisión por defecto (punto de
+    // consignación registrado en Clientes), se precarga para no repetirla.
+    if (fp.esConsignacion && fp.clienteId) {
+      var cli = clienteById(fp.clienteId);
+      if (cli && cli.comisionDefault) {
+        fp.consignacionComisionTipo = cli.comisionDefault.tipo || "porcentaje";
+        fp.consignacionComisionValor = cli.comisionDefault.valor || "";
+      }
+    }
+    notify();
+  },
   "add-pedido": function () {
     var fp = state.formPedido;
     if (!fp.cliente || !fp.descripcion) return;
-    var abonoInicial = num(fp.abono);
+    var esConsignacion = fp.esConsignacion;
+    var abonoInicial = esConsignacion ? 0 : num(fp.abono);
     var nuevoPedido = {
       id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: fp.descripcion,
-      cantidad: fp.cantidad, total: num(fp.total), costo: num(fp.costo), abono: abonoInicial, abonos: [],
-      fechaEntrega: fp.fechaEntrega, estado: "cotizacion",
+      cantidad: fp.cantidad, total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
+      fechaEntrega: fp.fechaEntrega,
+      // Un pedido en consignación ya está producido/listo — no pasa por el
+      // tape de etapas, así que nace directo como "entregado" (ver
+      // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
+      estado: esConsignacion ? "entregado" : "cotizacion",
       numeroOp: generarNumeroOp(todosNumerosOp()),
-      vendedor: fp.vendedorNombre ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
+      vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
+      consignacion: esConsignacion ? {
+        puntoId: fp.clienteId || "", comisionTipo: fp.consignacionComisionTipo || "porcentaje", comisionValor: num(fp.consignacionComisionValor),
+        precioUnitario: num(fp.consignacionPrecioUnitario), cantidadEnviada: num(fp.cantidad) || 0, ventas: [], retiros: []
+      } : null,
       codigoPublico: codigoPublico(), calendarEventId: ""
     };
     if (abonoInicial > 0) {
@@ -286,9 +376,65 @@ export var actions = {
       persist("tx");
     }
     state.pedidos.unshift(nuevoPedido);
-    state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "" };
+    state.formPedido = {
+      clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
+      vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
+      esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: ""
+    };
     persist("pedidos"); notify();
-    sincronizarEventoPedido(nuevoPedido);
+    if (!esConsignacion) sincronizarEventoPedido(nuevoPedido);
+  },
+  "registrar-venta-consignacion": function (el) {
+    var id = el.getAttribute("data-id");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped || !ped.consignacion) return;
+    var card = el.closest(".pedido-card");
+    var cantidadEl = card ? card.querySelector('[data-role="consig-venta-cantidad"]') : null;
+    var fechaEl = card ? card.querySelector('[data-role="consig-venta-fecha"]') : null;
+    var cantidad = cantidadEl ? num(cantidadEl.value) : 0;
+    var fecha = (fechaEl && fechaEl.value) || todayStr();
+    var disponible = calcConsignacionDisponible(ped);
+    if (cantidad <= 0 || cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
+    var montoTotal = cantidad * num(ped.consignacion.precioUnitario);
+    var comisionMonto = calcConsignacionComision(ped.consignacion, cantidad, montoTotal);
+    var ventaId = uid();
+    state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Venta consignación — " + ped.descripcion, monto: montoTotal, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id });
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      var ventas = (p.consignacion.ventas || []).concat([{ id: ventaId, cantidad: cantidad, fecha: fecha, montoTotal: montoTotal, comisionMonto: comisionMonto, comisionPagada: false }]);
+      return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { ventas: ventas }) });
+    });
+    persist("tx"); persist("pedidos"); notify();
+  },
+  "registrar-retiro-consignacion": function (el) {
+    var id = el.getAttribute("data-id");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped || !ped.consignacion) return;
+    var card = el.closest(".pedido-card");
+    var cantidadEl = card ? card.querySelector('[data-role="consig-retiro-cantidad"]') : null;
+    var cantidad = cantidadEl ? num(cantidadEl.value) : 0;
+    var disponible = calcConsignacionDisponible(ped);
+    if (cantidad <= 0 || cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      var retiros = (p.consignacion.retiros || []).concat([{ id: uid(), cantidad: cantidad, fecha: todayStr() }]);
+      return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { retiros: retiros }) });
+    });
+    persist("pedidos"); notify();
+  },
+  "pagar-comision-consignacion": function (el) {
+    var id = el.getAttribute("data-id"), ventaId = el.getAttribute("data-venta");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped || !ped.consignacion) return;
+    var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
+    if (!venta || venta.comisionPagada) return;
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Comisión consignación — " + ped.cliente, monto: venta.comisionMonto, contraparte: ped.cliente, fecha: todayStr(), pedidoId: ped.id });
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      var ventas = p.consignacion.ventas.map(function (v) { return v.id === ventaId ? Object.assign({}, v, { comisionPagada: true }) : v; });
+      return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { ventas: ventas }) });
+    });
+    persist("tx"); persist("pedidos"); notify();
   },
   // "Escalar" un pedido rápido: crea una cotización de arranque (una
   // referencia con lo que ya se sabe) para poder detallar insumos, tallas y

@@ -323,6 +323,37 @@ sin pantalla de login ni popup de Google. Ver `restaurarSesion()` en
   romper la seguridad del flujo (sería justamente el tipo de cosa que un
   sitio malicioso querría hacer).
 
+## Consignación: vender a través de un punto externo
+
+Modelo de venta en depósito: le entregás mercancía a un local que no es tuyo
+(un punto de venta), ese local no te paga por adelantado — solo cuando algo
+se vende de verdad, momento en el que le corresponde una comisión (fija o un
+%). Lo que no se vende, se retira y vuelve a tu inventario sin que se haya
+movido plata. Se implementó reusando piezas que ya existían, sin pestaña
+nueva ni concepto ajeno al resto de la app:
+
+- **Un punto de consignación es un Cliente** con `tipoRelacion:
+  "punto_consignacion"` (Clientes → campo "Tipo") y una comisión por defecto
+  (`comisionDefault: { tipo, valor }`) que se precarga al enviarle mercancía.
+- **Enviar mercancía es un Pedido** con la casilla "🏬 Es consignación"
+  marcada (Pedidos → Nuevo pedido rápido). No pasa por el tape de etapas de
+  producción (cortado/confección/…) — nace directo como "entregado" porque
+  ya está producido; en su lugar, la tarjeta muestra cuánto queda disponible
+  en el punto (enviado − vendido − retirado) y dos acciones: **Registrar
+  venta** y **Registrar retiro**.
+- **Cada venta registrada** crea un ingreso en Finanzas por lo vendido y
+  calcula la comisión de esa venta puntual (no del envío completo) —
+  `calcConsignacionComision()` en `core/calc.js`. La comisión pendiente
+  aparece en "Por pagar" bajo su propia categoría ("Comisiones de
+  consignación"), con el mismo patrón que ya usan las comisiones de
+  vendedor (`calcSaldosVendedores` → `calcSaldosConsignacion`).
+- **Pagar la comisión** de una venta puntual crea el gasto correspondiente en
+  Finanzas y la marca como pagada — no hay un pago único por todo el pedido,
+  porque un envío en consignación se vende de a poco, no todo junto.
+- Un pedido en consignación no tiene "saldo por cobrar" tradicional
+  (`total`/`abono` quedan en 0): el dinero entra recién con cada venta
+  reportada, nunca de una vez al crear el envío.
+
 ## Estructura
 
 ```
