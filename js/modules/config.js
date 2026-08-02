@@ -9,7 +9,7 @@ import { calcIngresosTotales, calcGastosTotales, calcNominaPagada, calcCaja, cal
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
-import { subirImagenReferencia } from "../core/drive.js";
+import { subirImagenReferencia, actualizarAccesoEquipoDrive } from "../core/drive.js";
 
 export function render() {
   var cfg = state.config;
@@ -38,6 +38,12 @@ export function render() {
     '<div class="field wide"><label>Texto del pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
     '<div class="field"><label>Color de acento (correos)</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
     "</div></div>";
+
+  html += '<div class="card"><div class="section-title small">Acceso del equipo a Drive' +
+    renderHelp("La carpeta de imágenes de referencia (Cotizaciones) se comparte con todo el equipo (admin y vendedores) automáticamente, pero solo la PRIMERA vez que se crea — si agregas a alguien nuevo en la pestaña \"roles\" DESPUÉS de eso, no queda compartido solo. Este botón vuelve a compartir la carpeta ya existente con todos los correos que hoy están en \"roles\".") +
+    '</div>' +
+    '<button class="btn ghost small" data-action="actualizar-acceso-equipo">Actualizar acceso del equipo</button>' +
+    "</div>";
 
   html += '<div class="card"><div class="section-title small">Respaldo de datos' +
     renderHelp("Copia completa de la Google Sheet (todo lo que gestiona la app) a una carpeta aparte en tu Drive — un respaldo de seguridad, no la base de datos en uso (esa sigue siendo la Sheet). Se actualiza sola como mucho una vez cada 24 horas, al abrir la app, para no generar llamadas de más a la API.") +
@@ -156,6 +162,14 @@ export var actions = {
   "respaldar-ahora": async function () {
     await respaldarSiCorresponde(true);
     notify();
+  },
+  "actualizar-acceso-equipo": async function () {
+    try {
+      await actualizarAccesoEquipoDrive();
+      window.alert("Listo — la carpeta de Drive se volvió a compartir con todos los correos que están hoy en la pestaña \"roles\".");
+    } catch (e) {
+      window.alert("No se pudo actualizar el acceso: " + (e && e.message ? e.message : e));
+    }
   },
   "set-pie-imagen": function () {
     var input = document.createElement("input");

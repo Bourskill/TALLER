@@ -22,7 +22,7 @@
 // abrió con esta app.
 
 import { state, persist } from "./store.js";
-import { getAccessToken, getSession, listarVendedoresEmail } from "./auth.js";
+import { getAccessToken, getSession, listarEquipoEmail } from "./auth.js";
 import { SPREADSHEET_ID } from "./google-config.js";
 
 var FOLDER_NAME = "Panel del Taller — imágenes";
@@ -67,18 +67,36 @@ async function obtenerCarpetaCompartida() {
   });
   var folderId = creada.id;
 
-  var vendedores = await listarVendedoresEmail();
-  await Promise.all(vendedores.map(function (email) {
+  await compartirCarpetaConEquipo(folderId);
+
+  state.config.driveFolderId = folderId;
+  await persist("config");
+  return folderId;
+}
+
+async function compartirCarpetaConEquipo(folderId) {
+  var equipo = await listarEquipoEmail();
+  await Promise.all(equipo.map(function (email) {
     return driveFetch("files/" + folderId + "/permissions?sendNotificationEmail=false", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: "writer", type: "user", emailAddress: email })
     }).catch(function (e) { console.error("No se pudo compartir la carpeta de Drive con " + email, e); });
   }));
+}
 
-  state.config.driveFolderId = folderId;
-  await persist("config");
-  return folderId;
+// El reparto de arriba solo corre UNA vez, al crear la carpeta — si después
+// se agrega un admin o vendedor nuevo a la pestaña "roles", nunca queda
+// compartido automáticamente (nadie vuelve a llamar a esa función). Este
+// botón ("Actualizar acceso del equipo" en Configuración) lo resuelve: re-
+// comparte la carpeta YA EXISTENTE con todos los correos que hoy están en
+// "roles", así que agregarlos de nuevo no rompe nada (Drive simplemente
+// confirma el permiso que ya tenían).
+export async function actualizarAccesoEquipoDrive() {
+  var session = getSession();
+  if (!session || session.rol !== "admin") throw new Error("Solo el admin puede actualizar los accesos del equipo.");
+  if (!state.config.driveFolderId) throw new Error("Todavía no existe la carpeta compartida de Drive — sube una imagen de referencia en Cotizaciones primero para crearla.");
+  await compartirCarpetaConEquipo(state.config.driveFolderId);
 }
 
 async function hacerPublica(fileId) {

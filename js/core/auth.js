@@ -121,13 +121,15 @@ async function resolverSesion(token) {
   return { email: email, rol: rol === "admin" ? "admin" : "vendedor", vendedorNombre: (fila[2] || "").trim() };
 }
 
-// Correos de todos los vendedores en la pestaña "roles" — lo usa
-// core/drive.js para compartir automáticamente la carpeta de imágenes del
-// admin con cada uno la primera vez que se crea.
-export async function listarVendedoresEmail() {
+// Correos de TODOS los demás con acceso a la app (admin o vendedor, salvo
+// uno mismo) en la pestaña "roles" — lo usa core/drive.js para compartir la
+// carpeta de imágenes del admin con todo el equipo, no solo vendedores (un
+// segundo admin también necesita permiso de escritura ahí, es una cuenta de
+// Google distinta con su propio acceso a Drive).
+export async function listarEquipoEmail() {
   var filas = await leerFilasRoles(accessToken);
+  var propio = (session && session.email) || "";
   return filas
-    .filter(function (f) { return (f[1] || "").trim().toLowerCase() === "vendedor"; })
     .map(function (f) { return (f[0] || "").trim(); })
-    .filter(Boolean);
+    .filter(function (email) { return email && email.toLowerCase() !== propio.toLowerCase(); });
 }

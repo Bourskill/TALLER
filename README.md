@@ -123,9 +123,14 @@ Ver `js/core/drive.js`. Detalles a tener en cuenta:
   primera vez que **vos** (admin) subís una imagen — si un vendedor la sube
   antes de que exista, ve un aviso pidiéndole que esperes a que la crees.
 - Al crearla, la comparte automáticamente (permiso de Editor, sin mandar
-  correo de aviso) con cada correo que figure como `rol = vendedor` en la
-  pestaña `roles` — así sus subidas también van a esa misma carpeta sin que
-  tengas que compartir nada a mano.
+  correo de aviso) con cada correo que figure en la pestaña `roles` — admin
+  o vendedor, salvo el tuyo propio — así sus subidas también van a esa misma
+  carpeta sin que tengas que compartir nada a mano. **Ojo**: ese reparto
+  automático solo corre la PRIMERA vez que se crea la carpeta. Si agregás a
+  alguien nuevo en `roles` DESPUÉS de eso (ej. un segundo admin, o un
+  vendedor nuevo), esa persona no queda compartida sola — usá el botón
+  "Actualizar acceso del equipo" en Configuración para volver a compartir la
+  carpeta ya existente con todos los correos que hoy están en `roles`.
 - Cada imagen queda además con permiso "cualquiera con el link puede ver" —
   así la miniatura y los PDF la pueden mostrar sin pedir login, igual que
   antes con un link externo cualquiera.
