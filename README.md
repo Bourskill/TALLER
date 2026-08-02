@@ -374,6 +374,24 @@ aparte:
   completar a mano (útil en uniformes, donde el nombre/número se define
   después). Ver `parseCurvaTallas()` en `core/utils.js`.
 
+## Roster de equipo (uniformes)
+
+Un cliente/equipo puede guardar su **roster** (lista de jugadores: nombre,
+número, talla) directamente en su ficha de Clientes — botón "🎽 Roster" en la
+tarjeta. Pensado para clientes que repiten pedido cada temporada (típico en
+uniformes deportivos): en vez de tipear la misma lista de 15-20 jugadores de
+nuevo cada vez, se guarda una sola vez y se reutiliza.
+
+- Se consume desde Cotizaciones: en la sección "Tallas y observaciones" de
+  cualquier referencia, si la cotización tiene un cliente vinculado con
+  roster, aparece "🎽 Cargar roster de [nombre]" — trae toda la lista de una
+  vez como filas de detalle (tipo/observaciones quedan en blanco para esa
+  referencia puntual).
+- Es **unidireccional** (roster → cotización): editar el detalle de una
+  cotización no actualiza el roster guardado en el cliente. El roster se
+  mantiene deliberadamente en Clientes como la fuente de verdad — si el
+  plantel cambia de una temporada a otra, se actualiza ahí.
+
 ## Estructura
 
 ```

@@ -47,9 +47,12 @@ export function render() {
   lista.forEach(function (c) {
     if (state.clienteEditando === c.id) { html += renderClienteEdit(c); return; }
     var esPuntoC = c.tipoRelacion === "punto_consignacion";
+    var roster = c.roster || [];
+    var rosterAbierto = state.clienteRosterAbierto === c.id;
     html += '<div class="cliente-card">' +
       '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) + (esPuntoC ? ' <span class="badge" title="Punto de consignación">🏬 Consignación</span>' : "") + "</span>" +
       '<span style="display:flex;gap:6px;">' +
+      '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>" +
       '<button class="btn ghost small" data-action="editar-cliente" data-id="' + c.id + '">Editar</button>' +
       '<button class="btn danger small" data-action="remove-cliente" data-id="' + c.id + '">Eliminar</button>' +
       "</span></div>" +
@@ -63,8 +66,35 @@ export function render() {
       "<div><b>Entidad:</b> " + esc(c.entidad || "—") + "</div>" +
       (esPuntoC ? "<div><b>Comisión:</b> " + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? "$" + esc(c.comisionDefault.valor) + " por unidad" : (esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta")) + "</div>" : "") +
       "</div>" +
+      (rosterAbierto ? renderRoster(c, roster) : "") +
       "</div>";
   });
+  return html;
+}
+
+// Roster de equipo: lista nombre+número+talla guardada en el propio cliente
+// (club/equipo), para reusarla temporada tras temporada en vez de tipear de
+// nuevo la misma lista cada vez. Se consume desde Cotizaciones con el botón
+// "Cargar roster" en la sección de tallas de una referencia.
+function renderRoster(c, roster) {
+  var html = '<div class="card nested" style="margin-top:12px;"><div class="section-title small" style="font-size:12.5px;">Roster de equipo' +
+    renderHelp("Guarda aquí la lista de jugadores (nombre, número, talla) de este cliente/equipo. Desde Cotizaciones, en la sección \"Tallas y observaciones\" de una referencia, el botón \"Cargar roster\" trae esta lista completa de una vez — útil para clientes que repiten pedido cada temporada.") +
+    "</div>";
+  if (roster.length) {
+    html += '<div class="det-row head" style="grid-template-columns:1fr 70px 70px 30px;"><span>Nombre</span><span>Número</span><span>Talla</span><span></span></div>';
+    roster.forEach(function (j) {
+      html += '<div class="det-row" style="grid-template-columns:1fr 70px 70px 30px;">' +
+        '<input class="mini-input" value="' + esc(j.nombre) + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="nombre" />' +
+        '<input class="mini-input" value="' + esc(j.numero || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="numero" />' +
+        '<input class="mini-input" value="' + esc(j.talla || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="talla" />' +
+        '<button class="btn danger small" data-action="remove-roster-jugador" data-id="' + c.id + '" data-jug="' + j.id + '">✕</button>' +
+        "</div>";
+    });
+  } else {
+    html += '<div class="empty" style="padding:8px 0;">Sin jugadores todavía.</div>';
+  }
+  html += '<div class="pedido-actions" style="margin-top:10px;"><button class="btn ghost small" data-action="add-roster-jugador" data-id="' + c.id + '">+ Agregar jugador</button></div>';
+  html += "</div>";
   return html;
 }
 
@@ -132,7 +162,8 @@ export var actions = {
     var nuevo = {
       id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo, contactResourceName: "",
       tipoRelacion: fcli.tipoRelacion || "cliente",
-      comisionDefault: esPunto ? { tipo: fcli.comisionDefaultTipo || "porcentaje", valor: num(fcli.comisionDefaultValor) } : null
+      comisionDefault: esPunto ? { tipo: fcli.comisionDefaultTipo || "porcentaje", valor: num(fcli.comisionDefaultValor) } : null,
+      roster: []
     };
     state.clientes.unshift(nuevo);
     state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "" };
@@ -185,5 +216,39 @@ export var actions = {
     persist("clientes"); notify();
     var actualizado = state.clientes.filter(function (c) { return c.id === id; })[0];
     if (actualizado) sincronizarClienteContacto(actualizado);
+  },
+  "toggle-cliente-roster": function (el) {
+    var id = el.getAttribute("data-id");
+    state.clienteRosterAbierto = state.clienteRosterAbierto === id ? "" : id;
+    notify();
+  },
+  "add-roster-jugador": function (el) {
+    var id = el.getAttribute("data-id");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      return Object.assign({}, c, { roster: (c.roster || []).concat([{ id: uid(), nombre: "", numero: "", talla: "" }]) });
+    });
+    persist("clientes"); notify();
+  },
+  "remove-roster-jugador": function (el) {
+    var id = el.getAttribute("data-id"), jugId = el.getAttribute("data-jug");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      return Object.assign({}, c, { roster: (c.roster || []).filter(function (j) { return j.id !== jugId; }) });
+    });
+    persist("clientes"); notify();
+  },
+  "set-roster-campo": function (el) {
+    var id = el.getAttribute("data-id"), jugId = el.getAttribute("data-jug"), campo = el.getAttribute("data-campo");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      var roster = (c.roster || []).map(function (j) {
+        if (j.id !== jugId) return j;
+        var patch = {}; patch[campo] = el.value;
+        return Object.assign({}, j, patch);
+      });
+      return Object.assign({}, c, { roster: roster });
+    });
+    persist("clientes"); notify();
   }
 };

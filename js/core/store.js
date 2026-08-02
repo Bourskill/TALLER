@@ -129,6 +129,7 @@ export const state = {
   // defecto para que la tarjeta muestre solo lo básico). Objeto {[id]: bool}.
   pedidoPanelAbierto: {},
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
+  clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a
   // Drive — nunca se persiste, es puramente visual (igual que refImagenSubiendo).
   configPiePaginaSubiendo: false,

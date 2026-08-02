@@ -297,9 +297,15 @@ function renderRefCard(cotId, ref) {
 // borrar y volver a crear si había un error de digitación).
 function renderDetalleReferencia(cotId, ref) {
   var detalle = ref.detalle || [];
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
   var html = '<div class="cot-col-title" style="margin-top:14px;">Tallas y observaciones' +
     renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización.") +
     "</div>";
+  if (clienteRoster && (clienteRoster.roster || []).length) {
+    html += '<div class="section-sub" style="margin:0 0 8px;">' +
+      '<button class="btn ghost small" data-action="cargar-roster-cliente" data-cot="' + cotId + '" data-ref="' + ref.id + '">🎽 Cargar roster de ' + esc(clienteRoster.nombre) + " (" + clienteRoster.roster.length + ")</button></div>";
+  }
   if (detalle.length > 0) {
     html += '<div class="detalle-table">' +
       '<div class="det-row head"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Tipo</span><span>Observaciones</span><span></span></div>';
@@ -687,6 +693,19 @@ export var actions = {
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
     var curvaLimpia = Object.assign({}, state.curvaSugerida); delete curvaLimpia[refId];
     state.curvaSugerida = curvaLimpia;
+  },
+  // Trae de una vez el roster guardado en el cliente (nombre+número+talla,
+  // ver modules/clientes.js) como filas de detalle — para clientes que
+  // repiten pedido cada temporada (típico en uniformes de equipo) sin tener
+  // que tipear la misma lista de nuevo.
+  "cargar-roster-cliente": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+    var cliente = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
+    var roster = cliente ? (cliente.roster || []) : [];
+    if (!roster.length) return;
+    var filas = roster.map(function (j) { return { id: uid(), nombre: j.nombre, talla: j.talla, numero: j.numero, tipo: "", observaciones: "" }; });
+    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
   },
   "remove-ref-detalle": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), itemId = el.getAttribute("data-item");
