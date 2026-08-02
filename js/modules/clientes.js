@@ -79,14 +79,17 @@ function renderClienteEdit(c) {
 // conexión, scope todavía no otorgado, etc.) solo quedan en consola: nunca
 // deben bloquear el guardado real del cliente.
 function sincronizarClienteContacto(cliente) {
-  if (!getSession()) return;
+  var session = getSession();
+  if (!session) { console.warn("[Contacts] Se omite el sync de \"" + cliente.nombre + "\": no hay sesión activa (getSession() devolvió null)."); return; }
+  console.info("[Contacts] Sincronizando \"" + cliente.nombre + "\" como " + session.email + "…");
   sincronizarContacto(cliente).then(function (resourceName) {
+    console.info("[Contacts] Listo: \"" + cliente.nombre + "\" → " + (resourceName || "(sin resourceName, revisa la respuesta de Google)"));
     if (!resourceName || cliente.contactResourceName === resourceName) return;
     var idx = state.clientes.findIndex(function (c) { return c.id === cliente.id; });
     if (idx === -1) return;
     state.clientes = state.clientes.map(function (c) { return c.id === cliente.id ? Object.assign({}, c, { contactResourceName: resourceName }) : c; });
     persist("clientes");
-  }).catch(function (e) { console.error("No se pudo sincronizar el cliente con Contactos", e); });
+  }).catch(function (e) { console.error("[Contacts] No se pudo sincronizar \"" + cliente.nombre + "\":", e); });
 }
 
 export var actions = {
