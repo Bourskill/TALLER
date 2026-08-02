@@ -354,6 +354,26 @@ nueva ni concepto ajeno al resto de la app:
   (`total`/`abono` quedan en 0): el dinero entra recién con cada venta
   reportada, nunca de una vez al crear el envío.
 
+## Plantillas de prendas: foto + curva de tallas
+
+Reutilizando la entidad que ya existía (`state.plantillasPrendas` — insumos +
+flujo de producción por tipo de prenda), sin crear un catálogo visual
+aparte:
+
+- Cada plantilla ahora puede tener una **foto** (se sube a la misma carpeta
+  compartida de Drive que las imágenes de referencia de Cotizaciones — mismo
+  botón, mismo `subirImagenReferencia()`). Al "Aplicar plantilla" a una
+  referencia de cotización que todavía no tiene foto propia, se copia la de
+  la plantilla — así una prenda que ya fotografiaste una vez no hay que
+  volver a fotografiarla en cada cotización nueva.
+- Cada plantilla puede definir una **curva de tallas típica** (ej. "S:2,
+  M:4, L:3, XL:1"). Al aplicar la plantilla, esa curva queda sugerida en la
+  referencia; el botón "Generar filas por talla" (sección "Tallas y
+  observaciones") crea de una vez una fila de detalle por cada unidad de la
+  curva, con la talla ya puesta — nombre/número quedan en blanco para
+  completar a mano (útil en uniformes, donde el nombre/número se define
+  después). Ver `parseCurvaTallas()` en `core/utils.js`.
+
 ## Estructura
 
 ```

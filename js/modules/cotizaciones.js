@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico, parseCurvaTallas } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
@@ -319,6 +319,10 @@ function renderDetalleReferencia(cotId, ref) {
     html += '<div class="empty" style="padding:8px 0;">Sin filas aún — útil para uniformes: nombre, talla, número...</div>';
   }
   html += '<div class="inline-form" style="margin-top:6px;">' +
+    '<input class="mini-input" data-role="curva-tallas-' + ref.id + '" value="' + esc(state.curvaSugerida[ref.id] || "") + '" placeholder="Curva de tallas, ej. S:2, M:4, L:3, XL:1" style="width:230px" />' +
+    '<button class="btn ghost small" data-action="generar-curva-tallas" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Genera una fila por cada unidad de la curva, con esa talla ya puesta">Generar filas por talla</button>' +
+    "</div>";
+  html += '<div class="inline-form" style="margin-top:6px;">' +
     '<input class="mini-input" data-role="det-nombre-' + ref.id + '" placeholder="Nombre" style="width:120px" />' +
     '<input class="mini-input" data-role="det-talla-' + ref.id + '" placeholder="Talla" style="width:60px" />' +
     '<input class="mini-input" data-role="det-numero-' + ref.id + '" placeholder="Número" style="width:60px" />' +
@@ -474,8 +478,15 @@ export var actions = {
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
       if (pla.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(pla.consumoSugerido);
+      if (pla.imagenUrl && !r.imagenUrl) patch.imagenUrl = pla.imagenUrl;
       return Object.assign({}, r, patch);
     });
+    // La curva de tallas de la plantilla (si tiene una) queda sugerida en el
+    // input de "Tallas y observaciones" de esta referencia, lista para
+    // generar las filas con un clic (ver renderDetalleReferencia).
+    if (pla.curvaTallas) {
+      state.curvaSugerida = Object.assign({}, state.curvaSugerida, { [refId]: pla.curvaTallas });
+    }
     // Cada tipo de prenda puede necesitar etapas de producción distintas
     // (ej. sublimación). Si la plantilla trae un flujo asignado, se aplica a
     // la cotización completa (no solo a la referencia) para que la orden de
@@ -659,6 +670,23 @@ export var actions = {
     if (!nombreD) return;
     var fila = { id: uid(), nombre: nombreD, talla: val(card, "det-talla-" + refId), numero: val(card, "det-numero-" + refId), tipo: val(card, "det-tipo-" + refId), observaciones: val(card, "det-obs-" + refId) };
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat([fila]) }); });
+  },
+  // Genera de una vez varias filas de "tallas y observaciones" a partir de
+  // una curva tipo "S:2, M:4, L:3" — cada unidad nace con su talla puesta y
+  // nombre/número en blanco para completar a mano (útil sobre todo cuando
+  // el nombre/número se sabe después, como en uniformes por jugador).
+  "generar-curva-tallas": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    var card = el.closest(".cot-card");
+    var curva = parseCurvaTallas(val(card, "curva-tallas-" + refId));
+    if (!curva.length) { window.alert("Escribe la curva como \"S:2, M:4, L:3\" (talla y cantidad separadas por dos puntos)."); return; }
+    var filas = [];
+    curva.forEach(function (c) {
+      for (var i = 0; i < c.cantidad; i++) filas.push({ id: uid(), nombre: "", talla: c.talla, numero: "", tipo: "", observaciones: "" });
+    });
+    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
+    var curvaLimpia = Object.assign({}, state.curvaSugerida); delete curvaLimpia[refId];
+    state.curvaSugerida = curvaLimpia;
   },
   "remove-ref-detalle": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), itemId = el.getAttribute("data-item");

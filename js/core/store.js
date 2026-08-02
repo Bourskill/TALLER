@@ -115,6 +115,11 @@ export const state = {
   flujoEstadosAbierto: "", // id del flujo de producción con sus etapas desplegadas en Plantillas (o "")
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
+  plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
+  // { [refId]: "S:2, M:4..." } — curva de tallas sugerida por la plantilla
+  // recién aplicada a esa referencia, para precargar el input (ver
+  // cotizaciones.js: "aplicar-plantilla" / "generar-curva-tallas"). Nunca se persiste.
+  curvaSugerida: {},
 
   filtroTx: "todos",
   filtroPedidos: "todos",

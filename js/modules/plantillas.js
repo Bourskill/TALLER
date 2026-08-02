@@ -1,6 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
+import { subirImagenReferencia } from "../core/drive.js";
 
 var INS_COLS = "1fr 60px 90px 150px 70px 30px";
 
@@ -70,16 +71,31 @@ function renderFlujoEstadosCard(f) {
   return html;
 }
 
+function renderPlantillaThumb(p) {
+  if (state.plantillaImagenSubiendo[p.id]) {
+    return '<span class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</span>';
+  }
+  if (p.imagenUrl) {
+    return '<span class="ref-thumb" style="width:64px;height:64px;" data-action="set-pla-imagen" data-id="' + p.id + '" title="Clic para subir otra foto desde tu dispositivo">' +
+      '<img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-remove" data-action="quitar-pla-imagen" data-id="' + p.id + '" title="Quitar foto">✕</button>' +
+      "</span>";
+  }
+  return '<span class="ref-thumb ref-thumb-empty" style="width:64px;height:64px;" data-action="set-pla-imagen" data-id="' + p.id + '" title="Subir una foto desde tu dispositivo (se guarda en tu Google Drive)">+ foto</span>';
+}
+
 function renderPlantillaCard(p) {
   var flujos = state.plantillasEstados || [];
   var html = '<div class="card nested" data-plantilla-id="' + p.id + '">' +
-    '<div class="pedido-top"><div class="form-grid" style="flex:1;grid-template-columns:2fr 1fr 1fr;">' +
+    '<div class="pedido-top" style="align-items:flex-start;">' + renderPlantillaThumb(p) +
+    '<div class="form-grid" style="flex:1;grid-template-columns:2fr 1fr 1fr;">' +
     '<div class="field"><label>Nombre de la plantilla</label><input class="mini-input" style="width:100%" value="' + esc(p.nombre) + '" placeholder="Ej. T-shirt básica" data-action-change="set-pla-campo" data-id="' + p.id + '" data-campo="nombre" /></div>' +
     '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pla-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
     '<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pla-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
     '<option value="">Estándar</option>' +
     flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
     "</select></div>" +
+    '<div class="field wide"><label>Curva de tallas típica' + renderHelp("Ej. \"S:2, M:4, L:3, XL:1\". Al aplicar esta plantilla a una referencia de cotización, se sugiere esta curva ahí para generar de una vez esas filas de tallas en vez de una por una.") + '</label><input class="mini-input" style="width:100%" value="' + esc(p.curvaTallas || "") + '" placeholder="Ej. S:2, M:4, L:3, XL:1" data-action-change="set-pla-campo" data-id="' + p.id + '" data-campo="curvaTallas" /></div>' +
     '</div><button class="btn danger small" data-action="remove-plantilla" data-id="' + p.id + '">Eliminar plantilla</button></div>';
 
   html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
@@ -110,8 +126,34 @@ function renderPlantillaCard(p) {
 
 export var actions = {
   "add-plantilla": function () {
-    state.plantillasPrendas = (state.plantillasPrendas || []).concat([{ id: uid(), nombre: "Nueva plantilla", consumoSugerido: "", flujoEstadosId: "", insumos: [] }]);
+    state.plantillasPrendas = (state.plantillasPrendas || []).concat([{ id: uid(), nombre: "Nueva plantilla", consumoSugerido: "", flujoEstadosId: "", curvaTallas: "", imagenUrl: "", insumos: [] }]);
     persist("plantillasPrendas"); notify();
+  },
+  "set-pla-imagen": function (el) {
+    var id = el.getAttribute("data-id");
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      state.plantillaImagenSubiendo = Object.assign({}, state.plantillaImagenSubiendo, { [id]: true });
+      notify();
+      try {
+        var url = await subirImagenReferencia(file);
+        state.plantillaImagenSubiendo = Object.assign({}, state.plantillaImagenSubiendo); delete state.plantillaImagenSubiendo[id];
+        mapPla(id, function (p) { return Object.assign({}, p, { imagenUrl: url }); });
+      } catch (e) {
+        state.plantillaImagenSubiendo = Object.assign({}, state.plantillaImagenSubiendo); delete state.plantillaImagenSubiendo[id];
+        window.alert("No se pudo subir la imagen a Drive: " + (e && e.message ? e.message : e));
+        notify();
+      }
+    });
+    input.click();
+  },
+  "quitar-pla-imagen": function (el) {
+    var id = el.getAttribute("data-id");
+    mapPla(id, function (p) { return Object.assign({}, p, { imagenUrl: "" }); });
   },
   "remove-plantilla": function (el) {
     var id = el.getAttribute("data-id");
