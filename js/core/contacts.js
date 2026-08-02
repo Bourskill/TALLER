@@ -62,6 +62,11 @@ export async function sincronizarContacto(cliente) {
       // se sigue de largo y se crea uno nuevo abajo.
     }
   }
+  // Sin esto, la People API crea el contacto igual pero NO lo asigna al
+  // grupo "Mis contactos" — queda "invisible" en Google Contacts (web,
+  // celular) salvo que se busque por API directamente. Solo hace falta al
+  // CREAR: la membresía queda guardada, no hay que reenviarla en cada update.
+  persona.memberships = [{ contactGroupMembership: { contactGroupResourceName: "contactGroups/myContacts" } }];
   var creado = await peopleFetch("people:createContact", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

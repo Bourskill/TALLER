@@ -283,6 +283,12 @@ mismo gestiona. Ver `js/core/contacts.js` y los hooks en
   vigente del contacto en cada actualización — por eso actualizar un
   contacto primero pide el contacto actual (para tener su etag fresco)
   antes de mandar el cambio.
+- Al crearlo, se asigna explícitamente al grupo **"Mis contactos"**
+  (`memberships: [{ contactGroupMembership: { contactGroupResourceName:
+  "contactGroups/myContacts" } }]`) — sin esto, la API crea el contacto
+  igual pero no lo muestra en el listado normal de Google Contacts (web ni
+  celular), queda "invisible" salvo que se busque por API. Costó un ida y
+  vuelta descubrirlo, documentado acá para no repetirlo.
 - Usa el scope `contacts` (lectura/escritura completa de Contactos — no hay
   un scope más acotado tipo "solo los contactos creados por esta app").
 - Es **unidireccional** (la app manda cambios a Contacts, no al revés): si
