@@ -392,6 +392,20 @@ nuevo cada vez, se guarda una sola vez y se reutiliza.
   mantiene deliberadamente en Clientes como la fuente de verdad — si el
   plantel cambia de una temporada a otra, se actualiza ahí.
 
+## Cliente 360°
+
+Cada ficha de Clientes muestra ahora un resumen de la relación con ese
+cliente (`calcHistorialCliente()` en `core/calc.js`): cantidad de pedidos,
+total comprado, y la fecha de la última entrega registrada — sin tener que
+ir a buscarlo pedido por pedido en la pestaña Pedidos. Con más de un pedido,
+el nombre lleva una insignia "↻ Recurrente".
+
+- Se calcula solo sobre **Pedidos** (no cotizaciones sin convertir): es lo
+  que de verdad se vendió, no lo que se cotizó.
+- "Última entrega" usa `fechaEntrega` porque el pedido no guarda una fecha
+  de creación propia — está etiquetado como tal a propósito, para no
+  insinuar que es la fecha en que se hizo el pedido.
+
 ## Estructura
 
 ```

@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, uid, val, num } from "../core/utils.js";
-import { clientesFiltrados } from "../core/calc.js";
+import { esc, uid, val, num, fmt } from "../core/utils.js";
+import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
 import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
 import { renderHelp } from "../core/components.js";
@@ -49,8 +49,12 @@ export function render() {
     var esPuntoC = c.tipoRelacion === "punto_consignacion";
     var roster = c.roster || [];
     var rosterAbierto = state.clienteRosterAbierto === c.id;
+    var historial = calcHistorialCliente(c.id);
     html += '<div class="cliente-card">' +
-      '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) + (esPuntoC ? ' <span class="badge" title="Punto de consignación">🏬 Consignación</span>' : "") + "</span>" +
+      '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) +
+      (esPuntoC ? ' <span class="badge" title="Punto de consignación">🏬 Consignación</span>' : "") +
+      (historial.esRecurrente ? ' <span class="badge" style="background:var(--success-soft);color:var(--success-ink);" title="Más de un pedido registrado">↻ Recurrente</span>' : "") +
+      "</span>" +
       '<span style="display:flex;gap:6px;">' +
       '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>" +
       '<button class="btn ghost small" data-action="editar-cliente" data-id="' + c.id + '">Editar</button>' +
@@ -65,6 +69,7 @@ export function render() {
       "<div><b>Cuenta:</b> " + esc(c.cuenta || "—") + "</div>" +
       "<div><b>Entidad:</b> " + esc(c.entidad || "—") + "</div>" +
       (esPuntoC ? "<div><b>Comisión:</b> " + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? "$" + esc(c.comisionDefault.valor) + " por unidad" : (esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta")) + "</div>" : "") +
+      (historial.cantidadPedidos > 0 ? "<div><b>Pedidos:</b> " + historial.cantidadPedidos + " · " + fmt(historial.totalComprado) + " comprado" + (historial.ultimaEntrega ? " · última entrega " + esc(historial.ultimaEntrega) : "") + "</div>" : "") +
       "</div>" +
       (rosterAbierto ? renderRoster(c, roster) : "") +
       "</div>";

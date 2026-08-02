@@ -485,6 +485,24 @@ export function calcSaldosConsignacion() {
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
 
+// ---------- cliente 360° ----------
+// Resumen de relación con UN cliente puntual, para mostrar en su ficha
+// (ver modules/clientes.js) sin tener que ir a buscarlo pedido por pedido
+// en la pestaña Pedidos. "Última entrega" usa fechaEntrega (no hay una
+// fecha de creación guardada en el pedido) — se etiqueta como tal para no
+// insinuar que es la fecha en que se hizo el pedido.
+export function calcHistorialCliente(clienteId) {
+  var pedidosCliente = state.pedidos.filter(function (p) { return p.clienteId === clienteId; });
+  var totalComprado = pedidosCliente.reduce(function (a, p) { return a + num(p.total); }, 0);
+  var conFecha = pedidosCliente.filter(function (p) { return p.fechaEntrega; }).sort(function (a, b) { return b.fechaEntrega.localeCompare(a.fechaEntrega); });
+  return {
+    cantidadPedidos: pedidosCliente.length,
+    totalComprado: totalComprado,
+    ultimaEntrega: conFecha.length ? conFecha[0].fechaEntrega : null,
+    esRecurrente: pedidosCliente.length > 1
+  };
+}
+
 // ---------- deudas del taller ----------
 // Valor de cada cuota (monto total repartido entre el número de cuotas, 1 si
 // no se definieron varias).
