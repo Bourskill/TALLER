@@ -600,6 +600,31 @@ vez de una clase, cada vez que hacía falta un color nuevo.
 - Montos y valores de KPI usan `font-variant-numeric: tabular-nums`, para
   que los dígitos siempre midan lo mismo (un detalle chico, pero se nota
   cuando hay números cambiando de valor en la misma posición).
+- **Botones**: el primario (sólido, acento) suma sombra + se levanta un
+  poco al pasar el mouse — reservado para LA acción principal de cada
+  pantalla. Ghost/danger se quedan planos a propósito: son la mayoría de
+  los botones (tablas densas, acciones secundarias) y darles el mismo
+  efecto habría sentido "todo se mueve" en vez de señalar qué es lo
+  importante. Todos ganaron un `:active` sutil (que se sienta el clic al
+  soltar el mouse) y un anillo de foco igual al que ya usaban los inputs
+  (`css/forms.css`), para poder navegar la app con teclado.
+
+## Lenguaje: dos campos renombrados
+
+Del pedido original ("hay campos que se repiten o cumplen la misma función
+y se llaman distinto") — un barrido completo de cada etiqueta de la app es
+un trabajo aparte y más largo, pero estos dos eran el caso concreto que
+generaba confusión real:
+
+- **Finanzas → "Persona / cliente" pasó a "Persona / contraparte"** (con un
+  ayuda "?" que lo explica): ese campo (`contraparte`) no siempre es un
+  cliente — es quien sea que esté del otro lado del movimiento (un
+  vendedor cuando es una comisión, un proveedor, un empleado en nómina).
+  Llamarlo "cliente" siempre fue impreciso, y es parte de lo que generaba
+  la confusión original de "¿por qué el vendedor me da un ingreso?".
+- **Cotizaciones → "Descripción general" pasó a "Descripción"**, para que
+  diga lo mismo que el campo equivalente en Pedidos (que nunca tuvo el
+  "general") — mismo concepto, mismo nombre en las dos pestañas.
 
 ## Estructura
 

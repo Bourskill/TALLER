@@ -53,7 +53,7 @@ function renderFormNueva() {
     renderHelp("Arma cada referencia con sus insumos (o aplica una plantilla), define el precio de venta y el margen se calcula solo. Los gastos reales de producción se registran aparte para comparar contra lo cotizado.") +
     '</div><div class="form-grid">' +
     renderClienteCombo("cotizacion", "cot-cliente-nombre", f) +
-    '<div class="field wide"><label>Descripción general</label><input data-form="cotizacion" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. Uniformes equipo San Jorge" /></div>' +
+    '<div class="field wide"><label>Descripción</label><input data-form="cotizacion" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. Uniformes equipo San Jorge" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="cotizacion" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
     '<button class="btn" data-action="add-cotizacion">Crear cotización</button>' +
     "</div></div>";

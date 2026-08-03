@@ -20,7 +20,7 @@ export function render() {
     "</select></div>" +
     '<div class="field"><label>Concepto</label><input data-form="tx" data-field="concepto" value="' + esc(f.concepto) + '" placeholder="Ej. Tela, corte, cliente X" /></div>' +
     '<div class="field"><label>Monto</label><input type="number" data-form="tx" data-field="monto" value="' + esc(f.monto) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Persona / cliente</label><input list="dl-personas" data-form="tx" data-field="contraparte" value="' + esc(f.contraparte) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Persona / contraparte' + renderHelp("Quién está del otro lado del movimiento — no siempre es un cliente: puede ser un vendedor (comisión), un proveedor, un empleado (nómina) o quien sea que recibió/entregó ese dinero.") + '</label><input list="dl-personas" data-form="tx" data-field="contraparte" value="' + esc(f.contraparte) + '" placeholder="Opcional" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="tx" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
     '<div class="field wide"><label>Pedido relacionado (categoriza y agrupa el movimiento)' + renderHelp("Vincula este movimiento a un pedido para poder agruparlo y encontrarlo luego buscando por N.º de OP, cédula, nombre de la producción o fecha.") + '</label><select data-form="tx" data-field="pedidoId">' +
     '<option value="">Sin pedido (movimiento suelto)</option>' +
