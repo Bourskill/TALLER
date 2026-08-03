@@ -16,10 +16,9 @@
 .cot-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;}
 .cot-card.colapsada{padding:12px 20px;}
 .cot-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
-.cot-cliente{font-weight:700;font-size:15px;}
+.cot-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
 .cot-collapse-toggle{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;padding:0 2px;vertical-align:middle;}
 .cot-collapse-toggle:hover{color:var(--ink);}
-.cot-meta{font-size:12px;color:var(--ink-soft);margin-top:2px;}
 .cot-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px;}
 .cot-col-title{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;margin-bottom:6px;}
 .cot-line{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border-soft);gap:8px;}
@@ -86,22 +85,21 @@
 .det-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
 .det-row input, .det-row select{font-family:'Inter',sans-serif;font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-3);color:var(--ink);width:100%;}
 
-/* Cabecera de la tarjeta de detalle: cliente/estado a la izquierda; IVA,
-   "convertir en pedido" y el menú "⋮" de acciones secundarias (prueba,
-   eliminar) arriba a la derecha. */
-.cot-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
-.cot-head-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.cot-meta-label{color:var(--ink-faint);}
-.cot-head-actions{position:relative;flex:0 0 auto;}
-.cot-head-actions-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
-.cot-kebab-btn{background:none;border:1px solid var(--border);border-radius:8px;width:32px;height:32px;color:var(--ink-soft);font-size:16px;line-height:1;cursor:pointer;}
-.cot-kebab-btn:hover{border-color:var(--border-strong);color:var(--ink);}
-.cot-menu-overlay{position:fixed;inset:0;z-index:60;background:transparent;}
-.cot-menu{position:absolute;top:38px;right:0;z-index:61;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;width:230px;}
-.cot-menu-item{display:flex;align-items:center;width:100%;text-align:left;background:none;border:none;border-radius:7px;padding:8px 10px;font-size:13px;color:var(--ink);cursor:pointer;font-family:'Inter',sans-serif;}
-.cot-menu-item:hover{background:var(--surface-hover);}
-.cot-menu-item.danger{color:var(--danger-ink);}
-.cot-menu-sep{height:1px;background:var(--border-soft);margin:4px 6px;}
+/* Cabecera de la tarjeta de detalle. Jerarquía deliberada de arriba a abajo:
+   cliente (lo más grande) → estado → descripción (texto de apoyo, su propia
+   línea) → fecha (etiqueta chica + control, no mezclada con la descripción).
+   Las acciones (IVA, convertir, eliminar) van arriba a la derecha, ordenadas
+   de menos a más destructiva. */
+.cot-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;}
+.cot-head-info{min-width:0;}
+.cot-head-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.cot-descripcion{font-size:13.5px;color:var(--ink-soft);margin-top:5px;line-height:1.45;}
+.cot-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:9px;font-size:12px;color:var(--ink-soft);}
+.cot-meta-item{display:flex;align-items:center;gap:7px;font-size:12.5px;}
+.cot-meta-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;}
+.cot-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto;}
+.cot-delete-btn{background:none;border:1px solid var(--border);border-radius:8px;width:32px;height:32px;color:var(--ink-faint);font-size:14px;line-height:1;cursor:pointer;}
+.cot-delete-btn:hover{border-color:var(--danger);color:var(--danger-ink);background:var(--danger-soft);}
 
 /* Cifras grandes tipo dashboard financiero: lo primero que se lee de una
    cotización, en vez de una fila de texto chico. */
@@ -134,6 +132,17 @@
 .cot-docs-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
 .cot-docs-titulo{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;}
 .cot-doc-btn{display:block;width:100%;padding:13px 16px;font-size:13.5px;margin-bottom:10px;}
+
+/* Separador entre paneles de Producción — más aire y una línea clara en vez
+   de solo margen, para que cada bloque se lea como su propia sección. */
+.cot-section-divider{margin:30px 0;}
+
+/* Fila de "registrar costo real": grid en vez de ancho fijo por campo, se
+   reparte mejor el espacio disponible y se apila sola en pantallas chicas. */
+.cot-gasto-grid{display:grid;grid-template-columns:1.3fr 1fr 1.5fr 1.3fr;gap:10px;margin-top:12px;}
+@media (max-width: 700px){
+  .cot-gasto-grid{grid-template-columns:1fr;}
+}
 
 @media (max-width: 700px){
   .cot-cols{grid-template-columns:1fr;}

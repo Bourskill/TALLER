@@ -98,7 +98,6 @@ function renderCotResumen(c) {
     '<div class="cot-top"><div>' +
     '<span class="cot-cliente">' + esc(c.cliente) + "</span> " +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
-    (c.esDemo ? ' <span class="badge warning" title="No cuenta en KPIs, reportes ni Por cobrar">🧪 Prueba</span>' : "") +
     '<div class="cot-meta">' + esc(c.descripcion) + " · " + esc(c.fecha) + " · " + fmt(totales.precioTotal) + " venta</div>" +
     "</div></div></div>";
 }
@@ -163,23 +162,24 @@ function renderCotCard(c) {
   return html;
 }
 
+// Cabecera: cliente (lo más prominente) → descripción en su propia línea →
+// fecha con etiqueta, en vez de mezclar todo en un solo renglón de texto
+// corrido. Las acciones (IVA, convertir, eliminar) quedan arriba a la
+// derecha, ordenadas de menos a más destructiva.
 function renderCotHead(c, iva) {
-  var menuAbierto = state.cotMenuAbierto === c.id;
   var html = '<div class="cot-head">' +
-    '<div>' +
+    '<div class="cot-head-info">' +
     '<div class="cot-head-top">' +
     '<span class="cot-cliente">' + esc(c.cliente) + "</span>" +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
-    (c.esDemo ? ' <span class="badge warning" title="No cuenta en KPIs, reportes ni Por cobrar — es solo para practicar el flujo">🧪 Prueba</span>' : "") +
     "</div>" +
-    '<div class="cot-meta">' + esc(c.descripcion) + " · " +
-    '<span class="cot-meta-label">Fecha</span> ' +
-    '<input type="date" class="mini-input" style="width:135px;display:inline-block;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" />' +
-    (c.pedidoOrigenId && c.estado !== "convertida" ? ' · <span style="color:var(--accent-ink);">escalada desde pedido rápido</span>' : "") +
+    (c.descripcion ? '<div class="cot-descripcion">' + esc(c.descripcion) + "</div>" : "") +
+    '<div class="cot-meta">' +
+    '<span class="cot-meta-item"><span class="cot-meta-label">Fecha</span><input type="date" class="mini-input" style="width:135px;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" /></span>' +
+    (c.pedidoOrigenId && c.estado !== "convertida" ? '<span class="cot-meta-item" style="color:var(--accent-ink);">Escalada desde pedido rápido</span>' : "") +
     "</div>" +
     "</div>" +
     '<div class="cot-head-actions">' +
-    '<div class="cot-head-actions-row">' +
     '<label class="cot-iva-inline"><input type="checkbox" data-action-change="set-cot-iva" data-campo="activo" data-id="' + c.id + '" ' + (iva.activo ? "checked" : "") + " /> IVA" +
     (iva.activo ? ('<input type="number" class="mini-input" style="width:52px" value="' + esc(iva.porcentaje) + '" data-action-change="set-cot-iva" data-campo="porcentaje" data-id="' + c.id + '" title="Porcentaje de IVA" />%') : "") +
     "</label>" + renderHelp("El IVA es opcional: actívalo aquí (o desde el pedido convertido) y define el %. Si está apagado, el PDF no lo cobra.") +
@@ -188,25 +188,10 @@ function renderCotHead(c, iva) {
           ? '<button class="btn small" data-action="aplicar-cotizacion-a-pedido" data-id="' + c.id + '" title="Reemplaza el total, descripción, cantidad y vendedor del pedido original con estos valores. Los abonos ya cobrados se conservan.">Aplicar a pedido →</button>'
           : '<button class="btn small" data-action="convertir-cotizacion" data-id="' + c.id + '">Convertir en pedido →</button>')
       : "") +
-    '<button class="cot-kebab-btn" data-action="toggle-cot-menu" data-id="' + c.id + '" aria-label="Más acciones" title="Más acciones">⋮</button>' +
-    "</div>" +
-    (menuAbierto ? renderCotKebabMenu(c) : "") +
+    '<button class="cot-delete-btn" data-action="remove-cotizacion" data-id="' + c.id + '" aria-label="Eliminar cotización" title="Eliminar cotización">🗑</button>' +
     "</div>" +
     "</div>";
   return html;
-}
-
-// Acciones que se usan poco (marcar como prueba, eliminar) — antes eran
-// botones sueltos al mismo nivel que "convertir en pedido". El overlay
-// invisible detrás del menú lo cierra al hacer clic afuera (mismo patrón
-// que ".sidebar-overlay" para el menú móvil).
-function renderCotKebabMenu(c) {
-  return '<div class="cot-menu-overlay" data-action="cerrar-cot-menu"></div>' +
-    '<div class="cot-menu">' +
-    '<button class="cot-menu-item" data-action="toggle-cot-demo" data-id="' + c.id + '" title="' + (c.esDemo ? "Esta cotización es de prueba: no cuenta en KPIs, reportes ni Por cobrar. Clic para convertirla en real." : "Marcarla como prueba la saca de todo cálculo financiero real (KPIs, reportes, Por cobrar) — útil para practicar el flujo sin ensuciar tus números.") + '">' + (c.esDemo ? "✓ Hacer real" : "🧪 Marcar como prueba") + "</button>" +
-    '<div class="cot-menu-sep"></div>' +
-    '<button class="cot-menu-item danger" data-action="remove-cotizacion" data-id="' + c.id + '">✕ Eliminar cotización</button>' +
-    "</div>";
 }
 
 // Cifras grandes (estilo dashboard financiero) en vez de una fila de texto
@@ -316,27 +301,32 @@ function renderTabProduccion(c, totales, real) {
       '<button class="btn danger small" data-action="remove-cot-gasto" data-cot="' + c.id + '" data-gasto="' + g.id + '">✕</button></div>';
   });
   if ((c.gastosReales || []).length === 0) { htmlCostosReales += '<div class="empty" style="padding:8px 0;">Sin costos reales registrados aún.</div>'; }
-  htmlCostosReales += '<div class="inline-form">' +
-    '<input class="mini-input" data-role="gasto-concepto" placeholder="Concepto (ej. tela)" style="width:130px" />' +
-    '<input type="number" class="mini-input" data-role="gasto-monto" placeholder="Costo real" style="width:100px" />' +
-    '<select class="mini-input" data-role="gasto-destino" style="width:170px">' +
+  htmlCostosReales += '<div class="cot-gasto-grid">' +
+    '<input class="mini-input" data-role="gasto-concepto" placeholder="Concepto (ej. tela)" />' +
+    '<input type="number" class="mini-input" data-role="gasto-monto" placeholder="Costo real" />' +
+    '<select class="mini-input" data-role="gasto-destino">' +
     '<option value="total">Costo real del total</option>' +
     compras.map(function (comp) { return '<option value="insumo::' + esc(comp.nombre) + '">Insumo: ' + esc(comp.nombre) + "</option>"; }).join("") +
     "</select>" +
-    '<input class="mini-input" data-role="gasto-nota" placeholder="Nota / imprevisto" style="width:150px" />' +
+    '<input class="mini-input" data-role="gasto-nota" placeholder="Nota / imprevisto" />' +
+    "</div>";
+  htmlCostosReales += '<div class="row-actions" style="margin-top:10px;">' +
     '<button class="btn ghost small" data-action="add-cot-gasto" data-id="' + c.id + '" title="Solo ajusta el resultado real de ESTA cotización — no crea un movimiento en Finanzas ni afecta el KPI.">Registrar costo real</button>' +
     (c.estado === "convertida"
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como un solo movimiento en Finanzas, para llevar el registro completo por pedido.">Registrar estimado completo como movimiento</button>'
       : '<span class="tag" style="background:var(--surface-3);" title="Disponible una vez esta cotización ya sea un pedido — es una medida de seguridad para no registrar gastos sin que exista un pedido con abono real.">🔒 Estimado completo (disponible al convertir en pedido)</span>') +
     "</div>";
-  html += '<div class="cot-col-title" style="margin-top:22px;">Costos reales registrados' +
+  html += '<hr class="stitch cot-section-divider" />';
+  html += '<div class="cot-col-title">Costos reales registrados' +
     renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro también crea un movimiento en Finanzas, para que la caja quede sincronizada.") +
     "</div>";
   html += htmlCostosReales;
 
-  html += '<div class="cot-col-title" style="margin-top:22px;">Qué falta comprar</div>';
+  html += '<hr class="stitch cot-section-divider" />';
+  html += '<div class="cot-col-title">Qué falta comprar</div>';
   html += renderListaCompras(compras);
 
+  html += '<hr class="stitch cot-section-divider" />';
   html += renderProduccionDocumentos(c);
 
   return html;
@@ -346,7 +336,7 @@ function renderTabProduccion(c, totales, real) {
 // justificarla sola — se dividió en dos columnas (para el cliente / para ti)
 // dentro de Producción, con botones más grandes.
 function renderProduccionDocumentos(c) {
-  var html = '<div class="cot-col-title" style="margin-top:22px;">Documentos</div>';
+  var html = '<div class="cot-col-title">Documentos</div>';
   html += '<div class="cot-docs-grid">';
 
   html += '<div class="cot-docs-col">' +
@@ -562,15 +552,6 @@ export var actions = {
     state.cotizacionesVista = el.getAttribute("data-val");
     notify();
   },
-  "toggle-cot-menu": function (el) {
-    var id = el.getAttribute("data-id");
-    state.cotMenuAbierto = state.cotMenuAbierto === id ? "" : id;
-    notify();
-  },
-  "cerrar-cot-menu": function () {
-    state.cotMenuAbierto = "";
-    notify();
-  },
   "set-cot-tab": function (el) {
     var id = el.getAttribute("data-id"), valTab = el.getAttribute("data-val");
     state.cotTabActiva = Object.assign({}, state.cotTabActiva, { [id]: valTab });
@@ -596,7 +577,7 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!fc.cliente || !fc.descripcion) return;
-    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico(), esDemo: false };
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
     state.cotizaciones.unshift(nueva);
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
     // Se queda en esta misma pestaña, ahora mostrando el detalle completo de
@@ -615,16 +596,6 @@ export var actions = {
     state.cotizacionEditando = "";
     notify();
   },
-  // Reversible en los dos sentidos: una cotización de prueba se puede volver
-  // real (y al revés) en cualquier momento, sin perder nada de lo cargado —
-  // solo cambia si cuenta o no en los cálculos financieros reales (ver
-  // origenDeTx-style exclusiones con "esDemo" en core/calc.js).
-  "toggle-cot-demo": function (el) {
-    var id = el.getAttribute("data-id");
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { esDemo: !c.esDemo }) : c; });
-    state.cotMenuAbierto = "";
-    persist("cotizaciones"); notify();
-  },
   "set-cot-fecha": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fecha: el.value }) : c; });
@@ -633,7 +604,6 @@ export var actions = {
   "remove-cotizacion": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== id; });
-    state.cotMenuAbierto = "";
     persist("cotizaciones"); notify();
   },
   "add-referencia": function (el) {
@@ -658,7 +628,19 @@ export var actions = {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), campo = el.getAttribute("data-campo");
     var numerico = campo !== "nombre";
     mapRef(cotId, refId, function (r) {
-      var patch = {}; patch[campo] = numerico ? num(el.value) : el.value;
+      var valor = numerico ? num(el.value) : el.value;
+      // No puede haber menos cantidad que filas ya cargadas en "Tallas y
+      // observaciones" — si se intenta bajar de ahí, se avisa y se deja en
+      // el mínimo posible (la cantidad de filas). Al revés (agregar filas)
+      // ya sube la cantidad sola, ver conDetalleAgregado().
+      if (campo === "cantidadPedida") {
+        var minimo = (r.detalle || []).length;
+        if (valor < minimo) {
+          window.alert("No puede haber menos cantidad que filas en \"Tallas y observaciones\" (" + minimo + "). Borra filas de esa lista primero si quieres bajar la cantidad.");
+          valor = minimo;
+        }
+      }
+      var patch = {}; patch[campo] = valor;
       return Object.assign({}, r, patch);
     });
   },
@@ -799,9 +781,7 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null
       };
       state.pedidos.unshift(nuevoP);
-      // Convertir en pedido siempre la vuelve real: no existe el concepto de
-      // "pedido de prueba" — si venía marcada como demo, se la desmarca acá.
-      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id, esDemo: false }) : c; });
+      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
       persist("pedidos"); persist("cotizaciones");
       state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
@@ -991,7 +971,7 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor
       });
     });
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId, esDemo: false }) : c; });
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId }) : c; });
     // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
