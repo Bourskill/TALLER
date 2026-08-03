@@ -53,10 +53,12 @@
 .ref-thumb-zoom{position:absolute;bottom:2px;right:2px;width:16px;height:16px;border-radius:999px;border:none;background:rgba(20,21,31,.78);color:#fff;font-size:9px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .ref-thumb-zoom:hover{background:var(--accent);}
 
-/* La foto de referencia de cotización tiene protagonismo: 125px fijos, no
-   los 52px genéricos de arriba. flex-grow en 0 — si no, se estira para
-   llenar el espacio libre de la fila en vez de quedarse en su tamaño. */
-.ref-thumb-cotizacion{flex:0 0 125px;width:125px;min-width:125px;height:125px;border-radius:10px;}
+/* La foto de referencia de cotización tiene protagonismo, y sigue flexible:
+   crece con el espacio disponible entre 140 y 180px (antes, sin el tope de
+   max-width, se estiraba sin límite y quedaba gigante). aspect-ratio la
+   mantiene cuadrada mientras crece o encoge, en vez de fijar alto y ancho
+   por separado. */
+.ref-thumb-cotizacion{flex:1 1 140px;min-width:140px;max-width:180px;aspect-ratio:1/1;height:auto;border-radius:10px;}
 .ref-thumb-cotizacion.ref-thumb-empty{font-size:12px;padding:4px;}
 .ref-thumb-cotizacion .ref-thumb-remove,.ref-thumb-cotizacion .ref-thumb-zoom{width:22px;height:22px;font-size:11px;top:5px;right:5px;}
 .ref-thumb-cotizacion .ref-thumb-zoom{top:auto;bottom:5px;}
