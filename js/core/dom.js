@@ -143,6 +143,19 @@ var coreActions = {
     persist("config");
     notify();
   },
+  // Cualquier foto de la app (referencia, plantilla de prenda, pie de página
+  // del PDF) se puede abrir en grande con esto — ver el overlay al final de
+  // render(). No depende de qué pestaña esté activa.
+  "abrir-imagen-preview": function (el) {
+    var url = el.getAttribute("data-url");
+    if (!url) return;
+    state.imagenPreview = url;
+    notify();
+  },
+  "cerrar-imagen-preview": function () {
+    state.imagenPreview = "";
+    notify();
+  },
   "logout": function () {
     if (!window.confirm("¿Cerrar sesión?")) return;
     logout();
@@ -185,7 +198,8 @@ export function render() {
       renderSidebar() +
       '<div class="sidebar-overlay" data-action="toggle-sidebar-mobile"></div>' +
       '<main class="main"><div class="main-inner">' + mainInner + "</div></main>" +
-      "</div>";
+      "</div>" +
+      renderImagenPreview();
 
     app.innerHTML = html;
     bindEvents();
@@ -294,6 +308,17 @@ function renderTopbar() {
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
     '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
     '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
+    "</div>";
+}
+
+// Overlay a pantalla completa para ver en grande cualquier foto de la app
+// (referencia de cotización, plantilla de prenda, pie de página del PDF).
+// Vive fuera de ".shell" para no depender de qué pestaña esté activa.
+function renderImagenPreview() {
+  if (!state.imagenPreview) return "";
+  return '<div class="imgprev-overlay" data-action="cerrar-imagen-preview">' +
+    '<button class="imgprev-close" data-action="cerrar-imagen-preview" aria-label="Cerrar">✕</button>' +
+    '<img class="imgprev-img" src="' + esc(state.imagenPreview) + '" alt="" />' +
     "</div>";
 }
 

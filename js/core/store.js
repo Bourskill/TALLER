@@ -116,6 +116,7 @@ export const state = {
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
+  imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
 
   filtroTx: "todos",
   filtroPedidos: "todos",

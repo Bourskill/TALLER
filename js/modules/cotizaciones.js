@@ -22,6 +22,16 @@ function nuevoInsumo(fuente) {
   };
 }
 
+// Puente temporal: las etapas de producción ahora son por referencia (ver
+// renderEstadosRef), pero Pedidos todavía solo soporta UN flujo por pedido.
+// Al convertir, se usa el de la primera referencia que traiga uno
+// personalizado — si ninguna lo tiene, el pedido nace con el flujo estándar,
+// igual que antes de este cambio.
+function primerFlujoEstadosDeCot(cot) {
+  var conFlujo = (cot.referencias || []).filter(function (r) { return r.estadosDef && r.estadosDef.length; })[0];
+  return conFlujo ? conFlujo.estadosDef : null;
+}
+
 // Dos pestañas arriba (estilo hoja de cálculo, a la derecha): "Historial"
 // es siempre un índice liviano — una tarjeta chica por cotización, sin el
 // detalle de referencias/insumos — y "+ Nueva cotización"/"✎ Editando..."
@@ -93,37 +103,38 @@ function renderCotResumen(c) {
     "</div></div></div>";
 }
 
-// Editor del flujo de etapas de producción de ESTA cotización (y por tanto
-// del pedido que salga de ella). Si no se ha personalizado, se parte del
-// flujo estándar de toda la app.
-function renderEstadosCot(c) {
-  var estados = (c.estadosDef && c.estadosDef.length) ? c.estadosDef : ESTADOS_DEFAULT;
-  var esPersonalizado = !!(c.estadosDef && c.estadosDef.length);
+// Editor del flujo de etapas de producción de ESTA referencia — cada
+// referencia puede necesitar etapas distintas (ej. una lleva sublimación y
+// otra no), así que ya no es un flujo único por cotización. Si la plantilla
+// de prenda aplicada trae un flujo asignado, nace precargado con ese (ver
+// acción "aplicar-plantilla"); si no, parte del flujo estándar de la app.
+function renderEstadosRef(cotId, ref) {
+  var estados = (ref.estadosDef && ref.estadosDef.length) ? ref.estadosDef : ESTADOS_DEFAULT;
+  var esPersonalizado = !!(ref.estadosDef && ref.estadosDef.length);
   var COLS_E = "30px 1fr 36px 36px 30px";
   var html = '<div class="det-row head" style="grid-template-columns:' + COLS_E + ';"><span>#</span><span>Etapa</span><span></span><span></span><span></span></div>';
   estados.forEach(function (e, i) {
     html += '<div class="det-row" style="grid-template-columns:' + COLS_E + ';">' +
       "<span>" + (i + 1) + "</span>" +
-      '<input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-estado-cot-label" data-id="' + c.id + '" data-idx="' + i + '" />' +
-      '<button class="btn ghost small" ' + (i === 0 ? "disabled" : "") + ' data-action="mover-estado-cot" data-dir="-1" data-id="' + c.id + '" data-idx="' + i + '" title="Subir">↑</button>' +
-      '<button class="btn ghost small" ' + (i === estados.length - 1 ? "disabled" : "") + ' data-action="mover-estado-cot" data-dir="1" data-id="' + c.id + '" data-idx="' + i + '" title="Bajar">↓</button>' +
-      '<button class="btn danger small" data-action="remove-estado-cot" data-id="' + c.id + '" data-idx="' + i + '">✕</button>' +
+      '<input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-estado-ref-label" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" />' +
+      '<button class="btn ghost small" ' + (i === 0 ? "disabled" : "") + ' data-action="mover-estado-ref" data-dir="-1" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" title="Subir">↑</button>' +
+      '<button class="btn ghost small" ' + (i === estados.length - 1 ? "disabled" : "") + ' data-action="mover-estado-ref" data-dir="1" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" title="Bajar">↓</button>' +
+      '<button class="btn danger small" data-action="remove-estado-ref" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '">✕</button>' +
       "</div>";
   });
   html += '<div class="inline-form" style="margin-top:8px;">' +
-    '<input class="mini-input" data-role="nueva-etapa-' + c.id + '" placeholder="Nombre de la nueva etapa" style="width:180px" />' +
-    '<button class="btn ghost small" data-action="add-estado-cot" data-id="' + c.id + '">+ Agregar etapa</button>' +
-    (esPersonalizado ? '<button class="btn ghost small" data-action="resetear-estados-cot" data-id="' + c.id + '">Restablecer estándar</button>' : "") +
+    '<input class="mini-input" data-role="nueva-etapa-' + ref.id + '" placeholder="Nombre de la nueva etapa" style="width:180px" />' +
+    '<button class="btn ghost small" data-action="add-estado-ref" data-cot="' + cotId + '" data-ref="' + ref.id + '">+ Agregar etapa</button>' +
+    (esPersonalizado ? '<button class="btn ghost small" data-action="resetear-estados-ref" data-cot="' + cotId + '" data-ref="' + ref.id + '">Restablecer estándar</button>' : "") +
     "</div>";
-  html += '<div class="inline-form" style="margin-top:8px;">' +
-    '<button class="btn ghost small" data-action="guardar-plantilla-estados" data-id="' + c.id + '">💾 Guardar este flujo como plantilla</button>';
   if ((state.plantillasEstados || []).length) {
-    html += '<select class="mini-input" data-role="plantilla-estados-sel-' + c.id + '" style="width:190px">' +
+    html += '<div class="inline-form" style="margin-top:8px;">' +
+      '<select class="mini-input" data-role="plantilla-estados-sel-' + ref.id + '" style="width:190px">' +
       (state.plantillasEstados || []).map(function (pl) { return '<option value="' + pl.id + '">' + esc(pl.nombre) + " (" + pl.estados.length + " etapas)</option>"; }).join("") +
       "</select>" +
-      '<button class="btn ghost small" data-action="cargar-plantilla-estados" data-id="' + c.id + '">Cargar plantilla</button>';
+      '<button class="btn ghost small" data-action="cargar-plantilla-estados" data-cot="' + cotId + '" data-ref="' + ref.id + '">Cargar plantilla</button>' +
+      "</div>";
   }
-  html += "</div>";
   return html;
 }
 
@@ -326,11 +337,6 @@ function renderTabProduccion(c, totales, real) {
     "</div>";
   html += htmlCostosReales;
 
-  html += '<div class="cot-col-title" style="margin-top:22px;">Etapas de producción' +
-    renderHelp("Define aquí las etapas por las que pasa este pedido (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Se pueden guardar como plantilla para reutilizarlas en otra cotización.") +
-    "</div>";
-  html += renderEstadosCot(c);
-
   html += renderProduccionDocumentos(c);
 
   return html;
@@ -449,6 +455,11 @@ function renderRefCard(cotId, ref) {
     '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (calc.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(calc.gananciaTotal) + "</div></div>" +
     "</div>";
 
+  html += '<div class="cot-col-title" style="margin-top:18px;">Etapas de producción' +
+    renderHelp("Cada referencia puede tener su propio flujo (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Si le aplicaste una plantilla con un flujo asignado, nace precargado con ese.") +
+    "</div>";
+  html += renderEstadosRef(cotId, ref);
+
   html += renderDetalleReferencia(cotId, ref);
 
   html += "</div>"; // .ref-card
@@ -516,15 +527,16 @@ function renderDetalleReferencia(cotId, ref) {
 
 function renderThumb(cotId, ref) {
   if (state.refImagenSubiendo[ref.id]) {
-    return '<span class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</span>';
+    return '<span class="ref-thumb ref-thumb-cotizacion ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</span>';
   }
   if (ref.imagenUrl) {
-    return '<span class="ref-thumb" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Clic para subir otra imagen desde tu dispositivo">' +
+    return '<span class="ref-thumb ref-thumb-cotizacion" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Clic para subir otra imagen desde tu dispositivo">' +
       '<img src="' + esc(ref.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-zoom" data-action="abrir-imagen-preview" data-url="' + esc(ref.imagenUrl) + '" title="Ver en grande">🔍</button>' +
       '<button class="ref-thumb-remove" data-action="quitar-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Quitar imagen">✕</button>' +
       "</span>";
   }
-  return '<span class="ref-thumb ref-thumb-empty" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</span>';
+  return '<span class="ref-thumb ref-thumb-cotizacion ref-thumb-empty" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</span>';
 }
 
 function renderListaCompras(compras) {
@@ -714,18 +726,15 @@ export var actions = {
       if (!r.nombre) patch.nombre = pla.nombre;
       if (pla.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(pla.consumoSugerido);
       if (pla.imagenUrl && !r.imagenUrl) patch.imagenUrl = pla.imagenUrl;
+      // Cada tipo de prenda puede necesitar etapas de producción distintas
+      // (ej. sublimación). Si la plantilla trae un flujo asignado, se aplica
+      // a ESTA referencia — cada una lleva su propio flujo.
+      if (pla.flujoEstadosId) {
+        var flujo = (state.plantillasEstados || []).filter(function (f) { return f.id === pla.flujoEstadosId; })[0];
+        if (flujo) patch.estadosDef = flujo.estados.map(function (e) { return { id: e.id, label: e.label }; });
+      }
       return Object.assign({}, r, patch);
     });
-    // Cada tipo de prenda puede necesitar etapas de producción distintas
-    // (ej. sublimación). Si la plantilla trae un flujo asignado, se aplica a
-    // la cotización completa (no solo a la referencia) para que la orden de
-    // producción salga con las etapas correctas de una vez.
-    if (pla.flujoEstadosId) {
-      var flujo = (state.plantillasEstados || []).filter(function (f) { return f.id === pla.flujoEstadosId; })[0];
-      if (flujo) {
-        conRef(cotId, function (c) { return Object.assign({}, c, { estadosDef: flujo.estados.map(function (e) { return { id: e.id, label: e.label }; }) }); });
-      }
-    }
   },
   "add-cot-gasto": function (el) {
     var id = el.getAttribute("data-id");
@@ -775,7 +784,7 @@ export var actions = {
       var totales = calcCotizacionTotales(cot);
       var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
       var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
-      var estadosDef = (cot.estadosDef && cot.estadosDef.length) ? cot.estadosDef : null;
+      var estadosDef = primerFlujoEstadosDeCot(cot);
       var nuevoP = {
         id: uid(), clienteId: cot.clienteId || "", cliente: cot.cliente, tipoCliente: "propio", descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
         cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: "", estado: estadosDef ? estadosDef[0].id : "nuevo", cotizacionId: cot.id,
@@ -970,7 +979,7 @@ export var actions = {
     var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
     var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
     if (!window.confirm("¿Aplicar estos valores al pedido original?\n\nEl total, la descripción, la cantidad, el vendedor y las etapas del pedido se reemplazan por los de esta cotización. Los abonos que ya se hayan cobrado NO se pierden.")) return;
-    var estadosDef = (cot.estadosDef && cot.estadosDef.length) ? cot.estadosDef : null;
+    var estadosDef = primerFlujoEstadosDeCot(cot);
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== cot.pedidoOrigenId) return p;
       return Object.assign({}, p, {
@@ -986,67 +995,57 @@ export var actions = {
     state.cotizacionesVista = "historial";
     persist("pedidos"); persist("cotizaciones"); notify();
   },
-  "set-estado-cot-label": function (el) {
-    var id = el.getAttribute("data-id"), idx = Number(el.getAttribute("data-idx"));
-    conRef(id, function (c) {
-      var estados = ((c.estadosDef && c.estadosDef.length) ? c.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
-      if (!estados[idx]) return c;
+  "set-estado-ref-label": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx"));
+    mapRef(cotId, refId, function (r) {
+      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      if (!estados[idx]) return r;
       estados[idx].label = el.value;
-      return Object.assign({}, c, { estadosDef: estados });
+      return Object.assign({}, r, { estadosDef: estados });
     });
   },
-  "add-estado-cot": function (el) {
-    var id = el.getAttribute("data-id");
+  "add-estado-ref": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     var card = el.closest(".cot-card");
-    var nombre = val(card, "nueva-etapa-" + id);
+    var nombre = val(card, "nueva-etapa-" + refId);
     if (!nombre) return;
-    conRef(id, function (c) {
-      var estados = ((c.estadosDef && c.estadosDef.length) ? c.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+    mapRef(cotId, refId, function (r) {
+      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
       estados.push({ id: uid(), label: nombre });
-      return Object.assign({}, c, { estadosDef: estados });
+      return Object.assign({}, r, { estadosDef: estados });
     });
   },
-  "remove-estado-cot": function (el) {
-    var id = el.getAttribute("data-id"), idx = Number(el.getAttribute("data-idx"));
-    conRef(id, function (c) {
-      var estados = ((c.estadosDef && c.estadosDef.length) ? c.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
-      if (estados.length <= 1) { window.alert("Debe quedar al menos una etapa en el flujo."); return c; }
+  "remove-estado-ref": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx"));
+    mapRef(cotId, refId, function (r) {
+      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      if (estados.length <= 1) { window.alert("Debe quedar al menos una etapa en el flujo."); return r; }
       estados.splice(idx, 1);
-      return Object.assign({}, c, { estadosDef: estados });
+      return Object.assign({}, r, { estadosDef: estados });
     });
   },
-  "mover-estado-cot": function (el) {
-    var id = el.getAttribute("data-id"), idx = Number(el.getAttribute("data-idx")), dir = Number(el.getAttribute("data-dir"));
-    conRef(id, function (c) {
-      var estados = ((c.estadosDef && c.estadosDef.length) ? c.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+  "mover-estado-ref": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx")), dir = Number(el.getAttribute("data-dir"));
+    mapRef(cotId, refId, function (r) {
+      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
       var nidx = idx + dir;
-      if (nidx < 0 || nidx >= estados.length) return c;
+      if (nidx < 0 || nidx >= estados.length) return r;
       var tmp = estados[idx]; estados[idx] = estados[nidx]; estados[nidx] = tmp;
-      return Object.assign({}, c, { estadosDef: estados });
+      return Object.assign({}, r, { estadosDef: estados });
     });
   },
-  "resetear-estados-cot": function (el) {
-    var id = el.getAttribute("data-id");
-    if (!window.confirm('¿Restablecer al flujo de etapas estándar? Se pierden los cambios personalizados de esta cotización (no afecta las plantillas guardadas).')) return;
-    conRef(id, function (c) { return Object.assign({}, c, { estadosDef: null }); });
-  },
-  "guardar-plantilla-estados": function (el) {
-    var id = el.getAttribute("data-id");
-    var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
-    if (!cot) return;
-    var estados = (cot.estadosDef && cot.estadosDef.length) ? cot.estadosDef : ESTADOS_DEFAULT;
-    var nombre = window.prompt('¿Cómo se llama esta plantilla de etapas? (ej. "Uniformes", "Camisetas simples")');
-    if (!nombre) return;
-    state.plantillasEstados = (state.plantillasEstados || []).concat([{ id: uid(), nombre: nombre, estados: estados.map(function (e) { return { id: e.id, label: e.label }; }) }]);
-    persist("plantillasEstados"); notify();
+  "resetear-estados-ref": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    if (!window.confirm('¿Restablecer al flujo de etapas estándar? Se pierden los cambios personalizados de esta referencia (no afecta las plantillas guardadas).')) return;
+    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { estadosDef: null }); });
   },
   "cargar-plantilla-estados": function (el) {
-    var id = el.getAttribute("data-id");
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     var card = el.closest(".cot-card");
-    var sel = card ? card.querySelector('[data-role="plantilla-estados-sel-' + id + '"]') : null;
+    var sel = card ? card.querySelector('[data-role="plantilla-estados-sel-' + refId + '"]') : null;
     var plantilla = (state.plantillasEstados || []).filter(function (pl) { return pl.id === (sel ? sel.value : ""); })[0];
     if (!plantilla) return;
-    conRef(id, function (c) { return Object.assign({}, c, { estadosDef: plantilla.estados.map(function (e) { return { id: e.id, label: e.label }; }) }); });
+    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { estadosDef: plantilla.estados.map(function (e) { return { id: e.id, label: e.label }; }) }); });
   }
 };
 

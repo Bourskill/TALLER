@@ -78,6 +78,7 @@ function renderPlantillaThumb(p) {
   if (p.imagenUrl) {
     return '<span class="ref-thumb" style="width:64px;height:64px;" data-action="set-pla-imagen" data-id="' + p.id + '" title="Clic para subir otra foto desde tu dispositivo">' +
       '<img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-zoom" data-action="abrir-imagen-preview" data-url="' + esc(p.imagenUrl) + '" title="Ver en grande">🔍</button>' +
       '<button class="ref-thumb-remove" data-action="quitar-pla-imagen" data-id="' + p.id + '" title="Quitar foto">✕</button>' +
       "</span>";
   }

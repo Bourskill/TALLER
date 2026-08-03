@@ -115,6 +115,7 @@ function renderPiePaginaImg(cfg) {
   if (cfg.pdfPiePaginaImagenUrl) {
     return '<div class="ref-thumb" data-action="set-pie-imagen" title="Clic para subir otra imagen desde tu dispositivo">' +
       '<img src="' + esc(cfg.pdfPiePaginaImagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-zoom" data-action="abrir-imagen-preview" data-url="' + esc(cfg.pdfPiePaginaImagenUrl) + '" title="Ver en grande">🔍</button>' +
       '<button class="ref-thumb-remove" data-action="quitar-pie-imagen" title="Quitar imagen">✕</button>' +
       "</div>";
   }
