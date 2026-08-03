@@ -67,6 +67,41 @@
 .det-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
 .det-row input, .det-row select{font-family:'Inter',sans-serif;font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-3);color:var(--ink);width:100%;}
 
+/* Cabecera de la tarjeta de detalle: cliente/estado a la izquierda, menú
+   "⋮" de acciones secundarias (prueba, eliminar) a la derecha. */
+.cot-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.cot-head-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cot-head-actions{position:relative;flex:0 0 auto;}
+.cot-kebab-btn{background:none;border:1px solid var(--border);border-radius:8px;width:32px;height:32px;color:var(--ink-soft);font-size:16px;line-height:1;cursor:pointer;}
+.cot-kebab-btn:hover{border-color:var(--border-strong);color:var(--ink);}
+.cot-menu-overlay{position:fixed;inset:0;z-index:60;background:transparent;}
+.cot-menu{position:absolute;top:38px;right:0;z-index:61;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-md);padding:6px;width:230px;}
+.cot-menu-item{display:flex;align-items:center;width:100%;text-align:left;background:none;border:none;border-radius:7px;padding:8px 10px;font-size:13px;color:var(--ink);cursor:pointer;font-family:'Inter',sans-serif;}
+.cot-menu-item:hover{background:var(--surface-hover);}
+.cot-menu-item.danger{color:var(--danger-ink);}
+.cot-menu-sep{height:1px;background:var(--border-soft);margin:4px 6px;}
+
+/* Cifras grandes tipo dashboard financiero: lo primero que se lee de una
+   cotización, en vez de una fila de texto chico. */
+.cot-hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0 10px;}
+.cot-hero-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:12px 14px;}
+.cot-hero-stat .rl{font-size:11.5px;color:var(--ink-faint);}
+.cot-hero-stat .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:21px;margin-top:3px;}
+.cot-iva-inline{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);margin-right:10px;}
+.cot-cta{margin-top:10px;}
+
+/* Vendedor: una línea resumen por defecto, se expande a formulario al hacer clic. */
+.cot-vendedor-compact{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);padding:8px 0 0;cursor:pointer;}
+.cot-vendedor-compact:hover{color:var(--ink);}
+
+/* Pestañas internas de una cotización: Referencias / Producción / Documentos —
+   reemplazan lo que antes era una pila de secciones siempre visibles. */
+.cot-tabs{display:flex;gap:4px;background:var(--surface-3);border-radius:9px;padding:3px;margin-top:16px;}
+.cot-tab-btn{flex:1;text-align:center;font-size:12.5px;font-weight:600;padding:7px 0;border-radius:7px;background:none;border:none;color:var(--ink-faint);cursor:pointer;font-family:'Inter',sans-serif;}
+.cot-tab-btn.active{background:var(--surface);color:var(--ink);}
+.cot-tab-btn:hover:not(.active){color:var(--ink-soft);}
+.cot-tab-body{margin-top:14px;}
+
 @media (max-width: 700px){
   .cot-cols{grid-template-columns:1fr;}
   .ins-row{grid-template-columns:1fr 1fr;}

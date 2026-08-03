@@ -131,6 +131,9 @@ export const state = {
   cotizacionesVista: "nueva", // "nueva" | "historial" — pestañas superiores de Cotizaciones
   cotizacionEditando: "", // id de la cotización con el detalle completo abierto en la pestaña "nueva" (o "" = formulario en blanco)
   refActiva: {}, // { [cotId]: refId } — qué referencia está activa en la vista de pestañas de cada cotización
+  cotTabActiva: {}, // { [cotId]: "referencias"|"produccion"|"documentos" } — pestaña interna activa dentro del detalle de una cotización
+  cotMenuAbierto: "", // id de la cotización con el menú "⋮" de acciones secundarias (PDF, prueba, eliminar) abierto, o ""
+  cotVendedorEditando: "", // id de la cotización con el formulario de vendedor/comisión desplegado, o "" (por defecto solo se ve un resumen de una línea)
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a
