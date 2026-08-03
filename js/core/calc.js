@@ -47,6 +47,47 @@ export function calcNominaPagada() {
     .filter(function (t) { return t.tipo === "nomina"; })
     .reduce(function (a, t) { return a + num(t.monto); }, 0);
 }
+// Mismo criterio de categorización que usaba (por separado, con su propia
+// copia del cálculo) el PDF de reporte financiero — se extrajo acá para que
+// el reporte EN VIVO de Configuración y el PDF nunca puedan mostrar números
+// distintos para el mismo rango de movimientos.
+export function calcResumenMovimientos(movimientos) {
+  var ingresos = 0, gastos = 0, nomina = 0, comisiones = 0;
+  (movimientos || []).forEach(function (t) {
+    var v = num(t.monto);
+    if (t.tipo === "ingreso") ingresos += v;
+    else if (t.tipo === "nomina") { gastos += v; nomina += v; }
+    else if (t.tipo === "comision") { gastos += v; comisiones += v; }
+    else gastos += v;
+  });
+  return { ingresos: ingresos, gastos: gastos, nomina: nomina, comisiones: comisiones, balance: ingresos - gastos };
+}
+// Agrupa los movimientos de un rango en puntos para graficar ingresos vs.
+// gastos — la granularidad se adapta al tamaño del rango (día si es corto,
+// semana o mes si es largo) para que un año completo no intente dibujar
+// 365 barras.
+export function calcSerieMovimientos(movimientos, desde, hasta) {
+  var dIni = new Date(desde + "T00:00:00"), dFin = new Date(hasta + "T00:00:00");
+  var dias = Math.max(1, Math.round((dFin - dIni) / 86400000) + 1);
+  var granularidad = dias <= 31 ? "dia" : dias <= 180 ? "semana" : "mes";
+  function clave(fechaStr) {
+    if (granularidad === "dia") return fechaStr;
+    if (granularidad === "mes") return fechaStr.slice(0, 7);
+    var d = new Date(fechaStr + "T00:00:00");
+    var dow = (d.getDay() + 6) % 7; // lunes = 0
+    var lunes = new Date(d); lunes.setDate(d.getDate() - dow);
+    return lunes.getFullYear() + "-" + String(lunes.getMonth() + 1).padStart(2, "0") + "-" + String(lunes.getDate()).padStart(2, "0");
+  }
+  var mapa = {};
+  (movimientos || []).forEach(function (t) {
+    var k = clave(t.fecha);
+    if (!mapa[k]) mapa[k] = { clave: k, ingresos: 0, gastos: 0 };
+    var v = num(t.monto);
+    if (t.tipo === "ingreso") mapa[k].ingresos += v; else mapa[k].gastos += v;
+  });
+  var claves = Object.keys(mapa).sort();
+  return { granularidad: granularidad, puntos: claves.map(function (k) { return mapa[k]; }) };
+}
 // Un movimiento generado POR el sistema (abono, comisión, pago de gasto
 // fijo/deuda...) siempre tiene un registro real del que salió — a
 // diferencia de un movimiento cargado a mano desde "Registrar movimiento",
@@ -661,11 +702,14 @@ export function calcCotResultadoReal(cot) {
   return { costoTotal: costoTotal, precioTotal: totales.precioTotal, gananciaTotal: gananciaTotal, margenPct: margenPct, sobrecosto: sobrecosto, comision: comision };
 }
 
-// Consolida los insumos de TODAS las referencias de una cotización en una sola
-// lista de compras: si dos referencias comparten una tela, aquí ya suman juntas.
-export function calcListaCompras(cot) {
+// Agrega los insumos usados en un conjunto de referencias (de una o varias
+// cotizaciones) en un mapa {clave: {...}} — lógica compartida entre
+// calcListaCompras (una sola cotización) y calcGastoInsumosMensual (todas),
+// para no calcular el costo de un insumo de dos formas distintas en dos
+// lugares.
+function agregarInsumosDeReferencias(referencias) {
   var mapa = {};
-  (cot.referencias || []).forEach(function (ref) {
+  (referencias || []).forEach(function (ref) {
     var cantidadPedida = num(ref.cantidadPedida) || 0;
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();
@@ -679,5 +723,39 @@ export function calcListaCompras(cot) {
       if (ref.nombre && mapa[key].refs.indexOf(ref.nombre) === -1) mapa[key].refs.push(ref.nombre);
     });
   });
+  return mapa;
+}
+// Consolida los insumos de TODAS las referencias de una cotización en una sola
+// lista de compras: si dos referencias comparten una tela, aquí ya suman juntas.
+export function calcListaCompras(cot) {
+  var mapa = agregarInsumosDeReferencias(cot.referencias || []);
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
+}
+// "Inventario negativo": en vez de cuánto insumo hay en stock (rechazado por
+// el usuario — compra por pedido, no mantiene stock, ver README), cuánto se
+// ha GASTADO en insumos por mes, sobre TODAS las cotizaciones reales (las
+// demo no cuentan). Agrupa por el mes de la propia cotización (no hay una
+// fecha de "producción real" guardada aparte). Pensado para decidir cuándo
+// conviene empezar a comprar al por mayor — ahí sí tendría sentido llevar
+// stock de verdad.
+export function calcGastoInsumosMensual() {
+  var porMes = {};
+  state.cotizaciones.forEach(function (c) {
+    if (c.esDemo) return;
+    var mes = (c.fecha || "").slice(0, 7); // "YYYY-MM"
+    if (!mes) return;
+    if (!porMes[mes]) porMes[mes] = { mes: mes, total: 0, insumos: {} };
+    var mapa = agregarInsumosDeReferencias(c.referencias || []);
+    Object.keys(mapa).forEach(function (k) {
+      var item = mapa[k];
+      if (!porMes[mes].insumos[k]) porMes[mes].insumos[k] = { nombre: item.nombre, unidad: item.unidad, costoTotal: 0 };
+      porMes[mes].insumos[k].costoTotal += item.costoTotal;
+      porMes[mes].total += item.costoTotal;
+    });
+  });
+  return Object.keys(porMes).sort().reverse().map(function (mes) {
+    var bucket = porMes[mes];
+    var insumos = Object.keys(bucket.insumos).map(function (k) { return bucket.insumos[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
+    return { mes: bucket.mes, total: bucket.total, insumos: insumos };
+  });
 }

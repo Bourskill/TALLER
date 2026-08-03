@@ -510,6 +510,48 @@ negocio existente (todo lo de arriba sigue funcionando igual):
   PDF interno) ya eran colapsables desde antes (`renderSeccionColapsable`) —
   no hizo falta tocarlas, ya cumplían con "no saturar la vista de una".
 
+## Configuración: KPIs consolidados + reporte unificado con gráfica + gasto en insumos
+
+Antes los KPIs (caja, por cobrar, por pagar, pedidos activos) se repetían
+arriba de TODAS las pestañas del admin — reportado como ruido. Y había dos
+tarjetas de "reporte financiero" que no hablaban entre sí: una con números
+de TODO el histórico, otra con un selector de fechas que solo servía para
+el PDF. Se resolvieron juntas porque el arreglo es el mismo: un solo lugar,
+una sola fuente de verdad.
+
+- **KPIs solo en Configuración** (`renderKpis()` en `modules/config.js`,
+  movido tal cual desde `core/dom.js`, que ya no los dibuja en ningún lado).
+  El test de humo ahora verifica lo contrario de antes: que `.kpis` NO
+  aparezca fuera de Configuración.
+- **Un solo panel de reporte**: el rango de fechas (con los mismos atajos de
+  siempre — hoy/semana/mes/año) alimenta a la vez los números en pantalla,
+  la gráfica y el botón de PDF. Los tres usan **`calcResumenMovimientos()`**
+  (nueva, en `core/calc.js`) — la misma función que antes solo vivía
+  duplicada dentro de `generarPDFReporteFinanciero()` en `core/pdf.js`, así
+  que ya no pueden mostrar números distintos para el mismo rango.
+- **Gráfica en vivo, sin librería nueva**: `calcSerieMovimientos()` agrupa
+  los movimientos del rango (por día si es corto, semana o mes si es largo,
+  para que "todo el histórico" no intente dibujar 365 barras) y
+  `renderGraficaReporte()` la dibuja como SVG plano usando los mismos
+  colores semánticos ya definidos en `variables.css` (`--success`/
+  `--danger`) — se ve bien en modo claro y oscuro sin CSS aparte, y no hace
+  falta cargar Chart.js ni resolver el problema de "cómo redibujar un
+  canvas después de que `innerHTML` se reemplaza", que no existe con SVG
+  generado como parte del mismo string de HTML.
+- **"Gasto en insumos por mes"** (`calcGastoInsumosMensual()`): NO es
+  inventario de lo que hay guardado (el usuario no maneja stock — compra lo
+  que cada pedido requiere, ver README arriba). Es cuánto se gastó en
+  insumos cada mes, sumado desde las cotizaciones reales de ese mes (las
+  demo no cuentan) — para decidir cuándo conviene empezar a comprar al por
+  mayor. Reutiliza el mismo cálculo de costo por insumo que ya usaba
+  "Lista de compras" (`agregarInsumosDeReferencias()`, factorizada de
+  `calcListaCompras()` para no calcular el costo de un insumo de dos formas
+  distintas en dos lugares).
+- **Meta queda aparte**, con su propio card chico: es un progreso contra SU
+  PROPIO periodo (configurado en Pendientes), no contra el rango de fechas
+  que el admin elija en el reporte — mezclarlos habría sido confuso, son
+  conceptos independientes.
+
 ## Estructura
 
 ```

@@ -33,7 +33,9 @@ function assert(cond, msg) {
 await loadAll();
 render();
 assert(document.querySelector(".sidebar"), "renderiza sidebar en el primer render");
-assert(document.querySelector(".kpis"), "renderiza KPIs en el primer render");
+// Los KPIs ya NO se muestran en todas las pestañas (reportado como ruido) —
+// viven solo en Configuración, ver más abajo.
+assert(!document.querySelector(".kpis"), "no renderiza KPIs fuera de Configuración");
 
 // --- recorre cada pestaña y verifica que renderiza sin lanzar ---
 const tabs = ["resumen", "finanzas", "pedidos", "cotizaciones", "clientes", "pendientes", "notas", "config"];
@@ -42,6 +44,7 @@ for (const t of tabs) {
   assert(state.tab === t, "cambia a la pestaña " + t);
   assert(!state.lastError, "sin error de render en " + t + (state.lastError ? (": " + state.lastError) : ""));
 }
+assert(document.querySelector(".kpis"), "renderiza KPIs en Configuración (único lugar)");
 
 // --- finanzas: agregar transacción ---
 click('[data-action="tab"][data-tab="finanzas"]');

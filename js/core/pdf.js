@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -291,15 +291,8 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
   doc.text("Periodo: " + etiquetaPeriodo + "  (" + desde + " a " + hasta + ")", pageW - marginX, y, { align: "right" });
   y += 20;
 
-  var ingresos = 0, gastos = 0, nomina = 0, comisiones = 0;
-  movimientos.forEach(function (t) {
-    var v = num(t.monto);
-    if (t.tipo === "ingreso") ingresos += v;
-    else if (t.tipo === "nomina") { gastos += v; nomina += v; }
-    else if (t.tipo === "comision") { gastos += v; comisiones += v; }
-    else gastos += v;
-  });
-  var balance = ingresos - gastos;
+  var resumen = calcResumenMovimientos(movimientos);
+  var ingresos = resumen.ingresos, gastos = resumen.gastos, nomina = resumen.nomina, comisiones = resumen.comisiones, balance = resumen.balance;
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
   var resumenY = y;

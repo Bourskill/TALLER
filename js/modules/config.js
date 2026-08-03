@@ -5,17 +5,49 @@
 
 import { state, persist, notify } from "../core/store.js";
 import { esc, fmt, num, todayStr } from "../core/utils.js";
-import { calcIngresosTotales, calcGastosTotales, calcNominaPagada, calcCaja, calcGastosFijosMensuales, calcBalancePeriodo } from "../core/calc.js";
+import {
+  calcBalancePeriodo, calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
+  calcResumenMovimientos, calcSerieMovimientos, calcGastoInsumosMensual
+} from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
 import { subirImagenReferencia, compartirRecursosConNuevoMiembro } from "../core/drive.js";
 import { agregarMiembroEquipo } from "../core/auth.js";
 
+// Único lugar de la app donde se ven los KPIs del negocio (antes se
+// repetían arriba de TODAS las pestañas) — reportado como ruido: se
+// consolidan acá, junto con el reporte financiero completo.
+function renderKpis() {
+  var caja = calcCaja(), porCobrar = calcPorCobrar(), activos = calcPedidosActivos();
+  var resumenPago = calcResumenPorPagar();
+  return '<div class="kpis">' +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmt(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmt(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
+    renderKpiPorPagar(resumenPago) +
+    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
+    "</div>";
+}
+// KPI "Por pagar" inteligente: en vez del total acumulado, muestra lo más
+// urgente — obligaciones vencidas (si las hay) o el próximo vencimiento. El
+// total general de todo lo pendiente sigue viviendo en Pendientes.
+function renderKpiPorPagar(r) {
+  if (r.estado === "aldia") {
+    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Por pagar</div><div class="kpi-value success">Al día</div><div class="kpi-note">Sin obligaciones pendientes</div></div>';
+  }
+  if (r.estado === "vencidas") {
+    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Obligaciones vencidas</div><div class="kpi-value danger">' + fmt(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación vencida" : " obligaciones vencidas") + "</div></div>";
+  }
+  var fechaCorta = r.fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }).replace(".", "");
+  return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Próximo vencimiento</div><div class="kpi-value warning">' + esc(fechaCorta) + " · " + fmt(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación" : " obligaciones") + "</div></div>";
+}
+
 export function render() {
   var cfg = state.config;
 
-  var html = '<div class="card"><div class="section-title small">Marca del taller' +
+  var html = renderKpis();
+
+  html += '<div class="card"><div class="section-title small">Marca del taller' +
     renderHelp("El nombre se edita también desde el encabezado del panel. El ícono puede ser un emoji corto (ej. \uD83E\uDDF5) o el link a una imagen — ambos se reflejan en el PDF de cotización.") +
     '</div><div class="form-grid">' +
     '<div class="field"><label>Ícono</label><input id="inp-config-logo" value="' + esc(cfg.logoUrl) + '" placeholder="Emoji o link a imagen" /></div>' +
@@ -56,28 +88,20 @@ export function render() {
     '<button class="btn ghost small" data-action="respaldar-ahora">Respaldar ahora</button>' +
     "</div>";
 
-  var ingresos = calcIngresosTotales(), gastos = calcGastosTotales(), nominaPagada = calcNominaPagada(), caja = calcCaja();
-  var gastosFijosTotal = calcGastosFijosMensuales();
   var meta = cfg.meta || { label: "Meta", monto: 0, periodo: "mensual" };
   var metaMonto = num(meta.monto);
   var balancePeriodo = metaMonto > 0 ? calcBalancePeriodo(meta.periodo || "mensual") : 0;
   var progresoMeta = metaMonto > 0 ? Math.max(0, Math.min(100, (balancePeriodo / metaMonto) * 100)) : null;
-
-  html += '<div class="card"><div class="section-title small">Reporte financiero' +
-    renderHelp("Balance con todos los movimientos registrados hasta hoy (sin importar el rango de fechas de abajo).") +
-    "</div>";
-  html += '<div class="report-grid">' +
-    '<div class="report-item"><div class="rl">Ingresos totales</div><div class="rv" style="color:var(--success-ink);">' + fmt(ingresos) + "</div></div>" +
-    '<div class="report-item"><div class="rl">Gastos totales</div><div class="rv" style="color:var(--danger-ink);">' + fmt(gastos) + "</div></div>" +
-    '<div class="report-item"><div class="rl">Nómina pagada</div><div class="rv" style="color:var(--warning-ink);">' + fmt(nominaPagada) + "</div></div>" +
-    '<div class="report-item"><div class="rl">Gastos fijos (mensualizado)</div><div class="rv" style="color:var(--info-ink);">' + fmt(gastosFijosTotal) + "</div></div>" +
-    '<div class="report-item"><div class="rl">Balance neto (caja)</div><div class="rv">' + fmt(caja) + "</div></div>" +
-    (progresoMeta !== null ? '<div class="report-item"><div class="rl">' + esc(meta.label || "Meta de balance neto") + "</div><div class=\"rv\">" + progresoMeta.toFixed(0) + "% (" + fmt(balancePeriodo) + " de " + fmt(metaMonto) + ")</div></div>" : "") +
-    "</div>" +
-    '<div class="pedido-actions"><button class="btn ghost small" data-action="export-csv">Descargar CSV de movimientos</button></div>' +
-    "</div>";
+  if (progresoMeta !== null) {
+    html += '<div class="card"><div class="section-title small">Meta' +
+      renderHelp("Se define en Pendientes → Meta. Progreso del balance neto dentro de SU PROPIO periodo (no del rango de fechas que elijas abajo en el reporte, que son conceptos independientes).") +
+      "</div>" +
+      '<div class="report-grid"><div class="report-item"><div class="rl">' + esc(meta.label || "Meta de balance neto") + "</div><div class=\"rv\">" + progresoMeta.toFixed(0) + "% (" + fmt(balancePeriodo) + " de " + fmt(metaMonto) + ")</div></div></div>" +
+      "</div>";
+  }
 
   html += renderReportePeriodo();
+  html += renderGastoInsumos();
   return html;
 }
 
@@ -97,14 +121,17 @@ function renderPiePaginaImg(cfg) {
   return '<div class="ref-thumb ref-thumb-empty" data-action="set-pie-imagen" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</div>';
 }
 
-// Selector de rango de fechas para el reporte en PDF — mismos atajos de
-// periodo que usa Nómina (semana/quincena/mes actual) más fechas de corte
-// personalizadas, para poder revisar "lo que hice cierta semana o mes".
+// Único panel de reporte financiero (antes había dos: uno con números de
+// TODO el histórico, sin relación con el rango de fechas del otro, que solo
+// servía para el PDF). Ahora el mismo rango alimenta los números en vivo, la
+// gráfica y el PDF — nunca puede pasar que la pantalla y el PDF de un mismo
+// periodo digan cosas distintas, porque los tres usan calcResumenMovimientos().
 function renderReportePeriodo() {
   var fr = state.formReporte;
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
-  var html = '<div class="card"><div class="section-title small">Reporte financiero en PDF' +
-    renderHelp("Elige un rango de fechas (o usa los atajos) y descarga un PDF con el detalle de movimientos de ese periodo y sus totales — útil para saber qué pasó en una semana, un mes, o entre dos fechas de corte específicas.") +
+  var resumen = calcResumenMovimientos(movimientos);
+  var html = '<div class="card"><div class="section-title small">Reporte financiero' +
+    renderHelp("Elige un rango de fechas (o usa los atajos) — los números, la gráfica y el PDF de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí.") +
     "</div>";
   html += '<div class="filters" style="margin-bottom:10px;">' +
     ["hoy", "semana", "mes", "año"].map(function (k) {
@@ -115,11 +142,103 @@ function renderReportePeriodo() {
   html += '<div class="form-grid">' +
     '<div class="field"><label>Desde</label><input type="date" data-form="reporte" data-field="desde" value="' + esc(fr.desde) + '" /></div>' +
     '<div class="field"><label>Hasta</label><input type="date" data-form="reporte" data-field="hasta" value="' + esc(fr.hasta) + '" /></div>' +
-    '<div class="field"><label>&nbsp;</label><button class="btn" data-action="generar-reporte-pdf">Generar PDF del periodo</button></div>' +
     "</div>";
-  html += '<div class="section-sub" style="margin-top:8px;">' + movimientos.length + " movimiento(s) en este rango.</div>";
+
+  html += '<div class="report-grid" style="margin-top:14px;">' +
+    '<div class="report-item"><div class="rl">Ingresos</div><div class="rv" style="color:var(--success-ink);">' + fmt(resumen.ingresos) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Gastos</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.gastos) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Nómina</div><div class="rv" style="color:var(--warning-ink);">' + fmt(resumen.nomina) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Comisiones</div><div class="rv" style="color:var(--info-ink);">' + fmt(resumen.comisiones) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Balance neto</div><div class="rv">' + fmt(resumen.balance) + "</div></div>" +
+    "</div>";
+
+  html += '<div style="margin-top:16px;">' + renderGraficaReporte(calcSerieMovimientos(movimientos, fr.desde, fr.hasta)) + "</div>";
+
+  html += '<div class="section-sub" style="margin-top:10px;">' + movimientos.length + " movimiento(s) en este rango.</div>";
+  html += '<div class="pedido-actions" style="margin-top:6px;">' +
+    '<button class="btn" data-action="generar-reporte-pdf">Generar PDF del periodo</button>' +
+    '<button class="btn ghost small" data-action="export-csv">Descargar CSV de todos los movimientos</button>' +
+    "</div>";
   html += "</div>";
   return html;
+}
+
+// Gráfica en vivo (SVG, sin librería externa — reutiliza los colores
+// semánticos ya definidos en variables.css, así queda bien en modo claro y
+// oscuro sin código aparte). Barras pareadas ingresos/gastos por punto.
+function renderGraficaReporte(serie) {
+  if (!serie.puntos.length) return '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div>';
+  var W = 640, H = 200, padL = 50, padB = 20, padT = 10, padR = 10;
+  var innerW = W - padL - padR, innerH = H - padT - padB;
+  var maxVal = serie.puntos.reduce(function (m, p) { return Math.max(m, p.ingresos, p.gastos); }, 0) || 1;
+  var n = serie.puntos.length;
+  var groupW = innerW / n;
+  var barW = Math.max(2, Math.min(18, groupW / 3));
+  var mostrarEtiquetas = n <= 14;
+
+  var gridLines = [0, 0.5, 1].map(function (f) {
+    var yy = padT + innerH - f * innerH;
+    return '<line x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '" stroke="var(--border-soft)" stroke-width="1" />' +
+      '<text x="' + (padL - 6) + '" y="' + (yy + 3) + '" font-size="9" text-anchor="end" fill="var(--ink-faint)">' + esc(fmtCorto(f * maxVal)) + "</text>";
+  }).join("");
+
+  var bars = serie.puntos.map(function (p, i) {
+    var xGroup = padL + i * groupW + groupW / 2;
+    var hIng = (p.ingresos / maxVal) * innerH, hGas = (p.gastos / maxVal) * innerH;
+    var xIng = xGroup - barW - 2, xGas = xGroup + 2;
+    var etiqueta = etiquetaPuntoReporte(p.clave, serie.granularidad);
+    return '<rect x="' + xIng + '" y="' + (padT + innerH - hIng) + '" width="' + barW + '" height="' + hIng + '" fill="var(--success)" rx="2"><title>Ingresos ' + esc(etiqueta) + ": " + esc(fmt(p.ingresos)) + '</title></rect>' +
+      '<rect x="' + xGas + '" y="' + (padT + innerH - hGas) + '" width="' + barW + '" height="' + hGas + '" fill="var(--danger)" rx="2"><title>Gastos ' + esc(etiqueta) + ": " + esc(fmt(p.gastos)) + '</title></rect>' +
+      (mostrarEtiquetas ? '<text x="' + xGroup + '" y="' + (H - 4) + '" font-size="9" text-anchor="middle" fill="var(--ink-faint)">' + esc(etiqueta) + "</text>" : "");
+  }).join("");
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;max-height:220px;display:block;" role="img" aria-label="Ingresos y gastos por periodo">' + gridLines + bars + "</svg>" +
+    '<div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--ink-faint);">' +
+    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--success);border-radius:2px;margin-right:4px;"></span>Ingresos</span>' +
+    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Gastos</span>' +
+    "</div>";
+}
+function etiquetaPuntoReporte(clave, granularidad) {
+  if (granularidad === "mes") {
+    var partes = clave.split("-");
+    var meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+    return meses[Number(partes[1]) - 1] + " " + partes[0].slice(2);
+  }
+  var d = new Date(clave + "T00:00:00");
+  return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0");
+}
+function fmtCorto(n) {
+  if (Math.abs(n) >= 1000000) return "$" + (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (Math.abs(n) >= 1000) return "$" + Math.round(n / 1000) + "k";
+  return fmt(n);
+}
+
+// "Inventario negativo" (ver calcGastoInsumosMensual en core/calc.js): no
+// cuánto insumo hay en stock, sino cuánto se gastó en insumos cada mes —
+// para saber cuándo conviene empezar a comprar al por mayor.
+function renderGastoInsumos() {
+  var meses = calcGastoInsumosMensual();
+  var html = '<div class="card"><div class="section-title small">Gasto en insumos por mes' +
+    renderHelp("No es un inventario de lo que tenés guardado (no manejás stock) — es cuánto gastaste en insumos cada mes, sumado desde las cotizaciones de ese mes. Sirve para decidir cuándo conviene empezar a comprar al por mayor — ahí sí tendría sentido llevar inventario de verdad.") +
+    "</div>";
+  if (!meses.length) {
+    html += '<div class="empty">Todavía no hay cotizaciones con insumos para reportar.</div></div>';
+    return html;
+  }
+  meses.slice(0, 6).forEach(function (m) {
+    html += '<div class="section-sub" style="margin:14px 0 6px;display:flex;justify-content:space-between;">' +
+      "<b style=\"color:var(--ink);\">" + esc(etiquetaMes(m.mes)) + "</b><span class=\"amount\">" + fmt(m.total) + "</span></div>";
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+      m.insumos.slice(0, 8).map(function (i) { return '<span class="badge">' + esc(i.nombre) + " · " + fmt(i.costoTotal) + "</span>"; }).join("") +
+      "</div>";
+  });
+  html += "</div>";
+  return html;
+}
+function etiquetaMes(mes) {
+  var partes = mes.split("-");
+  var meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  return meses[Number(partes[1]) - 1] + " " + partes[0];
 }
 
 export var actions = {

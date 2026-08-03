@@ -12,7 +12,7 @@
 
 import { state, persist, notify } from "./store.js";
 import { esc } from "./utils.js";
-import { calcCaja, calcPorCobrar, calcResumenPorPagar, calcPedidosActivos, clienteById } from "./calc.js";
+import { clienteById } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
 
@@ -177,13 +177,7 @@ export function render() {
     if (state.lastError) {
       mainInner += '<div class="error-box">Ocurrió un error inesperado y se muestra aquí para poder corregirlo:\n' + esc(state.lastError) + "</div>";
     }
-    var sesionActiva = getSession();
-    var esVendedor = sesionActiva && sesionActiva.rol === "vendedor";
     mainInner += renderTopbar();
-    // Los KPIs de la franja superior (caja, por cobrar/pagar) son datos
-    // financieros del taller — un vendedor no debe verlos aquí aunque esté
-    // en otra pestaña; su propio resumen vive dentro de "Mis ventas".
-    if (!esVendedor) mainInner += renderKpis();
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
@@ -302,36 +296,6 @@ function renderTopbar() {
     '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
     "</div>";
 }
-
-function renderKpis() {
-  var caja = calcCaja(), porCobrar = calcPorCobrar(), activos = calcPedidosActivos();
-  var resumenPago = calcResumenPorPagar();
-  var html = "" +
-    '<div class="kpis">' +
-    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmtLocal(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
-    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmtLocal(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
-    renderKpiPorPagar(resumenPago) +
-    '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
-    "</div>";
-  return html;
-}
-
-// KPI "Por pagar" inteligente: en vez del total acumulado, muestra lo más
-// urgente — obligaciones vencidas (si las hay) o el próximo vencimiento.
-// El total general de todo lo pendiente sigue viviendo solo en la pestaña
-// Pendientes (módulo de cuentas por pagar), no aquí.
-function renderKpiPorPagar(r) {
-  if (r.estado === "aldia") {
-    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Por pagar</div><div class="kpi-value success">Al día</div><div class="kpi-note">Sin obligaciones pendientes</div></div>';
-  }
-  if (r.estado === "vencidas") {
-    return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Obligaciones vencidas</div><div class="kpi-value danger">' + fmtLocal(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación vencida" : " obligaciones vencidas") + "</div></div>";
-  }
-  var fechaCorta = r.fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }).replace(".", "");
-  return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pendientes" title="Ver cuentas por pagar"><div class="kpi-label">Próximo vencimiento</div><div class="kpi-value warning">' + esc(fechaCorta) + " · " + fmtLocal(r.monto) + '</div><div class="kpi-note">' + r.cantidad + (r.cantidad === 1 ? " obligación" : " obligaciones") + "</div></div>";
-}
-
-function fmtLocal(n) { return "$" + Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }); }
 
 function bindEvents() {
   var app = document.getElementById("app");
