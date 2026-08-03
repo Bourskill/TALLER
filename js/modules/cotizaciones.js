@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico, parseCurvaTallas } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
@@ -93,19 +93,6 @@ function renderCotResumen(c) {
     "</div></div></div>";
 }
 
-// Sección desplegable genérica dentro de una cotización — para que no todo
-// quede amontonado: el título siempre se ve, el contenido solo si está
-// abierta. El estado (abierta/cerrada) se guarda en la propia cotización
-// bajo `campo`, así que se recuerda entre renders.
-function renderSeccionColapsable(c, campo, titulo, ayudaHtml, contenidoHtml) {
-  var abierta = !!c[campo];
-  var html = '<div class="cot-col-title" style="margin-top:16px;cursor:pointer;" data-action="toggle-cot-seccion" data-id="' + c.id + '" data-campo="' + campo + '">' +
-    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo + (ayudaHtml || "") +
-    "</div>";
-  if (abierta) html += contenidoHtml;
-  return html;
-}
-
 // Editor del flujo de etapas de producción de ESTA cotización (y por tanto
 // del pedido que salga de ella). Si no se ha personalizado, se parte del
 // flujo estándar de toda la app.
@@ -153,20 +140,19 @@ function renderCotCard(c) {
   var tab = state.cotTabActiva[c.id] || "referencias";
 
   var html = '<div class="cot-card" data-cot-id="' + c.id + '">';
-  html += renderCotHead(c);
-  html += renderCotStatsRow(c, totales, iva);
+  html += renderCotHead(c, iva);
+  html += renderCotStatsRow(totales);
   html += renderCotVendedorCompact(c);
   html += renderCotTabsStrip(c, tab);
   html += '<div class="cot-tab-body">';
   if (tab === "produccion") html += renderTabProduccion(c, totales, real);
-  else if (tab === "documentos") html += renderTabDocumentos(c);
   else html += renderTabReferencias(c);
   html += "</div>";
   html += "</div>"; // .cot-card
   return html;
 }
 
-function renderCotHead(c) {
+function renderCotHead(c, iva) {
   var menuAbierto = state.cotMenuAbierto === c.id;
   var html = '<div class="cot-head">' +
     '<div>' +
@@ -176,12 +162,23 @@ function renderCotHead(c) {
     (c.esDemo ? ' <span class="badge warning" title="No cuenta en KPIs, reportes ni Por cobrar — es solo para practicar el flujo">🧪 Prueba</span>' : "") +
     "</div>" +
     '<div class="cot-meta">' + esc(c.descripcion) + " · " +
+    '<span class="cot-meta-label">Fecha</span> ' +
     '<input type="date" class="mini-input" style="width:135px;display:inline-block;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" />' +
     (c.pedidoOrigenId && c.estado !== "convertida" ? ' · <span style="color:var(--accent-ink);">escalada desde pedido rápido</span>' : "") +
     "</div>" +
     "</div>" +
     '<div class="cot-head-actions">' +
+    '<div class="cot-head-actions-row">' +
+    '<label class="cot-iva-inline"><input type="checkbox" data-action-change="set-cot-iva" data-campo="activo" data-id="' + c.id + '" ' + (iva.activo ? "checked" : "") + " /> IVA" +
+    (iva.activo ? ('<input type="number" class="mini-input" style="width:52px" value="' + esc(iva.porcentaje) + '" data-action-change="set-cot-iva" data-campo="porcentaje" data-id="' + c.id + '" title="Porcentaje de IVA" />%') : "") +
+    "</label>" + renderHelp("El IVA es opcional: actívalo aquí (o desde el pedido convertido) y define el %. Si está apagado, el PDF no lo cobra.") +
+    (c.estado !== "convertida"
+      ? (c.pedidoOrigenId
+          ? '<button class="btn small" data-action="aplicar-cotizacion-a-pedido" data-id="' + c.id + '" title="Reemplaza el total, descripción, cantidad y vendedor del pedido original con estos valores. Los abonos ya cobrados se conservan.">Aplicar a pedido →</button>'
+          : '<button class="btn small" data-action="convertir-cotizacion" data-id="' + c.id + '">Convertir en pedido →</button>')
+      : "") +
     '<button class="cot-kebab-btn" data-action="toggle-cot-menu" data-id="' + c.id + '" aria-label="Más acciones" title="Más acciones">⋮</button>' +
+    "</div>" +
     (menuAbierto ? renderCotKebabMenu(c) : "") +
     "</div>" +
     "</div>";
@@ -202,26 +199,14 @@ function renderCotKebabMenu(c) {
 }
 
 // Cifras grandes (estilo dashboard financiero) en vez de una fila de texto
-// chico: es lo primero que se debe leer de una cotización. El IVA vive acá
-// al lado, compacto, y la única acción primaria (convertir en pedido) cierra
-// el bloque.
-function renderCotStatsRow(c, totales, iva) {
-  var html = '<div class="cot-hero-stats">' +
+// chico: es lo primero que se debe leer de una cotización. IVA y "convertir
+// en pedido" viven arriba a la derecha, junto al menú "⋮" (ver renderCotHead).
+function renderCotStatsRow(totales) {
+  return '<div class="cot-hero-stats">' +
     '<div class="cot-hero-stat"><div class="rl">Precio total cotizado</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
     '<div class="cot-hero-stat"><div class="rl">Ganancia estimada</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
     '<div class="cot-hero-stat"><div class="rl">Margen</div><div class="rv">' + totales.margenPct.toFixed(1) + "%</div></div>" +
     "</div>";
-
-  html += '<label class="cot-iva-inline"><input type="checkbox" data-action-change="set-cot-iva" data-campo="activo" data-id="' + c.id + '" ' + (iva.activo ? "checked" : "") + " /> IVA" +
-    (iva.activo ? ('<input type="number" class="mini-input" style="width:52px" value="' + esc(iva.porcentaje) + '" data-action-change="set-cot-iva" data-campo="porcentaje" data-id="' + c.id + '" title="Porcentaje de IVA" />%') : "") +
-    "</label>" + renderHelp("El IVA es opcional: actívalo aquí (o desde el pedido convertido) y define el %. Si está apagado, el PDF no lo cobra.");
-
-  if (c.estado !== "convertida") {
-    html += c.pedidoOrigenId
-      ? '<button class="btn cot-cta" data-action="aplicar-cotizacion-a-pedido" data-id="' + c.id + '" title="Reemplaza el total, descripción, cantidad y vendedor del pedido original con estos valores. Los abonos ya cobrados se conservan.">Aplicar a pedido →</button>'
-      : '<button class="btn cot-cta" data-action="convertir-cotizacion" data-id="' + c.id + '">Convertir en pedido →</button>';
-  }
-  return html;
 }
 
 // Una sola línea por defecto (nombre, comisión, si ya se pagó) — clic para
@@ -253,7 +238,7 @@ function renderCotVendedorCompact(c) {
 }
 
 function renderCotTabsStrip(c, tab) {
-  var tabs = [["referencias", "Referencias"], ["produccion", "Producción"], ["documentos", "Documentos"]];
+  var tabs = [["referencias", "Referencias"], ["produccion", "Producción"]];
   var html = '<div class="cot-tabs">';
   tabs.forEach(function (t) {
     html += '<button class="cot-tab-btn' + (tab === t[0] ? " active" : "") + '" data-action="set-cot-tab" data-id="' + c.id + '" data-val="' + t[0] + '">' + t[1] + "</button>";
@@ -263,30 +248,40 @@ function renderCotTabsStrip(c, tab) {
 }
 
 // Pestaña "Referencias": qué se está vendiendo y con qué insumos — lo que se
-// arma primero al cotizar. La lista de compras es un derivado directo de los
-// insumos, así que se queda aquí en vez de en Producción.
+// arma primero al cotizar.
 function renderTabReferencias(c) {
-  var compras = calcListaCompras(c);
   var html = renderReferenciasTabs(c);
   html += '<div class="pedido-actions" style="margin-top:4px;"><button class="btn ghost small" data-action="add-referencia" data-id="' + c.id + '">+ Agregar referencia</button></div>';
-  html += renderSeccionColapsable(c, "seccionCompras", "Lista de compras (insumos a conseguir)", "", renderListaCompras(compras));
   return html;
 }
 
 // Pestaña "Producción": todo lo que solo importa una vez se empieza a
-// producir — comparación real vs. estimado, costos reales registrados y las
-// etapas del flujo. Antes vivía siempre visible, mezclado con lo de armar la
-// cotización.
+// producir — comparación estimado vs. real lado a lado, qué falta comprar,
+// costos reales, etapas del flujo y los documentos (que antes tenían su
+// propia pestaña, mucho más flaca que esta). Nada queda recogido por
+// defecto: son pocas secciones, así que no hace falta esconderlas.
 function renderTabProduccion(c, totales, real) {
   var sobrecosto = real.sobrecosto;
   var vClass = sobrecosto === 0 ? "neutra" : (sobrecosto > 0 ? "mala" : "ok");
 
-  var html = '<div class="cot-col-title">Real vs. estimado' + renderHelp("Lo estimado ajustado por la diferencia entre los costos reales que registraste y lo presupuestado para ellos. Así comparas lo planeado contra lo que en verdad pasó.") + "</div>";
-  html += '<div class="cot-resumen-total">' +
-    '<div><div class="rl">Costo total real</div><div class="rv">' + fmt(real.costoTotal) + "</div></div>" +
-    '<div><div class="rl">Precio total cotizado</div><div class="rv">' + fmt(real.precioTotal) + "</div></div>" +
-    '<div><div class="rl">Ganancia real</div><div class="rv" style="color:' + (real.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(real.gananciaTotal) + "</div></div>" +
-    '<div><div class="rl">Margen real</div><div class="rv">' + real.margenPct.toFixed(1) + "%</div></div>" +
+  var html = '<div class="cot-col-title">Estimado vs. real' + renderHelp("Estimado es lo que se planeó al cotizar. Real ajusta esos números con los costos reales que hayas registrado abajo, para comparar lo planeado contra lo que en verdad pasó.") + "</div>";
+  html += '<div class="cot-compara-grid">' +
+    '<div class="cot-compara-col">' +
+    '<div class="cot-compara-titulo">Estimado</div>' +
+    '<div class="cot-resumen-total">' +
+    '<div><div class="rl">Costo total</div><div class="rv">' + fmt(totales.costoTotal) + "</div></div>" +
+    '<div><div class="rl">Precio total</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
+    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
+    '<div><div class="rl">Margen</div><div class="rv">' + totales.margenPct.toFixed(1) + "%</div></div>" +
+    "</div></div>" +
+    '<div class="cot-compara-col">' +
+    '<div class="cot-compara-titulo">Real</div>' +
+    '<div class="cot-resumen-total">' +
+    '<div><div class="rl">Costo total</div><div class="rv">' + fmt(real.costoTotal) + "</div></div>" +
+    '<div><div class="rl">Precio total</div><div class="rv">' + fmt(real.precioTotal) + "</div></div>" +
+    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (real.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(real.gananciaTotal) + "</div></div>" +
+    '<div><div class="rl">Margen</div><div class="rv">' + real.margenPct.toFixed(1) + "%</div></div>" +
+    "</div></div>" +
     "</div>";
 
   if (sobrecosto !== 0) {
@@ -298,6 +293,9 @@ function renderTabProduccion(c, totales, real) {
   }
 
   var compras = calcListaCompras(c);
+  html += '<div class="cot-col-title" style="margin-top:22px;">Qué falta comprar</div>';
+  html += renderListaCompras(compras);
+
   var htmlCostosReales = "";
   (c.gastosReales || []).forEach(function (g) {
     var etiquetaDestino = g.destino === "insumo" ? (" — insumo: " + esc(g.destinoNombre || "")) : " — costo total";
@@ -323,37 +321,47 @@ function renderTabProduccion(c, totales, real) {
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como un solo movimiento en Finanzas, para llevar el registro completo por pedido.">Registrar estimado completo como movimiento</button>'
       : '<span class="tag" style="background:var(--surface-3);" title="Disponible una vez esta cotización ya sea un pedido — es una medida de seguridad para no registrar gastos sin que exista un pedido con abono real.">🔒 Estimado completo (disponible al convertir en pedido)</span>') +
     "</div>";
-  html += renderSeccionColapsable(c, "seccionCostosReales", "Costos reales registrados",
-    renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro también crea un movimiento en Finanzas, para que la caja quede sincronizada."),
-    htmlCostosReales);
+  html += '<div class="cot-col-title" style="margin-top:22px;">Costos reales registrados' +
+    renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro también crea un movimiento en Finanzas, para que la caja quede sincronizada.") +
+    "</div>";
+  html += htmlCostosReales;
 
-  html += renderSeccionColapsable(c, "seccionEstados", "Estados de producción",
-    renderHelp("Define aquí las etapas por las que pasa este pedido (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Se pueden guardar como plantilla para reutilizarlas en otra cotización."),
-    renderEstadosCot(c));
+  html += '<div class="cot-col-title" style="margin-top:22px;">Etapas de producción' +
+    renderHelp("Define aquí las etapas por las que pasa este pedido (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Se pueden guardar como plantilla para reutilizarlas en otra cotización.") +
+    "</div>";
+  html += renderEstadosCot(c);
+
+  html += renderProduccionDocumentos(c);
 
   return html;
 }
 
-// Pestaña "Documentos": lo que sale hacia afuera (o queda de control
-// interno). Antes eran botones sueltos arriba de la tarjeta, mezclados con
-// las acciones del día a día.
-function renderTabDocumentos(c) {
-  var html = '<div class="row-actions" style="flex-wrap:wrap;gap:8px;">' +
-    '<button class="btn ghost small" data-action="generar-pdf" data-id="' + c.id + '">Generar PDF para el cliente</button>' +
-    '<button class="btn ghost small" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Clientes)">✉ Enviar por correo</button>' +
+// Documentos: antes tenía su propia pestaña, pero era demasiado flaca para
+// justificarla sola — se dividió en dos columnas (para el cliente / para ti)
+// dentro de Producción, con botones más grandes.
+function renderProduccionDocumentos(c) {
+  var html = '<div class="cot-col-title" style="margin-top:22px;">Documentos</div>';
+  html += '<div class="cot-docs-grid">';
+
+  html += '<div class="cot-docs-col">' +
+    '<div class="cot-docs-titulo">Para el cliente</div>' +
+    '<button class="btn cot-doc-btn" data-action="generar-pdf" data-id="' + c.id + '">📄 Generar PDF para el cliente</button>' +
+    '<button class="btn ghost cot-doc-btn" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Clientes)">✉ Enviar por correo</button>' +
     "</div>";
 
-  html += renderSeccionColapsable(c, "seccionPdfInterno", "PDF interno (para ti, con lo que elijas)",
-    renderHelp("Este PDF no es para el cliente: es para tu propio control interno. Elige qué secciones incluir — de pronto solo quieres la lista de compras, o de pronto toda la información."),
-    '<div class="row-actions" style="flex-wrap:wrap;gap:12px;">' +
+  html += '<div class="cot-docs-col">' +
+    '<div class="cot-docs-titulo">Para ti (control interno)' + renderHelp("Este PDF no es para el cliente: es para tu propio control interno. Elige qué secciones incluir — de pronto solo quieres la lista de compras, o de pronto toda la información.") + "</div>" +
+    '<div class="row-actions" style="flex-wrap:wrap;gap:10px;margin-bottom:10px;">' +
       checkboxPdfInterno("pdfint-general", "Datos generales", true) +
       checkboxPdfInterno("pdfint-referencias", "Referencias e insumos", true) +
       checkboxPdfInterno("pdfint-compras", "Lista de compras", true) +
       checkboxPdfInterno("pdfint-reales", "Costos reales", true) +
       checkboxPdfInterno("pdfint-vendedor", "Comisión vendedor", !!(c.vendedor && c.vendedor.nombre)) +
-      '<button class="btn ghost small" data-action="generar-pdf-interno" data-id="' + c.id + '">Generar PDF interno</button>' +
-      "</div>");
+      "</div>" +
+    '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-interno" data-id="' + c.id + '">🗂 Generar PDF interno</button>' +
+    "</div>";
 
+  html += "</div>";
   return html;
 }
 
@@ -391,12 +399,14 @@ function renderRefCard(cotId, ref) {
   var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
     '<div class="ref-top">' +
     renderThumb(cotId, ref) +
-    '<span class="ref-nombre" style="flex:1;"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="nombre" /></span>' +
+    '<div class="ref-top-info">' +
+    '<span class="ref-nombre"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="nombre" /></span>' +
     '<div class="ref-fields">' +
-    '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="width:80px" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="consumoAprox" /></span>' +
-    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="width:80px" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="cantidadPedida" /></span>' +
-    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="width:100px" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="precioVenta" /></span>' +
-    '<button class="btn danger small" data-action="remove-referencia" data-cot="' + cotId + '" data-ref="' + ref.id + '">Eliminar referencia</button>' +
+    '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="consumoAprox" /></span>' +
+    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="cantidadPedida" /></span>' +
+    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="precioVenta" /></span>' +
+    '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia" data-cot="' + cotId + '" data-ref="' + ref.id + '">Eliminar referencia</button>' +
+    "</div>" +
     "</div>" +
     "</div>";
 
@@ -448,21 +458,22 @@ function renderRefCard(cotId, ref) {
 // Tallas/observaciones (antes vivía en el pedido, ahora aquí para poder
 // diferenciar el listado por referencia cuando la cotización tiene varias).
 // Las filas SÍ son editables in-place (antes en pedidos solo se podían
-// borrar y volver a crear si había un error de digitación).
+// borrar y volver a crear si había un error de digitación). Vive dentro de
+// "Opciones adicionales" porque no toda referencia necesita este listado
+// (no todo lo que se cotiza es deportivo/personalizado por unidad).
 function renderDetalleReferencia(cotId, ref) {
   var detalle = ref.detalle || [];
-  // Progresivo: colapsada por defecto hasta que tenga datos (no todas las
-  // referencias necesitan tallas por unidad) — en cuanto se usa, queda
+  // Colapsada por defecto hasta que tenga datos — en cuanto se usa, queda
   // abierta sola de ahí en adelante; se puede colapsar/expandir a mano.
-  // También se abre sola si una plantilla dejó una curva de tallas sugerida
-  // para esta referencia — si no, el botón para generarla quedaría escondido.
-  var abierta = ref.seccionTallasAbierta !== undefined ? !!ref.seccionTallasAbierta : (detalle.length > 0 || !!state.curvaSugerida[ref.id]);
-  var titulo = "Tallas y observaciones" + (detalle.length ? " (" + detalle.length + ")" : "");
+  var abierta = ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : detalle.length > 0;
+  var titulo = "Opciones adicionales" + (detalle.length ? " · tallas (" + detalle.length + ")" : "");
   var html = '<div class="cot-col-title" style="margin-top:14px;cursor:pointer;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
-    renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización. Si este listado crece más que la cantidad cotizada de la referencia, la cantidad sube sola para que coincidan (nunca al revés).") +
     "</div>";
   if (!abierta) return html;
+  html += '<div class="cot-col-title" style="margin-top:0;text-transform:none;font-weight:600;font-size:12.5px;color:var(--ink-soft);">Tallas y observaciones' +
+    renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización. Si este listado crece más que la cantidad cotizada de la referencia, la cantidad sube sola para que coincidan (nunca al revés).") +
+    "</div>";
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
   var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
   if (clienteRoster && (clienteRoster.roster || []).length) {
@@ -487,10 +498,6 @@ function renderDetalleReferencia(cotId, ref) {
   } else {
     html += '<div class="empty" style="padding:8px 0;">Sin filas aún — útil para uniformes: nombre, talla, número...</div>';
   }
-  html += '<div class="inline-form" style="margin-top:6px;">' +
-    '<input class="mini-input" data-role="curva-tallas-' + ref.id + '" value="' + esc(state.curvaSugerida[ref.id] || "") + '" placeholder="Curva de tallas, ej. S:2, M:4, L:3, XL:1" style="width:230px" />' +
-    '<button class="btn ghost small" data-action="generar-curva-tallas" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Genera una fila por cada unidad de la curva, con esa talla ya puesta">Generar filas por talla</button>' +
-    "</div>";
   html += '<div class="inline-form" style="margin-top:6px;">' +
     '<input class="mini-input" data-role="det-nombre-' + ref.id + '" placeholder="Nombre" style="width:120px" />' +
     '<input class="mini-input" data-role="det-talla-' + ref.id + '" placeholder="Talla" style="width:60px" />' +
@@ -521,11 +528,10 @@ function renderThumb(cotId, ref) {
 }
 
 function renderListaCompras(compras) {
-  var html = '<div class="cot-col-title" style="margin-top:16px;">Lista de compras (insumos a conseguir)</div>';
   if (compras.length === 0) {
-    return html + '<div class="empty" style="padding:8px 0;">Agrega insumos a las referencias para ver aquí lo que necesitas comprar.</div>';
+    return '<div class="empty" style="padding:8px 0;">Agrega insumos a las referencias para ver aquí lo que necesitas comprar.</div>';
   }
-  html += '<div class="tx-row head" style="grid-template-columns:1fr 1.4fr 110px 110px;"><span>Insumo</span><span>Usado en</span><span>Cantidad a comprar</span><span>Costo total</span></div>';
+  var html = '<div class="tx-row head" style="grid-template-columns:1fr 1.4fr 110px 110px;"><span>Insumo</span><span>Usado en</span><span>Cantidad a comprar</span><span>Costo total</span></div>';
   compras.forEach(function (c) {
     html += '<div class="tx-row" style="grid-template-columns:1fr 1.4fr 110px 110px;">' +
       "<span>" + esc(c.nombre) + "</span>" +
@@ -569,8 +575,8 @@ export var actions = {
   "toggle-ref-seccion": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     mapRef(cotId, refId, function (r) {
-      var abierta = r.seccionTallasAbierta !== undefined ? !!r.seccionTallasAbierta : (r.detalle || []).length > 0;
-      return Object.assign({}, r, { seccionTallasAbierta: !abierta });
+      var abierta = r.seccionOpcionalesAbierta !== undefined ? !!r.seccionOpcionalesAbierta : (r.detalle || []).length > 0;
+      return Object.assign({}, r, { seccionOpcionalesAbierta: !abierta });
     });
   },
   "add-cotizacion": function () {
@@ -710,12 +716,6 @@ export var actions = {
       if (pla.imagenUrl && !r.imagenUrl) patch.imagenUrl = pla.imagenUrl;
       return Object.assign({}, r, patch);
     });
-    // La curva de tallas de la plantilla (si tiene una) queda sugerida en el
-    // input de "Tallas y observaciones" de esta referencia, lista para
-    // generar las filas con un clic (ver renderDetalleReferencia).
-    if (pla.curvaTallas) {
-      state.curvaSugerida = Object.assign({}, state.curvaSugerida, { [refId]: pla.curvaTallas });
-    }
     // Cada tipo de prenda puede necesitar etapas de producción distintas
     // (ej. sublimación). Si la plantilla trae un flujo asignado, se aplica a
     // la cotización completa (no solo a la referencia) para que la orden de
@@ -901,23 +901,6 @@ export var actions = {
     var fila = { id: uid(), nombre: nombreD, talla: val(card, "det-talla-" + refId), numero: val(card, "det-numero-" + refId), tipo: val(card, "det-tipo-" + refId), observaciones: val(card, "det-obs-" + refId) };
     mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, [fila]); });
   },
-  // Genera de una vez varias filas de "tallas y observaciones" a partir de
-  // una curva tipo "S:2, M:4, L:3" — cada unidad nace con su talla puesta y
-  // nombre/número en blanco para completar a mano (útil sobre todo cuando
-  // el nombre/número se sabe después, como en uniformes por jugador).
-  "generar-curva-tallas": function (el) {
-    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
-    var card = el.closest(".cot-card");
-    var curva = parseCurvaTallas(val(card, "curva-tallas-" + refId));
-    if (!curva.length) { window.alert("Escribe la curva como \"S:2, M:4, L:3\" (talla y cantidad separadas por dos puntos)."); return; }
-    var filas = [];
-    curva.forEach(function (c) {
-      for (var i = 0; i < c.cantidad; i++) filas.push({ id: uid(), nombre: "", talla: c.talla, numero: "", tipo: "", observaciones: "" });
-    });
-    mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
-    var curvaLimpia = Object.assign({}, state.curvaSugerida); delete curvaLimpia[refId];
-    state.curvaSugerida = curvaLimpia;
-  },
   // Trae de una vez el roster guardado en el cliente (nombre+número+talla,
   // ver modules/clientes.js) como filas de detalle — para clientes que
   // repiten pedido cada temporada (típico en uniformes de equipo) sin tener
@@ -1002,10 +985,6 @@ export var actions = {
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
     persist("pedidos"); persist("cotizaciones"); notify();
-  },
-  "toggle-cot-seccion": function (el) {
-    var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
-    conRef(id, function (c) { var patch = {}; patch[campo] = !c[campo]; return Object.assign({}, c, patch); });
   },
   "set-estado-cot-label": function (el) {
     var id = el.getAttribute("data-id"), idx = Number(el.getAttribute("data-idx"));

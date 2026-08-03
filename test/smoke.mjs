@@ -161,9 +161,10 @@ addCatSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 ref = state.cotizaciones[0].referencias[0];
 assert(ref.insumos.length === 2, "agrega insumo desde el catálogo a la referencia");
 
-// generar PDF vive en la pestaña "Documentos" de la tarjeta (antes era un
-// botón siempre visible arriba de la tarjeta).
-click('[data-action="set-cot-tab"][data-id="' + cotId + '"][data-val="documentos"]');
+// generar PDF vive dentro de la pestaña "Producción" de la tarjeta (antes
+// era un botón siempre visible arriba de la tarjeta, y luego tuvo su propia
+// pestaña "Documentos" — se fusionó en Producción por ser muy chica sola).
+click('[data-action="set-cot-tab"][data-id="' + cotId + '"][data-val="produccion"]');
 // sin jsPDF cargado (no aplica en este entorno de prueba) debe fallar de
 // forma controlada, sin romper el render ni lanzar una excepción.
 click('[data-action="generar-pdf"][data-id="' + cotId + '"]');

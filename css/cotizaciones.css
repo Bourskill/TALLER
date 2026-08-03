@@ -36,24 +36,28 @@
 .badge.convertida{background:var(--info-soft);color:var(--info-ink);}
 
 .ref-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 15px;margin-bottom:12px;}
-.ref-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+/* La imagen tiene el protagonismo: va grande a la izquierda; nombre y campos
+   se apilan a la derecha en vez de ir todos en una sola fila apretada. */
+.ref-top{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;}
 
 /* miniatura de imagen de referencia (clic para pegar/cambiar el link) */
-.ref-thumb{position:relative;flex:0 0 52px;width:52px;height:52px;border-radius:8px;overflow:hidden;border:1.5px dashed var(--border);background:var(--surface-3);cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.ref-thumb{position:relative;flex:0 0 96px;width:96px;height:96px;border-radius:10px;overflow:hidden;border:1.5px dashed var(--border);background:var(--surface-3);cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .ref-thumb:hover{border-color:var(--accent);}
 .ref-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
-.ref-thumb-empty{font-size:9.5px;color:var(--ink-faint);text-align:center;line-height:1.3;padding:2px;}
-.ref-thumb-remove{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:999px;border:none;background:rgba(20,21,31,.78);color:#fff;font-size:9px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.ref-thumb-empty{font-size:11px;color:var(--ink-faint);text-align:center;line-height:1.3;padding:4px;}
+.ref-thumb-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:999px;border:none;background:rgba(20,21,31,.78);color:#fff;font-size:11px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .ref-thumb-remove:hover{background:var(--danger);}
+.ref-top-info{flex:1;min-width:220px;display:flex;flex-direction:column;gap:10px;}
 .ref-nombre{font-weight:700;font-size:14px;}
-.ref-fields{display:flex;gap:14px;align-items:center;flex-wrap:wrap;}
-.ref-fields label{font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;margin-right:4px;}
+.ref-fields{display:flex;flex-direction:column;align-items:stretch;gap:9px;}
+.ref-fields span{display:flex;align-items:center;gap:8px;}
+.ref-fields label{flex:0 0 128px;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
 .ins-table{width:100%;margin-top:10px;font-size:12px;}
 .ins-row{display:grid;grid-template-columns:1fr 60px 90px 90px 90px 30px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border-soft);}
 .ins-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
-.ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);}
-.ref-summary .rs-item .rl{font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}
-.ref-summary .rs-item .rv{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13.5px;margin-top:2px;}
+.ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px;padding:14px 0 2px;border-top:1px dashed var(--border);}
+.ref-summary .rs-item .rl{font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}
+.ref-summary .rs-item .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:17px;margin-top:4px;}
 .margen-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;}
 .margen-badge.pos{background:var(--success-soft);color:var(--success-ink);}
 .margen-badge.neg{background:var(--danger-soft);color:var(--danger-ink);}
@@ -67,11 +71,14 @@
 .det-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
 .det-row input, .det-row select{font-family:'Inter',sans-serif;font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-3);color:var(--ink);width:100%;}
 
-/* Cabecera de la tarjeta de detalle: cliente/estado a la izquierda, menú
-   "⋮" de acciones secundarias (prueba, eliminar) a la derecha. */
+/* Cabecera de la tarjeta de detalle: cliente/estado a la izquierda; IVA,
+   "convertir en pedido" y el menú "⋮" de acciones secundarias (prueba,
+   eliminar) arriba a la derecha. */
 .cot-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
 .cot-head-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cot-meta-label{color:var(--ink-faint);}
 .cot-head-actions{position:relative;flex:0 0 auto;}
+.cot-head-actions-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
 .cot-kebab-btn{background:none;border:1px solid var(--border);border-radius:8px;width:32px;height:32px;color:var(--ink-soft);font-size:16px;line-height:1;cursor:pointer;}
 .cot-kebab-btn:hover{border-color:var(--border-strong);color:var(--ink);}
 .cot-menu-overlay{position:fixed;inset:0;z-index:60;background:transparent;}
@@ -87,23 +94,37 @@
 .cot-hero-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:12px 14px;}
 .cot-hero-stat .rl{font-size:11.5px;color:var(--ink-faint);}
 .cot-hero-stat .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:21px;margin-top:3px;}
-.cot-iva-inline{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);margin-right:10px;}
-.cot-cta{margin-top:10px;}
+.cot-iva-inline{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);}
 
 /* Vendedor: una línea resumen por defecto, se expande a formulario al hacer clic. */
 .cot-vendedor-compact{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);padding:8px 0 0;cursor:pointer;}
 .cot-vendedor-compact:hover{color:var(--ink);}
 
-/* Pestañas internas de una cotización: Referencias / Producción / Documentos —
-   reemplazan lo que antes era una pila de secciones siempre visibles. */
+/* Pestañas internas de una cotización: Referencias / Producción — reemplazan
+   lo que antes era una pila de secciones siempre visibles. */
 .cot-tabs{display:flex;gap:4px;background:var(--surface-3);border-radius:9px;padding:3px;margin-top:16px;}
 .cot-tab-btn{flex:1;text-align:center;font-size:12.5px;font-weight:600;padding:7px 0;border-radius:7px;background:none;border:none;color:var(--ink-faint);cursor:pointer;font-family:'Inter',sans-serif;}
 .cot-tab-btn.active{background:var(--surface);color:var(--ink);}
 .cot-tab-btn:hover:not(.active){color:var(--ink-soft);}
-.cot-tab-body{margin-top:14px;}
+.cot-tab-body{margin-top:20px;}
+
+/* Producción → "Estimado vs. real": dos columnas lado a lado para comparar
+   de un vistazo (antes solo se veía "Real", sin nada al lado con qué compararlo). */
+.cot-compara-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cot-compara-titulo{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:6px;}
+.cot-compara-grid .cot-resumen-total{margin:0;height:100%;}
+
+/* Producción → "Documentos": antes tenía su propia pestaña, muy flaca sola;
+   ahora son dos columnas (cliente / interno) con botones más grandes. */
+.cot-docs-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.cot-docs-titulo{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;}
+.cot-doc-btn{display:block;width:100%;padding:13px 16px;font-size:13.5px;margin-bottom:10px;}
 
 @media (max-width: 700px){
   .cot-cols{grid-template-columns:1fr;}
   .ins-row{grid-template-columns:1fr 1fr;}
   .det-row{grid-template-columns:1fr 1fr;}
+  .det-row > *:nth-child(6){grid-column:1 / -1;}
+  .cot-compara-grid{grid-template-columns:1fr;}
+  .cot-docs-grid{grid-template-columns:1fr;}
 }

@@ -99,22 +99,6 @@ export function parseDias(str) {
     .sort(function (a, b) { return a - b; });
 }
 
-// Convierte "S:2, M:4, L:3" en [{talla:"S",cantidad:2}, {talla:"M",cantidad:4}, {talla:"L",cantidad:3}]
-// — para generar de una vez varias filas de "tallas y observaciones" (ver
-// cotizaciones.js: acción "generar-curva-tallas") en vez de fila por fila.
-// Ignora segmentos mal formados en vez de fallar del todo.
-export function parseCurvaTallas(str) {
-  return String(str || "")
-    .split(",")
-    .map(function (seg) {
-      var partes = seg.split(":");
-      var talla = (partes[0] || "").trim();
-      var cantidad = parseInt((partes[1] || "").trim(), 10);
-      return { talla: talla, cantidad: cantidad };
-    })
-    .filter(function (x) { return x.talla && x.cantidad > 0; });
-}
-
 // Lee "días de pago" de un objeto (gasto fijo, config de nómina...), aceptando
 // el formato nuevo (diasPago: array) o el legado (diaPago: un solo valor).
 export function diasPagoDe(obj) {

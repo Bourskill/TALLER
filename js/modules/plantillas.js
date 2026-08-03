@@ -95,7 +95,6 @@ function renderPlantillaCard(p) {
     '<option value="">Estándar</option>' +
     flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
     "</select></div>" +
-    '<div class="field wide"><label>Curva de tallas típica' + renderHelp("Ej. \"S:2, M:4, L:3, XL:1\". Al aplicar esta plantilla a una referencia de cotización, se sugiere esta curva ahí para generar de una vez esas filas de tallas en vez de una por una.") + '</label><input class="mini-input" style="width:100%" value="' + esc(p.curvaTallas || "") + '" placeholder="Ej. S:2, M:4, L:3, XL:1" data-action-change="set-pla-campo" data-id="' + p.id + '" data-campo="curvaTallas" /></div>' +
     '</div><button class="btn danger small" data-action="remove-plantilla" data-id="' + p.id + '">Eliminar plantilla</button></div>';
 
   html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
@@ -126,7 +125,7 @@ function renderPlantillaCard(p) {
 
 export var actions = {
   "add-plantilla": function () {
-    state.plantillasPrendas = (state.plantillasPrendas || []).concat([{ id: uid(), nombre: "Nueva plantilla", consumoSugerido: "", flujoEstadosId: "", curvaTallas: "", imagenUrl: "", insumos: [] }]);
+    state.plantillasPrendas = (state.plantillasPrendas || []).concat([{ id: uid(), nombre: "Nueva plantilla", consumoSugerido: "", flujoEstadosId: "", imagenUrl: "", insumos: [] }]);
     persist("plantillasPrendas"); notify();
   },
   "set-pla-imagen": function (el) {
