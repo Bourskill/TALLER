@@ -360,8 +360,14 @@ function bindEvents() {
   });
 
   // Patrón genérico 4: data-action -> dispara una acción del registro en "click".
+  // stopPropagation() es necesario porque hay data-action anidados a propósito
+  // (ej. el botón "quitar imagen" o "ver en grande" dentro de un thumb que a su
+  // vez tiene su propio data-action para "subir otra imagen") — sin esto, un
+  // clic en el botón interior burbujea hasta el contenedor y dispara las DOS
+  // acciones a la vez.
   app.querySelectorAll("[data-action]").forEach(function (el) {
-    el.addEventListener("click", function () {
+    el.addEventListener("click", function (e) {
+      e.stopPropagation();
       dispatch(el.getAttribute("data-action"), el);
     });
   });

@@ -304,9 +304,6 @@ function renderTabProduccion(c, totales, real) {
   }
 
   var compras = calcListaCompras(c);
-  html += '<div class="cot-col-title" style="margin-top:22px;">Qué falta comprar</div>';
-  html += renderListaCompras(compras);
-
   var htmlCostosReales = "";
   (c.gastosReales || []).forEach(function (g) {
     var etiquetaDestino = g.destino === "insumo" ? (" — insumo: " + esc(g.destinoNombre || "")) : " — costo total";
@@ -336,6 +333,9 @@ function renderTabProduccion(c, totales, real) {
     renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro también crea un movimiento en Finanzas, para que la caja quede sincronizada.") +
     "</div>";
   html += htmlCostosReales;
+
+  html += '<div class="cot-col-title" style="margin-top:22px;">Qué falta comprar</div>';
+  html += renderListaCompras(compras);
 
   html += renderProduccionDocumentos(c);
 
@@ -455,34 +455,36 @@ function renderRefCard(cotId, ref) {
     '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (calc.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(calc.gananciaTotal) + "</div></div>" +
     "</div>";
 
-  html += '<div class="cot-col-title" style="margin-top:18px;">Etapas de producción' +
-    renderHelp("Cada referencia puede tener su propio flujo (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Si le aplicaste una plantilla con un flujo asignado, nace precargado con ese.") +
-    "</div>";
-  html += renderEstadosRef(cotId, ref);
-
   html += renderDetalleReferencia(cotId, ref);
 
   html += "</div>"; // .ref-card
   return html;
 }
 
-// Tallas/observaciones (antes vivía en el pedido, ahora aquí para poder
-// diferenciar el listado por referencia cuando la cotización tiene varias).
-// Las filas SÍ son editables in-place (antes en pedidos solo se podían
-// borrar y volver a crear si había un error de digitación). Vive dentro de
-// "Opciones adicionales" porque no toda referencia necesita este listado
-// (no todo lo que se cotiza es deportivo/personalizado por unidad).
+// "Opciones adicionales" agrupa lo que no toda referencia necesita: etapas
+// de producción (cada una puede llevar un flujo distinto) y tallas/observaciones
+// (típico de uniformes, no de todo lo que se cotiza). Etapas va primero.
+// Las filas de tallas SÍ son editables in-place (antes en pedidos solo se
+// podían borrar y volver a crear si había un error de digitación).
 function renderDetalleReferencia(cotId, ref) {
   var detalle = ref.detalle || [];
-  // Colapsada por defecto hasta que tenga datos — en cuanto se usa, queda
-  // abierta sola de ahí en adelante; se puede colapsar/expandir a mano.
-  var abierta = ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : detalle.length > 0;
+  var tieneEstadosPersonalizados = !!(ref.estadosDef && ref.estadosDef.length);
+  // Colapsada por defecto hasta que tenga datos — en cuanto se usa (o una
+  // plantilla le asigna un flujo propio), queda abierta sola de ahí en
+  // adelante; se puede colapsar/expandir a mano.
+  var abierta = ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : (detalle.length > 0 || tieneEstadosPersonalizados);
   var titulo = "Opciones adicionales" + (detalle.length ? " · tallas (" + detalle.length + ")" : "");
   var html = '<div class="cot-col-title" style="margin-top:14px;cursor:pointer;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
     "</div>";
   if (!abierta) return html;
-  html += '<div class="cot-col-title" style="margin-top:0;text-transform:none;font-weight:600;font-size:12.5px;color:var(--ink-soft);">Tallas y observaciones' +
+
+  html += '<div class="cot-col-title" style="margin-top:0;text-transform:none;font-weight:600;font-size:12.5px;color:var(--ink-soft);">Etapas de producción' +
+    renderHelp("Cada referencia puede tener su propio flujo (ej. Cortado, Confección, Acabados...) — no todas las prendas pasan por las mismas. Si le aplicaste una plantilla con un flujo asignado, nace precargado con ese.") +
+    "</div>";
+  html += renderEstadosRef(cotId, ref);
+
+  html += '<div class="cot-col-title" style="margin-top:18px;text-transform:none;font-weight:600;font-size:12.5px;color:var(--ink-soft);">Tallas y observaciones' +
     renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización. Si este listado crece más que la cantidad cotizada de la referencia, la cantidad sube sola para que coincidan (nunca al revés).") +
     "</div>";
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
