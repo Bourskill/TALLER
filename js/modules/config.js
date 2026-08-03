@@ -9,7 +9,8 @@ import { calcIngresosTotales, calcGastosTotales, calcNominaPagada, calcCaja, cal
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
-import { subirImagenReferencia, actualizarAccesoEquipoDrive } from "../core/drive.js";
+import { subirImagenReferencia, compartirRecursosConNuevoMiembro } from "../core/drive.js";
+import { agregarMiembroEquipo } from "../core/auth.js";
 
 export function render() {
   var cfg = state.config;
@@ -39,11 +40,14 @@ export function render() {
     '<div class="field"><label>Color de acento (correos)</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
     "</div></div>";
 
-  html += '<div class="card"><div class="section-title small">Acceso del equipo a Drive' +
-    renderHelp("La carpeta de imágenes de referencia (Cotizaciones) se comparte con todo el equipo (admin y vendedores) automáticamente, pero solo la PRIMERA vez que se crea — si agregas a alguien nuevo en la pestaña \"roles\" DESPUÉS de eso, no queda compartido solo. Este botón vuelve a compartir la carpeta ya existente con todos los correos que hoy están en \"roles\".") +
-    '</div>' +
-    '<button class="btn ghost small" data-action="actualizar-acceso-equipo">Actualizar acceso del equipo</button>' +
-    "</div>";
+  html += '<div class="card"><div class="section-title small">Equipo' +
+    renderHelp("Agrega a alguien nuevo (admin o vendedor) en un solo paso desde acá: se guarda en la pestaña \"roles\" de la Sheet Y se le comparte automáticamente la Sheet y la carpeta de imágenes de Drive (si ya existe) — antes había que hacer esas dos cosas a mano, aparte. El único paso que sigue quedando FUERA de la app es agregar su correo como \"test user\" en Google Cloud Console → OAuth consent screen: es una política de Google mientras la app esté en modo Testing, no algo resoluble por API.") +
+    '</div><div class="form-grid">' +
+    '<div class="field"><label>Correo</label><input type="email" id="inp-equipo-correo" placeholder="correo@gmail.com" /></div>' +
+    '<div class="field"><label>Rol</label><select id="inp-equipo-rol"><option value="vendedor" selected>Vendedor</option><option value="admin">Admin</option></select></div>' +
+    '<div class="field"><label>Nombre (si es vendedor)</label><input id="inp-equipo-nombre" placeholder="Igual al que usa en Pedidos/Cotizaciones" /></div>' +
+    '<button class="btn small" data-action="agregar-miembro-equipo">Agregar al equipo</button>' +
+    "</div></div>";
 
   html += '<div class="card"><div class="section-title small">Respaldo de datos' +
     renderHelp("Copia completa de la Google Sheet (todo lo que gestiona la app) a una carpeta aparte en tu Drive — un respaldo de seguridad, no la base de datos en uso (esa sigue siendo la Sheet). Se actualiza sola como mucho una vez cada 24 horas, al abrir la app, para no generar llamadas de más a la API.") +
@@ -163,12 +167,26 @@ export var actions = {
     await respaldarSiCorresponde(true);
     notify();
   },
-  "actualizar-acceso-equipo": async function () {
+  "agregar-miembro-equipo": async function () {
+    var correoEl = document.getElementById("inp-equipo-correo");
+    var rolEl = document.getElementById("inp-equipo-rol");
+    var nombreEl = document.getElementById("inp-equipo-nombre");
+    var correo = correoEl ? correoEl.value.trim() : "";
+    var rol = rolEl ? rolEl.value : "vendedor";
+    var nombre = nombreEl ? nombreEl.value.trim() : "";
+    if (!correo) { window.alert("Escribe un correo."); return; }
     try {
-      await actualizarAccesoEquipoDrive();
-      window.alert("Listo — la carpeta de Drive se volvió a compartir con todos los correos que están hoy en la pestaña \"roles\".");
+      await agregarMiembroEquipo(correo, rol, nombre);
+      await compartirRecursosConNuevoMiembro(correo);
+      if (correoEl) correoEl.value = "";
+      if (nombreEl) nombreEl.value = "";
+      window.alert(
+        "Listo — " + correo + " ya está en el equipo (\"roles\") y tiene acceso a la Sheet" +
+        (state.config.driveFolderId ? " y a la carpeta de Drive" : "") + ".\n\n" +
+        "Último paso, fuera de la app: agregalo como \"test user\" en Google Cloud Console → APIs & Services → OAuth consent screen, para que pueda completar el login con Google."
+      );
     } catch (e) {
-      window.alert("No se pudo actualizar el acceso: " + (e && e.message ? e.message : e));
+      window.alert("No se pudo agregar al equipo: " + (e && e.message ? e.message : e));
     }
   },
   "set-pie-imagen": function () {

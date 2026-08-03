@@ -89,18 +89,22 @@ Cloud, fuera del código:
    Calendar API** y la **People API** (para Google Contacts).
 2. **Pantalla de consentimiento OAuth** → tipo Externo, modo **Testing**
    (evita el proceso de verificación de Google) → agregar como *test users*
-   tu correo y el de cada vendedor que vaya a entrar.
+   tu correo y el de cada persona del equipo que vaya a entrar. Este paso es
+   **el único que queda fuera de la app** (ver más abajo, "Agregar a alguien
+   al equipo") — Google no expone ninguna API para la lista de test users,
+   es pura configuración de la pantalla de consentimiento.
 3. **Credenciales** → crear un **OAuth Client ID** de tipo "Web application"
    → en "Authorized JavaScript origins" agregar `https://criyeak.netlify.app`
    y `http://localhost:8080` (o el origen que uses en desarrollo).
 4. **Google Sheets** → crear una hoja nueva (ej. "Panel del Taller — datos")
-   → compartirla como **Editor** con tu cuenta y con la de cada vendedor →
-   crear dos pestañas dentro:
+   → compartirla como **Editor** con tu propia cuenta (la del primer admin —
+   los siguientes se agregan desde la app, ver abajo) → crear dos pestañas
+   dentro:
    - `kv` con encabezados `key` | `value` (queda vacía; la app la llena sola).
    - `roles` con encabezados `correo` | `rol` | `vendedor_nombre`. Agrega ahí
-     tu propio correo con `rol = admin`, y uno por vendedor con
-     `rol = vendedor` y el mismo nombre que uses en el campo "Vendedor" de
-     Pedidos/Cotizaciones (así "Mis ventas" cruza sus datos correctamente).
+     tu propio correo con `rol = admin` (el resto del equipo se agrega desde
+     Configuración → "Equipo" una vez que la app ya esté andando, no hace
+     falta editar la Sheet a mano de nuevo).
 5. Copiar el **Client ID** (paso 3) y el **ID de la spreadsheet** (se ve en
    su URL, entre `/d/` y `/edit`) en `js/core/google-config.js`. Ninguno de
    los dos es secreto — el acceso real lo controla a quién compartiste la
@@ -111,26 +115,41 @@ solo consentimiento (Sheets + Drive + tu correo), y entrar según lo que diga
 tu fila en `roles`. Un correo que no esté en esa pestaña ve "Acceso no
 autorizado".
 
+### Agregar a alguien al equipo (admin o vendedor)
+
+Configuración → tarjeta "Equipo": correo + rol (+ nombre, si es vendedor) →
+"Agregar al equipo". Un solo paso hace lo que antes eran tres manuales: (1)
+agrega la fila en la pestaña `roles`, y (2) comparte automáticamente la
+Google Sheet y la carpeta de imágenes de Drive (si ya existe) con ese
+correo — ver `agregarMiembroEquipo()` en `core/auth.js` y
+`compartirRecursosConNuevoMiembro()` en `core/drive.js`.
+
+- **Sigue quedando un paso manual, fuera de la app, inevitable**: agregar el
+  correo como *test user* en Google Cloud Console → OAuth consent screen
+  (paso 2 de arriba). No hay forma de saltárselo por API — es la política de
+  Google mientras la app esté en modo Testing (permite hasta 100 test users
+  sin pedir verificación, de sobra para un taller). El diálogo de "Agregar
+  al equipo" te lo recuerda al terminar.
+- Si el correo ya está en `roles`, no lo duplica — avisa que ya está.
+- Un correo agregado como `admin` puede, a su vez, agregar a más gente —
+  no hace falta que sea siempre el mismo admin quien gestione el equipo.
+
 ### Imágenes de referencia → Google Drive (carpeta del admin)
 
 En Cotizaciones, la miniatura de cada referencia ("+ imagen") ahora sube un
 archivo desde el dispositivo (antes solo se podía pegar un link externo).
 Ver `js/core/drive.js`. Detalles a tener en cuenta:
 
-- Todas las imágenes (las subas vos o un vendedor) caen en **una sola
-  carpeta "Panel del Taller — imágenes" dentro de tu Drive** (el del admin),
-  no en el Drive personal de cada vendedor. La crea automáticamente la
-  primera vez que **vos** (admin) subís una imagen — si un vendedor la sube
-  antes de que exista, ve un aviso pidiéndole que esperes a que la crees.
-- Al crearla, la comparte automáticamente (permiso de Editor, sin mandar
-  correo de aviso) con cada correo que figure en la pestaña `roles` — admin
-  o vendedor, salvo el tuyo propio — así sus subidas también van a esa misma
-  carpeta sin que tengas que compartir nada a mano. **Ojo**: ese reparto
-  automático solo corre la PRIMERA vez que se crea la carpeta. Si agregás a
-  alguien nuevo en `roles` DESPUÉS de eso (ej. un segundo admin, o un
-  vendedor nuevo), esa persona no queda compartida sola — usá el botón
-  "Actualizar acceso del equipo" en Configuración para volver a compartir la
-  carpeta ya existente con todos los correos que hoy están en `roles`.
+- Todas las imágenes (las subas vos o cualquiera del equipo) caen en **una
+  sola carpeta "Panel del Taller — imágenes" dentro del Drive de quien la
+  creó** (el primer admin que suba una imagen), no en el Drive personal de
+  cada quien. Se crea automáticamente la primera vez que un admin sube una
+  imagen — si alguien más llega antes de que exista, ve un aviso pidiéndole
+  que espere a que un admin la cree.
+- Al crearla, se comparte automáticamente con todo el equipo que ya estaba
+  en `roles` en ese momento. A partir de ahí, cada persona nueva que se
+  agrega vía "Equipo" (arriba) queda compartida en el mismo paso — ya no
+  hace falta un botón aparte de "actualizar accesos".
 - Cada imagen queda además con permiso "cualquiera con el link puede ver" —
   así la miniatura y los PDF la pueden mostrar sin pedir login, igual que
   antes con un link externo cualquiera.

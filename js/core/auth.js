@@ -17,7 +17,7 @@
 // un token de acceso guardado indefinidamente en el disco.
 
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID, GOOGLE_SCOPES } from "./google-config.js";
-import { sheetsValuesGet } from "./googleRest.js";
+import { sheetsValuesGet, sheetsValuesAppend } from "./googleRest.js";
 
 var SESSION_STORAGE_KEY = "taller_sesion_v1";
 // Margen de seguridad: se considera vencido 2 minutos antes de la hora real,
@@ -132,4 +132,21 @@ export async function listarEquipoEmail() {
   return filas
     .map(function (f) { return (f[0] || "").trim(); })
     .filter(function (email) { return email && email.toLowerCase() !== propio.toLowerCase(); });
+}
+
+// Agrega un correo a la pestaña "roles" — antes esto se hacía a mano editando
+// la Sheet directamente. Junto con core/drive.js: compartirRecursosConNuevoMiembro()
+// (llamados los dos desde Configuración → "Equipo"), esto reduce "agregar a
+// alguien" a un solo paso dentro de la app en vez de tres manuales — el único
+// paso que sigue quedando afuera es agregarlo como *test user* en Google
+// Cloud Console → OAuth consent screen, que no tiene ninguna API pública:
+// es pura política de la pantalla de consentimiento mientras la app esté en
+// modo Testing.
+export async function agregarMiembroEquipo(correo, rol, vendedorNombre) {
+  var correoNorm = (correo || "").trim().toLowerCase();
+  if (!correoNorm) throw new Error("Falta el correo.");
+  var filas = await leerFilasRoles(accessToken);
+  var yaExiste = filas.some(function (f) { return (f[0] || "").trim().toLowerCase() === correoNorm; });
+  if (yaExiste) throw new Error("Ese correo ya está en el equipo (pestaña \"roles\").");
+  await sheetsValuesAppend(accessToken, SPREADSHEET_ID, "roles!A:C", [[correoNorm, rol === "admin" ? "admin" : "vendedor", vendedorNombre || ""]]);
 }
