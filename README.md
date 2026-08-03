@@ -430,6 +430,33 @@ el nombre lleva una insignia "↻ Recurrente".
   de creación propia — está etiquetado como tal a propósito, para no
   insinuar que es la fecha en que se hizo el pedido.
 
+## Finanzas: origen de cada movimiento + protección contra desincronizar la plata
+
+Primer paso de una ronda de rediseño de UX pedida por el usuario (ver
+"Ideas para la fase 2" al final). Reportó dos problemas reales: (1) un
+movimiento de tipo "comisión" se podía editar a "ingreso" desde Finanzas,
+invirtiendo su signo en la caja sin que el pedido/comisión real se enterara,
+y (2) no había forma de saber de un vistazo de dónde salió un movimiento.
+
+- **`origenDeTx(t)`** (`core/calc.js`): dado un movimiento, encuentra el
+  registro real que lo generó — pedido, cotización, gasto fijo o deuda —
+  usando los IDs que cada acción del sistema ya deja en el propio tx
+  (`pedidoId`, `cotizacionId`, `gastoFijoId`, `deudaId`). Un movimiento
+  cargado a mano desde "Registrar movimiento" no tiene ninguno de esos IDs,
+  así que `origenDeTx` devuelve `null` para él.
+- **Botón "↗ Origen"** en cada fila de Finanzas que sí tiene uno: cambia de
+  pestaña y hace scroll hasta el pedido/cotización/gasto fijo/deuda real
+  (mismo patrón que ya usaba "Ver cotización relacionada" en Pedidos).
+- **Edición bloqueada donde importa**: si el movimiento tiene un origen, su
+  `tipo` y `monto` quedan de solo lectura al editar (solo fecha/concepto/
+  persona siguen editables) — cambiarlos a mano es exactamente lo que
+  causaba el bug reportado. Un movimiento sin origen (cargado a mano) sigue
+  totalmente editable, sin restricciones, como siempre.
+- Motivo de "las matemáticas tienen que ser perfectas": esto que reportó el
+  usuario podía **invertir el signo de un movimiento en `calcCaja()`** sin
+  tocar el pedido real — la fila de edición ya no ofrece esa posibilidad
+  para movimientos con origen conocido.
+
 ## Estructura
 
 ```

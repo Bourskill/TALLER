@@ -629,7 +629,7 @@ export var actions = {
     var pagando = cot.vendedor.estado !== "pagado";
     if (pagando) {
       var valor = calcComisionValorCot(cot);
-      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: cot.pedidoId || "" });
+      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: cot.pedidoId || "", cotizacionId: cot.id });
       persist("tx");
     }
     state.cotizaciones = state.cotizaciones.map(function (c) {
@@ -650,7 +650,7 @@ export var actions = {
     state.tx.unshift({
       id: uid(), tipo: "gasto", concepto: "Estimado completo del pedido — " + cot.descripcion,
       monto: totales.costoTotal, contraparte: cot.cliente, estado: "pendiente", fecha: todayStr(),
-      pedidoId: cot.pedidoId || ""
+      pedidoId: cot.pedidoId || "", cotizacionId: cot.id
     });
     persist("tx"); notify();
   },

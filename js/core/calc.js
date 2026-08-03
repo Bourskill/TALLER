@@ -47,6 +47,35 @@ export function calcNominaPagada() {
     .filter(function (t) { return t.tipo === "nomina"; })
     .reduce(function (a, t) { return a + num(t.monto); }, 0);
 }
+// Un movimiento generado POR el sistema (abono, comisión, pago de gasto
+// fijo/deuda...) siempre tiene un registro real del que salió — a
+// diferencia de un movimiento cargado a mano desde "Registrar movimiento",
+// que no tiene ninguno. Esto se usa para dos cosas en Finanzas: mostrar un
+// botón "Ver origen" que navegue hasta ese registro, y BLOQUEAR la edición
+// de tipo/monto en esos movimientos (cambiarlos a mano desincroniza la
+// plata del taller de lo que ese pedido/comisión/deuda dice que pasó de
+// verdad — ver el "Registro de cambios" sobre por qué esto importa).
+export function origenDeTx(t) {
+  if (t.pedidoId) {
+    var p = state.pedidos.filter(function (x) { return x.id === t.pedidoId; })[0] ||
+      state.pedidosPapelera.filter(function (x) { return x.id === t.pedidoId; })[0];
+    if (p) return { tipo: "pedido", id: p.id, label: (p.numeroOp || "Pedido") + " — " + p.descripcion };
+  }
+  if (t.cotizacionId) {
+    var c = state.cotizaciones.filter(function (x) { return x.id === t.cotizacionId; })[0];
+    if (c) return { tipo: "cotizacion", id: c.id, label: "Cotización — " + c.descripcion };
+  }
+  if (t.gastoFijoId) {
+    var g = (state.config.gastosFijos || []).filter(function (x) { return x.id === t.gastoFijoId; })[0];
+    if (g) return { tipo: "gastoFijo", id: g.id, label: "Gasto fijo — " + g.nombre };
+  }
+  if (t.deudaId) {
+    var d = state.deudas.filter(function (x) { return x.id === t.deudaId; })[0] ||
+      state.deudasHistorial.filter(function (x) { return x.id === t.deudaId; })[0];
+    if (d) return { tipo: "deuda", id: d.id, label: "Deuda — " + d.concepto };
+  }
+  return null;
+}
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que
 // aún no se recibió no es un movimiento de Finanzas, es saldo de un pedido.

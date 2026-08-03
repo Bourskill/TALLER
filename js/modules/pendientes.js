@@ -85,7 +85,7 @@ export function render() {
     var pendiente = calcGastoFijoPendiente(g) > 0;
     var periodo = g.periodo || "mensual";
     var dias = diasPagoDe(g);
-    html += '<div class="emp-row" style="grid-template-columns:1fr 100px 110px 140px 130px 40px;">' +
+    html += '<div class="emp-row" data-gasto-fijo-id="' + g.id + '" style="grid-template-columns:1fr 100px 110px 140px 130px 40px;">' +
       "<span>" + esc(g.nombre) + '</span><span class="amount">' + fmt(g.monto) + "</span>" +
       '<span><select class="mini-input" style="width:100%" data-action-change="set-gasto-fijo-periodo" data-id="' + g.id + '">' +
       Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodo); }).join("") +
@@ -141,7 +141,7 @@ export function render() {
     var dias = diasPagoDe(d);
     // Aquí solo hay deudas pendientes: en cuanto se paga la última cuota, la
     // deuda se mueve entera al historial de abajo (ver acción "pagar-deuda").
-    html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;">' +
+    html += '<div class="emp-row" data-deuda-id="' + d.id + '" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;">' +
       "<span>" + esc(d.concepto) + "</span><span>" + esc(d.contraparte || "—") + '</span>' +
       '<span class="amount" title="Monto total: ' + fmt(d.monto) + '">' + fmt(saldo) + "</span>" +
       "<span>" + (cuotas > 1 ? (pagadas + "/" + cuotas) : "Único") + "</span>" +
@@ -186,7 +186,7 @@ export function render() {
     html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">';
     state.deudasHistorial.slice().reverse().forEach(function (d) {
       var cuotas = num(d.cuotas) || 1;
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;">' +
+      html += '<div data-deuda-id="' + d.id + '" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;">' +
         '<div style="min-width:0;">' +
         '<div style="font-weight:700;font-size:13px;">' + esc(d.concepto) + "</div>" +
         '<div style="font-size:11.5px;color:var(--ink-faint);margin-top:2px;">' +
@@ -395,7 +395,7 @@ export var actions = {
       return Object.assign({}, g, { pagadoHasta: pendiente ? clave : "" });
     });
     if (pendiente) {
-      state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Gasto fijo — " + gastoFijo.nombre, monto: num(gastoFijo.monto), contraparte: gastoFijo.nombre, fecha: todayStr(), pedidoId: "" });
+      state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Gasto fijo — " + gastoFijo.nombre, monto: num(gastoFijo.monto), contraparte: gastoFijo.nombre, fecha: todayStr(), pedidoId: "", gastoFijoId: gastoFijo.id });
       persist("tx");
     }
     persist("config"); notify();
@@ -495,7 +495,7 @@ export var actions = {
     if (!window.confirm('¿Registrar el pago de ' + etiqueta + " (" + fmt(valor) + ') de "' + deuda.concepto + '"?\n\nEsto crea un movimiento de gasto en Finanzas.' + (esUltima ? " Al quedar saldada, la deuda se mueve al historial." : ""))) return;
     var nuevasPagadas = pagadas + 1;
     var fechaPago = todayStr();
-    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "" });
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "", deudaId: deuda.id });
     if (nuevasPagadas >= cuotas) {
       // Deuda saldada por completo: sale de "deudas" y se mueve entera (no
       // solo un renglón de bitácora) al historial de deudas pagadas. Ya no

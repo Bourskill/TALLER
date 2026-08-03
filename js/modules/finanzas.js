@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm } from "../core/utils.js";
-import { clienteById, periodoKey } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
@@ -119,6 +119,7 @@ function renderTablaTx(lista) {
 }
 
 function renderFila(t) {
+  var origen = origenDeTx(t);
   return '<div class="tx-row">' +
     "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     "<span>" + esc(t.concepto) + "</span>" +
@@ -126,6 +127,7 @@ function renderFila(t) {
     '<span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
     '<span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+    (origen ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
     '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
     '<button class="btn danger small" data-action="remove-tx" data-id="' + t.id + '" title="Se mueve a la papelera, no se borra para siempre">🗑</button>' +
     "</span>" +
@@ -135,15 +137,29 @@ function renderFila(t) {
 // Fila en modo edición: reemplaza cada celda por un input/select editable.
 // Se guarda con "guardar-tx-edit" (lee estos mismos campos por data-role) o
 // se cancela con "cancelar-edicion-tx", sin perder los demás movimientos.
+//
+// Si el movimiento tiene un origen real (abono, comisión, pago de gasto
+// fijo/deuda...), el tipo y el monto quedan de solo lectura: cambiarlos a
+// mano desincroniza la plata del taller de lo que ese registro dice que
+// pasó de verdad (ej. "cambiar una comisión a ingreso" invertiría su signo
+// en la caja sin que el pedido se entere). Solo fecha/concepto/persona
+// siguen editables ahí — para un movimiento cargado a mano (sin origen)
+// todo sigue editable como siempre.
 function renderFilaEdicion(t) {
+  var origen = origenDeTx(t);
+  var tipoCell = origen
+    ? '<span><span class="tag ' + t.tipo + '" title="No editable: vinculado a ' + esc(origen.label) + '">' + TIPOS_TX[t.tipo] + "</span></span>"
+    : '<span><select class="mini-input" style="width:100%" data-role="edit-tipo">' +
+      Object.keys(TIPOS_TX).map(function (k) { return opt(k, TIPOS_TX[k], t.tipo); }).join("") +
+      "</select></span>";
+  var montoCell = origen
+    ? '<span class="amount" title="No editable: vinculado a ' + esc(origen.label) + '">' + fmt(t.monto) + "</span>"
+    : '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>';
   return '<div class="tx-row" style="background:var(--surface-2);" data-tx-edit-row="' + t.id + '">' +
     '<span><input type="date" class="mini-input" style="width:100%" data-role="edit-fecha" value="' + esc(t.fecha) + '" /></span>' +
     '<span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(t.concepto) + '" /></span>' +
     '<span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(t.contraparte || "") + '" /></span>' +
-    '<span><select class="mini-input" style="width:100%" data-role="edit-tipo">' +
-    Object.keys(TIPOS_TX).map(function (k) { return opt(k, TIPOS_TX[k], t.tipo); }).join("") +
-    "</select></span>" +
-    '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>' +
+    tipoCell + montoCell +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     '<button class="btn small" data-action="guardar-tx-edit" data-id="' + t.id + '">Guardar</button>' +
     '<button class="btn ghost small" data-action="cancelar-edicion-tx">Cancelar</button>' +
@@ -213,22 +229,58 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var fila = el.closest('[data-tx-edit-row]');
     if (!fila) return;
-    var g = function (role) { var i = fila.querySelector('[data-role="' + role + '"]'); return i ? i.value : ""; };
+    var original = state.tx.filter(function (t) { return t.id === id; })[0];
+    if (!original) return;
+    // null (no "") cuando el campo no existe en el DOM — pasa con tipo/monto
+    // en movimientos con origen, que quedan de solo lectura (ver
+    // renderFilaEdicion). Sin este null, num("") = 0 tumbaba el guardado
+    // completo (incluida la fecha/concepto, que sí eran editables) apenas
+    // se ocultaba el input de monto.
+    var g = function (role) { var i = fila.querySelector('[data-role="' + role + '"]'); return i ? i.value : null; };
     var concepto = g("edit-concepto");
-    var monto = num(g("edit-monto"));
-    if (!concepto || monto <= 0) return;
+    if (concepto === null) concepto = original.concepto;
+    if (!concepto) return;
+    var montoRaw = g("edit-monto");
+    var monto = montoRaw === null ? num(original.monto) : num(montoRaw);
+    if (monto <= 0) return;
+    var contraparteRaw = g("edit-contraparte");
     state.tx = state.tx.map(function (t) {
       if (t.id !== id) return t;
       return Object.assign({}, t, {
         fecha: g("edit-fecha") || t.fecha,
         concepto: concepto,
-        contraparte: g("edit-contraparte"),
+        contraparte: contraparteRaw === null ? t.contraparte : contraparteRaw,
         tipo: g("edit-tipo") || t.tipo,
         monto: monto
       });
     });
     state.txEditando = "";
     persist("tx"); notify();
+  },
+  // Lleva a la pestaña del registro real detrás de un movimiento (pedido,
+  // cotización, gasto fijo o deuda) y, si tiene un anchor identificable en
+  // el DOM, hace scroll hasta ahí — mismo patrón que
+  // "ver-cotizacion-relacionada" en pedidos.js.
+  "ver-origen-tx": function (el) {
+    var id = el.getAttribute("data-id");
+    var t = state.tx.filter(function (t) { return t.id === id; })[0];
+    if (!t) return;
+    var origen = origenDeTx(t);
+    if (!origen) return;
+    var TAB_POR_ORIGEN = { pedido: "pedidos", cotizacion: "cotizaciones", gastoFijo: "pendientes", deuda: "pendientes" };
+    var ATTR_POR_ORIGEN = { pedido: "data-pedido-id", cotizacion: "data-cot-id", gastoFijo: "data-gasto-fijo-id", deuda: "data-deuda-id" };
+    state.tab = TAB_POR_ORIGEN[origen.tipo] || state.tab;
+    state.sidebarMobileOpen = false;
+    // Si el pedido de origen está en la vista normal pero la papelera de
+    // Pedidos había quedado activa, sin esto quedaría "escondido" detrás de
+    // esa vista al llegar — mismo reset que ya hace la acción "tab" genérica.
+    state.filtroPedidosVista = "activos";
+    notify();
+    setTimeout(function () {
+      var attr = ATTR_POR_ORIGEN[origen.tipo];
+      var card = attr ? document.querySelector('[' + attr + '="' + origen.id + '"]') : null;
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
   },
   // "Eliminar" ya no borra para siempre: mueve el movimiento a la papelera,
   // de donde se puede restaurar si fue un error.
