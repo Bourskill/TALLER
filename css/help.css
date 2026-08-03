@@ -27,4 +27,4 @@
 /* KPIs seleccionables (ver core/dom.js): dan la sensación de ser un control,
    no solo un dato de lectura. */
 .kpi.kpi-clickable{cursor:pointer;}
-.kpi.kpi-clickable:hover{border-color:var(--accent);background:var(--surface-2);}
+.kpi.kpi-clickable:hover{border-color:var(--accent);background:var(--surface-2);transform:translateY(-2px);box-shadow:var(--shadow-md);}

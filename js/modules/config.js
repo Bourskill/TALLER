@@ -7,7 +7,7 @@ import { state, persist, notify } from "../core/store.js";
 import { esc, fmt, num, todayStr } from "../core/utils.js";
 import {
   calcBalancePeriodo, calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
-  calcResumenMovimientos, calcSerieMovimientos, calcGastoInsumosMensual
+  calcResumenMovimientos, calcGastoInsumosMensual
 } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
@@ -131,7 +131,7 @@ function renderReportePeriodo() {
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
   var resumen = calcResumenMovimientos(movimientos);
   var html = '<div class="card"><div class="section-title small">Reporte financiero' +
-    renderHelp("Elige un rango de fechas (o usa los atajos) — los números, la gráfica y el PDF de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí.") +
+    renderHelp("Elige un rango de fechas (o usa los atajos) — los números y el PDF de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí. La gráfica de ingresos/gastos vive en Resumen.") +
     "</div>";
   html += '<div class="filters" style="margin-bottom:10px;">' +
     ["hoy", "semana", "mes", "año"].map(function (k) {
@@ -152,8 +152,6 @@ function renderReportePeriodo() {
     '<div class="report-item"><div class="rl">Balance neto</div><div class="rv">' + fmt(resumen.balance) + "</div></div>" +
     "</div>";
 
-  html += '<div style="margin-top:16px;">' + renderGraficaReporte(calcSerieMovimientos(movimientos, fr.desde, fr.hasta)) + "</div>";
-
   html += '<div class="section-sub" style="margin-top:10px;">' + movimientos.length + " movimiento(s) en este rango.</div>";
   html += '<div class="pedido-actions" style="margin-top:6px;">' +
     '<button class="btn" data-action="generar-reporte-pdf">Generar PDF del periodo</button>' +
@@ -161,56 +159,6 @@ function renderReportePeriodo() {
     "</div>";
   html += "</div>";
   return html;
-}
-
-// Gráfica en vivo (SVG, sin librería externa — reutiliza los colores
-// semánticos ya definidos en variables.css, así queda bien en modo claro y
-// oscuro sin código aparte). Barras pareadas ingresos/gastos por punto.
-function renderGraficaReporte(serie) {
-  if (!serie.puntos.length) return '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div>';
-  var W = 640, H = 200, padL = 50, padB = 20, padT = 10, padR = 10;
-  var innerW = W - padL - padR, innerH = H - padT - padB;
-  var maxVal = serie.puntos.reduce(function (m, p) { return Math.max(m, p.ingresos, p.gastos); }, 0) || 1;
-  var n = serie.puntos.length;
-  var groupW = innerW / n;
-  var barW = Math.max(2, Math.min(18, groupW / 3));
-  var mostrarEtiquetas = n <= 14;
-
-  var gridLines = [0, 0.5, 1].map(function (f) {
-    var yy = padT + innerH - f * innerH;
-    return '<line x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '" stroke="var(--border-soft)" stroke-width="1" />' +
-      '<text x="' + (padL - 6) + '" y="' + (yy + 3) + '" font-size="9" text-anchor="end" fill="var(--ink-faint)">' + esc(fmtCorto(f * maxVal)) + "</text>";
-  }).join("");
-
-  var bars = serie.puntos.map(function (p, i) {
-    var xGroup = padL + i * groupW + groupW / 2;
-    var hIng = (p.ingresos / maxVal) * innerH, hGas = (p.gastos / maxVal) * innerH;
-    var xIng = xGroup - barW - 2, xGas = xGroup + 2;
-    var etiqueta = etiquetaPuntoReporte(p.clave, serie.granularidad);
-    return '<rect x="' + xIng + '" y="' + (padT + innerH - hIng) + '" width="' + barW + '" height="' + hIng + '" fill="var(--success)" rx="2"><title>Ingresos ' + esc(etiqueta) + ": " + esc(fmt(p.ingresos)) + '</title></rect>' +
-      '<rect x="' + xGas + '" y="' + (padT + innerH - hGas) + '" width="' + barW + '" height="' + hGas + '" fill="var(--danger)" rx="2"><title>Gastos ' + esc(etiqueta) + ": " + esc(fmt(p.gastos)) + '</title></rect>' +
-      (mostrarEtiquetas ? '<text x="' + xGroup + '" y="' + (H - 4) + '" font-size="9" text-anchor="middle" fill="var(--ink-faint)">' + esc(etiqueta) + "</text>" : "");
-  }).join("");
-
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;max-height:220px;display:block;" role="img" aria-label="Ingresos y gastos por periodo">' + gridLines + bars + "</svg>" +
-    '<div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--ink-faint);">' +
-    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--success);border-radius:2px;margin-right:4px;"></span>Ingresos</span>' +
-    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Gastos</span>' +
-    "</div>";
-}
-function etiquetaPuntoReporte(clave, granularidad) {
-  if (granularidad === "mes") {
-    var partes = clave.split("-");
-    var meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-    return meses[Number(partes[1]) - 1] + " " + partes[0].slice(2);
-  }
-  var d = new Date(clave + "T00:00:00");
-  return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0");
-}
-function fmtCorto(n) {
-  if (Math.abs(n) >= 1000000) return "$" + (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (Math.abs(n) >= 1000) return "$" + Math.round(n / 1000) + "k";
-  return fmt(n);
 }
 
 // "Inventario negativo" (ver calcGastoInsumosMensual en core/calc.js): no

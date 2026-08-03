@@ -230,12 +230,16 @@ assert(!!deudaEnCuotas && deudaEnCuotas.cuotas === 3, "agrega deuda en 3 cuotas 
 const incrementoPorPagar = calcPorPagar() - porPagarAntesDeudaEnCuotas;
 assert(Math.abs(incrementoPorPagar - 300000) < 1, "Por pagar sube según el valor de la cuota ($300.000), no el monto total de la deuda ($900.000)");
 
-// --- cotizaciones: se contraen al convertir, y se pueden volver a expandir ---
+// --- cotizaciones: Historial es siempre un resumen chico; abrirlo manda al
+// detalle completo en la otra pestaña (state.cotizacionEditando) ---
 const cotConvertida = state.cotizaciones[0];
+assert(state.cotizacionEditando === "", "convertir cierra el editor de la cotización");
 click('[data-action="tab"][data-tab="cotizaciones"]');
-assert(cotConvertida.colapsada === true, "la cotización queda contraída al convertirla en pedido");
-click('[data-action="toggle-cot-colapsada"][data-id="' + cotConvertida.id + '"]');
-assert(state.cotizaciones[0].colapsada === false, "se puede volver a expandir una cotización contraída");
+click('[data-action="cot-vista"][data-val="historial"]');
+assert(!!document.querySelector('[data-action="abrir-cotizacion-editor"][data-id="' + cotConvertida.id + '"]'), "el historial muestra un resumen de la cotización convertida");
+click('[data-action="abrir-cotizacion-editor"][data-id="' + cotConvertida.id + '"]');
+assert(state.cotizacionEditando === cotConvertida.id && state.cotizacionesVista === "nueva", "abrir desde el historial abre el detalle completo");
+assert(!!document.querySelector('.cot-card[data-cot-id="' + cotConvertida.id + '"]'), "el detalle completo se renderiza en la pestaña de edición");
 
 // --- pedidos: comisión de vendedor ---
 click('[data-action="tab"][data-tab="pedidos"]');

@@ -22,23 +22,27 @@ function nuevoInsumo(fuente) {
   };
 }
 
-// Dos pestañas arriba (estilo hoja de cálculo, a la derecha) en vez de una
-// sola vista con el formulario y todo el historial apilados: "Nueva
-// cotización" recibe con el formulario en blanco como protagonista, y
-// "Historial" es donde vive/se sigue editando todo lo ya creado. Crear una
-// cotización nueva salta automáticamente a Historial (ver acción
-// "add-cotizacion") para seguir trabajándola ahí mismo.
+// Dos pestañas arriba (estilo hoja de cálculo, a la derecha): "Historial"
+// es siempre un índice liviano — una tarjeta chica por cotización, sin el
+// detalle de referencias/insumos — y "+ Nueva cotización"/"✎ Editando..."
+// es el ÚNICO lugar donde se ve y edita el detalle completo de una
+// cotización a la vez, ya sea una recién creada o una abierta desde el
+// historial (`state.cotizacionEditando`). Antes el historial mostraba
+// tarjetas completas apiladas (con un botón de contraer/expandir aparte);
+// ahora esa distinción "resumen vs. detalle completo" es la que separan
+// las dos pestañas, no un toggle por tarjeta.
 export function render() {
   var vista = state.cotizacionesVista || "nueva";
   var html = renderTabsCotizaciones(vista);
-  html += vista === "historial" ? renderHistorial() : renderFormNueva();
+  html += vista === "historial" ? renderHistorial() : renderEditor();
   return html;
 }
 
 function renderTabsCotizaciones(vista) {
   var total = state.cotizaciones.length;
+  var labelNueva = state.cotizacionEditando ? "✎ Editando cotización" : "+ Nueva cotización";
   return '<div class="gsheet-tabs">' +
-    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cot-vista" data-val="nueva">+ Nueva cotización</button>' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cot-vista" data-val="nueva">' + labelNueva + "</button>" +
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="cot-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
     "</div>";
 }
@@ -55,11 +59,38 @@ function renderFormNueva() {
     "</div></div>";
 }
 
+// Muestra el formulario en blanco, o (si se abrió una desde Historial, o se
+// acaba de crear una) el detalle completo de esa cotización puntual — nunca
+// las dos cosas ni una lista completa a la vez.
+function renderEditor() {
+  var id = state.cotizacionEditando;
+  var cot = id ? state.cotizaciones.filter(function (c) { return c.id === id; })[0] : null;
+  if (!cot) return renderFormNueva();
+  var html = '<div class="pedido-actions" style="margin-bottom:10px;">' +
+    '<button class="btn ghost small" data-action="cerrar-cotizacion-editor">← Nueva cotización en blanco</button>' +
+    "</div>";
+  html += renderCotCard(cot);
+  return html;
+}
+
+// El historial es SIEMPRE un índice de tarjetas chicas — clic en cualquiera
+// abre su detalle completo en la otra pestaña (renderEditor).
 function renderHistorial() {
   if (state.cotizaciones.length === 0) { return '<div class="empty">Aún no has creado cotizaciones — creá la primera en la pestaña "+ Nueva cotización".</div>'; }
   var html = "";
-  state.cotizaciones.forEach(function (c) { html += renderCotCard(c); });
+  state.cotizaciones.forEach(function (c) { html += renderCotResumen(c); });
   return html;
+}
+
+function renderCotResumen(c) {
+  var totales = calcCotizacionTotales(c);
+  return '<div class="cot-card colapsada" data-cot-id="' + c.id + '" data-action="abrir-cotizacion-editor" data-id="' + c.id + '" style="cursor:pointer;" title="Clic para abrir y editar">' +
+    '<div class="cot-top"><div>' +
+    '<span class="cot-cliente">' + esc(c.cliente) + "</span> " +
+    '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
+    (c.esDemo ? ' <span class="badge warning" title="No cuenta en KPIs, reportes ni Por cobrar">🧪 Prueba</span>' : "") +
+    '<div class="cot-meta">' + esc(c.descripcion) + " · " + esc(c.fecha) + " · " + fmt(totales.precioTotal) + " venta</div>" +
+    "</div></div></div>";
 }
 
 // Sección desplegable genérica dentro de una cotización — para que no todo
@@ -115,26 +146,17 @@ function renderCotCard(c) {
   var sobrecosto = real.sobrecosto;
   var vClass = sobrecosto === 0 ? "neutra" : (sobrecosto > 0 ? "mala" : "ok");
   var iva = c.iva || { activo: false, porcentaje: 19 };
-  var colapsada = !!c.colapsada;
 
-  var html = '<div class="cot-card' + (colapsada ? " colapsada" : "") + '" data-cot-id="' + c.id + '">' +
+  var html = '<div class="cot-card" data-cot-id="' + c.id + '">' +
     '<div class="cot-top"><div>' +
-    '<button class="cot-collapse-toggle" data-action="toggle-cot-colapsada" data-id="' + c.id + '" title="' + (colapsada ? "Expandir" : "Contraer") + '">' + (colapsada ? "\u25b8" : "\u25be") + '</button> ' +
     '<span class="cot-cliente">' + esc(c.cliente) + "</span> " +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
-    (c.esDemo ? ' <span class="badge" style="background:var(--warning-soft);color:var(--warning-ink);" title="No cuenta en KPIs, reportes ni Por cobrar \u2014 es solo para practicar el flujo">\ud83e\uddea Prueba</span>' : "") +
+    (c.esDemo ? ' <span class="badge warning" title="No cuenta en KPIs, reportes ni Por cobrar \u2014 es solo para practicar el flujo">\ud83e\uddea Prueba</span>' : "") +
     '<div class="cot-meta">' + esc(c.descripcion) + " \u00b7 " +
     '<input type="date" class="mini-input" style="width:135px;display:inline-block;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" />' +
     (c.pedidoOrigenId && c.estado !== "convertida" ? ' \u00b7 <span style="color:var(--accent-ink);">escalada desde pedido r\u00e1pido</span>' : "") +
-    (colapsada ? " \u00b7 " + fmt(totales.precioTotal) + " venta" : "") + "</div>" +
+    "</div>" +
     "</div>";
-
-  if (colapsada) {
-    html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<button class="btn ghost small" data-action="toggle-cot-colapsada" data-id="' + c.id + '">Expandir y editar</button>' +
-      "</div></div></div>";
-    return html;
-  }
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
     '<label class="mini-label" style="display:flex;align-items:center;gap:5px;">' +
@@ -451,18 +473,24 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!fc.cliente || !fc.descripcion) return;
-    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico(), esDemo: false };
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico(), esDemo: false };
     state.cotizaciones.unshift(nueva);
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
-    // Salta directo a Historial para seguir trabajándola ahí — "Nueva
-    // cotización" es solo el punto de arranque, no donde se sigue editando.
-    state.cotizacionesVista = "historial";
+    // Se queda en esta misma pestaña, ahora mostrando el detalle completo de
+    // la recién creada — el detalle SIEMPRE vive acá, nunca en Historial.
+    state.cotizacionEditando = nueva.id;
     persist("cotizaciones"); notify();
   },
-  "toggle-cot-colapsada": function (el) {
-    var id = el.getAttribute("data-id");
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { colapsada: !c.colapsada }) : c; });
-    persist("cotizaciones"); notify();
+  // Abrir desde Historial siempre manda a esta pestaña con el detalle
+  // completo — Historial en sí nunca muestra más que la tarjeta chica.
+  "abrir-cotizacion-editor": function (el) {
+    state.cotizacionEditando = el.getAttribute("data-id");
+    state.cotizacionesVista = "nueva";
+    notify();
+  },
+  "cerrar-cotizacion-editor": function () {
+    state.cotizacionEditando = "";
+    notify();
   },
   // Reversible en los dos sentidos: una cotización de prueba se puede volver
   // real (y al revés) en cualquier momento, sin perder nada de lo cargado —
@@ -655,12 +683,11 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null
       };
       state.pedidos.unshift(nuevoP);
-      // Se contrae automáticamente para no ocupar tanto espacio; se puede
-      // expandir y seguir editando cuando haga falta.
       // Convertir en pedido siempre la vuelve real: no existe el concepto de
       // "pedido de prueba" — si venía marcada como demo, se la desmarca acá.
-      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id, colapsada: true, esDemo: false }) : c; });
+      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id, esDemo: false }) : c; });
       persist("pedidos"); persist("cotizaciones");
+      state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
     }
     notify();
@@ -865,7 +892,10 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor
       });
     });
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId, colapsada: true, esDemo: false }) : c; });
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId, esDemo: false }) : c; });
+    // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
+    state.cotizacionEditando = "";
+    state.cotizacionesVista = "historial";
     persist("pedidos"); persist("cotizaciones"); notify();
   },
   "toggle-cot-seccion": function (el) {

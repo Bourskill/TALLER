@@ -16,9 +16,9 @@
 
 /* ---------- KPIs ---------- */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin-bottom:32px;}
-.kpi{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:16px 18px 15px;border-left:3px solid var(--border-strong);transition:border-color .15s ease;}
+.kpi{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:16px 18px 15px;border-left:3px solid var(--border-strong);box-shadow:var(--shadow-sm);transition:border-color .15s ease,transform .15s ease,box-shadow .15s ease;}
 .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-faint);font-weight:700;}
-.kpi-value{font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:600;margin-top:8px;color:var(--ink);line-height:1.1;}
+.kpi-value{font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:600;margin-top:8px;color:var(--ink);line-height:1.1;font-variant-numeric:tabular-nums;}
 .kpi-value.danger{color:var(--danger-ink);} .kpi-value.success{color:var(--success-ink);} .kpi-value.warning{color:var(--warning-ink);} .kpi-value.info{color:var(--info-ink);}
 .kpi:has(.kpi-value.danger){border-left-color:var(--danger);}
 .kpi:has(.kpi-value.success){border-left-color:var(--success);}

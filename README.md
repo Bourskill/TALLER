@@ -524,20 +524,19 @@ una sola fuente de verdad.
   El test de humo ahora verifica lo contrario de antes: que `.kpis` NO
   aparezca fuera de Configuración.
 - **Un solo panel de reporte**: el rango de fechas (con los mismos atajos de
-  siempre — hoy/semana/mes/año) alimenta a la vez los números en pantalla,
-  la gráfica y el botón de PDF. Los tres usan **`calcResumenMovimientos()`**
-  (nueva, en `core/calc.js`) — la misma función que antes solo vivía
-  duplicada dentro de `generarPDFReporteFinanciero()` en `core/pdf.js`, así
-  que ya no pueden mostrar números distintos para el mismo rango.
-- **Gráfica en vivo, sin librería nueva**: `calcSerieMovimientos()` agrupa
-  los movimientos del rango (por día si es corto, semana o mes si es largo,
-  para que "todo el histórico" no intente dibujar 365 barras) y
-  `renderGraficaReporte()` la dibuja como SVG plano usando los mismos
-  colores semánticos ya definidos en `variables.css` (`--success`/
-  `--danger`) — se ve bien en modo claro y oscuro sin CSS aparte, y no hace
-  falta cargar Chart.js ni resolver el problema de "cómo redibujar un
-  canvas después de que `innerHTML` se reemplaza", que no existe con SVG
-  generado como parte del mismo string de HTML.
+  siempre — hoy/semana/mes/año) alimenta a la vez los números en pantalla y
+  el botón de PDF. Los dos usan **`calcResumenMovimientos()`** (nueva, en
+  `core/calc.js`) — la misma función que antes solo vivía duplicada dentro
+  de `generarPDFReporteFinanciero()` en `core/pdf.js`, así que ya no pueden
+  mostrar números distintos para el mismo rango.
+- **La gráfica en vivo vive en Resumen, no en Configuración** (ajustado
+  luego de la entrega inicial de esta fase — se probó primero acá y se
+  pidió moverla): sin selector de fechas, un rango fijo de últimos 30 días,
+  para que Resumen siga siendo "un vistazo al entrar" y no otro panel de
+  controles. Mismo cálculo (`calcSerieMovimientos()`, granularidad por día/
+  semana/mes según el tamaño del rango) y mismo dibujo SVG plano (sin
+  Chart.js — ver `renderGraficaBarras()` en `modules/resumen.js`) que se
+  había armado para acá.
 - **"Gasto en insumos por mes"** (`calcGastoInsumosMensual()`): NO es
   inventario de lo que hay guardado (el usuario no maneja stock — compra lo
   que cada pedido requiere, ver README arriba). Es cuánto se gastó en
@@ -551,6 +550,56 @@ una sola fuente de verdad.
   PROPIO periodo (configurado en Pendientes), no contra el rango de fechas
   que el admin elija en el reporte — mezclarlos habría sido confuso, son
   conceptos independientes.
+
+## Cotizaciones: Historial siempre resumido + editor único
+
+Ajuste sobre el rediseño de pestañas de la sección anterior: "Historial"
+mostraba tarjetas completas (con un botón aparte para contraerlas) —
+reportado como que seguía siendo demasiado para un simple índice. Ahora la
+separación es más tajante:
+
+- **Historial es SIEMPRE una tarjeta chica por cotización** (cliente,
+  descripción, fecha, total, badges) — nunca el detalle completo de
+  referencias/insumos/tallas. `renderCotResumen()`.
+- **"+ Nueva cotización" es el ÚNICO lugar con el detalle completo**, tanto
+  para crear una cotización desde cero como para editar cualquiera ya
+  existente — `state.cotizacionEditando` guarda cuál. Al abrir una desde
+  Historial (clic en su tarjeta chica), la pestaña salta ahí, se renombra a
+  "✎ Editando cotización" y muestra `renderCotCard()` completo — el mismo
+  componente que antes vivía apilado en Historial, solo que ahora aparece
+  UNA cotización a la vez. Botón "← Nueva cotización en blanco" para
+  soltarla y empezar una de cero sin perder la que se estaba viendo.
+- Se eliminó el campo `colapsada` y el botón de contraer/expandir por
+  tarjeta — quedaron reemplazados por completo por esta separación de
+  pestañas, no hacía falta mantener las dos formas de "resumir" una
+  cotización a la vez.
+- **"Ver origen" (Finanzas) y "Ver cotización relacionada" (Pedidos) abren
+  el detalle completo directo** (`cotizacionEditando` + pestaña "nueva"),
+  en vez de navegar a Historial y hacer scroll hasta una tarjeta que ahora
+  solo mostraría el resumen — no tendría sentido llevar a alguien a ver
+  algo que no puede ver ahí.
+
+## Indicadores: un solo lenguaje visual
+
+Reportado: los indicadores chicos de estado (badge, tag, status-pill)
+tenían cada uno su propio tamaño/radio, sutilmente distintos entre sí sin
+ninguna razón — y varios se coloreaban con `style=""` inline repetido en
+vez de una clase, cada vez que hacía falta un color nuevo.
+
+- **Una sola receta de forma** para `.badge`, `.tag` y `.status-pill`
+  (tamaño de letra, padding, radio — ahora los tres son "pill" redondeados
+  del todo) en `css/tables.css`, con los mismos 4 colores semánticos
+  (`success`/`warning`/`danger`/`info`) ya definidos en `variables.css`.
+  `.badge` ganó las clases `.warning`/`.success`/`.danger`/`.info` — los
+  usos que antes coloreaban con `style="background:...` inline (🧪 Prueba,
+  ↻ Recurrente, 🏬 Consignación) ahora usan esas clases.
+- **KPIs con más profundidad**: sombra sutil siempre, y los clickeables se
+  levantan un poco al pasar el mouse (además del cambio de borde/fondo que
+  ya tenían) — la misma afordancia "esto se puede tocar" de cualquier
+  tarjeta interactiva conocida.
+- Montos y valores de KPI usan `font-variant-numeric: tabular-nums`, para
+  que los dígitos siempre midan lo mismo (un detalle chico, pero se nota
+  cuando hay números cambiando de valor en la misma posición).
 
 ## Estructura
 

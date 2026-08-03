@@ -268,22 +268,28 @@ export var actions = {
     var origen = origenDeTx(t);
     if (!origen) return;
     var TAB_POR_ORIGEN = { pedido: "pedidos", cotizacion: "cotizaciones", gastoFijo: "pendientes", deuda: "pendientes" };
-    var ATTR_POR_ORIGEN = { pedido: "data-pedido-id", cotizacion: "data-cot-id", gastoFijo: "data-gasto-fijo-id", deuda: "data-deuda-id" };
+    var ATTR_POR_ORIGEN = { pedido: "data-pedido-id", gastoFijo: "data-gasto-fijo-id", deuda: "data-deuda-id" };
     state.tab = TAB_POR_ORIGEN[origen.tipo] || state.tab;
     state.sidebarMobileOpen = false;
     // Si el pedido de origen está en la vista normal pero la papelera de
     // Pedidos había quedado activa, sin esto quedaría "escondido" detrás de
     // esa vista al llegar — mismo reset que ya hace la acción "tab" genérica.
     state.filtroPedidosVista = "activos";
-    // Igual para Cotizaciones: si la vista estaba en "Nueva cotización" (no
-    // en "Historial"), la tarjeta destino ni se renderiza.
-    if (origen.tipo === "cotizacion") state.cotizacionesVista = "historial";
+    // Cotizaciones no tiene un anchor para hacer scroll (Historial ya no
+    // muestra más que tarjetas chicas) — en su lugar, abre el detalle
+    // completo directo, igual que "Ver cotización relacionada" en Pedidos.
+    if (origen.tipo === "cotizacion") {
+      state.cotizacionEditando = origen.id;
+      state.cotizacionesVista = "nueva";
+    }
     notify();
-    setTimeout(function () {
-      var attr = ATTR_POR_ORIGEN[origen.tipo];
-      var card = attr ? document.querySelector('[' + attr + '="' + origen.id + '"]') : null;
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 60);
+    var attr = ATTR_POR_ORIGEN[origen.tipo];
+    if (attr) {
+      setTimeout(function () {
+        var card = document.querySelector('[' + attr + '="' + origen.id + '"]');
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 60);
+    }
   },
   // "Eliminar" ya no borra para siempre: mueve el movimiento a la papelera,
   // de donde se puede restaurar si fue un error.

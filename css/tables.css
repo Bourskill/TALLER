@@ -1,13 +1,20 @@
 .tx-row{display:grid;grid-template-columns:90px 1fr 110px 100px 100px 130px;gap:10px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--border-soft);font-size:13px;border-radius:8px;}
 .tx-row:not(.head):hover{background:var(--surface-2);}
 .tx-row.head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);padding:0 8px 8px;}
-.tag{display:inline-block;font-size:10px;font-weight:800;padding:3px 9px;border-radius:12px;text-transform:uppercase;letter-spacing:.04em;}
-.tag.ingreso{background:var(--success-soft);color:var(--success-ink);}
-.tag.gasto{background:var(--danger-soft);color:var(--danger-ink);}
-.tag.nomina{background:var(--warning-soft);color:var(--warning-ink);}
-.tag.comision{background:var(--info-soft);color:var(--info-ink);}
-.amount{font-family:'IBM Plex Mono',monospace;font-weight:700;}
+/* Receta visual compartida por CUALQUIER indicador chico de estado en la
+   app — badge, tag, status-pill nacieron por separado (cada uno con su
+   propio tamaño/radio, sutilmente distintos) y visualmente deberían leerse
+   como una sola familia, no tres. Los colores semánticos (éxito/alerta/
+   peligro/info) siguen siendo los mismos tokens de variables.css en los
+   tres; lo único que cambiaba antes era la forma. */
+.tag,.status-pill,.badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:20px;}
+.tag.ingreso,.badge.success{background:var(--success-soft);color:var(--success-ink);}
+.tag.gasto,.badge.danger{background:var(--danger-soft);color:var(--danger-ink);}
+.tag.nomina,.badge.warning{background:var(--warning-soft);color:var(--warning-ink);}
+.tag.comision,.badge.info{background:var(--info-soft);color:var(--info-ink);}
+.amount{font-family:'IBM Plex Mono',monospace;font-weight:700;font-variant-numeric:tabular-nums;}
 .amount.neg{color:var(--danger-ink);} .amount.pos{color:var(--success-ink);}
-.status-pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px;cursor:pointer;border:none;}
+.status-pill{cursor:pointer;border:none;transition:filter .12s ease;}
+.status-pill:hover{filter:brightness(1.12);}
 .status-pill.pagado{background:var(--success-soft);color:var(--success-ink);}
 .status-pill.pendiente{background:var(--warning-soft);color:var(--warning-ink);}

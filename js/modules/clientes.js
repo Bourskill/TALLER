@@ -52,8 +52,8 @@ export function render() {
     var historial = calcHistorialCliente(c.id);
     html += '<div class="cliente-card">' +
       '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) +
-      (esPuntoC ? ' <span class="badge" title="Punto de consignación">🏬 Consignación</span>' : "") +
-      (historial.esRecurrente ? ' <span class="badge" style="background:var(--success-soft);color:var(--success-ink);" title="Más de un pedido registrado">↻ Recurrente</span>' : "") +
+      (esPuntoC ? ' <span class="badge info" title="Punto de consignación">🏬 Consignación</span>' : "") +
+      (historial.esRecurrente ? ' <span class="badge success" title="Más de un pedido registrado">↻ Recurrente</span>' : "") +
       "</span>" +
       '<span style="display:flex;gap:6px;">' +
       '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>" +

@@ -458,7 +458,8 @@ export var actions = {
     state.pedidos = state.pedidos.map(function (x) { return x.id === id ? Object.assign({}, x, { cotizacionId: cotId }) : x; });
     persist("cotizaciones"); persist("pedidos");
     state.tab = "cotizaciones";
-    state.cotizacionesVista = "historial"; // si no, aterriza en "Nueva cotización" en vez de la que se acaba de crear
+    state.cotizacionEditando = cotId; // abre de una vez el detalle completo de la recién creada
+    state.cotizacionesVista = "nueva";
     notify();
   },
   "toggle-pedido-panel": function (el) {
@@ -471,17 +472,12 @@ export var actions = {
   // tener que buscarla manualmente en la lista.
   "ver-cotizacion-relacionada": function (el) {
     var cotId = el.getAttribute("data-id");
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? Object.assign({}, c, { colapsada: false }) : c; });
     state.tab = "cotizaciones";
-    // Sin esto, si la vista de Cotizaciones estaba en "Nueva cotización" (no
-    // en "Historial"), esta tarjeta ni siquiera se renderiza y el scroll de
-    // abajo no encuentra nada.
-    state.cotizacionesVista = "historial";
-    persist("cotizaciones"); notify();
-    setTimeout(function () {
-      var card = document.querySelector('[data-cot-id="' + cotId + '"]');
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 60);
+    // Abre el detalle completo directo — Historial en Cotizaciones ya no
+    // muestra más que tarjetas chicas, así que no hay nada que "expandir" ahí.
+    state.cotizacionEditando = cotId;
+    state.cotizacionesVista = "nueva";
+    notify();
   },
   "toggle-comision": function (el) {
     var id = el.getAttribute("data-id");

@@ -30,7 +30,8 @@
 .variacion.mala{background:var(--danger-soft);color:var(--danger-ink);}
 .variacion.neutra{background:var(--surface-3);color:var(--ink-soft);}
 
-.badge{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:10px;}
+/* Forma/tamaño base de .badge vive en tables.css (compartida con .tag y
+   .status-pill) — acá solo los colores propios de un estado de cotización. */
 .badge.borrador{background:var(--surface-3);color:var(--ink-soft);}
 .badge.convertida{background:var(--info-soft);color:var(--info-ink);}
 
