@@ -84,6 +84,11 @@ var coreActions = {
     state.sidebarMobileOpen = false; // al elegir una pestaña en móvil, cerrar el cajón
     if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; }
     if (state.tab !== "pedidos") { state.filtroPedidosVista = "activos"; }
+    // Nota: `cotizacionesVista` NO se resetea acá — arranca en "nueva" (ver
+    // DEFAULT en store.js) para que la primera vez que se entra a
+    // Cotizaciones reciba con el formulario, pero después queda como el
+    // usuario la haya dejado. Resetearla en cada clic de pestaña rompía ir y
+    // volver de Pedidos a seguir editando algo en el historial.
     notify();
   },
   "kpi-nav": function (el) {
@@ -92,6 +97,7 @@ var coreActions = {
     state.filtroTxVista = "activos";
     state.txEditando = "";
     state.filtroPedidosVista = "activos";
+    if (state.tab === "cotizaciones") state.cotizacionesVista = "historial";
     var filtroTx = el.getAttribute("data-filtro-tx");
     if (filtroTx) state.filtroTx = filtroTx;
     if (el.getAttribute("data-filtro-saldo")) state.filtroPedidosSoloSaldo = true;

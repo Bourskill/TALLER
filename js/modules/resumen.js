@@ -59,7 +59,7 @@ export function render() {
         "<span></span>" +
         "</div>";
     });
-    html += '<button class="btn ghost small" style="margin-top:10px;" data-action="tab" data-tab="cotizaciones">Ver cotizaciones</button></div>';
+    html += '<button class="btn ghost small" style="margin-top:10px;" data-action="kpi-nav" data-tab="cotizaciones">Ver cotizaciones</button></div>';
   }
   return html;
 }

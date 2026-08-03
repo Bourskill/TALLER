@@ -22,9 +22,30 @@ function nuevoInsumo(fuente) {
   };
 }
 
+// Dos pestañas arriba (estilo hoja de cálculo, a la derecha) en vez de una
+// sola vista con el formulario y todo el historial apilados: "Nueva
+// cotización" recibe con el formulario en blanco como protagonista, y
+// "Historial" es donde vive/se sigue editando todo lo ya creado. Crear una
+// cotización nueva salta automáticamente a Historial (ver acción
+// "add-cotizacion") para seguir trabajándola ahí mismo.
 export function render() {
+  var vista = state.cotizacionesVista || "nueva";
+  var html = renderTabsCotizaciones(vista);
+  html += vista === "historial" ? renderHistorial() : renderFormNueva();
+  return html;
+}
+
+function renderTabsCotizaciones(vista) {
+  var total = state.cotizaciones.length;
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cot-vista" data-val="nueva">+ Nueva cotización</button>' +
+    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="cot-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
+    "</div>";
+}
+
+function renderFormNueva() {
   var f = state.formCotizacion;
-  var html = '<div class="card"><div class="section-title small">Nueva cotización' +
+  return '<div class="card"><div class="section-title small">Nueva cotización' +
     renderHelp("Arma cada referencia con sus insumos (o aplica una plantilla), define el precio de venta y el margen se calcula solo. Los gastos reales de producción se registran aparte para comparar contra lo cotizado.") +
     '</div><div class="form-grid">' +
     renderClienteCombo("cotizacion", "cot-cliente-nombre", f) +
@@ -32,9 +53,11 @@ export function render() {
     '<div class="field"><label>Fecha</label><input type="date" data-form="cotizacion" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
     '<button class="btn" data-action="add-cotizacion">Crear cotización</button>' +
     "</div></div>";
+}
 
-  if (state.cotizaciones.length === 0) { html += '<div class="empty">Aún no has creado cotizaciones.</div>'; return html; }
-
+function renderHistorial() {
+  if (state.cotizaciones.length === 0) { return '<div class="empty">Aún no has creado cotizaciones — creá la primera en la pestaña "+ Nueva cotización".</div>'; }
+  var html = "";
   state.cotizaciones.forEach(function (c) { html += renderCotCard(c); });
   return html;
 }
@@ -131,7 +154,7 @@ function renderCotCard(c) {
 
   html += renderVendedorCot(c);
 
-  (c.referencias || []).forEach(function (ref) { html += renderRefCard(c.id, ref); });
+  html += renderReferenciasTabs(c);
 
   html += '<div class="pedido-actions" style="margin-top:4px;"><button class="btn ghost small" data-action="add-referencia" data-id="' + c.id + '">+ Agregar referencia</button></div>';
 
@@ -234,6 +257,29 @@ function checkboxPdfInterno(role, label, checked) {
     "</label>";
 }
 
+// Antes las referencias se apilaban todas con scroll — con más de dos o
+// tres, la vista se saturaba de golpe. Ahora solo se ve la referencia
+// activa; el resto queda en pestañas cortas (nombre + precio total) arriba.
+function renderReferenciasTabs(c) {
+  var refs = c.referencias || [];
+  if (!refs.length) return '<div class="empty" style="margin:10px 0;">Sin referencias todavía.</div>';
+  var activaId = state.refActiva[c.id];
+  if (!activaId || !refs.some(function (r) { return r.id === activaId; })) activaId = refs[0].id;
+  var html = "";
+  if (refs.length > 1) {
+    html += '<div class="ref-tabs">' +
+      refs.map(function (r, i) {
+        var t = calcRefTotales(r);
+        return '<button class="ref-tab ' + (r.id === activaId ? "active" : "") + '" data-action="set-ref-activa" data-cot="' + c.id + '" data-ref="' + r.id + '">' +
+          esc(r.nombre || "Referencia " + (i + 1)) + '<span class="ref-tab-meta">' + fmt(t.precioTotal) + "</span></button>";
+      }).join("") +
+      "</div>";
+  }
+  var activa = refs.filter(function (r) { return r.id === activaId; })[0];
+  html += renderRefCard(c.id, activa);
+  return html;
+}
+
 function renderRefCard(cotId, ref) {
   var calc = calcRefTotales(ref);
   var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
@@ -299,11 +345,20 @@ function renderRefCard(cotId, ref) {
 // borrar y volver a crear si había un error de digitación).
 function renderDetalleReferencia(cotId, ref) {
   var detalle = ref.detalle || [];
-  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
-  var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
-  var html = '<div class="cot-col-title" style="margin-top:14px;">Tallas y observaciones' +
+  // Progresivo: colapsada por defecto hasta que tenga datos (no todas las
+  // referencias necesitan tallas por unidad) — en cuanto se usa, queda
+  // abierta sola de ahí en adelante; se puede colapsar/expandir a mano.
+  // También se abre sola si una plantilla dejó una curva de tallas sugerida
+  // para esta referencia — si no, el botón para generarla quedaría escondido.
+  var abierta = ref.seccionTallasAbierta !== undefined ? !!ref.seccionTallasAbierta : (detalle.length > 0 || !!state.curvaSugerida[ref.id]);
+  var titulo = "Tallas y observaciones" + (detalle.length ? " (" + detalle.length + ")" : "");
+  var html = '<div class="cot-col-title" style="margin-top:14px;cursor:pointer;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
     renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización. Si este listado crece más que la cantidad cotizada de la referencia, la cantidad sube sola para que coincidan (nunca al revés).") +
     "</div>";
+  if (!abierta) return html;
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
   if (clienteRoster && (clienteRoster.roster || []).length) {
     html += '<div class="section-sub" style="margin:0 0 8px;">' +
       '<button class="btn ghost small" data-action="cargar-roster-cliente" data-cot="' + cotId + '" data-ref="' + ref.id + '">🎽 Cargar roster de ' + esc(clienteRoster.nombre) + " (" + clienteRoster.roster.length + ")</button></div>";
@@ -377,11 +432,31 @@ function renderListaCompras(compras) {
 }
 
 export var actions = {
+  "cot-vista": function (el) {
+    state.cotizacionesVista = el.getAttribute("data-val");
+    notify();
+  },
+  "set-ref-activa": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    state.refActiva = Object.assign({}, state.refActiva, { [cotId]: refId });
+    notify();
+  },
+  "toggle-ref-seccion": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    mapRef(cotId, refId, function (r) {
+      var abierta = r.seccionTallasAbierta !== undefined ? !!r.seccionTallasAbierta : (r.detalle || []).length > 0;
+      return Object.assign({}, r, { seccionTallasAbierta: !abierta });
+    });
+  },
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!fc.cliente || !fc.descripcion) return;
-    state.cotizaciones.unshift({ id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico(), esDemo: false });
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico(), esDemo: false };
+    state.cotizaciones.unshift(nueva);
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
+    // Salta directo a Historial para seguir trabajándola ahí — "Nueva
+    // cotización" es solo el punto de arranque, no donde se sigue editando.
+    state.cotizacionesVista = "historial";
     persist("cotizaciones"); notify();
   },
   "toggle-cot-colapsada": function (el) {
@@ -410,10 +485,14 @@ export var actions = {
   },
   "add-referencia": function (el) {
     var id = el.getAttribute("data-id");
+    var nueva = nuevaReferencia();
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== id) return c;
-      return Object.assign({}, c, { referencias: (c.referencias || []).concat([nuevaReferencia()]) });
+      return Object.assign({}, c, { referencias: (c.referencias || []).concat([nueva]) });
     });
+    // La nueva referencia queda activa de una vez (si no, con varias
+    // referencias tocaría buscarla entre las pestañas para empezar a cargarla).
+    state.refActiva = Object.assign({}, state.refActiva, { [id]: nueva.id });
     persist("cotizaciones"); notify();
   },
   "remove-referencia": function (el) {

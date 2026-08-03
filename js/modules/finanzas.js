@@ -275,6 +275,9 @@ export var actions = {
     // Pedidos había quedado activa, sin esto quedaría "escondido" detrás de
     // esa vista al llegar — mismo reset que ya hace la acción "tab" genérica.
     state.filtroPedidosVista = "activos";
+    // Igual para Cotizaciones: si la vista estaba en "Nueva cotización" (no
+    // en "Historial"), la tarjeta destino ni se renderiza.
+    if (origen.tipo === "cotizacion") state.cotizacionesVista = "historial";
     notify();
     setTimeout(function () {
       var attr = ATTR_POR_ORIGEN[origen.tipo];

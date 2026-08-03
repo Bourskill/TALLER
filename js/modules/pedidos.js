@@ -458,6 +458,7 @@ export var actions = {
     state.pedidos = state.pedidos.map(function (x) { return x.id === id ? Object.assign({}, x, { cotizacionId: cotId }) : x; });
     persist("cotizaciones"); persist("pedidos");
     state.tab = "cotizaciones";
+    state.cotizacionesVista = "historial"; // si no, aterriza en "Nueva cotización" en vez de la que se acaba de crear
     notify();
   },
   "toggle-pedido-panel": function (el) {
@@ -472,6 +473,10 @@ export var actions = {
     var cotId = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? Object.assign({}, c, { colapsada: false }) : c; });
     state.tab = "cotizaciones";
+    // Sin esto, si la vista de Cotizaciones estaba en "Nueva cotización" (no
+    // en "Historial"), esta tarjeta ni siquiera se renderiza y el scroll de
+    // abajo no encuentra nada.
+    state.cotizacionesVista = "historial";
     persist("cotizaciones"); notify();
     setTimeout(function () {
       var card = document.querySelector('[data-cot-id="' + cotId + '"]');

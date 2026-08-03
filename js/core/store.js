@@ -128,6 +128,8 @@ export const state = {
   // Qué pedidos tienen desplegado el panel de "dinero + pdf" (colapsado por
   // defecto para que la tarjeta muestre solo lo básico). Objeto {[id]: bool}.
   pedidoPanelAbierto: {},
+  cotizacionesVista: "nueva", // "nueva" | "historial" — pestañas superiores de Cotizaciones
+  refActiva: {}, // { [cotId]: refId } — qué referencia está activa en la vista de pestañas de cada cotización
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a

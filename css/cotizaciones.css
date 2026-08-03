@@ -1,3 +1,18 @@
+/* Pestañas superiores de Cotizaciones ("Nueva cotización" / "Historial"),
+   arriba a la derecha, estilo pestañas de hoja de cálculo. */
+.gsheet-tabs{display:flex;justify-content:flex-end;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border-soft);}
+.gsheet-tab{background:var(--surface-2);border:1px solid var(--border-soft);border-bottom:none;border-radius:8px 8px 0 0;padding:8px 16px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;margin-bottom:-1px;}
+.gsheet-tab.active{background:var(--surface);color:var(--ink);border-color:var(--border);}
+.gsheet-tab:hover:not(.active){color:var(--ink);background:var(--surface-hover);}
+
+/* Pestañas de referencias dentro de una cotización — en vez de apilarlas
+   todas con scroll, solo se ve la activa. */
+.ref-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 10px;}
+.ref-tab{display:flex;flex-direction:column;align-items:flex-start;gap:1px;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 12px;font-size:12px;font-weight:600;color:var(--ink-soft);cursor:pointer;}
+.ref-tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
+.ref-tab-meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;color:var(--ink-faint);}
+.ref-tab.active .ref-tab-meta{color:var(--accent-ink);opacity:.85;}
+
 .cot-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;}
 .cot-card.colapsada{padding:12px 20px;}
 .cot-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}

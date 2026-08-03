@@ -478,6 +478,38 @@ Dos ajustes chicos, pero que tocan dinero, así que van documentados aparte:
   `conDetalleAgregado()` en `modules/cotizaciones.js`, usado por las 4
   acciones que agregan filas para que ninguna se quede desincronizada.
 
+## Cotizaciones: rediseño (pestañas Nueva/Historial, referencias en pestañas, flujo progresivo)
+
+Reportado como "muy complejo, muchas opciones, difícil de entender para
+alguien nuevo". Tres cambios de estructura, sin tocar ninguna función de
+negocio existente (todo lo de arriba sigue funcionando igual):
+
+- **Dos pestañas arriba, estilo hoja de cálculo** (`state.cotizacionesVista`:
+  `"nueva" | "historial"`, siempre a la derecha): "+ Nueva cotización" (el
+  formulario en blanco, protagonista) e "Historial" (todo lo ya creado,
+  donde se sigue editando). Crear una cotización salta directo a Historial
+  para seguir trabajándola. La primera vez que se entra a Cotizaciones en
+  una sesión recibe con "Nueva" (default en `store.js`); entrar y salir por
+  el menú lateral después de eso **no** resetea la vista — solo saltan a
+  Historial explícitamente las acciones que apuntan a una cotización
+  puntual ("Ver cotización relacionada" desde Pedidos, "Ver origen" desde
+  Finanzas, "escalar a cotización", el botón "Ver cotizaciones" de Resumen).
+  Este matiz salió de un test de humo que falló: resetear en cada clic de
+  pestaña rompía ir a Pedidos y volver a seguir editando algo en Historial.
+- **Referencias en pestañas, no apiladas con scroll** (`state.refActiva`:
+  `{ [cotId]: refId }`): con más de una referencia, solo se ve la activa;
+  el resto queda como pestañas cortas (nombre + precio total) arriba. Se ve
+  la primera vez que la cotización tiene 2+ referencias — con solo una, no
+  hay pestañas que mostrar. Agregar una referencia nueva la deja activa de
+  una vez.
+- **"Tallas y observaciones" es progresiva**: colapsada por defecto en una
+  referencia nueva (no todas las prendas necesitan tallas por unidad) — se
+  abre sola en cuanto tiene datos, o en cuanto una plantilla le sugiere una
+  curva de tallas (si no, el botón para generarla quedaría escondido). El
+  resto de las secciones opcionales (costos reales, estados de producción,
+  PDF interno) ya eran colapsables desde antes (`renderSeccionColapsable`) —
+  no hizo falta tocarlas, ya cumplían con "no saturar la vista de una".
+
 ## Estructura
 
 ```
