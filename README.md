@@ -457,6 +457,27 @@ y (2) no había forma de saber de un vistazo de dónde salió un movimiento.
   tocar el pedido real — la fila de edición ya no ofrece esa posibilidad
   para movimientos con origen conocido.
 
+## Cotizaciones: modo demo + la cantidad sigue al listado de tallas
+
+Dos ajustes chicos, pero que tocan dinero, así que van documentados aparte:
+
+- **Modo demo** (botón "🧪 Marcar como prueba" / "✓ Hacer real" en cada
+  cotización, campo `esDemo`): una cotización de prueba queda excluida de
+  TODO cálculo financiero real — comisiones pendientes (`calcComisionesPendientesCot`,
+  `calcSaldosVendedores`, `calcResumenPorPagar`), "Mis ventas"
+  (`calcVentasVendedor`, y su listado propio en `mis-ventas.js`) y el
+  listado de "Cotizaciones sin convertir" en Resumen. **Es reversible en
+  los dos sentidos** (demo → real y real → demo) en cualquier momento, sin
+  perder nada de lo cargado. Convertir una cotización en pedido (con
+  "Convertir en pedido" o "Aplicar a pedido") siempre la vuelve real de
+  paso — no existe el concepto de "pedido de prueba".
+- **La cantidad cotizada nunca puede ser menor que el listado de tallas**:
+  agregar filas a "Tallas y observaciones" (a mano, por CSV, por curva de
+  tallas o cargando un roster) sube `cantidadPedida` si el listado resultante
+  la supera — nunca al revés (borrar filas no baja la cantidad sola). Ver
+  `conDetalleAgregado()` en `modules/cotizaciones.js`, usado por las 4
+  acciones que agregan filas para que ninguna se quede desincronizada.
+
 ## Estructura
 
 ```

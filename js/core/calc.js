@@ -271,7 +271,7 @@ export function calcResumenPorPagar() {
     }
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") {
+    if (c.estado !== "convertida" && !c.esDemo && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") {
       if (c.vendedor.fechaPago) items.push({ monto: calcComisionValorCot(c), fecha: new Date(c.vendedor.fechaPago + "T00:00:00") });
       else items.push({ monto: calcComisionValorCot(c), vencida: true });
     }
@@ -319,7 +319,7 @@ export function calcSaldosVendedores() {
     if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") agregar(p.vendedor.nombre, calcComisionValor(p), p.vendedor.fechaPago);
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") agregar(c.vendedor.nombre, calcComisionValorCot(c), c.vendedor.fechaPago);
+    if (c.estado !== "convertida" && !c.esDemo && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") agregar(c.vendedor.nombre, calcComisionValorCot(c), c.vendedor.fechaPago);
   });
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
@@ -438,7 +438,7 @@ export function calcComisionValorCot(cot) {
 // calcComisionesPendientes, para no duplicarla.
 export function calcComisionesPendientesCot() {
   return state.cotizaciones.reduce(function (a, c) {
-    if (c.estado === "convertida") return a;
+    if (c.estado === "convertida" || c.esDemo) return a;
     if (c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") return a + calcComisionValorCot(c);
     return a;
   }, 0);
@@ -457,7 +457,7 @@ export function calcVentasVendedor(nombre) {
     if (p.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
+    if (c.estado === "convertida" || c.esDemo || !c.vendedor || c.vendedor.nombre !== nombre) return;
     totalVendido += calcCotizacionTotales(c).precioTotal;
     var valor = calcComisionValorCot(c);
     if (c.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;

@@ -17,7 +17,7 @@ function filasVendedor(nombre) {
     filas.push({ cliente: p.cliente, descripcion: p.descripcion, total: p.total, comision: calcComisionValor(p), pagado: p.vendedor.estado === "pagado" });
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
+    if (c.estado === "convertida" || c.esDemo || !c.vendedor || c.vendedor.nombre !== nombre) return;
     filas.push({ cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, comision: calcComisionValorCot(c), pagado: c.vendedor.estado === "pagado" });
   });
   return filas;

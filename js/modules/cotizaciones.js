@@ -99,6 +99,7 @@ function renderCotCard(c) {
     '<button class="cot-collapse-toggle" data-action="toggle-cot-colapsada" data-id="' + c.id + '" title="' + (colapsada ? "Expandir" : "Contraer") + '">' + (colapsada ? "\u25b8" : "\u25be") + '</button> ' +
     '<span class="cot-cliente">' + esc(c.cliente) + "</span> " +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
+    (c.esDemo ? ' <span class="badge" style="background:var(--warning-soft);color:var(--warning-ink);" title="No cuenta en KPIs, reportes ni Por cobrar \u2014 es solo para practicar el flujo">\ud83e\uddea Prueba</span>' : "") +
     '<div class="cot-meta">' + esc(c.descripcion) + " \u00b7 " +
     '<input type="date" class="mini-input" style="width:135px;display:inline-block;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" />' +
     (c.pedidoOrigenId && c.estado !== "convertida" ? ' \u00b7 <span style="color:var(--accent-ink);">escalada desde pedido r\u00e1pido</span>' : "") +
@@ -118,6 +119,7 @@ function renderCotCard(c) {
     '</label>' +
     (iva.activo ? '<input type="number" class="mini-input" style="width:60px" value="' + esc(iva.porcentaje) + '" data-action-change="set-cot-iva" data-campo="porcentaje" data-id="' + c.id + '" title="Porcentaje de IVA" />%' : "") +
     renderHelp("El IVA es opcional: act\u00edvalo aqu\u00ed (o desde el pedido convertido) y define el %. Si est\u00e1 apagado, el PDF no lo cobra.") +
+    '<button class="btn ghost small" data-action="toggle-cot-demo" data-id="' + c.id + '" title="' + (c.esDemo ? "Esta cotizaci\u00f3n es de prueba: no cuenta en KPIs, reportes ni Por cobrar. Clic para convertirla en real." : "Marcarla como prueba la saca de todo c\u00e1lculo financiero real (KPIs, reportes, Por cobrar) \u2014 \u00fatil para practicar el flujo sin ensuciar tus n\u00fameros.") + '">' + (c.esDemo ? "\u2713 Hacer real" : "\ud83e\uddea Marcar como prueba") + "</button>" +
     '<button class="btn ghost small" data-action="generar-pdf" data-id="' + c.id + '">Generar PDF para el cliente</button>' +
     '<button class="btn ghost small" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Clientes)">✉ Enviar por correo</button>' +
     (c.estado !== "convertida"
@@ -300,7 +302,7 @@ function renderDetalleReferencia(cotId, ref) {
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
   var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
   var html = '<div class="cot-col-title" style="margin-top:14px;">Tallas y observaciones' +
-    renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización.") +
+    renderHelp("Para uniformes o pedidos personalizados: cada fila puede ser una persona/unidad con su talla, número y observación propia. Se incluye en el PDF de orden de producción de los pedidos que salgan de esta cotización. Si este listado crece más que la cantidad cotizada de la referencia, la cantidad sube sola para que coincidan (nunca al revés).") +
     "</div>";
   if (clienteRoster && (clienteRoster.roster || []).length) {
     html += '<div class="section-sub" style="margin:0 0 8px;">' +
@@ -378,13 +380,22 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!fc.cliente || !fc.descripcion) return;
-    state.cotizaciones.unshift({ id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico() });
+    state.cotizaciones.unshift({ id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, colapsada: false, vendedor: null, codigoPublico: codigoPublico(), esDemo: false });
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
     persist("cotizaciones"); notify();
   },
   "toggle-cot-colapsada": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { colapsada: !c.colapsada }) : c; });
+    persist("cotizaciones"); notify();
+  },
+  // Reversible en los dos sentidos: una cotización de prueba se puede volver
+  // real (y al revés) en cualquier momento, sin perder nada de lo cargado —
+  // solo cambia si cuenta o no en los cálculos financieros reales (ver
+  // origenDeTx-style exclusiones con "esDemo" en core/calc.js).
+  "toggle-cot-demo": function (el) {
+    var id = el.getAttribute("data-id");
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { esDemo: !c.esDemo }) : c; });
     persist("cotizaciones"); notify();
   },
   "set-cot-fecha": function (el) {
@@ -567,7 +578,9 @@ export var actions = {
       state.pedidos.unshift(nuevoP);
       // Se contrae automáticamente para no ocupar tanto espacio; se puede
       // expandir y seguir editando cuando haga falta.
-      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id, colapsada: true }) : c; });
+      // Convertir en pedido siempre la vuelve real: no existe el concepto de
+      // "pedido de prueba" — si venía marcada como demo, se la desmarca acá.
+      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id, colapsada: true, esDemo: false }) : c; });
       persist("pedidos"); persist("cotizaciones");
       state.tab = "pedidos";
     }
@@ -675,7 +688,7 @@ export var actions = {
     var nombreD = val(card, "det-nombre-" + refId);
     if (!nombreD) return;
     var fila = { id: uid(), nombre: nombreD, talla: val(card, "det-talla-" + refId), numero: val(card, "det-numero-" + refId), tipo: val(card, "det-tipo-" + refId), observaciones: val(card, "det-obs-" + refId) };
-    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat([fila]) }); });
+    mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, [fila]); });
   },
   // Genera de una vez varias filas de "tallas y observaciones" a partir de
   // una curva tipo "S:2, M:4, L:3" — cada unidad nace con su talla puesta y
@@ -690,7 +703,7 @@ export var actions = {
     curva.forEach(function (c) {
       for (var i = 0; i < c.cantidad; i++) filas.push({ id: uid(), nombre: "", talla: c.talla, numero: "", tipo: "", observaciones: "" });
     });
-    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
+    mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
     var curvaLimpia = Object.assign({}, state.curvaSugerida); delete curvaLimpia[refId];
     state.curvaSugerida = curvaLimpia;
   },
@@ -705,7 +718,7 @@ export var actions = {
     var roster = cliente ? (cliente.roster || []) : [];
     if (!roster.length) return;
     var filas = roster.map(function (j) { return { id: uid(), nombre: j.nombre, talla: j.talla, numero: j.numero, tipo: "", observaciones: "" }; });
-    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
+    mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
   },
   "remove-ref-detalle": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), itemId = el.getAttribute("data-item");
@@ -735,7 +748,7 @@ export var actions = {
         window.alert("No se encontraron filas válidas en el CSV. Revisa que tenga columnas: nombre, talla, numero, tipo, observaciones (y que 'nombre' no esté vacío).");
         return;
       }
-      mapRef(cotId, refId, function (r) { return Object.assign({}, r, { detalle: (r.detalle || []).concat(filas) }); });
+      mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
     };
     reader.readAsText(file, "UTF-8");
   },
@@ -773,7 +786,7 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor
       });
     });
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId, colapsada: true }) : c; });
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId, colapsada: true, esDemo: false }) : c; });
     persist("pedidos"); persist("cotizaciones"); notify();
   },
   "toggle-cot-seccion": function (el) {
@@ -848,6 +861,16 @@ export var actions = {
 function conRef(cotId, transform) {
   state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? transform(c) : c; });
   persist("cotizaciones"); notify();
+}
+// Agrega filas al detalle (tallas/observaciones) de una referencia y, si el
+// listado resultante queda más grande que la cantidad cotizada, la sube
+// para que coincidan — el listado nunca puede representar más unidades de
+// las que la cotización dice vender (afecta el precio total calculado). No
+// funciona al revés: borrar filas de detalle no baja la cantidad sola.
+function conDetalleAgregado(r, nuevasFilas) {
+  var detalle = (r.detalle || []).concat(nuevasFilas);
+  var cantidadPedida = Math.max(num(r.cantidadPedida) || 0, detalle.length);
+  return Object.assign({}, r, { detalle: detalle, cantidadPedida: cantidadPedida });
 }
 // Aplica una función de transformación a una referencia puntual dentro de su cotización.
 function mapRef(cotId, refId, transform) {

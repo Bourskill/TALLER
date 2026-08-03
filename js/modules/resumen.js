@@ -15,7 +15,7 @@ export function render() {
     .slice(0, 5);
   var deudores = listaDeudores().slice(0, 6);
   var urgentes = state.pendientes.filter(function (p) { return !p.hecho && p.prioridad === "alta"; }).slice(0, 5);
-  var cotizacionesAbiertas = state.cotizaciones.filter(function (c) { return c.estado !== "convertida"; }).slice(0, 5);
+  var cotizacionesAbiertas = state.cotizaciones.filter(function (c) { return c.estado !== "convertida" && !c.esDemo; }).slice(0, 5);
 
   var html = '<div class="card"><div class="section-title">Próximas entregas</div><div class="section-sub">Pedidos ordenados por fecha comprometida</div>';
   if (proximas.length === 0) { html += '<div class="empty">No hay entregas programadas todavía.</div>'; }
