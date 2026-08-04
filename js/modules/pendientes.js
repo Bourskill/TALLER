@@ -37,9 +37,9 @@ export function render() {
         // saldo total), con un contador discreto tipo "2/6". El saldo total
         // de la deuda queda disponible al pasar el mouse.
         html += '<div class="tx-row" style="grid-template-columns:1fr 110px 90px;padding:4px 0;">' +
-          "<span>" + esc(it.concepto) + (it.contador ? ' <span style="font-size:10px;font-weight:700;color:var(--ink-faint);background:var(--surface-3);padding:1px 6px;border-radius:8px;">' + esc(it.contador) + "</span>" : "") + "</span>" +
-          "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-faint);\">" + (it.fecha ? fechaCorta(it.fecha) : "Sin fecha") + "</span>" +
-          '<span class="amount"' + (it.montoTotal !== undefined && it.montoTotal !== it.monto ? ' title="Saldo total de la deuda: ' + fmt(it.montoTotal) + '"' : "") + '>' + fmt(it.monto) + "</span>" +
+          '<span class="mobile-th">Concepto</span><span>' + esc(it.concepto) + (it.contador ? ' <span style="font-size:10px;font-weight:700;color:var(--ink-faint);background:var(--surface-3);padding:1px 6px;border-radius:8px;">' + esc(it.contador) + "</span>" : "") + "</span>" +
+          '<span class="mobile-th">Vence</span>' + "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-faint);\">" + (it.fecha ? fechaCorta(it.fecha) : "Sin fecha") + "</span>" +
+          '<span class="mobile-th">Monto</span><span class="amount"' + (it.montoTotal !== undefined && it.montoTotal !== it.monto ? ' title="Saldo total de la deuda: ' + fmt(it.montoTotal) + '"' : "") + '>' + fmt(it.monto) + "</span>" +
           "</div>";
       });
       html += "</div>";
@@ -55,7 +55,7 @@ export function render() {
     '</div>';
   html += '<div class="emp-row" style="font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario</span><span></span></div>';
   (cfg.nomina || []).forEach(function (e) {
-    html += '<div class="emp-row"><span>' + esc(e.nombre) + "</span><span>" + esc(e.cargo || "—") + '</span><span class="amount">' + fmt(e.salario) + "</span>" +
+    html += '<div class="emp-row"><span class="mobile-th">Nombre</span><span>' + esc(e.nombre) + '</span><span class="mobile-th">Cargo</span><span>' + esc(e.cargo || "—") + '</span><span class="mobile-th">Salario</span><span class="amount">' + fmt(e.salario) + "</span>" +
       '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button></div>';
   });
   if ((cfg.nomina || []).length === 0) { html += '<div class="empty">Aún no registras personas en nómina.</div>'; }
@@ -88,12 +88,12 @@ export function render() {
     var periodo = g.periodo || "mensual";
     var dias = diasPagoDe(g);
     html += '<div class="emp-row" data-gasto-fijo-id="' + g.id + '" style="grid-template-columns:1fr 100px 110px 140px 130px 40px;">' +
-      "<span>" + esc(g.nombre) + '</span><span class="amount">' + fmt(g.monto) + "</span>" +
-      '<span><select class="mini-input" style="width:100%" data-action-change="set-gasto-fijo-periodo" data-id="' + g.id + '">' +
+      '<span class="mobile-th">Concepto</span><span>' + esc(g.nombre) + '</span><span class="mobile-th">Monto</span><span class="amount">' + fmt(g.monto) + "</span>" +
+      '<span class="mobile-th">Periodo</span><span><select class="mini-input" style="width:100%" data-action-change="set-gasto-fijo-periodo" data-id="' + g.id + '">' +
       Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodo); }).join("") +
       "</select></span>" +
-      '<span><input class="mini-input" style="width:100%" value="' + esc(dias.join(",")) + '" placeholder="' + (periodo === "semanal" ? "Ej. 6" : "Ej. 1,15") + '" data-action-change="set-gasto-fijo-dia" data-id="' + g.id + '" title="Próximo: ' + fechaCorta(calcFechaVencimientoPeriodo(periodo, dias)) + '" /></span>' +
-      '<span><button class="status-pill ' + (pendiente ? "pendiente" : "pagado") + '" data-action="toggle-gasto-fijo-pagado" data-id="' + g.id + '">' + (pendiente ? "pendiente" : "pagado este periodo") + "</button></span>" +
+      '<span class="mobile-th">Día(s) de pago</span><span><input class="mini-input" style="width:100%" value="' + esc(dias.join(",")) + '" placeholder="' + (periodo === "semanal" ? "Ej. 6" : "Ej. 1,15") + '" data-action-change="set-gasto-fijo-dia" data-id="' + g.id + '" title="Próximo: ' + fechaCorta(calcFechaVencimientoPeriodo(periodo, dias)) + '" /></span>' +
+      '<span class="mobile-th">Estado</span><span><button class="status-pill ' + (pendiente ? "pendiente" : "pagado") + '" data-action="toggle-gasto-fijo-pagado" data-id="' + g.id + '">' + (pendiente ? "pendiente" : "pagado este periodo") + "</button></span>" +
       '<button class="btn danger small" data-action="remove-gasto-fijo" data-id="' + g.id + '">✕</button></div>';
   });
   if ((cfg.gastosFijos || []).length === 0) { html += '<div class="empty">Aún no registras gastos fijos.</div>'; }
@@ -147,10 +147,10 @@ export function render() {
     // Aquí solo hay deudas pendientes: en cuanto se paga la última cuota, la
     // deuda se mueve entera al historial de abajo (ver acción "pagar-deuda").
     html += '<div class="emp-row" data-deuda-id="' + d.id + '" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;">' +
-      "<span>" + esc(d.concepto) + "</span><span>" + esc(d.contraparte || "—") + '</span>' +
-      '<span class="amount" title="Monto total: ' + fmt(d.monto) + '">' + fmt(saldo) + "</span>" +
-      "<span>" + (cuotas > 1 ? (pagadas + "/" + cuotas) : "Único") + "</span>" +
-      "<span>" + (dias.length ? (PERIODOS_PAGO[periodo] + " · " + dias.join(",")) : PERIODOS_PAGO[periodo]) + "</span>" +
+      '<span class="mobile-th">Concepto</span><span>' + esc(d.concepto) + '</span><span class="mobile-th">Con quién</span><span>' + esc(d.contraparte || "—") + '</span>' +
+      '<span class="mobile-th">Saldo</span><span class="amount" title="Monto total: ' + fmt(d.monto) + '">' + fmt(saldo) + "</span>" +
+      '<span class="mobile-th">Cuotas</span><span>' + (cuotas > 1 ? (pagadas + "/" + cuotas) : "Único") + "</span>" +
+      '<span class="mobile-th">Periodo</span><span>' + (dias.length ? (PERIODOS_PAGO[periodo] + " · " + dias.join(",")) : PERIODOS_PAGO[periodo]) + "</span>" +
       '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn small" data-action="pagar-deuda" data-id="' + d.id + '">Pagar</button>' +
       '<button class="btn ghost small" data-action="editar-deuda" data-id="' + d.id + '">Editar</button>' +
@@ -248,14 +248,14 @@ function renderFilaEdicionDeuda(d) {
   var dias = diasPagoDe(d);
   return '<div data-deuda-edit-row="' + d.id + '">' +
     '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 90px 150px;background:var(--surface-2);">' +
-    '<span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(d.concepto) + '" /></span>' +
-    '<span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(d.contraparte || "") + '" /></span>' +
-    '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(d.monto) + '" /></span>' +
-    '<span><input type="number" min="1" class="mini-input" style="width:100%" data-role="edit-cuotas" value="' + esc(d.cuotas || "") + '" /></span>' +
-    '<span><select class="mini-input" style="width:100%" data-role="edit-periodo">' +
+    '<span class="mobile-th">Concepto</span><span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(d.concepto) + '" /></span>' +
+    '<span class="mobile-th">Con quién</span><span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(d.contraparte || "") + '" /></span>' +
+    '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(d.monto) + '" /></span>' +
+    '<span class="mobile-th">Cuotas</span><span><input type="number" min="1" class="mini-input" style="width:100%" data-role="edit-cuotas" value="' + esc(d.cuotas || "") + '" /></span>' +
+    '<span class="mobile-th">Periodo</span><span><select class="mini-input" style="width:100%" data-role="edit-periodo">' +
     Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], d.periodo || "mensual"); }).join("") +
     "</select></span>" +
-    '<span><input class="mini-input" style="width:100%" data-role="edit-dias" value="' + esc(dias.join(",")) + '" placeholder="Días de pago" /></span>' +
+    '<span class="mobile-th">Día(s) de pago</span><span><input class="mini-input" style="width:100%" data-role="edit-dias" value="' + esc(dias.join(",")) + '" placeholder="Días de pago" /></span>' +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     '<button class="btn small" data-action="guardar-deuda-edit" data-id="' + d.id + '">Guardar</button>' +
     '<button class="btn ghost small" data-action="cancelar-edicion-deuda">Cancelar</button>' +

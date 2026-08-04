@@ -1,3 +1,11 @@
+/* Etiqueta de campo para cuando una fila tipo tabla se apila en móvil: oculta
+   en escritorio por defecto (display:none la saca por completo del layout de
+   grid, así no ocupa una casilla de columna ahí) y se muestra dentro del
+   media query de abajo. Se inserta como un <span> hermano justo antes de
+   cada campo (no se envuelve el input/select existente porque ::before no se
+   puede poner sobre elementos reemplazados como <input>/<select>). */
+.mobile-th{display:none;}
+
 /* ==========================================================================
    Móvil / pantallas angostas: la sidebar deja de ocupar espacio fijo y se
    convierte en un cajón (drawer) que se desliza desde la izquierda, con un
@@ -47,8 +55,20 @@
   .kpi-value{font-size:20px;}
 
   .two-col{grid-template-columns:1fr;}
-  .tx-row{grid-template-columns:1fr;gap:2px;padding:12px 4px;}
-  .tx-row.head{display:none;}
+
+  /* Cualquier fila tipo tabla (movimientos, insumos, tallas, nómina...) pasa
+     de columnas fijas en px a apilarse en una sola columna. El !important es
+     necesario: casi todas fijan su ancho con un style="grid-template-columns:
+     ...px..." inline por fila (para poder variar el layout entre pantallas),
+     y un estilo inline sin !important le gana a cualquier regla externa —
+     por eso un intento anterior de apilar sin !important quedaba inerte y la
+     tabla seguía desbordando con scroll horizontal. */
+  .tx-row, .ins-row, .det-row, .emp-row{grid-template-columns:1fr !important;gap:3px;padding:12px 4px;}
+  .tx-row.head, .ins-row.head, .det-row.head, .emp-row.head{display:none;}
+  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;}
+
+  .mobile-th{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;margin-top:9px;}
+  .mobile-th:first-child{margin-top:0;}
 }
 
 @media (max-width: 480px){

@@ -11,6 +11,9 @@ export var ICONS = {
   pedidos: '<svg viewBox="0 0 24 24" ' + S + '><path d="M12 3.3 20.5 8 12 12.7 3.5 8 12 3.3Z"/><path d="M3.5 8v8.2L12 20.9l8.5-4.7V8"/><path d="M12 12.7V20.9"/></svg>',
   cotizaciones: '<svg viewBox="0 0 24 24" ' + S + '><path d="M13.5 3H7a1.6 1.6 0 0 0-1.6 1.6v14.8A1.6 1.6 0 0 0 7 21h10a1.6 1.6 0 0 0 1.6-1.6V8.1L13.5 3Z"/><path d="M13.3 3v4.6a1 1 0 0 0 1 1H18.6"/><path d="M8.4 13h7.2M8.4 16.2h7.2M8.4 9.8h3"/></svg>',
   catalogo: '<svg viewBox="0 0 24 24" ' + S + '><rect x="3.3" y="3.3" width="7.2" height="7.2" rx="1.3"/><rect x="13.5" y="3.3" width="7.2" height="7.2" rx="1.3"/><rect x="3.3" y="13.5" width="7.2" height="7.2" rx="1.3"/><rect x="13.5" y="13.5" width="7.2" height="7.2" rx="1.3"/></svg>',
+  // Prenda ya hecha (camiseta) — catálogo de productos con stock, distinto
+  // de la rejilla de "catalogo" (insumos).
+  productos: '<svg viewBox="0 0 24 24" ' + S + '><path d="M8.7 3.8 4 6.6l1.7 3 2.2-1.2V20.2h8.2V8.4l2.2 1.2 1.7-3-4.7-2.8c-.5 1.5-1.8 2.6-3.3 2.6s-2.8-1.1-3.3-2.6Z"/></svg>',
   plantillas: '<svg viewBox="0 0 24 24" ' + S + '><rect x="7.5" y="7.5" width="13.2" height="13.2" rx="1.8"/><path d="M16.7 7.5V5.3A1.8 1.8 0 0 0 14.9 3.5H4.9A1.8 1.8 0 0 0 3.1 5.3v10a1.8 1.8 0 0 0 1.8 1.8h2.6"/></svg>',
   clientes: '<svg viewBox="0 0 24 24" ' + S + '><circle cx="9.2" cy="8.4" r="3.4"/><path d="M2.8 20c0-3.4 2.9-6 6.4-6s6.4 2.6 6.4 6"/><circle cx="17.3" cy="9.3" r="2.6"/><path d="M15 14.4c2.7 0 5.6 1.7 5.9 5.6"/></svg>',
   pendientes: '<svg viewBox="0 0 24 24" ' + S + '><rect x="3.5" y="4" width="17" height="17" rx="2.2"/><path d="M7.5 12.2l2.7 2.7 6-6.4"/></svg>',

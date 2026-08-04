@@ -121,11 +121,11 @@ function renderTablaTx(lista) {
 function renderFila(t) {
   var origen = origenDeTx(t);
   return '<div class="tx-row">' +
-    "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
-    "<span>" + esc(t.concepto) + "</span>" +
-    '<span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
-    '<span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
-    '<span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
+    "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
+    '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
+    '<span class="mobile-th">Persona</span><span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
+    '<span class="mobile-th">Tipo</span><span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
+    '<span class="mobile-th">Monto</span><span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     (origen ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
     '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
@@ -147,18 +147,18 @@ function renderFila(t) {
 // todo sigue editable como siempre.
 function renderFilaEdicion(t) {
   var origen = origenDeTx(t);
-  var tipoCell = origen
+  var tipoCell = '<span class="mobile-th">Tipo</span>' + (origen
     ? '<span><span class="tag ' + t.tipo + '" title="No editable: vinculado a ' + esc(origen.label) + '">' + TIPOS_TX[t.tipo] + "</span></span>"
     : '<span><select class="mini-input" style="width:100%" data-role="edit-tipo">' +
       Object.keys(TIPOS_TX).map(function (k) { return opt(k, TIPOS_TX[k], t.tipo); }).join("") +
-      "</select></span>";
-  var montoCell = origen
+      "</select></span>");
+  var montoCell = '<span class="mobile-th">Monto</span>' + (origen
     ? '<span class="amount" title="No editable: vinculado a ' + esc(origen.label) + '">' + fmt(t.monto) + "</span>"
-    : '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>';
+    : '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>');
   return '<div class="tx-row" style="background:var(--surface-2);" data-tx-edit-row="' + t.id + '">' +
-    '<span><input type="date" class="mini-input" style="width:100%" data-role="edit-fecha" value="' + esc(t.fecha) + '" /></span>' +
-    '<span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(t.concepto) + '" /></span>' +
-    '<span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(t.contraparte || "") + '" /></span>' +
+    '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" style="width:100%" data-role="edit-fecha" value="' + esc(t.fecha) + '" /></span>' +
+    '<span class="mobile-th">Concepto</span><span><input class="mini-input" style="width:100%" data-role="edit-concepto" value="' + esc(t.concepto) + '" /></span>' +
+    '<span class="mobile-th">Persona</span><span><input class="mini-input" style="width:100%" data-role="edit-contraparte" value="' + esc(t.contraparte || "") + '" /></span>' +
     tipoCell + montoCell +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     '<button class="btn small" data-action="guardar-tx-edit" data-id="' + t.id + '">Guardar</button>' +
@@ -182,11 +182,11 @@ function renderPapelera() {
   html += '<div class="tx-row head"><span>Fecha</span><span>Concepto</span><span>Persona</span><span>Tipo</span><span>Monto</span><span></span></div>';
   state.txPapelera.forEach(function (t) {
     html += '<div class="tx-row">' +
-      "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
-      "<span>" + esc(t.concepto) + "</span>" +
-      '<span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
-      '<span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
-      '<span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
+      "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
+      '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
+      '<span class="mobile-th">Persona</span><span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
+      '<span class="mobile-th">Tipo</span><span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
+      '<span class="mobile-th">Monto</span><span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
       '<span style="display:flex;align-items:center;gap:6px;">' +
       '<button class="btn ghost small" data-action="restaurar-tx" data-id="' + t.id + '">Restaurar</button>' +
       '<button class="btn danger small" data-action="eliminar-tx-definitivo" data-id="' + t.id + '">Eliminar definitivo</button>' +

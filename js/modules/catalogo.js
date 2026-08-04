@@ -90,14 +90,14 @@ export function render() {
 
 function renderFilaInsumo(c, categorias) {
   return '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
-    '<input class="mini-input" style="width:100%" value="' + esc(c.nombre) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="nombre" />' +
-    '<select class="mini-input" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="categoriaId">' +
+    '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(c.nombre) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="nombre" />' +
+    '<span class="mobile-th">Categoría</span><select class="mini-input" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="categoriaId">' +
     '<option value="">Sin categoría</option>' +
     categorias.map(function (cat) { return '<option value="' + cat.id + '" ' + (c.categoriaId === cat.id ? "selected" : "") + ">" + esc(cat.nombre) + "</option>"; }).join("") +
     "</select>" +
-    '<input class="mini-input" style="width:100%" value="' + esc(c.unidad) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="unidad" />' +
-    '<input type="number" class="mini-input" style="width:100%" value="' + esc(c.costo) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="costo" />' +
-    '<select class="mini-input tipo-sel" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
+    '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(c.unidad) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="unidad" />' +
+    '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(c.costo) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="costo" />' +
+    '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
     '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '">✕</button>' +
     "</div>";
 }

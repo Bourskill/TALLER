@@ -110,9 +110,9 @@ function renderRoster(c, roster) {
     html += '<div class="det-row head" style="grid-template-columns:1fr 70px 70px 30px;"><span>Nombre</span><span>Número</span><span>Talla</span><span></span></div>';
     roster.forEach(function (j) {
       html += '<div class="det-row" style="grid-template-columns:1fr 70px 70px 30px;">' +
-        '<input class="mini-input" value="' + esc(j.nombre) + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="nombre" />' +
-        '<input class="mini-input" value="' + esc(j.numero || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="numero" />' +
-        '<input class="mini-input" value="' + esc(j.talla || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="talla" />' +
+        '<span class="mobile-th">Nombre</span><input class="mini-input" value="' + esc(j.nombre) + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="nombre" />' +
+        '<span class="mobile-th">Número</span><input class="mini-input" value="' + esc(j.numero || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="numero" />' +
+        '<span class="mobile-th">Talla</span><input class="mini-input" value="' + esc(j.talla || "") + '" data-action-change="set-roster-campo" data-id="' + c.id + '" data-jug="' + j.id + '" data-campo="talla" />' +
         '<button class="btn danger small" data-action="remove-roster-jugador" data-id="' + c.id + '" data-jug="' + j.id + '">✕</button>' +
         "</div>";
     });

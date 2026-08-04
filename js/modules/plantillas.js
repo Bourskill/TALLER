@@ -54,8 +54,8 @@ function renderFlujoEstadosCard(f) {
     html += '<div class="det-row head" style="grid-template-columns:' + COLS_E + ';"><span>#</span><span>Etapa</span><span></span><span></span><span></span></div>';
     estados.forEach(function (e, i) {
       html += '<div class="det-row" style="grid-template-columns:' + COLS_E + ';">' +
-        "<span>" + (i + 1) + "</span>" +
-        '<input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-etapa-flujo-label" data-id="' + f.id + '" data-idx="' + i + '" />' +
+        '<span class="mobile-th">#</span><span>' + (i + 1) + "</span>" +
+        '<span class="mobile-th">Etapa</span><input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-etapa-flujo-label" data-id="' + f.id + '" data-idx="' + i + '" />' +
         '<button class="btn ghost small" ' + (i === 0 ? "disabled" : "") + ' data-action="mover-etapa-flujo" data-dir="-1" data-id="' + f.id + '" data-idx="' + i + '" title="Subir">↑</button>' +
         '<button class="btn ghost small" ' + (i === estados.length - 1 ? "disabled" : "") + ' data-action="mover-etapa-flujo" data-dir="1" data-id="' + f.id + '" data-idx="' + i + '" title="Bajar">↓</button>' +
         '<button class="btn danger small" data-action="remove-etapa-flujo" data-id="' + f.id + '" data-idx="' + i + '">✕</button>' +
@@ -101,11 +101,11 @@ function renderPlantillaCard(p) {
   html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
   (p.insumos || []).forEach(function (i) {
     html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';">' +
-      '<input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
-      '<input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
-      '<select class="mini-input tipo-sel" style="width:100%" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
-      '<input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
+      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
+      '<span class="mobile-th">Cant./mult.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
       '<button class="btn danger small" data-action="remove-pla-insumo" data-pla="' + p.id + '" data-ins="' + i.id + '">✕</button>' +
       "</div>";
   });

@@ -145,9 +145,8 @@
 
 @media (max-width: 700px){
   .cot-cols{grid-template-columns:1fr;}
-  .ins-row{grid-template-columns:1fr 1fr;}
-  .det-row{grid-template-columns:1fr 1fr;}
-  .det-row > *:nth-child(6){grid-column:1 / -1;}
+  /* .ins-row/.det-row ya se apilan a una sola columna desde 880px, con
+     !important, en responsive.css (ver ahí el porqué del !important). */
   .cot-compara-grid{grid-template-columns:1fr;}
   .cot-docs-grid{grid-template-columns:1fr;}
 }

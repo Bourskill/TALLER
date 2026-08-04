@@ -713,3 +713,67 @@ export async function generarPDFFactura(p, opts) {
   var nombreSeguro = slugify(p.cliente || "factura");
   return finalizarPDF(doc, codigo.replace("#", "") + "-factura-" + nombreSeguro + ".pdf", opts);
 }
+
+// PDF de REMISIÓN: sustento de qué se entregó/recibió en UNA entrega puntual
+// de consignación (un pedido puede acumular varias remisiones en el tiempo —
+// cada reposición de stock al punto genera la suya, ver modules/pedidos.js
+// "Agregar remisión"). No es una factura: los valores son de referencia para
+// dejar constancia de lo entregado — el cobro real nace cuando el punto
+// reporte ventas. Termina con dos líneas en blanco para firma, como soporte
+// físico de que el punto recibió conforme.
+export async function generarPDFRemision(p, remision, opts) {
+  if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
+  var jsPDF = window.jspdf.jsPDF;
+  var doc = new jsPDF({ unit: "pt", format: "letter" });
+  var codigo = remision.codigoPublico || codigoPublico();
+  var head = drawHeaderBasic(doc, "REMISIÓN", codigo);
+  var pageW = head.pageW, marginX = head.marginX, y = head.y;
+  var cfg = state.config;
+  var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
+  var clienteLines = [p.cliente, clienteInfo && clienteInfo.direccion, clienteInfo && clienteInfo.ciudad, clienteInfo && clienteInfo.telefono].filter(Boolean);
+
+  y = drawParties(doc, y, marginX, pageW, negocioLinesFrom(cfg), clienteLines, "PARA (punto de consignación)");
+
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
+  doc.text("Pedido: " + (p.numeroOp || "—") + (remision.fecha ? "   ·   Fecha: " + remision.fecha : "") + (remision.nota ? "   ·   " + remision.nota : ""), marginX, y);
+  y += 20;
+
+  var items = remision.items || [];
+  var totalRef = items.reduce(function (a, it) { return a + num(it.cantidad) * num(it.precioUnitario); }, 0);
+  doc.autoTable({
+    startY: y,
+    head: [["PRODUCTO", "TALLA", "CANTIDAD", "VALOR REF.", "SUBTOTAL"]],
+    body: items.map(function (it) {
+      return [it.productoNombre || "—", it.talla || "—", numFmt(it.cantidad), money(it.precioUnitario), money(num(it.cantidad) * num(it.precioUnitario))];
+    }),
+    styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
+    headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: "bold", fontSize: 9 },
+    alternateRowStyles: { fillColor: [242, 242, 242] },
+    margin: { left: marginX, right: marginX },
+    columnStyles: { 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } }
+  });
+
+  var finalY = doc.lastAutoTable.finalY + 22;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
+  doc.text("VALOR DE REFERENCIA TOTAL", marginX, finalY);
+  doc.text(money(totalRef), pageW - marginX, finalY, { align: "right" });
+  finalY += 20;
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(140, 140, 140);
+  var nota = doc.splitTextToSize("Documento de entrega en consignación — no es una factura. El cobro nace solo cuando el punto reporte ventas reales.", pageW - marginX * 2);
+  nota.forEach(function (l) { finalY += 12; doc.text(l, marginX, finalY); });
+
+  finalY += 46;
+  var pageH = doc.internal.pageSize.getHeight();
+  if (finalY + 60 > pageH - 60) { doc.addPage(); finalY = 54; }
+  doc.setDrawColor(160, 160, 160);
+  doc.line(marginX, finalY, marginX + 200, finalY);
+  doc.line(pageW - marginX - 200, finalY, pageW - marginX, finalY);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(90, 90, 90);
+  doc.text("Recibido conforme — firma", marginX, finalY + 14);
+  doc.text("Nombre y fecha", pageW - marginX - 200, finalY + 14);
+  finalY += 40;
+  await drawPiePagina(doc, finalY, marginX, pageW);
+
+  var nombreSeguro = slugify(p.cliente || "remision");
+  return finalizarPDF(doc, codigo.replace("#", "") + "-remision-" + nombreSeguro + ".pdf", opts);
+}

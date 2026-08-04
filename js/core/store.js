@@ -90,6 +90,18 @@ export const state = {
   // los apruebe (ver persist()/proponerCambio() más abajo). Cada uno:
   // { id, key: "catalogoInsumos"|"catalogoCategorias", autor, valor, fecha }.
   catalogoPropuestas: [],
+  // Prendas YA HECHAS (no personalizadas, solo cambia la talla) con stock
+  // propio — distinto del catálogo de insumos de arriba. Ver modules/productos.js.
+  productos: [],
+  productoImagenSubiendo: {}, // { [productoId]: true } mientras se sube su foto a Drive — nunca se persiste
+  productoMovimientosAbierto: "", // id del producto con su bitácora de stock desplegada (o "")
+  // Remisión de consignación en construcción (ver "Agregar remisión" en un
+  // pedido de consignación, modules/pedidos.js): se acumulan líneas de
+  // producto+talla+cantidad ANTES de confirmar, para que una entrega con
+  // varios productos/tallas genere UN solo documento, no uno por línea. Solo
+  // puede haber una remisión en construcción a la vez en toda la app (igual
+  // que cotVendedorEditando) — abrir otra reemplaza la anterior sin guardar.
+  remisionBuilder: { pedidoId: "", productoSel: "", items: [] },
 
   // Borradores de formularios. Viven en el estado (no en el DOM) para sobrevivir
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
@@ -98,7 +110,13 @@ export const state = {
     clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
     // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
-    esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: ""
+    esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+    // Producto del catálogo agregado a este pedido de venta directa (ver
+    // "Producto del catálogo" en el formulario): productoSel es el producto
+    // elegido en el picker (antes de confirmar la línea); stockConsumido es
+    // lo ya agregado — se descuenta del stock al crear el pedido y se
+    // restituye si el pedido se elimina (ver core/stock.js).
+    productoSel: "", stockConsumido: []
   },
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
@@ -186,6 +204,7 @@ export async function loadAll() {
     plantillasPrendas: KEYS.plantillasPrendas,
     plantillasEstados: KEYS.plantillasEstados,
     catalogoPropuestas: KEYS.catalogoPropuestas,
+    productos: KEYS.productos,
     ui: KEYS.ui
   };
   var nombres = Object.keys(claves);
@@ -222,6 +241,7 @@ export async function loadAll() {
     if (datos.plantillasPrendas && datos.plantillasPrendas.length) state.plantillasPrendas = datos.plantillasPrendas;
     if (datos.plantillasEstados) state.plantillasEstados = datos.plantillasEstados;
     if (datos.catalogoPropuestas) state.catalogoPropuestas = datos.catalogoPropuestas;
+    if (datos.productos) state.productos = datos.productos;
     if (datos.ui) state.ui = Object.assign({}, DEFAULT_UI, datos.ui, { navGroups: Object.assign({}, DEFAULT_UI.navGroups, datos.ui.navGroups || {}) });
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora

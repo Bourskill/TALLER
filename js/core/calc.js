@@ -552,9 +552,50 @@ export function calcConsignacionRetirada(p) {
   if (!p.consignacion) return 0;
   return (p.consignacion.retiros || []).reduce(function (a, r) { return a + num(r.cantidad); }, 0);
 }
+// Cuánto se ha enviado en total al punto: lo viejo (cantidadEnviada, un solo
+// número cargado al crear el pedido) más lo nuevo (remisiones — envíos
+// puntuales con soporte en PDF, ver modules/pedidos.js "Agregar remisión").
+// Las dos formas conviven: una consignación vieja sigue funcionando igual,
+// y cualquier reposición desde ahora en adelante se hace vía remisión.
+export function calcConsignacionEnviadoTotal(p) {
+  if (!p.consignacion) return 0;
+  var deRemisiones = (p.consignacion.remisiones || []).reduce(function (a, r) {
+    return a + (r.items || []).reduce(function (s, it) { return s + num(it.cantidad); }, 0);
+  }, 0);
+  return num(p.consignacion.cantidadEnviada) + deRemisiones;
+}
 export function calcConsignacionDisponible(p) {
   if (!p.consignacion) return 0;
-  return Math.max(0, num(p.consignacion.cantidadEnviada) - calcConsignacionVendida(p) - calcConsignacionRetirada(p));
+  return Math.max(0, calcConsignacionEnviadoTotal(p) - calcConsignacionVendida(p) - calcConsignacionRetirada(p));
+}
+// Desglose por producto+talla de lo que hay en el punto (solo para
+// consignaciones que ya usan remisiones — las viejas de un solo número no
+// tienen cómo desglosarse por talla, así que no aparecen aquí). Cada venta o
+// retiro que se registre indicando a qué línea corresponde (productoId +
+// talla) se resta de la línea correspondiente, no del total agregado.
+export function calcConsignacionDisponiblePorTalla(p) {
+  if (!p.consignacion) return [];
+  var mapa = {};
+  (p.consignacion.remisiones || []).forEach(function (r) {
+    (r.items || []).forEach(function (it) {
+      var key = it.productoId + "|" + it.talla;
+      if (!mapa[key]) mapa[key] = { productoId: it.productoId, productoNombre: it.productoNombre, talla: it.talla, precioUnitario: num(it.precioUnitario), enviado: 0, vendida: 0, retirada: 0 };
+      mapa[key].enviado += num(it.cantidad);
+    });
+  });
+  (p.consignacion.ventas || []).forEach(function (v) {
+    var key = v.productoId + "|" + v.talla;
+    if (v.productoId && v.talla && mapa[key]) mapa[key].vendida += num(v.cantidad);
+  });
+  (p.consignacion.retiros || []).forEach(function (r) {
+    var key = r.productoId + "|" + r.talla;
+    if (r.productoId && r.talla && mapa[key]) mapa[key].retirada += num(r.cantidad);
+  });
+  return Object.keys(mapa).map(function (k) {
+    var m = mapa[k];
+    m.disponible = Math.max(0, m.enviado - m.vendida - m.retirada);
+    return m;
+  });
 }
 // La comisión se calcula en el momento de CADA venta (no del pedido
 // completo): así una comisión por % siempre es sobre lo que de verdad se
@@ -637,6 +678,20 @@ export function calcDeudasPendientes() {
 // ---------- clientes ----------
 export function clienteById(id) {
   return state.clientes.filter(function (c) { return c.id === id; })[0] || null;
+}
+
+// ---------- productos (prendas ya hechas, con stock por talla) ----------
+export function productoById(id) {
+  return (state.productos || []).filter(function (p) { return p.id === id; })[0] || null;
+}
+export function stockTalla(producto, talla) {
+  if (!producto) return 0;
+  var v = (producto.variantesTalla || []).filter(function (v) { return v.talla === talla; })[0];
+  return v ? num(v.stock) : 0;
+}
+export function stockTotalProducto(producto) {
+  if (!producto) return 0;
+  return (producto.variantesTalla || []).reduce(function (a, v) { return a + num(v.stock); }, 0);
 }
 export function clientesFiltrados() {
   var q = norm(state.filtroClientes).trim();

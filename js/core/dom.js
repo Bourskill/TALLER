@@ -21,6 +21,7 @@ import * as finanzas from "../modules/finanzas.js";
 import * as pedidos from "../modules/pedidos.js";
 import * as cotizaciones from "../modules/cotizaciones.js";
 import * as catalogo from "../modules/catalogo.js";
+import * as productos from "../modules/productos.js";
 import * as plantillas from "../modules/plantillas.js";
 import * as clientes from "../modules/clientes.js";
 import * as pendientes from "../modules/pendientes.js";
@@ -28,13 +29,20 @@ import * as notas from "../modules/notas.js";
 import * as config from "../modules/config.js";
 import * as misVentas from "../modules/mis-ventas.js";
 
+// Nota de nombres (a propósito, pedido explícito del usuario): la clave
+// interna "catalogo" sigue siendo el catálogo de INSUMOS de siempre, pero su
+// label visible cambió a "Insumos". La clave interna "productos" es el
+// catálogo NUEVO de prendas ya hechas con stock, y su label visible es
+// "Catálogo" — las etiquetas quedan cruzadas respecto a las claves internas
+// para no tener que tocar nada que dependa de state.tab === "catalogo".
 var TABS = [
   ["resumen", "Resumen", resumen],
   ["mis-ventas", "Mis ventas", misVentas],
   ["finanzas", "Finanzas", finanzas],
   ["pedidos", "Pedidos", pedidos],
   ["cotizaciones", "Cotizaciones", cotizaciones],
-  ["catalogo", "Catálogo", catalogo],
+  ["productos", "Catálogo", productos],
+  ["catalogo", "Insumos", catalogo],
   ["plantillas", "Plantillas", plantillas],
   ["clientes", "Clientes", clientes],
   ["pendientes", "Pendientes", pendientes],
@@ -55,14 +63,14 @@ var TAB_MODULES = TABS.reduce(function (acc, t) { acc[t[0]] = t[2]; return acc; 
 // siempre para quien no pasa por el flujo de login real.
 var NAV_GROUPS_ADMIN = [
   ["general", "Panel", ["resumen", "notas"]],
-  ["ventas", "Ventas", ["pedidos", "cotizaciones", "clientes"]],
+  ["ventas", "Ventas", ["pedidos", "cotizaciones", "productos", "clientes"]],
   ["produccion", "Producción", ["catalogo", "plantillas"]],
   ["gestion", "Gestión", ["finanzas", "pendientes"]],
   ["sistema", "Sistema", ["config"]]
 ];
 var NAV_GROUPS_VENDEDOR = [
   ["general", "Panel", ["mis-ventas"]],
-  ["ventas", "Ventas", ["pedidos", "cotizaciones", "clientes"]],
+  ["ventas", "Ventas", ["pedidos", "cotizaciones", "productos", "clientes"]],
   ["produccion", "Producción", ["catalogo", "plantillas"]]
 ];
 function navGroupsActivo() {
@@ -168,7 +176,7 @@ var actionRegistry = Object.assign(
   {},
   coreActions,
   resumen.actions, finanzas.actions, pedidos.actions, cotizaciones.actions,
-  catalogo.actions, plantillas.actions,
+  catalogo.actions, productos.actions, plantillas.actions,
   clientes.actions, pendientes.actions, notas.actions, config.actions,
   misVentas.actions
 );

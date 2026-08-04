@@ -48,7 +48,8 @@ export const KEYS = {
   plantillasEstados: "cotizaciones:plantillas-estados",
   pdfContador: "cotizaciones:pdf-contador",
   ui: "ui:preferencias",
-  catalogoPropuestas: "cotizaciones:catalogo-propuestas" // cambios de catálogo hechos por un vendedor, a la espera de aprobación del admin
+  catalogoPropuestas: "cotizaciones:catalogo-propuestas", // cambios de catálogo hechos por un vendedor, a la espera de aprobación del admin
+  productos: "productos:lista" // catálogo de prendas ya hechas (con stock por talla) — distinto del catálogo de insumos
 };
 
 // Claves de `state` que, si las edita alguien con rol "vendedor", no se

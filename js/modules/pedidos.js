@@ -1,13 +1,14 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
-import { generarPDFPedido, generarPDFRecibo, generarPDFFactura } from "../core/pdf.js";
+import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 import { getSession } from "../core/auth.js";
+import { ajustarStockProducto } from "../core/stock.js";
 
 // Todos los números de OP usados, activos Y en la papelera — para que un
 // pedido restaurado o uno nuevo nunca choque con uno que ya existió.
@@ -64,6 +65,7 @@ function renderFormNuevoPedido() {
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
       "</div>";
   } else {
+    html += renderProductoPicker(f);
     html += '<div class="cot-col-title">Dinero</div><div class="form-grid">' +
       '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
@@ -78,6 +80,44 @@ function renderFormNuevoPedido() {
   }
   html += '<div style="margin-top:22px;"><button class="btn" data-action="add-pedido">Crear pedido</button></div>' +
     '<div class="section-sub" style="margin-top:8px;margin-bottom:0;">Se le asigna un número de OP único al crearlo.</div></div>';
+  return html;
+}
+
+// Elegir una prenda ya hecha del catálogo (con stock) para una venta directa:
+// se agrega como texto a la Descripción, suma al Total sugerido, y queda
+// anotada en f.stockConsumido para descontarse de verdad al crear el pedido
+// (ver acción "add-pedido"). Solo aplica a venta directa — en consignación el
+// producto se agrega después, vía remisión (ver renderPedidoConsignacion).
+function renderProductoPicker(f) {
+  var productos = state.productos || [];
+  if (!productos.length) return "";
+  var producto = f.productoSel ? productoById(f.productoSel) : null;
+  var html = '<div class="cot-col-title" style="margin-top:0;">Producto del catálogo (opcional)' +
+    renderHelp("Si es una prenda ya hecha (no personalizada), elígela acá: se agrega a la descripción, el total sugerido sube solo con su precio de venta, y el stock del taller baja al crear el pedido.") +
+    "</div>";
+  html += '<div class="inline-form" style="flex-wrap:wrap;margin-top:0;">' +
+    '<select class="mini-input" data-action-change="set-pedido-producto-sel" style="width:200px">' +
+    '<option value="">Elegir producto…</option>' +
+    productos.map(function (p) { return '<option value="' + p.id + '" ' + (p.id === f.productoSel ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
+    "</select>";
+  if (producto) {
+    var tallas = (producto.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
+    if (!tallas.length) {
+      html += '<span class="tag" style="background:var(--danger-soft);color:var(--danger-ink);">Sin stock disponible</span>';
+    } else {
+      html += '<select class="mini-input" data-role="pedido-producto-talla" style="width:150px">' +
+        tallas.map(function (t) { return '<option value="' + esc(t.talla) + '">' + esc(t.talla) + " (" + num(t.stock) + " disp.)</option>"; }).join("") +
+        "</select>" +
+        '<input type="number" class="mini-input" data-role="pedido-producto-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
+        '<button class="btn ghost small" data-action="add-pedido-producto-linea" data-id="' + producto.id + '">+ Agregar</button>';
+    }
+  }
+  html += "</div>";
+  if ((f.stockConsumido || []).length) {
+    html += '<div class="section-sub" style="margin:8px 0 0;">Se descontará del stock al crear el pedido: ' +
+      f.stockConsumido.map(function (l) { return esc(l.productoNombre) + " (" + esc(l.talla) + ") x" + l.cantidad; }).join(" · ") +
+      "</div>";
+  }
   return html;
 }
 
@@ -195,6 +235,7 @@ function renderPedidoConsignacion(p) {
   var vendida = calcConsignacionVendida(p);
   var retirada = calcConsignacionRetirada(p);
   var ventas = (c.ventas || []).slice().reverse();
+  var porTalla = calcConsignacionDisponiblePorTalla(p);
 
   var html = '<div class="pedido-card" data-pedido-id="' + p.id + '">' +
     '<div class="pedido-top"><div>' +
@@ -207,28 +248,34 @@ function renderPedidoConsignacion(p) {
     '<div class="saldo ' + (disponible > 0 ? "" : "ok") + '">' + vendida + " vendidas · " + retirada + " retiradas</div>" +
     "</div></div>" +
     '<div class="pedido-actions" style="flex-wrap:wrap;">' +
-    '<span class="inline-form" style="flex-wrap:wrap;">' +
-    '<input type="number" class="mini-input" data-role="consig-venta-cantidad" placeholder="Cantidad vendida" style="width:130px" min="1" />' +
-    '<input type="date" class="mini-input" data-role="consig-venta-fecha" style="width:135px" value="' + todayStr() + '" />' +
-    '<button class="btn small" data-action="registrar-venta-consignacion" data-id="' + p.id + '">Registrar venta</button>' +
-    "</span>" +
-    '<span class="inline-form" style="flex-wrap:wrap;">' +
-    '<input type="number" class="mini-input" data-role="consig-retiro-cantidad" placeholder="Cantidad retirada" style="width:130px" min="1" />' +
-    '<button class="btn ghost small" data-action="registrar-retiro-consignacion" data-id="' + p.id + '">Registrar retiro</button>' +
-    "</span>" +
+    renderVentaFormConsignacion(p, porTalla) +
+    renderRetiroFormConsignacion(p, porTalla) +
     '<button class="btn danger small" style="margin-left:auto;" data-action="remove-pedido" data-id="' + p.id + '">Eliminar</button>' +
     "</div>";
 
-  html += '<div class="section-sub" style="margin:10px 0 4px;">Precio unitario ' + fmt(c.precioUnitario) + " · Comisión del punto " + (c.comisionTipo === "fijo" ? fmt(c.comisionValor) + " por unidad" : c.comisionValor + "% por venta") + "</div>";
+  if (num(c.cantidadEnviada) > 0) {
+    html += '<div class="section-sub" style="margin:10px 0 4px;">Envío inicial (sin desglose): ' + num(c.cantidadEnviada) + " unidades a " + fmt(c.precioUnitario) + " c/u</div>";
+  }
+  html += '<div class="section-sub" style="margin:4px 0 4px;">Comisión del punto: ' + (c.comisionTipo === "fijo" ? fmt(c.comisionValor) + " por unidad" : c.comisionValor + "% por venta") + "</div>";
+
+  html += '<hr class="stitch" />';
+  html += renderRemisionSection(p);
+
+  if (porTalla.length) {
+    html += '<hr class="stitch" />';
+    html += renderSeguimientoTalla(p, porTalla);
+  }
 
   if (ventas.length) {
+    html += '<hr class="stitch" />';
+    html += '<div class="cot-col-title">Ventas reportadas</div>';
     html += '<div class="tx-row head" style="grid-template-columns:90px 70px 100px 100px 110px;"><span>Fecha</span><span>Cant.</span><span>Monto</span><span>Comisión</span><span></span></div>';
     ventas.forEach(function (v) {
       html += '<div class="tx-row" style="grid-template-columns:90px 70px 100px 100px 110px;">' +
-        "<span>" + esc(v.fecha || "—") + "</span>" +
-        "<span>" + esc(v.cantidad) + "</span>" +
-        '<span class="amount">' + fmt(v.montoTotal) + "</span>" +
-        '<span class="amount">' + fmt(v.comisionMonto) + "</span>" +
+        '<span class="mobile-th">Fecha</span><span>' + esc(v.fecha || "—") + "</span>" +
+        '<span class="mobile-th">Cant.</span><span>' + esc(v.cantidad) + "</span>" +
+        '<span class="mobile-th">Monto</span><span class="amount">' + fmt(v.montoTotal) + "</span>" +
+        '<span class="mobile-th">Comisión</span><span class="amount">' + fmt(v.comisionMonto) + "</span>" +
         "<span>" + (v.comisionPagada
           ? '<span class="status-pill pagado">pagada</span>'
           : '<button class="btn ghost small" data-action="pagar-comision-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '">Pagar comisión</button>') +
@@ -237,6 +284,131 @@ function renderPedidoConsignacion(p) {
   }
 
   html += "</div>";
+  return html;
+}
+
+// Igual que antes si el pedido no tiene remisiones (un solo precio para todo
+// el envío) — si ya tiene remisiones, agrega el selector de a qué línea
+// producto+talla corresponde, para que el seguimiento por talla cuadre.
+function renderVentaFormConsignacion(p, porTalla) {
+  var opciones = porTalla.filter(function (t) { return t.disponible > 0; });
+  var html = '<span class="inline-form" style="flex-wrap:wrap;">';
+  if (porTalla.length) {
+    html += '<select class="mini-input" data-role="consig-venta-item" style="width:210px">' +
+      '<option value="">Producto y talla…</option>' +
+      opciones.map(function (t) { return '<option value="' + t.productoId + "|" + esc(t.talla) + '">' + esc(t.productoNombre) + " (" + esc(t.talla) + ") — " + t.disponible + " disp.</option>"; }).join("") +
+      "</select>";
+  }
+  html += '<input type="number" class="mini-input" data-role="consig-venta-cantidad" placeholder="Cantidad vendida" style="width:130px" min="1" />' +
+    '<input type="date" class="mini-input" data-role="consig-venta-fecha" style="width:135px" value="' + todayStr() + '" />' +
+    '<button class="btn small" data-action="registrar-venta-consignacion" data-id="' + p.id + '">Registrar venta</button>' +
+    "</span>";
+  return html;
+}
+function renderRetiroFormConsignacion(p, porTalla) {
+  var opciones = porTalla.filter(function (t) { return t.disponible > 0; });
+  var html = '<span class="inline-form" style="flex-wrap:wrap;">';
+  if (porTalla.length) {
+    html += '<select class="mini-input" data-role="consig-retiro-item" style="width:210px">' +
+      '<option value="">Producto y talla…</option>' +
+      opciones.map(function (t) { return '<option value="' + t.productoId + "|" + esc(t.talla) + '">' + esc(t.productoNombre) + " (" + esc(t.talla) + ") — " + t.disponible + " disp.</option>"; }).join("") +
+      "</select>";
+  }
+  html += '<input type="number" class="mini-input" data-role="consig-retiro-cantidad" placeholder="Cantidad retirada" style="width:130px" min="1" />' +
+    '<button class="btn ghost small" data-action="registrar-retiro-consignacion" data-id="' + p.id + '">Registrar retiro</button>' +
+    "</span>";
+  return html;
+}
+
+// Desglose de disponible/vendida/retirada POR producto+talla — solo existe
+// para lo que se envió vía remisión (lo viejo, sin desglose, sigue sumando
+// al total agregado de arriba, pero no puede aparecer aquí por talla).
+function renderSeguimientoTalla(p, porTalla) {
+  var COLS = "1fr 80px 90px 90px 90px 90px";
+  var html = '<div class="cot-col-title">Seguimiento por talla' + renderHelp("Cuánto se ha entregado, vendido y retirado de CADA producto/talla enviado por remisión. \"Disponible\" es lo que en teoría sigue en el punto.") + "</div>";
+  html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Producto</span><span>Talla</span><span>Enviado</span><span>Vendida</span><span>Retirada</span><span>Disponible</span></div>';
+  porTalla.forEach(function (t) {
+    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">Producto</span><span>' + esc(t.productoNombre) + "</span>" +
+      '<span class="mobile-th">Talla</span><span>' + esc(t.talla) + "</span>" +
+      '<span class="mobile-th">Enviado</span><span>' + t.enviado + "</span>" +
+      '<span class="mobile-th">Vendida</span><span>' + t.vendida + "</span>" +
+      '<span class="mobile-th">Retirada</span><span>' + t.retirada + "</span>" +
+      '<span class="mobile-th">Disponible</span><span class="amount ' + (t.disponible > 0 ? "" : "pos") + '">' + t.disponible + "</span>" +
+      "</div>";
+  });
+  return html;
+}
+
+// Historial de remisiones (envíos con soporte en PDF) + el constructor de
+// una nueva: se van agregando líneas de producto+talla+cantidad ANTES de
+// confirmar, para que una entrega con varios productos/tallas quede en UN
+// solo documento en vez de uno por línea (ver state.remisionBuilder).
+function renderRemisionSection(p) {
+  var remisiones = (p.consignacion.remisiones || []).slice().reverse();
+  var builder = state.remisionBuilder;
+  var construyendo = builder.pedidoId === p.id;
+  var html = '<div class="cot-col-title">Remisiones (entregas al punto)' +
+    renderHelp("Cada vez que le llevas más mercancía a este punto, registra una remisión: eliges producto, talla y cantidad del catálogo, el stock del taller baja solo, y queda un PDF firmable como sustento de lo entregado.") +
+    "</div>";
+
+  if (!construyendo) {
+    html += '<div class="pedido-actions" style="margin-top:0;"><button class="btn ghost small" data-action="iniciar-remision" data-id="' + p.id + '">+ Agregar remisión</button></div>';
+  } else {
+    var productos = state.productos || [];
+    var prodSel = builder.productoSel ? productoById(builder.productoSel) : null;
+    html += '<div class="inline-form" style="flex-wrap:wrap;margin-top:0;">' +
+      '<select class="mini-input" data-action-change="set-remision-producto-sel" style="width:200px">' +
+      '<option value="">Elegir producto…</option>' +
+      productos.map(function (pr) { return '<option value="' + pr.id + '" ' + (pr.id === builder.productoSel ? "selected" : "") + ">" + esc(pr.nombre) + "</option>"; }).join("") +
+      "</select>";
+    if (prodSel) {
+      var tallasDisp = (prodSel.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
+      if (!tallasDisp.length) {
+        html += '<span class="tag" style="background:var(--danger-soft);color:var(--danger-ink);">Sin stock disponible</span>';
+      } else {
+        html += '<select class="mini-input" data-role="remision-talla" style="width:150px">' +
+          tallasDisp.map(function (t) { return '<option value="' + esc(t.talla) + '">' + esc(t.talla) + " (" + num(t.stock) + " disp.)</option>"; }).join("") +
+          "</select>" +
+          '<input type="number" class="mini-input" data-role="remision-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
+          '<button class="btn ghost small" data-action="add-remision-linea" data-id="' + p.id + '">+ Agregar línea</button>';
+      }
+    }
+    html += "</div>";
+    if (builder.items.length) {
+      html += '<div class="tx-row head" style="grid-template-columns:1fr 80px 80px 30px;"><span>Producto</span><span>Talla</span><span>Cantidad</span><span></span></div>';
+      builder.items.forEach(function (it, i) {
+        html += '<div class="tx-row" style="grid-template-columns:1fr 80px 80px 30px;">' +
+          '<span class="mobile-th">Producto</span><span>' + esc(it.productoNombre) + "</span>" +
+          '<span class="mobile-th">Talla</span><span>' + esc(it.talla) + "</span>" +
+          '<span class="mobile-th">Cantidad</span><span>' + it.cantidad + "</span>" +
+          '<button class="btn danger small" data-action="quitar-remision-linea" data-idx="' + i + '">✕</button>' +
+          "</div>";
+      });
+    } else {
+      html += '<div class="empty" style="padding:8px 0;">Agrega al menos una línea antes de confirmar.</div>';
+    }
+    html += '<div class="pedido-actions" style="margin-top:8px;">' +
+      '<button class="btn small" ' + (builder.items.length ? "" : "disabled") + ' data-action="confirmar-remision" data-id="' + p.id + '">Confirmar remisión y descontar stock</button>' +
+      '<button class="btn ghost small" data-action="cancelar-remision">Cancelar</button>' +
+      "</div>";
+  }
+
+  if (remisiones.length) {
+    html += '<div class="tx-row head" style="margin-top:10px;grid-template-columns:90px 1fr 110px;"><span>Fecha</span><span>Contenido</span><span></span></div>';
+    remisiones.forEach(function (r) {
+      var resumen = (r.items || []).map(function (it) { return esc(it.productoNombre) + " (" + esc(it.talla) + ") x" + it.cantidad; }).join(", ");
+      html += '<div class="tx-row" style="grid-template-columns:90px 1fr 110px;">' +
+        '<span class="mobile-th">Fecha</span><span>' + esc(r.fecha) + "</span>" +
+        '<span class="mobile-th">Contenido</span><span>' + resumen + "</span>" +
+        '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '<button class="btn ghost small" data-action="generar-pdf-remision" data-id="' + p.id + '" data-remision="' + r.id + '">📄 PDF</button>' +
+        '<button class="btn ghost small" data-action="enviar-remision-correo" data-id="' + p.id + '" data-remision="' + r.id + '" title="Envía la remisión al correo del punto">✉</button>' +
+        "</span></div>";
+    });
+  } else if (!construyendo) {
+    html += '<div class="empty" style="padding:8px 0;">Sin remisiones registradas todavía.</div>';
+  }
   return html;
 }
 
@@ -339,22 +511,22 @@ function renderAbonosPedido(p) {
   abonos.forEach(function (a) {
     if (state.abonoEditando === a.id) {
       html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;" data-abono-edit-row="' + a.id + '">' +
-        '<span><input type="date" class="mini-input" style="width:100%" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
-        '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
-        '<span><select class="mini-input" style="width:100%" data-role="edit-abono-metodo">' +
+        '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" style="width:100%" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
+        '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" style="width:100%" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
+        '<span class="mobile-th">Método</span><span><select class="mini-input" style="width:100%" data-role="edit-abono-metodo">' +
         ["efectivo", "transferencia", "tarjeta", "otro"].map(function (m) { return opt(m, m.charAt(0).toUpperCase() + m.slice(1), a.metodoPago || "efectivo"); }).join("") +
         "</select></span>" +
-        "<span>" + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
+        '<span class="mobile-th">Comprobante</span><span>' + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
         '<span style="display:flex;gap:6px;">' +
         '<button class="btn small" data-action="guardar-abono-edit" data-id="' + p.id + '" data-abono="' + a.id + '">Guardar</button>' +
         '<button class="btn ghost small" data-action="cancelar-edicion-abono">✕</button>' +
         "</span></div>";
     } else {
       html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;">' +
-        "<span>" + esc(a.fecha || "—") + "</span>" +
-        '<span class="amount">' + fmt(a.monto) + "</span>" +
-        "<span>" + esc(a.metodoPago || "—") + "</span>" +
-        "<span>" + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
+        '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
+        '<span class="mobile-th">Monto</span><span class="amount">' + fmt(a.monto) + "</span>" +
+        '<span class="mobile-th">Método</span><span>' + esc(a.metodoPago || "—") + "</span>" +
+        '<span class="mobile-th">Comprobante</span><span>' + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
         '<span style="display:flex;gap:6px;">' +
         '<button class="btn ghost small" data-action="editar-abono" data-id="' + a.id + '">Editar</button>' +
         '<button class="btn ghost small" data-action="generar-pdf-recibo" data-id="' + p.id + '" data-abono="' + a.id + '">Recibo</button>' +
@@ -418,15 +590,42 @@ export var actions = {
     }
     notify();
   },
+  "set-pedido-producto-sel": function (el) {
+    state.formPedido.productoSel = el.value;
+    notify();
+  },
+  // Agrega una línea de producto+talla a la descripción del pedido rápido
+  // (venta directa) y la anota en stockConsumido — el descuento real de
+  // stock ocurre recién al confirmar "Crear pedido" (ver acción "add-pedido"),
+  // nunca antes, para no descontar stock de un pedido que al final no se crea.
+  "add-pedido-producto-linea": function (el) {
+    var productoId = el.getAttribute("data-id");
+    var producto = productoById(productoId);
+    if (!producto) return;
+    var card = el.closest(".card");
+    var talla = card ? val(card, "pedido-producto-talla") : "";
+    var cantidad = num(card ? val(card, "pedido-producto-cantidad") : 0);
+    var disponible = stockTalla(producto, talla);
+    if (!talla || cantidad <= 0) return;
+    if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
+    var fp = state.formPedido;
+    fp.stockConsumido = (fp.stockConsumido || []).concat([{ productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad }]);
+    var linea = producto.nombre + " (Talla " + talla + ") x" + cantidad;
+    fp.descripcion = fp.descripcion ? (fp.descripcion + "; " + linea) : linea;
+    fp.total = num(fp.total) + num(producto.precioVenta) * cantidad;
+    notify();
+  },
   "add-pedido": function () {
     var fp = state.formPedido;
     if (!fp.cliente || !fp.descripcion) return;
     var esConsignacion = fp.esConsignacion;
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
+    var stockConsumido = esConsignacion ? [] : (fp.stockConsumido || []);
     var nuevoPedido = {
       id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: fp.descripcion,
       cantidad: fp.cantidad, total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
       fechaEntrega: fp.fechaEntrega,
+      stockConsumido: stockConsumido,
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
       // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
@@ -435,7 +634,7 @@ export var actions = {
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
         puntoId: fp.clienteId || "", comisionTipo: fp.consignacionComisionTipo || "porcentaje", comisionValor: num(fp.consignacionComisionValor),
-        precioUnitario: num(fp.consignacionPrecioUnitario), cantidadEnviada: num(fp.cantidad) || 0, ventas: [], retiros: []
+        precioUnitario: num(fp.consignacionPrecioUnitario), cantidadEnviada: num(fp.cantidad) || 0, ventas: [], retiros: [], remisiones: []
       } : null,
       codigoPublico: codigoPublico(), calendarEventId: ""
     };
@@ -446,10 +645,15 @@ export var actions = {
       persist("tx");
     }
     state.pedidos.unshift(nuevoPedido);
+    // El stock del catálogo baja recién ahora, que el pedido ya es real.
+    stockConsumido.forEach(function (l) {
+      ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Venta directa — " + fp.descripcion, "pedido:" + nuevoPedido.id);
+    });
     state.formPedido = {
       clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
-      esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: ""
+      esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+      productoSel: "", stockConsumido: []
     };
     // Salta directo al Historial para confirmar de una vez que el pedido
     // quedó creado (con su N.º de OP) — el formulario en blanco queda a un
@@ -458,24 +662,43 @@ export var actions = {
     persist("pedidos"); notify();
     if (!esConsignacion) sincronizarEventoPedido(nuevoPedido);
   },
+  // Si el pedido ya tiene remisiones (ver "Agregar remisión"), el select
+  // "consig-venta-item" indica a qué línea producto+talla corresponde la
+  // venta (usa el precio de ESA línea) — así el seguimiento por talla
+  // (calcConsignacionDisponiblePorTalla) sabe de dónde restar. Si no hay
+  // remisiones (consignación creada a la antigua, un solo número), se
+  // comporta exactamente igual que siempre: contra el precio único del pedido.
   "registrar-venta-consignacion": function (el) {
     var id = el.getAttribute("data-id");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!ped || !ped.consignacion) return;
     var card = el.closest(".pedido-card");
+    var itemEl = card ? card.querySelector('[data-role="consig-venta-item"]') : null;
     var cantidadEl = card ? card.querySelector('[data-role="consig-venta-cantidad"]') : null;
     var fechaEl = card ? card.querySelector('[data-role="consig-venta-fecha"]') : null;
     var cantidad = cantidadEl ? num(cantidadEl.value) : 0;
     var fecha = (fechaEl && fechaEl.value) || todayStr();
-    var disponible = calcConsignacionDisponible(ped);
+
+    var productoId = "", talla = "", precioUnitario = num(ped.consignacion.precioUnitario), disponible = calcConsignacionDisponible(ped);
+    if (itemEl && itemEl.value) {
+      var partes = itemEl.value.split("|");
+      productoId = partes[0]; talla = partes[1];
+      var linea = calcConsignacionDisponiblePorTalla(ped).filter(function (t) { return t.productoId === productoId && t.talla === talla; })[0];
+      if (!linea) return;
+      precioUnitario = linea.precioUnitario; disponible = linea.disponible;
+    } else if (itemEl) {
+      // Hay remisiones pero no se eligió ninguna línea: no se puede vender "en general".
+      window.alert("Elige a qué producto y talla corresponde la venta.");
+      return;
+    }
     if (cantidad <= 0 || cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
-    var montoTotal = cantidad * num(ped.consignacion.precioUnitario);
+    var montoTotal = cantidad * precioUnitario;
     var comisionMonto = calcConsignacionComision(ped.consignacion, cantidad, montoTotal);
     var ventaId = uid();
     state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Venta consignación — " + ped.descripcion, monto: montoTotal, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
-      var ventas = (p.consignacion.ventas || []).concat([{ id: ventaId, cantidad: cantidad, fecha: fecha, montoTotal: montoTotal, comisionMonto: comisionMonto, comisionPagada: false }]);
+      var ventas = (p.consignacion.ventas || []).concat([{ id: ventaId, cantidad: cantidad, fecha: fecha, montoTotal: montoTotal, comisionMonto: comisionMonto, comisionPagada: false, productoId: productoId, talla: talla }]);
       return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { ventas: ventas }) });
     });
     persist("tx"); persist("pedidos"); notify();
@@ -485,16 +708,119 @@ export var actions = {
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!ped || !ped.consignacion) return;
     var card = el.closest(".pedido-card");
+    var itemEl = card ? card.querySelector('[data-role="consig-retiro-item"]') : null;
     var cantidadEl = card ? card.querySelector('[data-role="consig-retiro-cantidad"]') : null;
     var cantidad = cantidadEl ? num(cantidadEl.value) : 0;
-    var disponible = calcConsignacionDisponible(ped);
+
+    var productoId = "", talla = "", disponible = calcConsignacionDisponible(ped);
+    if (itemEl && itemEl.value) {
+      var partes = itemEl.value.split("|");
+      productoId = partes[0]; talla = partes[1];
+      var linea = calcConsignacionDisponiblePorTalla(ped).filter(function (t) { return t.productoId === productoId && t.talla === talla; })[0];
+      if (!linea) return;
+      disponible = linea.disponible;
+    } else if (itemEl) {
+      window.alert("Elige a qué producto y talla corresponde el retiro.");
+      return;
+    }
     if (cantidad <= 0 || cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
-      var retiros = (p.consignacion.retiros || []).concat([{ id: uid(), cantidad: cantidad, fecha: todayStr() }]);
+      var retiros = (p.consignacion.retiros || []).concat([{ id: uid(), cantidad: cantidad, fecha: todayStr(), productoId: productoId, talla: talla }]);
       return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { retiros: retiros }) });
     });
     persist("pedidos"); notify();
+  },
+  // ---------- Remisiones de consignación (entregas con soporte en PDF) ----------
+  "iniciar-remision": function (el) {
+    state.remisionBuilder = { pedidoId: el.getAttribute("data-id"), productoSel: "", items: [] };
+    notify();
+  },
+  "cancelar-remision": function () {
+    state.remisionBuilder = { pedidoId: "", productoSel: "", items: [] };
+    notify();
+  },
+  "set-remision-producto-sel": function (el) {
+    state.remisionBuilder = Object.assign({}, state.remisionBuilder, { productoSel: el.value });
+    notify();
+  },
+  "add-remision-linea": function (el) {
+    var pedidoId = el.getAttribute("data-id");
+    var card = el.closest(".pedido-card");
+    var producto = productoById(state.remisionBuilder.productoSel);
+    var talla = card ? val(card, "remision-talla") : "";
+    var cantidad = num(card ? val(card, "remision-cantidad") : 0);
+    if (!producto || !talla || cantidad <= 0) return;
+    // Ya descontando lo que se haya agregado antes de confirmar, para no
+    // dejar armar una remisión con más de lo que en verdad hay en el taller.
+    var yaEnBuilder = state.remisionBuilder.items
+      .filter(function (it) { return it.productoId === producto.id && it.talla === talla; })
+      .reduce(function (a, it) { return a + it.cantidad; }, 0);
+    var disponible = stockTalla(producto, talla) - yaEnBuilder;
+    if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles en el taller: " + disponible + ")."); return; }
+    state.remisionBuilder = Object.assign({}, state.remisionBuilder, {
+      pedidoId: pedidoId,
+      items: state.remisionBuilder.items.concat([{ productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad, precioUnitario: num(producto.precioVenta) }])
+    });
+    notify();
+  },
+  "quitar-remision-linea": function (el) {
+    var idx = Number(el.getAttribute("data-idx"));
+    var items = state.remisionBuilder.items.slice();
+    items.splice(idx, 1);
+    state.remisionBuilder = Object.assign({}, state.remisionBuilder, { items: items });
+    notify();
+  },
+  "confirmar-remision": function (el) {
+    var id = el.getAttribute("data-id");
+    var items = state.remisionBuilder.items;
+    if (!items.length || state.remisionBuilder.pedidoId !== id) return;
+    var remision = { id: uid(), fecha: todayStr(), codigoPublico: codigoPublico(), items: items, nota: "" };
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { remisiones: (p.consignacion.remisiones || []).concat([remision]) }) });
+    });
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    items.forEach(function (it) {
+      ajustarStockProducto(it.productoId, it.talla, -it.cantidad, "Remisión a " + (ped ? ped.cliente : ""), "consignacion:" + id);
+    });
+    state.remisionBuilder = { pedidoId: "", productoSel: "", items: [] };
+    persist("pedidos"); notify();
+  },
+  "generar-pdf-remision": function (el) {
+    var id = el.getAttribute("data-id"), remisionId = el.getAttribute("data-remision");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped) return;
+    var remision = (ped.consignacion.remisiones || []).filter(function (r) { return r.id === remisionId; })[0];
+    if (remision) generarPDFRemision(ped, remision);
+  },
+  "enviar-remision-correo": async function (el) {
+    var id = el.getAttribute("data-id"), remisionId = el.getAttribute("data-remision");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped) return;
+    var remision = (ped.consignacion.remisiones || []).filter(function (r) { return r.id === remisionId; })[0];
+    if (!remision) return;
+    var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
+    var correo = cliente && cliente.correo;
+    if (!correo) { window.alert('Este punto de consignación no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    try {
+      var pdf = await generarPDFRemision(ped, remision, { enviarPorCorreo: true });
+      await enviarCorreoConAdjunto({
+        to: correo,
+        subject: "Remisión — " + (ped.descripcion || state.config.nombre),
+        bodyHtml: plantillaCorreoHtml({
+          cfg: state.config,
+          saludo: "Hola " + (ped.cliente || "") + ",",
+          mensaje: "Adjuntamos la remisión de lo entregado. Cualquier duda, quedamos atentos.",
+          docTitulo: "Remisión"
+        }),
+        filename: pdf.nombreArchivo,
+        bytes: pdf.bytes
+      });
+      window.alert("Correo enviado a " + correo + ".");
+    } catch (e) {
+      window.alert("No se pudo enviar el correo: " + (e && e.message ? e.message : e));
+    }
   },
   "pagar-comision-consignacion": function (el) {
     var id = el.getAttribute("data-id"), ventaId = el.getAttribute("data-venta");
@@ -684,6 +1010,11 @@ export var actions = {
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
     persist("pedidos"); persist("pedidosPapelera"); notify();
     if (pedido.calendarEventId) eliminarEvento(pedido.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del pedido", e); });
+    // Se restituye el stock que este pedido había consumido — si se restaura
+    // luego desde la papelera, se vuelve a descontar (ver "restaurar-pedido").
+    (pedido.stockConsumido || []).forEach(function (l) {
+      ajustarStockProducto(l.productoId, l.talla, l.cantidad, "Pedido eliminado — restitución", "pedido:" + pedido.id);
+    });
   },
   "restaurar-pedido": function (el) {
     var id = el.getAttribute("data-id");
@@ -702,6 +1033,11 @@ export var actions = {
     state.pedidos.unshift(restaurado);
     persist("pedidos"); persist("pedidosPapelera"); notify();
     sincronizarEventoPedido(restaurado);
+    // Vuelve a descontar el stock que se le había restituido al eliminarlo
+    // (best-effort: si la talla ya no existe en el catálogo, simplemente no hace nada).
+    (restaurado.stockConsumido || []).forEach(function (l) {
+      ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Pedido restaurado desde la papelera", "pedido:" + restaurado.id);
+    });
   },
   "eliminar-pedido-definitivo": function (el) {
     var id = el.getAttribute("data-id");

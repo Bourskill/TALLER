@@ -38,7 +38,7 @@ assert(document.querySelector(".sidebar"), "renderiza sidebar en el primer rende
 assert(document.querySelector(".kpis"), "renderiza KPIs en Resumen desde el primer render");
 
 // --- recorre cada pestaña y verifica que renderiza sin lanzar ---
-const tabs = ["resumen", "finanzas", "pedidos", "cotizaciones", "clientes", "pendientes", "notas", "config"];
+const tabs = ["resumen", "finanzas", "pedidos", "cotizaciones", "productos", "clientes", "pendientes", "notas", "config"];
 for (const t of tabs) {
   click('[data-action="tab"][data-tab="' + t + '"]');
   assert(state.tab === t, "cambia a la pestaña " + t);
@@ -301,5 +301,107 @@ const txAntes = state.tx.length;
 click('[data-action="toggle-comision"][data-id="' + pedidoConVendedor.id + '"]');
 assert(state.pedidos.find(p => p.id === pedidoConVendedor.id).vendedor.estado === "pagado", "marca la comisión como pagada");
 assert(state.tx.length === txAntes + 1 && state.tx[0].tipo === "comision", "pagar la comisión crea un movimiento en Finanzas");
+
+// --- productos: catálogo de prendas ya hechas, con stock por talla ---
+click('[data-action="tab"][data-tab="productos"]');
+click('[data-action="add-producto"]');
+const productoId = state.productos[state.productos.length - 1].id;
+assert(!!productoId, "crea producto en el catálogo");
+document.querySelector('[data-role="nueva-talla-' + productoId + '"]').value = "M";
+click('[data-action="add-pro-talla"][data-id="' + productoId + '"]');
+assert(state.productos.find(p => p.id === productoId).variantesTalla.length === 1, "agrega talla al producto");
+const precioInput = document.querySelector('input[data-action-change="set-pro-campo"][data-id="' + productoId + '"][data-campo="precioVenta"]');
+precioInput.value = "40000";
+precioInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+document.querySelector('[data-role="stock-cantidad-' + productoId + '"]').value = "20";
+click('[data-action="add-pro-stock"][data-id="' + productoId + '"]');
+let producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 20, "registra entrada de stock (20 unidades talla M)");
+assert(producto.movimientosStock.length === 1, "el movimiento de stock queda en la bitácora");
+
+// --- pedidos: venta directa de un producto del catálogo descuenta stock, y se restituye si se elimina ---
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="nueva"]');
+setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+const productoSelect = document.querySelector('select[data-action-change="set-pedido-producto-sel"]');
+productoSelect.value = productoId;
+productoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
+document.querySelector('[data-role="pedido-producto-cantidad"]').value = "3";
+click('[data-action="add-pedido-producto-linea"][data-id="' + productoId + '"]');
+assert(state.formPedido.stockConsumido.length === 1, "agrega la línea del producto al pedido en construcción");
+click('[data-action="add-pedido"]');
+const pedidoVentaDirecta = state.pedidos.find(p => (p.stockConsumido || []).length > 0);
+assert(!!pedidoVentaDirecta, "crea el pedido de venta directa con el producto");
+producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 17, "el stock baja al crear el pedido (20 - 3 = 17)");
+click('[data-action="toggle-pedido-panel"][data-id="' + pedidoVentaDirecta.id + '"]');
+click('[data-action="remove-pedido"][data-id="' + pedidoVentaDirecta.id + '"]');
+producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 20, "el stock se restituye al eliminar el pedido");
+
+// --- cotizaciones: aplicar un producto del catálogo a una referencia también
+// descuenta stock — pero solo al convertir en pedido, agrupando las filas de
+// "Tallas y observaciones" por talla ---
+click('[data-action="tab"][data-tab="cotizaciones"]');
+click('[data-action="cerrar-cotizacion-editor"]'); // la pestaña "nueva" seguía mostrando el detalle de la cotización abierta antes
+setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Prueba");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes con producto de catálogo");
+click('[data-action="add-cotizacion"]');
+const cotProdId = state.cotizaciones[0].id;
+const refProdId = state.cotizaciones[0].referencias[0].id;
+const aplicarProductoSelect = document.querySelector('select[data-action-change="aplicar-producto"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+aplicarProductoSelect.value = productoId;
+aplicarProductoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.cotizaciones[0].referencias[0].productoId === productoId, "vincula la referencia al producto del catálogo");
+click('[data-action="toggle-ref-seccion"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+document.querySelector('[data-role="det-nombre-' + refProdId + '"]').value = "Talla M unidad 1";
+document.querySelector('[data-role="det-talla-' + refProdId + '"]').value = "M";
+click('[data-action="add-ref-detalle"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+document.querySelector('[data-role="det-nombre-' + refProdId + '"]').value = "Talla M unidad 2";
+document.querySelector('[data-role="det-talla-' + refProdId + '"]').value = "M";
+click('[data-action="add-ref-detalle"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+click('[data-action="convertir-cotizacion"][data-id="' + cotProdId + '"]');
+producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descuenta 2 unidades de stock (20 - 2 = 18) según las filas de talla M");
+
+// --- pedidos: consignación con remisión (envío con soporte en PDF),
+// seguimiento por talla y venta reportada contra una línea puntual ---
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="nueva"]');
+setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+setInput('[data-form="pedido"][data-field="descripcion"]', "Consignación tienda");
+click('[data-action="toggle-es-consignacion"]');
+click('[data-action="add-pedido"]');
+const pedidoConsig = state.pedidos.find(p => p.consignacion);
+assert(!!pedidoConsig, "crea pedido de consignación");
+click('[data-action="iniciar-remision"][data-id="' + pedidoConsig.id + '"]');
+const remisionProductoSelect = document.querySelector('select[data-action-change="set-remision-producto-sel"]');
+remisionProductoSelect.value = productoId;
+remisionProductoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+document.querySelector('[data-role="remision-cantidad"]').value = "5";
+click('[data-action="add-remision-linea"][data-id="' + pedidoConsig.id + '"]');
+assert(state.remisionBuilder.items.length === 1, "agrega una línea a la remisión en construcción");
+click('[data-action="confirmar-remision"][data-id="' + pedidoConsig.id + '"]');
+let pedidoConsigActualizado = state.pedidos.find(p => p.id === pedidoConsig.id);
+assert(pedidoConsigActualizado.consignacion.remisiones.length === 1, "confirma la remisión");
+producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 13, "la remisión descuenta el stock del taller (18 - 5 = 13)");
+click('[data-action="generar-pdf-remision"][data-id="' + pedidoConsig.id + '"][data-remision="' + pedidoConsigActualizado.consignacion.remisiones[0].id + '"]');
+assert(!state.lastError, "generar el PDF de la remisión no rompe el render aunque jsPDF no esté cargado");
+
+const ventaItemSelect = document.querySelector('select[data-role="consig-venta-item"]');
+assert(!!ventaItemSelect, "el formulario de venta ofrece elegir producto y talla cuando el pedido ya tiene remisiones");
+ventaItemSelect.value = productoId + "|M";
+ventaItemSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+document.querySelector('[data-role="consig-venta-cantidad"]').value = "2";
+click('[data-action="registrar-venta-consignacion"][data-id="' + pedidoConsig.id + '"]');
+pedidoConsigActualizado = state.pedidos.find(p => p.id === pedidoConsig.id);
+assert(pedidoConsigActualizado.consignacion.ventas.length === 1, "registra la venta contra la línea del producto");
+assert(pedidoConsigActualizado.consignacion.ventas[0].montoTotal === 80000, "calcula el monto con el precio de esa línea (2 x $40.000)");
+
+const { calcConsignacionDisponiblePorTalla } = await import("../js/core/calc.js");
+const seguimiento = calcConsignacionDisponiblePorTalla(pedidoConsigActualizado);
+assert(seguimiento[0].disponible === 3, "el seguimiento por talla refleja lo vendido (5 enviadas - 2 vendidas = 3 disponibles)");
 
 console.log("\n✅ Todos los checks de humo pasaron.");

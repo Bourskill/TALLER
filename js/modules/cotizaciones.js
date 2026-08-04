@@ -7,6 +7,7 @@ import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp } from "./pedidos.js";
 import { ESTADOS_DEFAULT } from "../core/constants.js";
+import { ajustarStockProducto } from "../core/stock.js";
 
 function nuevaReferencia() {
   return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [] };
@@ -105,8 +106,8 @@ function renderEstadosRef(cotId, ref) {
   var html = '<div class="det-row head" style="grid-template-columns:' + COLS_E + ';"><span>#</span><span>Etapa</span><span></span><span></span><span></span></div>';
   estados.forEach(function (e, i) {
     html += '<div class="det-row" style="grid-template-columns:' + COLS_E + ';">' +
-      "<span>" + (i + 1) + "</span>" +
-      '<input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-estado-ref-label" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" />' +
+      '<span class="mobile-th">#</span><span>' + (i + 1) + "</span>" +
+      '<span class="mobile-th">Etapa</span><input class="mini-input" value="' + esc(e.label) + '" data-action-change="set-estado-ref-label" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" />' +
       '<button class="btn ghost small" ' + (i === 0 ? "disabled" : "") + ' data-action="mover-estado-ref" data-dir="-1" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" title="Subir">↑</button>' +
       '<button class="btn ghost small" ' + (i === estados.length - 1 ? "disabled" : "") + ' data-action="mover-estado-ref" data-dir="1" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '" title="Bajar">↓</button>' +
       '<button class="btn danger small" data-action="remove-estado-ref" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-idx="' + i + '">✕</button>' +
@@ -401,12 +402,12 @@ function renderRefCard(cotId, ref) {
     '<div class="ins-row head" style="grid-template-columns:1fr 60px 90px 150px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
     html += '<div class="ins-row" style="grid-template-columns:1fr 60px 90px 150px 70px 90px 30px;">' +
-      '<input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
-      '<input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
-      '<select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
-      '<input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
-      '<span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
+      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
+      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
+      '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";
   });
@@ -425,7 +426,14 @@ function renderRefCard(cotId, ref) {
       state.plantillasPrendas.map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
       "</select>"
     ) : "") +
-    "</div>";
+    ((state.productos || []).length ? (
+      '<select class="mini-input" style="max-width:220px" data-action-change="aplicar-producto" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Trae los insumos, el precio y el flujo de un producto del catálogo (prenda ya hecha con stock)">' +
+      '<option value="">Aplicar producto del catálogo…</option>' +
+      state.productos.map(function (p) { return '<option value="' + p.id + '" ' + (ref.productoId === p.id ? "selected" : "") + '>' + esc(p.nombre) + "</option>"; }).join("") +
+      "</select>"
+    ) : "") +
+    "</div>" +
+    (ref.productoId ? '<div class="combo-linked">✓ Vinculado al producto del catálogo — al convertir en pedido, el stock de las tallas de "Tallas y observaciones" se descuenta solo</div>' : "");
 
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
@@ -479,12 +487,12 @@ function renderDetalleReferencia(cotId, ref) {
       '<div class="det-row head"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Tipo</span><span>Observaciones</span><span></span></div>';
     detalle.forEach(function (d, i) {
       html += '<div class="det-row">' +
-        "<span>" + (i + 1) + "</span>" +
-        '<input class="mini-input" value="' + esc(d.nombre) + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="nombre" />' +
-        '<input class="mini-input" value="' + esc(d.talla || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="talla" />' +
-        '<input class="mini-input" value="' + esc(d.numero || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="numero" />' +
-        '<input class="mini-input" value="' + esc(d.tipo || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="tipo" />' +
-        '<input class="mini-input" value="' + esc(d.observaciones || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="observaciones" />' +
+        '<span class="mobile-th">#</span><span>' + (i + 1) + "</span>" +
+        '<span class="mobile-th">Nombre</span><input class="mini-input" value="' + esc(d.nombre) + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="nombre" />' +
+        '<span class="mobile-th">Talla</span><input class="mini-input" value="' + esc(d.talla || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="talla" />' +
+        '<span class="mobile-th">Número</span><input class="mini-input" value="' + esc(d.numero || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="numero" />' +
+        '<span class="mobile-th">Tipo</span><input class="mini-input" value="' + esc(d.tipo || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="tipo" />' +
+        '<span class="mobile-th">Observaciones</span><input class="mini-input" value="' + esc(d.observaciones || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="observaciones" />' +
         '<button class="btn danger small" data-action="remove-ref-detalle" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '">✕</button>' +
         "</div>";
     });
@@ -529,10 +537,10 @@ function renderListaCompras(compras) {
   var html = '<div class="tx-row head" style="grid-template-columns:1fr 1.4fr 110px 110px;"><span>Insumo</span><span>Usado en</span><span>Cantidad a comprar</span><span>Costo total</span></div>';
   compras.forEach(function (c) {
     html += '<div class="tx-row" style="grid-template-columns:1fr 1.4fr 110px 110px;">' +
-      "<span>" + esc(c.nombre) + "</span>" +
-      "<span>" + (c.refs.length ? c.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>') + "</span>" +
-      '<span class="amount">' + (c.tipo === "fijo_pedido" ? '<span style="color:var(--ink-faint);">servicio</span>' : (c.cantidadFisica.toFixed(2) + " " + esc(c.unidad))) + "</span>" +
-      '<span class="amount">' + fmt(c.costoTotal) + "</span>" +
+      '<span class="mobile-th">Insumo</span><span>' + esc(c.nombre) + "</span>" +
+      '<span class="mobile-th">Usado en</span><span>' + (c.refs.length ? c.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>') + "</span>" +
+      '<span class="mobile-th">Cantidad a comprar</span><span class="amount">' + (c.tipo === "fijo_pedido" ? '<span style="color:var(--ink-faint);">servicio</span>' : (c.cantidadFisica.toFixed(2) + " " + esc(c.unidad))) + "</span>" +
+      '<span class="mobile-th">Costo total</span><span class="amount">' + fmt(c.costoTotal) + "</span>" +
       "</div>";
   });
   return html;
@@ -722,6 +730,33 @@ export var actions = {
       return Object.assign({}, r, patch);
     });
   },
+  // Igual que "aplicar-plantilla" (copia insumos/consumo/imagen/flujo), pero
+  // además marca la referencia como ligada a un producto del catálogo
+  // (r.productoId + r.precioVenta sugerido). Eso es lo que permite, al
+  // convertir la cotización en pedido, descontar el stock real de ese
+  // producto agrupando las filas de "Tallas y observaciones" por talla (ver
+  // función auxiliar descontarStockPorTallas más abajo).
+  "aplicar-producto": function (el) {
+    if (!el.value) return;
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    var prod = (state.productos || []).filter(function (p) { return p.id === el.value; })[0];
+    if (!prod) return;
+    mapRef(cotId, refId, function (r) {
+      var nuevosInsumos = (prod.insumos || []).map(function (ins) {
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
+      });
+      var patch = { insumos: (r.insumos || []).concat(nuevosInsumos), productoId: prod.id };
+      if (!r.nombre) patch.nombre = prod.nombre;
+      if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
+      if (prod.imagenUrl && !r.imagenUrl) patch.imagenUrl = prod.imagenUrl;
+      if (prod.precioVenta && (!r.precioVenta || Number(r.precioVenta) === 0)) patch.precioVenta = num(prod.precioVenta);
+      if (prod.flujoEstadosId) {
+        var flujoP = (state.plantillasEstados || []).filter(function (f) { return f.id === prod.flujoEstadosId; })[0];
+        if (flujoP) patch.estadosDef = flujoP.estados.map(function (e) { return { id: e.id, label: e.label }; });
+      }
+      return Object.assign({}, r, patch);
+    });
+  },
   "add-cot-gasto": function (el) {
     var id = el.getAttribute("data-id");
     var cotCard = el.closest(".cot-card");
@@ -789,6 +824,7 @@ export var actions = {
       };
       state.pedidos.unshift(nuevoP);
       state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
+      descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
       persist("pedidos"); persist("cotizaciones");
       state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
@@ -982,6 +1018,7 @@ export var actions = {
       });
     });
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId }) : c; });
+    descontarStockPorTallas(cot, "pedido:" + cot.pedidoOrigenId);
     // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
@@ -1040,6 +1077,28 @@ export var actions = {
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { estadosDef: plantilla.estados.map(function (e) { return { id: e.id, label: e.label }; }) }); });
   }
 };
+
+// Al convertir una cotización en pedido (o aplicarla a uno existente), cada
+// referencia ligada a un producto del catálogo (ref.productoId, ver acción
+// "aplicar-producto") descuenta su stock real, agrupando las filas de
+// "Tallas y observaciones" por talla — es la única forma confiable de saber
+// CUÁNTAS unidades de CADA talla salieron. Sin filas de detalle no hay talla
+// que agrupar, así que esa referencia no descuenta stock solo (queda como
+// límite conocido, ajustable a mano en Productos).
+function descontarStockPorTallas(cot, origen) {
+  (cot.referencias || []).forEach(function (ref) {
+    if (!ref.productoId) return;
+    var porTalla = {};
+    (ref.detalle || []).forEach(function (d) {
+      var talla = (d.talla || "").trim();
+      if (!talla) return;
+      porTalla[talla] = (porTalla[talla] || 0) + 1;
+    });
+    Object.keys(porTalla).forEach(function (talla) {
+      ajustarStockProducto(ref.productoId, talla, -porTalla[talla], "Convertido desde cotización — " + (ref.nombre || cot.descripcion), origen);
+    });
+  });
+}
 
 // Aplica una función de transformación a una cotización completa, guarda y notifica.
 function conRef(cotId, transform) {
