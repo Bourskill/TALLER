@@ -6,6 +6,13 @@
 // pedido, entregar en consignación, o aplicar en una cotización igual que una
 // plantilla. Ver js/core/stock.js (ajustarStockProducto) para cómo se
 // descuenta/repone el stock desde cualquiera de esos flujos.
+//
+// Mismo patrón de pestañas que Cotizaciones: "+ Nuevo producto" es un
+// formulario chico (lo esencial para vender) que, al crear, deja abierto el
+// detalle completo del producto recién creado — ahí (y solo ahí) se editan
+// tallas/stock/insumos. La pestaña "Catálogo" es SIEMPRE un índice visual en
+// cards (foto, nombre, categoría, precio, stock) — clic en cualquiera abre su
+// detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
@@ -18,26 +25,113 @@ var TALLA_COLS = "1fr 90px 30px";
 var MOV_COLS = "90px 90px 70px 70px 1fr";
 
 export function render() {
-  var lista = state.productos || [];
-  var plantillas = state.plantillasPrendas || [];
-  var html = '<div class="card"><div class="section-title small">Catálogo de productos' +
-    renderHelp("Prendas ya hechas o repetibles (no personalizadas — a lo mucho cambia la talla) que sí conviene tener en stock, a diferencia de una cotización a la medida. Se pueden vender directo en un pedido, entregar en consignación, o aplicar en una cotización (como una plantilla, pero con precio y stock ya definidos). El stock solo baja cuando de verdad sale del taller (venta o remisión), nunca al cotizar.") +
-    '</div><div class="pedido-actions" style="flex-wrap:wrap;">' +
-    '<button class="btn ghost small" data-action="add-producto">+ Nuevo producto</button>' +
-    (plantillas.length ? (
-      '<select class="mini-input" style="max-width:260px" data-action-change="add-producto-desde-plantilla">' +
-      '<option value="">+ Nuevo producto desde plantilla…</option>' +
-      plantillas.map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
-      "</select>"
-    ) : "") +
-    "</div></div>";
-
-  if (lista.length === 0) { html += '<div class="empty">Todavía no tienes productos en el catálogo.</div>'; return html; }
-
-  lista.forEach(function (p) { html += renderProductoCard(p); });
+  var vista = state.productosVista || "nueva";
+  var html = renderTabsProductos(vista);
+  html += vista === "catalogo" ? renderCatalogoGrid() : renderEditorProducto();
   return html;
 }
 
+function renderTabsProductos(vista) {
+  var total = (state.productos || []).length;
+  var labelNueva = state.productoEditando ? "✎ Editando producto" : "+ Nuevo producto";
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="producto-vista" data-val="nueva">' + labelNueva + "</button>" +
+    '<button class="gsheet-tab ' + (vista === "catalogo" ? "active" : "") + '" data-action="producto-vista" data-val="catalogo">Catálogo' + (total ? " (" + total + ")" : "") + "</button>" +
+    "</div>";
+}
+
+// ---------- "+ Nuevo producto": formulario chico, o el detalle completo del
+// que se acaba de crear / se abrió desde el Catálogo ----------
+function renderEditorProducto() {
+  var id = state.productoEditando;
+  var producto = id ? (state.productos || []).filter(function (p) { return p.id === id; })[0] : null;
+  if (!producto) return renderFormNuevoProducto();
+  var html = '<div class="pedido-actions" style="margin-bottom:10px;">' +
+    '<button class="btn ghost small" data-action="cerrar-producto-editor">← Nuevo producto en blanco</button>' +
+    "</div>";
+  html += renderProductoCard(producto);
+  return html;
+}
+
+// Solo lo esencial para identificar y vender el producto — el costeo
+// (insumos, consumo, flujo) y las tallas/stock se completan después, ya en
+// el detalle completo, para no recibir un formulario largo de una vez.
+function renderFormNuevoProducto() {
+  var f = state.formProducto;
+  var plantillas = state.plantillasPrendas || [];
+  var html = '<div class="card"><div class="section-title small">Nuevo producto' +
+    renderHelp("Prendas ya hechas o repetibles (no personalizadas — a lo mucho cambia la talla) que sí conviene tener en stock. Arranca con lo esencial; el costeo (insumos, consumo, flujo) y las tallas con su stock se completan después, ya con el producto creado.") +
+    '</div><div class="form-grid">' +
+    '<div class="field wide"><label>Nombre</label><input data-form="producto" data-field="nombre" value="' + esc(f.nombre) + '" placeholder="Ej. Camiseta básica algodón" /></div>' +
+    '<div class="field"><label>Categoría</label><input data-form="producto" data-field="categoria" value="' + esc(f.categoria) + '" placeholder="Ej. Camisetas" /></div>' +
+    '<div class="field"><label>Referencia / SKU</label><input data-form="producto" data-field="referencia" value="' + esc(f.referencia) + '" placeholder="Ej. CAM-001" /></div>' +
+    '<div class="field"><label>Precio de venta</label><input type="number" data-form="producto" data-field="precioVenta" value="' + esc(f.precioVenta) + '" placeholder="0" /></div>' +
+    '<button class="btn" data-action="add-producto">Crear producto</button>' +
+    "</div>";
+  if (plantillas.length) {
+    html += '<div class="inline-form" style="margin-top:4px;">' +
+      '<span class="mini-label">o arrancar copiando los insumos de una plantilla:</span>' +
+      '<select class="mini-input" style="max-width:220px" data-action-change="add-producto-desde-plantilla">' +
+      '<option value="">Elegir plantilla…</option>' +
+      plantillas.map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
+      "</select></div>";
+  }
+  html += "</div>";
+  return html;
+}
+
+// ---------- "Catálogo": índice visual en cards (nunca el detalle completo) ----------
+function categoriasUsadas(lista) {
+  var vistos = {}; var out = [];
+  lista.forEach(function (p) {
+    var c = (p.categoria || "").trim();
+    if (c && !vistos[c]) { vistos[c] = true; out.push(c); }
+  });
+  return out.sort(function (a, b) { return a.localeCompare(b); });
+}
+
+function renderCatalogoGrid() {
+  var lista = state.productos || [];
+  if (!lista.length) {
+    return '<div class="empty">Aún no tienes productos — creá el primero en la pestaña "+ Nuevo producto".</div>';
+  }
+  var categorias = categoriasUsadas(lista);
+  var activa = state.filtroProductosCategoria || "todos";
+  var html = "";
+  if (categorias.length) {
+    html += '<div class="filters">' +
+      '<button class="chip ' + (activa === "todos" ? "active" : "") + '" data-action="filtro-producto-categoria" data-val="todos">Todas</button>' +
+      categorias.map(function (c) { return '<button class="chip ' + (activa === c ? "active" : "") + '" data-action="filtro-producto-categoria" data-val="' + esc(c) + '">' + esc(c) + "</button>"; }).join("") +
+      '<button class="chip ' + (activa === "sin" ? "active" : "") + '" data-action="filtro-producto-categoria" data-val="sin">Sin categoría</button>' +
+      "</div>";
+  }
+  var filtrados = lista;
+  if (activa === "sin") filtrados = lista.filter(function (p) { return !(p.categoria || "").trim(); });
+  else if (activa !== "todos") filtrados = lista.filter(function (p) { return (p.categoria || "").trim() === activa; });
+
+  if (!filtrados.length) { html += '<div class="empty">Sin productos en esta categoría.</div>'; return html; }
+  html += '<div class="producto-grid">' + filtrados.map(renderProductoCardMini).join("") + "</div>";
+  return html;
+}
+
+function renderProductoCardMini(p) {
+  var stockTotal = stockTotalProducto(p);
+  var imgHtml = p.imagenUrl
+    ? '<img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />'
+    : '<span class="producto-card-mini-noimg">Sin foto</span>';
+  var meta = [p.categoria, p.referencia].filter(Boolean).map(esc).join(" · ");
+  return '<div class="producto-card-mini" data-action="abrir-producto-editor" data-id="' + p.id + '" title="Clic para abrir y editar">' +
+    '<div class="producto-card-mini-img">' + imgHtml + "</div>" +
+    '<div class="producto-card-mini-body">' +
+    '<div class="producto-card-mini-nombre">' + esc(p.nombre || "Sin nombre") + "</div>" +
+    (meta ? '<div class="producto-card-mini-meta">' + meta + "</div>" : "") +
+    '<div class="producto-card-mini-footer">' +
+    '<span class="amount">' + fmtMoney(p.precioVenta) + "</span>" +
+    '<span class="badge ' + (stockTotal > 0 ? "success" : "danger") + '">' + stockTotal + " en stock</span>" +
+    "</div></div></div>";
+}
+
+// ---------- Detalle completo de un producto puntual ----------
 function renderProductoThumb(p) {
   if (state.productoImagenSubiendo[p.id]) {
     return '<span class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</span>';
@@ -53,26 +147,22 @@ function renderProductoThumb(p) {
 }
 
 function renderProductoCard(p) {
-  var flujos = state.plantillasEstados || [];
-  var tallas = p.variantesTalla || [];
   var stockTotal = stockTotalProducto(p);
+  var tallas = p.variantesTalla || [];
   // Reusa el mismo cálculo de costo/ganancia que una referencia de cotización
   // (calcRefTotales) tratando el producto como si fuera "una referencia de
   // cantidad 1" — mismos insumos, mismo consumo sugerido — para que el
   // margen se documente con la misma fórmula en toda la app.
   var calc = calcRefTotales({ consumoAprox: p.consumoSugerido, cantidadPedida: 1, precioVenta: p.precioVenta, insumos: p.insumos });
 
-  var html = '<div class="card nested" data-producto-id="' + p.id + '">' +
+  var html = '<div class="card" data-producto-id="' + p.id + '">' +
     '<div class="pedido-top" style="align-items:flex-start;">' + renderProductoThumb(p) +
     '<div class="form-grid" style="flex:1;grid-template-columns:2fr 1fr 1fr 1fr;">' +
-    '<div class="field"><label>Nombre del producto</label><input class="mini-input" style="width:100%" value="' + esc(p.nombre) + '" placeholder="Ej. Camiseta básica algodón" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="nombre" /></div>' +
+    '<div class="field"><label>Nombre</label><input class="mini-input" style="width:100%;font-weight:700;" value="' + esc(p.nombre) + '" placeholder="Ej. Camiseta básica algodón" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="nombre" /></div>' +
+    '<div class="field"><label>Categoría</label><input class="mini-input" style="width:100%" value="' + esc(p.categoria || "") + '" placeholder="Ej. Camisetas" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="categoria" /></div>' +
+    '<div class="field"><label>Referencia / SKU</label><input class="mini-input" style="width:100%" value="' + esc(p.referencia || "") + '" placeholder="Ej. CAM-001" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="referencia" /></div>' +
     '<div class="field"><label>Precio de venta</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.precioVenta) + '" placeholder="0" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="precioVenta" /></div>' +
-    '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
-    '<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
-    '<option value="">Estándar</option>' +
-    flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
-    "</select></div>" +
-    '</div><button class="btn danger small" data-action="remove-producto" data-id="' + p.id + '">Eliminar producto</button></div>';
+    "</div><button class=\"btn danger small\" data-action=\"remove-producto\" data-id=\"" + p.id + "\">Eliminar producto</button></div>";
 
   html += '<div class="ref-summary" style="margin-top:14px;">' +
     '<div class="rs-item"><div class="rl">Stock total</div><div class="rv">' + stockTotal + "</div></div>" +
@@ -117,11 +207,37 @@ function renderProductoCard(p) {
   }
 
   html += renderMovimientosStock(p);
-
   html += '<hr class="stitch" />';
-  html += '<div class="cot-col-title">Insumos' + renderHelp("Igual que en Plantillas: la receta de insumos de este producto, para que el costo/ganancia de arriba se calcule solo.") + "</div>";
-  html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
-  (p.insumos || []).forEach(function (i) {
+  html += renderCosteoProduccion(p);
+
+  html += "</div>"; // .card
+  return html;
+}
+
+// Insumos + consumo + flujo de producción quedan agrupados y colapsados por
+// defecto (a menos que ya tenga insumos cargados) — es el detalle "de cómo se
+// hace/cuesta", no lo primero que hace falta para poder vender el producto.
+function renderCosteoProduccion(p) {
+  var flujos = state.plantillasEstados || [];
+  var insumos = p.insumos || [];
+  var abierta = p.seccionCosteoAbierta !== undefined ? !!p.seccionCosteoAbierta : insumos.length > 0;
+  var titulo = "Costeo y producción" + (insumos.length ? " · " + insumos.length + (insumos.length === 1 ? " insumo" : " insumos") : "");
+  var html = '<div class="cot-col-title" style="cursor:pointer;" data-action="toggle-producto-costeo" data-id="' + p.id + '">' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
+    renderHelp("Insumos, consumo de tela y flujo de producción — de acá sale el costo/ganancia de arriba. No hace falta llenarlo para poder vender el producto ya mismo.") +
+    "</div>";
+  if (!abierta) return html;
+
+  html += '<div class="form-grid" style="margin-top:10px;">' +
+    '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
+    '<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
+    '<option value="">Estándar</option>' +
+    flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
+    "</select></div>" +
+    "</div>";
+
+  html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
+  insumos.forEach(function (i) {
     html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
@@ -131,7 +247,7 @@ function renderProductoCard(p) {
       '<button class="btn danger small" data-action="remove-pro-insumo" data-pro="' + p.id + '" data-ins="' + i.id + '">✕</button>' +
       "</div>";
   });
-  if ((p.insumos || []).length === 0) { html += '<div class="empty" style="padding:12px 0;">Sin insumos en este producto.</div>'; }
+  if (!insumos.length) { html += '<div class="empty" style="padding:12px 0;">Sin insumos en este producto.</div>'; }
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
@@ -141,8 +257,6 @@ function renderProductoCard(p) {
     "</select>" +
     '<button class="btn ghost small" data-action="add-pro-insumo-custom" data-pro="' + p.id + '">+ Insumo personalizado</button>' +
     "</div>";
-
-  html += "</div>"; // .card.nested
   return html;
 }
 
@@ -171,8 +285,30 @@ function renderMovimientosStock(p) {
 function fmtMoney(n) { return "$" + Math.round(num(n)).toLocaleString("es-CO"); }
 
 export var actions = {
+  "producto-vista": function (el) {
+    state.productosVista = el.getAttribute("data-val");
+    notify();
+  },
+  "abrir-producto-editor": function (el) {
+    state.productoEditando = el.getAttribute("data-id");
+    state.productosVista = "nueva";
+    notify();
+  },
+  "cerrar-producto-editor": function () {
+    state.productoEditando = "";
+    notify();
+  },
+  "filtro-producto-categoria": function (el) {
+    state.filtroProductosCategoria = el.getAttribute("data-val");
+    notify();
+  },
   "add-producto": function () {
-    state.productos = (state.productos || []).concat([nuevoProducto()]);
+    var f = state.formProducto;
+    if (!f.nombre) return;
+    var nuevo = Object.assign(nuevoProducto(), { nombre: f.nombre, categoria: f.categoria, referencia: f.referencia, precioVenta: num(f.precioVenta) });
+    state.productos = (state.productos || []).concat([nuevo]);
+    state.productoEditando = nuevo.id;
+    state.formProducto = { nombre: "", categoria: "", referencia: "", precioVenta: "" };
     persist("productos"); notify();
   },
   "add-producto-desde-plantilla": function (el) {
@@ -185,6 +321,7 @@ export var actions = {
       insumos: (pla.insumos || []).map(function (i) { return Object.assign({}, i, { id: uid() }); })
     });
     state.productos = (state.productos || []).concat([nuevo]);
+    state.productoEditando = nuevo.id;
     persist("productos"); notify();
   },
   "remove-producto": function (el) {
@@ -194,6 +331,7 @@ export var actions = {
     var stockTotal = stockTotalProducto(p);
     if (!window.confirm('¿Eliminar "' + p.nombre + '"?' + (stockTotal > 0 ? "\n\nTodavía tiene " + stockTotal + " unidades en stock — se pierde ese registro." : "") + "\n\nNo afecta pedidos o cotizaciones donde ya se haya aplicado.")) return;
     state.productos = (state.productos || []).filter(function (p) { return p.id !== id; });
+    if (state.productoEditando === id) state.productoEditando = "";
     persist("productos"); notify();
   },
   "set-pro-campo": function (el) {
@@ -229,6 +367,13 @@ export var actions = {
   "quitar-pro-imagen": function (el) {
     var id = el.getAttribute("data-id");
     mapPro(id, function (p) { return Object.assign({}, p, { imagenUrl: "" }); });
+  },
+  "toggle-producto-costeo": function (el) {
+    var id = el.getAttribute("data-id");
+    mapPro(id, function (p) {
+      var abierta = p.seccionCosteoAbierta !== undefined ? !!p.seccionCosteoAbierta : (p.insumos || []).length > 0;
+      return Object.assign({}, p, { seccionCosteoAbierta: !abierta });
+    });
   },
   "add-pro-insumo-custom": function (el) {
     var id = el.getAttribute("data-pro");
@@ -307,7 +452,7 @@ export var actions = {
 };
 
 function nuevoProducto() {
-  return { id: uid(), nombre: "Nuevo producto", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [] };
+  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [] };
 }
 
 function mapPro(id, transform) {

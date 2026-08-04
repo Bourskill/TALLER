@@ -93,32 +93,73 @@ function renderProductoPicker(f) {
   if (!productos.length) return "";
   var producto = f.productoSel ? productoById(f.productoSel) : null;
   var html = '<div class="cot-col-title" style="margin-top:0;">Producto del catálogo (opcional)' +
-    renderHelp("Si es una prenda ya hecha (no personalizada), elígela acá: se agrega a la descripción, el total sugerido sube solo con su precio de venta, y el stock del taller baja al crear el pedido.") +
+    renderHelp("Si es una prenda ya hecha (no personalizada), buscala por nombre, referencia o categoría: se agrega a la descripción, el total sugerido sube solo con su precio de venta, y el stock del taller baja al crear el pedido. La miniatura y el enlace \"Ver en Catálogo\" son para confirmar que elegiste la prenda correcta.") +
     "</div>";
-  html += '<div class="inline-form" style="flex-wrap:wrap;margin-top:0;">' +
-    '<select class="mini-input" data-action-change="set-pedido-producto-sel" style="width:200px">' +
-    '<option value="">Elegir producto…</option>' +
-    productos.map(function (p) { return '<option value="' + p.id + '" ' + (p.id === f.productoSel ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
-    "</select>";
+
+  html += '<div class="field combo-wrap" style="max-width:380px;margin-top:0;">' +
+    '<input id="inp-buscar-producto-pedido" class="mini-input" style="width:100%" placeholder="Buscar por nombre, referencia o categoría…" value="' + esc(state.pedidoProductoBusqueda || "") + '" data-live-filter="pedidoProductoBusqueda" />';
+  var q = norm(state.pedidoProductoBusqueda || "").trim();
+  if (q) {
+    var matches = productos.filter(function (p) {
+      return norm(p.nombre).indexOf(q) >= 0 || norm(p.referencia || "").indexOf(q) >= 0 || norm(p.categoria || "").indexOf(q) >= 0;
+    });
+    html += '<div class="combo-suggestions">' + (matches.length
+      ? matches.map(renderSugerenciaProducto).join("")
+      : '<div class="combo-empty">Sin coincidencias.</div>') + "</div>";
+  }
+  html += "</div>";
+
   if (producto) {
+    html += renderProductoElegido(producto);
     var tallas = (producto.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
     if (!tallas.length) {
-      html += '<span class="tag" style="background:var(--danger-soft);color:var(--danger-ink);">Sin stock disponible</span>';
+      html += '<div class="section-sub" style="margin-top:6px;color:var(--danger-ink);">Sin stock disponible en ninguna talla.</div>';
     } else {
-      html += '<select class="mini-input" data-role="pedido-producto-talla" style="width:150px">' +
+      html += '<div class="inline-form" style="margin-top:8px;">' +
+        '<select class="mini-input" data-role="pedido-producto-talla" style="width:150px">' +
         tallas.map(function (t) { return '<option value="' + esc(t.talla) + '">' + esc(t.talla) + " (" + num(t.stock) + " disp.)</option>"; }).join("") +
         "</select>" +
         '<input type="number" class="mini-input" data-role="pedido-producto-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
-        '<button class="btn ghost small" data-action="add-pedido-producto-linea" data-id="' + producto.id + '">+ Agregar</button>';
+        '<button class="btn ghost small" data-action="add-pedido-producto-linea" data-id="' + producto.id + '">+ Agregar</button>' +
+        "</div>";
     }
   }
-  html += "</div>";
   if ((f.stockConsumido || []).length) {
     html += '<div class="section-sub" style="margin:8px 0 0;">Se descontará del stock al crear el pedido: ' +
       f.stockConsumido.map(function (l) { return esc(l.productoNombre) + " (" + esc(l.talla) + ") x" + l.cantidad; }).join(" · ") +
       "</div>";
   }
   return html;
+}
+
+function productoThumbHtml(p, claseThumb) {
+  if (p.imagenUrl) return '<span class="' + claseThumb + '"><img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" /></span>';
+  return '<span class="' + claseThumb + '">🧺</span>';
+}
+
+// Sugerencia en el buscador: miniatura + nombre + referencia/categoría +
+// stock, para poder confirmar a simple vista que es la prenda correcta antes
+// de elegirla (mismo espíritu que el combobox de cliente, con foto además).
+function renderSugerenciaProducto(p) {
+  var stockTotal = (p.variantesTalla || []).reduce(function (a, t) { return a + num(t.stock); }, 0);
+  var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
+  return '<div class="combo-item producto-combo-item" data-action="select-producto-pedido" data-id="' + p.id + '">' +
+    productoThumbHtml(p, "producto-combo-thumb") +
+    "<div><b>" + esc(p.nombre) + "</b><span>" + (meta ? esc(meta) + " · " : "") + stockTotal + " en stock</span></div>" +
+    "</div>";
+}
+
+// Una vez elegido, queda visible con su foto (para no perder de vista cuál
+// se está agregando) y un enlace directo a su detalle en el Catálogo, por si
+// hace falta comprobar del todo que es el producto correcto.
+function renderProductoElegido(p) {
+  var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
+  return '<div class="producto-elegido">' +
+    productoThumbHtml(p, "producto-elegido-thumb") +
+    '<div style="flex:1;min-width:0;"><b>' + esc(p.nombre) + "</b>" + (meta ? '<div class="section-sub" style="margin:2px 0 0;">' + esc(meta) + "</div>" : "") + "</div>" +
+    '<button class="btn ghost small" data-action="ver-producto-en-catalogo" data-id="' + p.id + '" title="Abrir este producto en el Catálogo, en otra pestaña, para confirmar que es el correcto">Ver en Catálogo ↗</button>' +
+    '<button class="btn ghost small" data-action="quitar-pedido-producto-sel" title="Elegir otro producto">✕</button>' +
+    "</div>";
 }
 
 function renderHistorialPedidos() {
@@ -590,8 +631,22 @@ export var actions = {
     }
     notify();
   },
-  "set-pedido-producto-sel": function (el) {
-    state.formPedido.productoSel = el.value;
+  "select-producto-pedido": function (el) {
+    state.formPedido.productoSel = el.getAttribute("data-id");
+    state.pedidoProductoBusqueda = "";
+    notify();
+  },
+  "quitar-pedido-producto-sel": function () {
+    state.formPedido.productoSel = "";
+    notify();
+  },
+  // Manda a Catálogo a ver el detalle completo del producto elegido en el
+  // picker — sirve para comprobar del todo que es el correcto (foto grande,
+  // tallas, etc.) antes de seguir armando el pedido.
+  "ver-producto-en-catalogo": function (el) {
+    state.tab = "productos";
+    state.productoEditando = el.getAttribute("data-id");
+    state.productosVista = "nueva";
     notify();
   },
   // Agrega una línea de producto+talla a la descripción del pedido rápido
@@ -655,6 +710,7 @@ export var actions = {
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
       productoSel: "", stockConsumido: []
     };
+    state.pedidoProductoBusqueda = "";
     // Salta directo al Historial para confirmar de una vez que el pedido
     // quedó creado (con su N.º de OP) — el formulario en blanco queda a un
     // clic de distancia en la otra pestaña.

@@ -302,11 +302,18 @@ click('[data-action="toggle-comision"][data-id="' + pedidoConVendedor.id + '"]')
 assert(state.pedidos.find(p => p.id === pedidoConVendedor.id).vendedor.estado === "pagado", "marca la comisión como pagada");
 assert(state.tx.length === txAntes + 1 && state.tx[0].tipo === "comision", "pagar la comisión crea un movimiento en Finanzas");
 
-// --- productos: catálogo de prendas ya hechas, con stock por talla ---
+// --- productos: pestañas "+ Nuevo producto" / "Catálogo" (cards visuales,
+// NO un historial de eventos) — mismo patrón que Cotizaciones/Pedidos/Clientes ---
 click('[data-action="tab"][data-tab="productos"]');
+assert(state.productosVista === "nueva" && !!document.querySelector('[data-form="producto"][data-field="nombre"]'), "Catálogo entra mostrando el formulario chico en blanco");
+setInput('[data-form="producto"][data-field="nombre"]', "Camiseta básica algodón");
+setInput('[data-form="producto"][data-field="categoria"]', "Camisetas");
+setInput('[data-form="producto"][data-field="referencia"]', "CAM-001");
 click('[data-action="add-producto"]');
 const productoId = state.productos[state.productos.length - 1].id;
 assert(!!productoId, "crea producto en el catálogo");
+assert(state.productoEditando === productoId, "tras crear, deja abierto el detalle completo del producto recién creado");
+
 document.querySelector('[data-role="nueva-talla-' + productoId + '"]').value = "M";
 click('[data-action="add-pro-talla"][data-id="' + productoId + '"]');
 assert(state.productos.find(p => p.id === productoId).variantesTalla.length === 1, "agrega talla al producto");
@@ -319,13 +326,29 @@ let producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 20, "registra entrada de stock (20 unidades talla M)");
 assert(producto.movimientosStock.length === 1, "el movimiento de stock queda en la bitácora");
 
-// --- pedidos: venta directa de un producto del catálogo descuenta stock, y se restituye si se elimina ---
+// insumos: colapsado por defecto (sección "Costeo y producción") hasta que se usa
+assert(!document.querySelector('select[data-action-change="add-pro-insumo-catalogo"][data-pro="' + productoId + '"]'), "la sección de insumos nace colapsada");
+click('[data-action="toggle-producto-costeo"][data-id="' + productoId + '"]');
+assert(!!document.querySelector('select[data-action-change="add-pro-insumo-catalogo"][data-pro="' + productoId + '"]'), "se puede desplegar la sección de insumos");
+
+// pestaña "Catálogo": índice visual en cards — clic en una abre su detalle completo
+click('[data-action="cerrar-producto-editor"]');
+click('[data-action="producto-vista"][data-val="catalogo"]');
+assert(!!document.querySelector('.producto-card-mini[data-id="' + productoId + '"]'), "el producto creado aparece como card visual en el Catálogo");
+click('[data-action="abrir-producto-editor"][data-id="' + productoId + '"]');
+assert(state.productoEditando === productoId && state.productosVista === "nueva", "la card abre el detalle completo en la otra pestaña");
+
+// --- pedidos: buscador de producto (por nombre/referencia/categoría) con
+// miniatura, venta directa descuenta stock, y se restituye si se elimina ---
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-const productoSelect = document.querySelector('select[data-action-change="set-pedido-producto-sel"]');
-productoSelect.value = productoId;
-productoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+setInput('#inp-buscar-producto-pedido', "CAM-001");
+render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
+assert(!!document.querySelector('.producto-combo-item[data-id="' + productoId + '"]'), "el buscador sugiere el producto por referencia (no solo por nombre)");
+click('.producto-combo-item[data-id="' + productoId + '"]');
+assert(state.formPedido.productoSel === productoId, "selecciona el producto desde el buscador");
+assert(!!document.querySelector('[data-action="ver-producto-en-catalogo"][data-id="' + productoId + '"]'), "muestra un enlace para verificar el producto en el Catálogo");
 document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
 document.querySelector('[data-role="pedido-producto-cantidad"]').value = "3";
 click('[data-action="add-pedido-producto-linea"][data-id="' + productoId + '"]');

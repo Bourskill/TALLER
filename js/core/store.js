@@ -95,6 +95,16 @@ export const state = {
   productos: [],
   productoImagenSubiendo: {}, // { [productoId]: true } mientras se sube su foto a Drive — nunca se persiste
   productoMovimientosAbierto: "", // id del producto con su bitácora de stock desplegada (o "")
+  // Mismo patrón de pestañas que Cotizaciones: "nueva" es un formulario chico
+  // enfocado que, al crear, deja abierto el detalle completo del producto
+  // recién creado (productoEditando) — nunca una lista completa a la vez. La
+  // segunda pestaña ("catalogo") es el catálogo visual en cards, no un
+  // historial de eventos.
+  productosVista: "nueva", // "nueva" | "catalogo"
+  productoEditando: "", // id del producto con el detalle completo abierto en la pestaña "nueva" (o "" = formulario en blanco)
+  formProducto: { nombre: "", categoria: "", referencia: "", precioVenta: "" },
+  filtroProductosCategoria: "todos",
+  pedidoProductoBusqueda: "", // texto de búsqueda del picker de producto en el formulario de pedido (nombre/referencia/categoría)
   // Remisión de consignación en construcción (ver "Agregar remisión" en un
   // pedido de consignación, modules/pedidos.js): se acumulan líneas de
   // producto+talla+cantidad ANTES de confirmar, para que una entrega con
