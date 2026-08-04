@@ -161,7 +161,7 @@ function renderCotHead(c, iva) {
   var html = '<div class="cot-head">' +
     '<div class="cot-head-info">' +
     '<div class="cot-head-top">' +
-    '<span class="cot-cliente">' + esc(c.cliente) + "</span>" +
+    '<input class="cot-cliente-input" value="' + esc(c.cliente) + '" placeholder="Nombre del cliente" data-action-change="set-cot-cliente" data-id="' + c.id + '" title="Editar el nombre del cliente" />' +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
     "</div>" +
     (c.descripcion ? '<div class="cot-descripcion">' + esc(c.descripcion) + "</div>" : "") +
@@ -592,6 +592,17 @@ export var actions = {
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fecha: el.value }) : c; });
     persist("cotizaciones"); notify();
   },
+  // Solo cambia el nombre mostrado (c.cliente) — si la cotización estaba
+  // vinculada a un cliente registrado (clienteId), el vínculo se conserva tal
+  // cual (sigue sirviendo para correo, roster, etc.); esto es para corregir
+  // un nombre mal escrito o dejar constancia de un apodo/razón social distinta.
+  "set-cot-cliente": function (el) {
+    var id = el.getAttribute("data-id");
+    var nombre = el.value.trim();
+    if (!nombre) { notify(); return; }
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { cliente: nombre }) : c; });
+    persist("cotizaciones"); notify();
+  },
   "remove-cotizacion": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== id; });
@@ -781,6 +792,7 @@ export var actions = {
       persist("pedidos"); persist("cotizaciones");
       state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
+      state.pedidosVista = "historial"; // aterriza viendo el pedido recién creado, no el formulario en blanco
     }
     notify();
   },

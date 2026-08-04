@@ -53,14 +53,22 @@ setInput('[data-form="tx"][data-field="monto"]', "50000");
 click('[data-action="add-tx"]');
 assert(state.tx.length === 1 && state.tx[0].concepto === "Venta de prueba", "agrega transacción");
 
-// --- clientes: agregar cliente ---
+// --- clientes: pestañas "+ Nuevo cliente" / "Historial" (mismo patrón que
+// Cotizaciones) — se entra viendo el formulario, y tras crear salta al
+// historial para confirmar que quedó registrado. ---
 click('[data-action="tab"][data-tab="clientes"]');
+assert(state.clientesVista === "nueva" && !!document.querySelector('[data-form="cliente"][data-field="nombre"]'), "Clientes entra mostrando el formulario en blanco");
 setInput('[data-form="cliente"][data-field="nombre"]', "Cliente Prueba");
 click('[data-action="add-cliente"]');
 assert(state.clientes.length === 1, "agrega cliente");
+assert(state.clientesVista === "historial", "tras crear el cliente salta al Historial");
+assert(!!document.querySelector(".cliente-card"), "el cliente recién creado aparece en el Historial");
+
+// --- pedidos: pestañas "+ Nuevo pedido" / "Historial" — mismo patrón ---
+click('[data-action="tab"][data-tab="pedidos"]');
+assert(state.pedidosVista === "nueva" && !!document.querySelector('[data-form="pedido"][data-field="cliente"]'), "Pedidos entra mostrando el formulario en blanco");
 
 // --- pedidos: crear pedido vinculado al cliente + abono inicial ---
-click('[data-action="tab"][data-tab="pedidos"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
 assert(document.querySelector(".combo-item"), "sugiere el cliente en el combobox");
 click('.combo-item[data-action="select-cliente"]');
@@ -71,6 +79,7 @@ setInput('[data-form="pedido"][data-field="abono"]', "100000");
 click('[data-action="add-pedido"]');
 assert(state.pedidos.length === 1, "crea pedido");
 assert(state.tx.some(t => t.concepto.indexOf("Abono inicial") === 0), "registra abono inicial en finanzas");
+assert(state.pedidosVista === "historial", "tras crear el pedido salta al Historial (donde vive la tarjeta recién creada)");
 
 // avanzar estado del pedido
 const pedidoId = state.pedidos[0].id;
@@ -264,8 +273,20 @@ click('[data-action="abrir-cotizacion-editor"][data-id="' + cotConvertida.id + '
 assert(state.cotizacionEditando === cotConvertida.id && state.cotizacionesVista === "nueva", "abrir desde el historial abre el detalle completo");
 assert(!!document.querySelector('.cot-card[data-cot-id="' + cotConvertida.id + '"]'), "el detalle completo se renderiza en la pestaña de edición");
 
+// --- cotizaciones: el cliente es editable directamente en la cabecera del detalle ---
+const cotClienteInput = document.querySelector('.cot-cliente-input[data-id="' + cotConvertida.id + '"]');
+assert(!!cotClienteInput, "el nombre del cliente de la cotización se edita con un input en la cabecera");
+cotClienteInput.value = "Cliente Prueba Renombrado";
+cotClienteInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.cotizaciones.find(c => c.id === cotConvertida.id).cliente === "Cliente Prueba Renombrado", "editar el input de cliente actualiza el nombre en la cotización");
+
 // --- pedidos: comisión de vendedor ---
+// Pedidos ahora se divide en pestañas "+ Nuevo pedido" / "Historial" (mismo
+// patrón que Cotizaciones) — tras convertir la cotización quedó viendo el
+// Historial (para mostrar el pedido recién creado), así que hay que volver
+// explícitamente al formulario en blanco antes de poder llenarlo de nuevo.
 click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
 setInput('[data-form="pedido"][data-field="descripcion"]', "Pedido con vendedor");
 setInput('[data-form="pedido"][data-field="total"]', "200000");

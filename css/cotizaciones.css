@@ -1,9 +1,6 @@
-/* Pestañas superiores de Cotizaciones ("Nueva cotización" / "Historial"),
-   arriba a la derecha, estilo pestañas de hoja de cálculo. */
-.gsheet-tabs{display:flex;justify-content:flex-end;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border-soft);}
-.gsheet-tab{background:var(--surface-2);border:1px solid var(--border-soft);border-bottom:none;border-radius:8px 8px 0 0;padding:8px 16px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;margin-bottom:-1px;}
-.gsheet-tab.active{background:var(--surface);color:var(--ink);border-color:var(--border);}
-.gsheet-tab:hover:not(.active){color:var(--ink);background:var(--surface-hover);}
+/* Pestañas superiores de Cotizaciones ("Nueva cotización" / "Historial") —
+   la regla compartida (.gsheet-tabs/.gsheet-tab) vive en layout.css, ya que
+   Pedidos y Clientes siguen el mismo patrón. */
 
 /* Pestañas de referencias dentro de una cotización — en vez de apilarlas
    todas con scroll, solo se ve la activa. */
@@ -17,10 +14,15 @@
 .cot-card.colapsada{padding:12px 20px;}
 .cot-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
 .cot-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
+/* Mismo peso visual que .cot-cliente (nace como texto corrido), pero es un
+   input real: borde transparente hasta que se pasa el mouse o se enfoca, para
+   que se lea como un título y no como un campo de formulario suelto. */
+.cot-cliente-input{font-family:'Inter',sans-serif;font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 7px;margin:-3px -7px;flex:0 1 320px;min-width:120px;max-width:100%;}
+.cot-cliente-input:hover{border-color:var(--border);}
+.cot-cliente-input:focus{outline:none;border-color:var(--accent);background:var(--surface-2);box-shadow:0 0 0 3px var(--accent-soft);}
 .cot-collapse-toggle{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;padding:0 2px;vertical-align:middle;}
 .cot-collapse-toggle:hover{color:var(--ink);}
 .cot-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px;}
-.cot-col-title{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;margin-bottom:6px;}
 .cot-line{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border-soft);gap:8px;}
 .cot-line .concept{color:var(--ink-soft);flex:1;}
 .cot-total-row{display:flex;justify-content:space-between;font-size:13.5px;font-weight:700;padding-top:8px;}
@@ -128,14 +130,11 @@
 .cot-compara-grid .cot-resumen-total{margin:0;height:100%;}
 
 /* Producción → "Documentos": antes tenía su propia pestaña, muy flaca sola;
-   ahora son dos columnas (cliente / interno) con botones más grandes. */
+   ahora son dos columnas (cliente / interno) con botones más grandes.
+   .cot-doc-btn y .cot-section-divider viven en layout.css (compartidos con
+   el panel de dinero/documentos de Pedidos). */
 .cot-docs-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
 .cot-docs-titulo{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:10px;}
-.cot-doc-btn{display:block;width:100%;padding:13px 16px;font-size:13.5px;margin-bottom:10px;}
-
-/* Separador entre paneles de Producción — más aire y una línea clara en vez
-   de solo margen, para que cada bloque se lea como su propia sección. */
-.cot-section-divider{margin:30px 0;}
 
 /* Fila de "registrar costo real": grid en vez de ancho fijo por campo, se
    reparte mejor el espacio disponible y se apila sola en pantallas chicas. */

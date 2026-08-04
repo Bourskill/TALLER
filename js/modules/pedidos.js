@@ -16,49 +16,73 @@ export function todosNumerosOp() {
     .concat(state.pedidosPapelera.map(function (p) { return p.numeroOp; }));
 }
 
+// Dos pestañas arriba, mismo patrón que Cotizaciones: "+ Nuevo pedido" es un
+// formulario enfocado y nada más (sin la lista ni los filtros compitiendo por
+// atención), y "Historial" es donde vive todo lo demás — búsqueda, filtros,
+// papelera y la lista completa de pedidos. Antes las dos cosas convivían
+// siempre en una sola pantalla larga.
 export function render() {
   if (state.filtroPedidosVista === "papelera") return renderPapelera();
+  var vista = state.pedidosVista || "nueva";
+  var html = renderTabsPedidos(vista);
+  html += vista === "historial" ? renderHistorialPedidos() : renderFormNuevoPedido();
+  return html;
+}
 
+function renderTabsPedidos(vista) {
+  var total = state.pedidos.length;
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="pedido-vista" data-val="nueva">+ Nuevo pedido</button>' +
+    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="pedido-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
+    "</div>";
+}
+
+function renderFormNuevoPedido() {
   var f = state.formPedido;
   var costoNum = num(f.costo), totalNum = num(f.total);
   var gananciaHint = costoNum > 0 && totalNum > 0
-    ? ('<div class="section-sub" style="margin:4px 0 0;">Ganancia estimada: <b style="color:' + (totalNum - costoNum >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + fmt(totalNum - costoNum) + " (" + ((totalNum - costoNum) / totalNum * 100).toFixed(1) + "%)</b></div>")
+    ? ('<div class="section-sub" style="margin:6px 0 0;">Ganancia estimada: <b style="color:' + (totalNum - costoNum >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + fmt(totalNum - costoNum) + " (" + ((totalNum - costoNum) / totalNum * 100).toFixed(1) + "%)</b></div>")
     : "";
   var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
     renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créala aparte en Cotizaciones y conviértela en pedido — sus valores reemplazan a los de aquí.") +
     "</div>";
-  html += '<div class="section-sub" style="margin:0 0 6px;">Datos básicos</div><div class="form-grid">' +
+  html += '<div class="cot-col-title" style="margin-top:6px;">Datos básicos</div><div class="form-grid">' +
     renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
     '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
     '<div class="field wide"><label>Descripción</label><input data-form="pedido" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. 40 camisetas algodón" /></div>' +
     '<div class="field"><label>' + (f.esConsignacion ? "Cantidad enviada" : "Cantidad") + '</label><input type="number" data-form="pedido" data-field="cantidad" value="' + esc(f.cantidad) + '" /></div>' +
     '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
     "</div>";
-  html += '<div class="field" style="margin-top:10px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+  html += '<div class="field" style="margin-top:16px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
     '<input type="checkbox" data-action="toggle-es-consignacion" ' + (f.esConsignacion ? "checked" : "") + ' /> 🏬 Es consignación (enviar a un punto de venta externo, sin cobrar de una vez)' +
     "</label></div>";
+  html += '<hr class="stitch" />';
   if (f.esConsignacion) {
-    html += '<div class="section-sub" style="margin:12px 0 6px;">Consignación' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (registralo antes en Clientes, con su comisión por defecto, y así queda vinculado). El precio unitario es lo que el punto cobra al público por cada unidad; la comisión se calcula por cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">Consignación' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (registralo antes en Clientes, con su comisión por defecto, y así queda vinculado). El precio unitario es lo que el punto cobra al público por cada unidad; la comisión se calcula por cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
       "</div>";
   } else {
-    html += '<div class="section-sub" style="margin:12px 0 6px;">Dinero</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">Dinero</div><div class="form-grid">' +
       '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Abono inicial recibido</label><input type="number" data-form="pedido" data-field="abono" value="' + esc(f.abono) + '" placeholder="0" /></div>' +
       "</div>" + gananciaHint;
-    html += '<div class="section-sub" style="margin:12px 0 6px;">Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
+    html += '<hr class="stitch" />';
+    html += '<div class="cot-col-title">Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
       '<div class="field"><label>Tipo de comisión</label><select data-form="pedido" data-field="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + '</select></div>' +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
       "</div>";
   }
-  html += '<div style="margin-top:14px;"><button class="btn" data-action="add-pedido">Crear pedido</button></div>' +
+  html += '<div style="margin-top:22px;"><button class="btn" data-action="add-pedido">Crear pedido</button></div>' +
     '<div class="section-sub" style="margin-top:8px;margin-bottom:0;">Se le asigna un número de OP único al crearlo.</div></div>';
+  return html;
+}
 
-  html += '<div class="field" style="max-width:340px;margin-bottom:10px;"><input id="inp-buscar-pedidos" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidos || "") + '" data-live-filter="buscarPedidos" /></div>';
+function renderHistorialPedidos() {
+  var html = '<div class="field" style="max-width:340px;margin-bottom:10px;"><input id="inp-buscar-pedidos" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidos || "") + '" data-live-filter="buscarPedidos" /></div>';
 
   html += '<div class="filters"><button class="chip ' + (state.filtroPedidos === "todos" ? "active" : "") + '" data-action="filtro-pedidos" data-val="todos">Todos</button>';
   chipsEstadosDisponibles().forEach(function (e) {
@@ -109,7 +133,7 @@ export function render() {
       (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p)) +
       '<div class="pedido-actions">' +
       '<span class="accion-grupo">' +
-      (saldo > 0 ? '<button class="btn ghost small" data-action="cobrar" data-id="' + p.id + '">Marcar saldo cobrado</button>' : "") +
+      (saldo > 0 ? '<button class="btn small" data-action="cobrar" data-id="' + p.id + '">Marcar saldo cobrado</button>' : "") +
       "</span>" +
       (cotRelacionada ? '<button class="btn ghost small" data-action="ver-cotizacion-relacionada" data-id="' + cotRelacionada.id + '">↗ Ver cotización relacionada</button>' :
         '<button class="btn ghost small" data-action="escalar-a-cotizacion" data-id="' + p.id + '" title="Si este pedido rápido escaló y necesitas cotizar insumos, tallas y márgenes en detalle.">📈 Cotizar este pedido</button>') +
@@ -220,25 +244,29 @@ function renderPedidoConsignacion(p) {
 // botones difícil de leer) vive aquí, oculto por defecto y dividido en dos
 // zonas claras: lo que tiene que ver con dinero, y lo que tiene que ver con
 // documentos/PDF.
+// Mismo tratamiento que la pestaña Producción de una cotización: título de
+// sección chico en mayúsculas (.cot-col-title) en vez de section-title, y los
+// botones de PDF pasan de una fila apretada de botones chicos a bloques
+// grandes apilados (.cot-doc-btn) — son la acción principal de esta columna,
+// no un detalle secundario.
 function renderPanelPedido(p, saldo) {
   var html = '<div class="pedido-panel">';
 
-  html += '<div class="pedido-panel-col"><div class="section-title small" style="font-size:12.5px;">💰 Dinero</div>';
+  html += '<div class="pedido-panel-col"><div class="cot-col-title">💰 Dinero</div>';
   html += renderVendedor(p);
   html += (saldo > 0 ? renderAbonoForm(p) : "");
   html += renderAbonosPedido(p);
   html += "</div>";
 
-  html += '<div class="pedido-panel-col"><div class="section-title small" style="font-size:12.5px;">📄 PDF y documentos</div>';
-  html += '<div class="inline-form">' +
-    '<button class="btn ghost small" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
-    '<button class="btn ghost small" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
-    '<button class="btn ghost small" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Clientes)">✉ Enviar factura</button>' +
-    "</div>";
-  html += '<div class="field" style="margin-top:10px;"><label>Observaciones generales del pedido' +
+  html += '<div class="pedido-panel-col"><div class="cot-col-title">📄 PDF y documentos</div>' +
+    '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
+    '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
+    '<button class="btn ghost cot-doc-btn" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Clientes)">✉ Enviar factura</button>';
+  html += '<div class="field" style="margin-top:8px;"><label>Observaciones generales del pedido' +
     renderHelp("Para una nota que aplica a todo el pedido, no a una talla en particular (esas se editan en la cotización de origen). Se incluye en el PDF de orden de producción.") +
     '</label><textarea rows="2" data-action-change="set-pedido-obs-generales" data-id="' + p.id + '" placeholder="Ej. Todo el pedido en tela impermeable, entregar en cajas separadas por talla...">' + esc(p.observacionesGenerales || "") + "</textarea></div>";
-  html += '<div class="pedido-actions" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-soft);">' +
+  html += '<hr class="stitch" style="margin:18px 0 12px;" />';
+  html += '<div class="pedido-actions" style="margin-top:0;">' +
     '<span class="accion-peligro" style="margin-left:0;padding-left:0;border-left:none;"><button class="btn danger small" data-action="remove-pedido" data-id="' + p.id + '">Eliminar pedido</button></span>' +
     "</div>";
   html += "</div>";
@@ -364,6 +392,10 @@ function sincronizarEventoPedido(p) {
 }
 
 export var actions = {
+  "pedido-vista": function (el) {
+    state.pedidosVista = el.getAttribute("data-val");
+    notify();
+  },
   "filtro-pedidos": function (el) {
     state.filtroPedidos = el.getAttribute("data-val");
     notify();
@@ -419,6 +451,10 @@ export var actions = {
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: ""
     };
+    // Salta directo al Historial para confirmar de una vez que el pedido
+    // quedó creado (con su N.º de OP) — el formulario en blanco queda a un
+    // clic de distancia en la otra pestaña.
+    state.pedidosVista = "historial";
     persist("pedidos"); notify();
     if (!esConsignacion) sincronizarEventoPedido(nuevoPedido);
   },

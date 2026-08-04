@@ -32,10 +32,12 @@
 .pedido-actions .accion-peligro{margin-left:auto;padding-left:10px;border-left:1px solid var(--border-soft);}
 
 /* panel secundario (dinero / pdf), oculto por defecto para reducir el ruido
-   visual de la tarjeta — solo se ve al desplegarlo */
-.pedido-panel{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);}
+   visual de la tarjeta — solo se ve al desplegarlo. Más aire que antes (gap y
+   padding-top más generosos) para que cada columna se lea como su propio
+   bloque, no como dos listas apretadas una junto a la otra. */
+.pedido-panel{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:18px;padding-top:18px;border-top:1px dashed var(--border);}
 .pedido-panel-col{min-width:0;}
 
 @media (max-width: 780px){
-  .pedido-panel{grid-template-columns:1fr;gap:16px;}
+  .pedido-panel{grid-template-columns:1fr;gap:22px;}
 }

@@ -5,7 +5,25 @@ import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
 import { renderHelp } from "../core/components.js";
 
+// Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo cliente" es solo el
+// formulario de alta, y "Historial" agrupa la búsqueda y la lista completa
+// (antes convivían siempre juntos en una sola pantalla larga).
 export function render() {
+  var vista = state.clientesVista || "nueva";
+  var html = renderTabsClientes(vista);
+  html += vista === "historial" ? renderHistorialClientes() : renderFormNuevoCliente();
+  return html;
+}
+
+function renderTabsClientes(vista) {
+  var total = state.clientes.length;
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cliente-vista" data-val="nueva">+ Nuevo cliente</button>' +
+    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="cliente-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
+    "</div>";
+}
+
+function renderFormNuevoCliente() {
   var f = state.formCliente;
   var esPunto = f.tipoRelacion === "punto_consignacion";
   var html = '<div class="card"><div class="section-title small">Nuevo cliente' +
@@ -33,9 +51,12 @@ export function render() {
       : "") +
     '<button class="btn" data-action="add-cliente">Agregar ' + (esPunto ? "punto" : "cliente") + "</button>" +
     "</div></div>";
+  return html;
+}
 
+function renderHistorialClientes() {
   var totalClientes = state.clientes.length;
-  html += '<div class="search-bar"><input id="inp-filtro-clientes" data-live-filter="filtroClientes" value="' + esc(state.filtroClientes) + '" placeholder="Buscar por nombre, cédula, ciudad o teléfono..." />' +
+  var html = '<div class="search-bar"><input id="inp-filtro-clientes" data-live-filter="filtroClientes" value="' + esc(state.filtroClientes) + '" placeholder="Buscar por nombre, cédula, ciudad o teléfono..." />' +
     '<div class="client-count">' + totalClientes + " cliente" + (totalClientes === 1 ? "" : "s") + " registrado" + (totalClientes === 1 ? "" : "s") + "</div></div>";
 
   var lista = clientesFiltrados();
@@ -156,6 +177,10 @@ function sincronizarClienteContacto(cliente) {
 }
 
 export var actions = {
+  "cliente-vista": function (el) {
+    state.clientesVista = el.getAttribute("data-val");
+    notify();
+  },
   "set-cliente-tipo-relacion": function (el) {
     state.formCliente.tipoRelacion = el.value;
     notify();
@@ -172,6 +197,8 @@ export var actions = {
     };
     state.clientes.unshift(nuevo);
     state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "" };
+    // Salta al Historial para confirmar de una vez que quedó registrado.
+    state.clientesVista = "historial";
     persist("clientes"); notify();
     sincronizarClienteContacto(nuevo);
   },

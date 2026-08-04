@@ -98,6 +98,7 @@ var coreActions = {
     state.txEditando = "";
     state.filtroPedidosVista = "activos";
     if (state.tab === "cotizaciones") state.cotizacionesVista = "historial";
+    if (state.tab === "pedidos") state.pedidosVista = "historial";
     var filtroTx = el.getAttribute("data-filtro-tx");
     if (filtroTx) state.filtroTx = filtroTx;
     if (el.getAttribute("data-filtro-saldo")) state.filtroPedidosSoloSaldo = true;
