@@ -1,11 +1,11 @@
-.pedido-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;}
-.pedido-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
-.pedido-cliente{font-weight:700;font-size:15px;}
-.pedido-meta{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+.pedido-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:20px 22px;margin-bottom:16px;}
+.pedido-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;}
+.pedido-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
+.pedido-meta{font-size:12px;color:var(--ink-soft);margin-top:5px;line-height:1.5;}
 .pedido-tipo{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent);padding:2px 7px;border-radius:10px;margin-left:6px;}
 .pedido-money{text-align:right;}
-.pedido-money .total{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:15px;}
-.pedido-money .saldo{font-size:11.5px;color:var(--danger-ink);font-family:'IBM Plex Mono',monospace;margin-top:2px;}
+.pedido-money .total{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:21px;color:var(--ink);}
+.pedido-money .saldo{font-size:12px;color:var(--danger-ink);font-family:'IBM Plex Mono',monospace;margin-top:4px;font-weight:600;}
 .pedido-money .saldo.ok{color:var(--success-ink);}
 .pedido-money .saldo.neutral{color:var(--ink-soft);}
 
@@ -13,6 +13,19 @@
 .tape-fill{height:100%;background:var(--accent);border-radius:3px;}
 .tape-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
 .tape-labels span.current{color:var(--accent);}
+
+/* Progreso por referencia (pedidos que vienen de una cotización con varias
+   piezas, cada una a su propio ritmo) — reemplaza el "tape" único cuando
+   aplica. Una fila compacta por referencia: nombre, etapa actual, fracción
+   y sus propios botones de avanzar/retroceder. */
+.pedido-refs-progreso{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px;}
+.pedido-ref-progreso{display:flex;align-items:center;gap:10px;background:var(--surface-2);border-radius:var(--radius-sm);padding:8px 12px;flex-wrap:wrap;}
+.pedido-ref-nombre{font-weight:600;font-size:12.5px;flex:1;min-width:120px;}
+.pedido-ref-etapa{font-size:11.5px;color:var(--accent-ink);}
+.pedido-ref-frac{font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:var(--ink-soft);background:var(--surface-3);padding:2px 7px;border-radius:8px;}
+.pedido-ref-btns{display:flex;gap:4px;}
+.pedido-ref-btns .btn{padding:4px 9px;}
+
 .pedido-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;}
 .pedido-actions .accion-grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .pedido-actions .accion-docs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-left:10px;border-left:1px solid var(--border-soft);}

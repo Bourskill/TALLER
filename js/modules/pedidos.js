@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura } from "../core/pdf.js";
@@ -83,14 +83,15 @@ export function render() {
 
   filtered.forEach(function (p) {
     if (p.consignacion) { html += renderPedidoConsignacion(p); return; }
-    var estadosDef = estadosDefDe(p);
-    var estadoIds = estadosDef.map(function (e) { return e.id; });
-    var idx = estadoIds.indexOf(p.estado);
-    if (idx < 0) idx = 0; // por seguridad, si el estado guardado ya no existe en la lista
     var saldo = num(p.total) - num(p.abono);
     var cliente = p.clienteId ? clienteById(p.clienteId) : null;
     var abierto = !!state.pedidoPanelAbierto[p.id];
     var cotRelacionada = p.cotizacionId ? state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0] : null;
+    // Si el pedido viene de una cotización con referencias, el progreso se
+    // ve y se controla por referencia (cada una puede llevar su propio
+    // ritmo) — si no, se usa el "tape" único de siempre (pedidos rápidos,
+    // sin cotización de origen).
+    var refsProduccion = (cotRelacionada && cotRelacionada.referencias && cotRelacionada.referencias.length) ? cotRelacionada.referencias : null;
     var ganancia = num(p.costo) > 0 ? num(p.total) - num(p.costo) : null;
     var gananciaPct = (ganancia != null && num(p.total) > 0) ? (ganancia / num(p.total) * 100) : null;
 
@@ -105,12 +106,9 @@ export function render() {
       "</div><div class=\"pedido-money\"><div class=\"total\">" + fmt(p.total) + "</div>" +
       '<div class="saldo ' + (saldo > 0 ? "" : (num(p.total) > 0 ? "ok" : "neutral")) + '">' + (saldo > 0 ? "saldo " + fmt(saldo) : (num(p.total) > 0 ? "cobrado completo" : "sin valor asignado")) + "</div>" +
       "</div></div>" +
-      '<div class="tape-track"><div class="tape-fill" style="width:' + (idx / (estadosDef.length - 1) * 100) + '%;"></div></div>' +
-      '<div class="tape-labels">' + estadosDef.map(function (e, i) { return '<span class="' + (i <= idx ? "current" : "") + '">' + esc(e.label) + "</span>"; }).join("") + "</div>" +
+      (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p)) +
       '<div class="pedido-actions">' +
       '<span class="accion-grupo">' +
-      (idx > 0 ? '<button class="btn ghost small" data-action="retreat" data-id="' + p.id + '">← Retroceder</button>' : "") +
-      (idx < estadosDef.length - 1 ? '<button class="btn small" data-action="advance" data-id="' + p.id + '">Avanzar a ' + esc(estadosDef[idx + 1].label) + " →</button>" : "") +
       (saldo > 0 ? '<button class="btn ghost small" data-action="cobrar" data-id="' + p.id + '">Marcar saldo cobrado</button>' : "") +
       "</span>" +
       (cotRelacionada ? '<button class="btn ghost small" data-action="ver-cotizacion-relacionada" data-id="' + cotRelacionada.id + '">↗ Ver cotización relacionada</button>' :
@@ -120,6 +118,46 @@ export function render() {
       (abierto ? renderPanelPedido(p, saldo) : "") +
       "</div>";
   });
+  return html;
+}
+
+// "Tape" único de toda la vida — solo para pedidos sin referencias propias
+// (pedidos rápidos creados directo en esta pestaña, sin pasar por una
+// cotización). El avance/retroceso es del pedido completo.
+function renderProgresoTape(p) {
+  var estadosDef = estadosDefDe(p);
+  var estadoIds = estadosDef.map(function (e) { return e.id; });
+  var idx = estadoIds.indexOf(p.estado);
+  if (idx < 0) idx = 0; // por seguridad, si el estado guardado ya no existe en la lista
+  return '<div class="tape-track"><div class="tape-fill" style="width:' + (idx / (estadosDef.length - 1) * 100) + '%;"></div></div>' +
+    '<div class="tape-labels">' + estadosDef.map(function (e, i) { return '<span class="' + (i <= idx ? "current" : "") + '">' + esc(e.label) + "</span>"; }).join("") + "</div>" +
+    '<div class="pedido-actions" style="margin-top:6px;">' +
+    '<span class="accion-grupo">' +
+    (idx > 0 ? '<button class="btn ghost small" data-action="retreat" data-id="' + p.id + '">← Retroceder</button>' : "") +
+    (idx < estadosDef.length - 1 ? '<button class="btn small" data-action="advance" data-id="' + p.id + '">Avanzar a ' + esc(estadosDef[idx + 1].label) + " →</button>" : "") +
+    "</span></div>";
+}
+
+// Un pedido salido de una cotización con varias (o incluso una sola)
+// referencias muestra el progreso de CADA UNA por separado — antes se veía
+// un solo "tape" para todo el pedido, que no dejaba ver que una pieza podía
+// ir más atrasada que otra.
+function renderProgresoPorReferencia(p, cot, refs) {
+  var html = '<div class="pedido-refs-progreso">';
+  refs.forEach(function (r) {
+    var def = estadosDefDeRef(r);
+    var idx = estadoIdxRef(r);
+    html += '<div class="pedido-ref-progreso">' +
+      '<span class="pedido-ref-nombre">' + esc(r.nombre || "Referencia") + "</span>" +
+      '<span class="pedido-ref-etapa">' + esc(def[idx].label) + "</span>" +
+      '<span class="pedido-ref-frac">' + (idx + 1) + "/" + def.length + "</span>" +
+      '<span class="pedido-ref-btns">' +
+      '<button class="btn ghost small" ' + (idx === 0 ? "disabled" : "") + ' data-action="retreat-ref" data-pedido="' + p.id + '" data-cot="' + cot.id + '" data-ref="' + r.id + '" title="Retroceder">←</button>' +
+      '<button class="btn ghost small" ' + (idx === def.length - 1 ? "disabled" : "") + ' data-action="advance-ref" data-pedido="' + p.id + '" data-cot="' + cot.id + '" data-ref="' + r.id + '" title="Avanzar">→</button>' +
+      "</span>" +
+      "</div>";
+  });
+  html += "</div>";
   return html;
 }
 
@@ -497,6 +535,8 @@ export var actions = {
   },
   advance: function (el) { moveEstado(el, 1); },
   retreat: function (el) { moveEstado(el, -1); },
+  "advance-ref": function (el) { moveEstadoRef(el, 1); },
+  "retreat-ref": function (el) { moveEstadoRef(el, -1); },
   cobrar: function (el) {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
@@ -730,6 +770,37 @@ function moveEstado(el, dir) {
     return Object.assign({}, p, { estado: estadoIds[nidx] });
   });
   persist("pedidos"); notify();
+}
+
+// Avanza/retrocede la etapa de UNA referencia dentro de la cotización de
+// origen del pedido (ahí vive el progreso real — ver calc.js:
+// estadoAgregadoDeCot). Después de mover la referencia, el pedido recalcula
+// su propio `estado`/`estadosDef` a partir de la referencia menos avanzada,
+// para que el filtro por etapa, el KPI "Pedidos activos" y el PDF de
+// producción (que solo conocen un estado por pedido) sigan reflejando la
+// realidad sin tener que tocarlos.
+function moveEstadoRef(el, dir) {
+  var pedidoId = el.getAttribute("data-pedido"), cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+  var cotActualizada = null;
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    var refs = (c.referencias || []).map(function (r) {
+      if (r.id !== refId) return r;
+      var estadoIds = estadosDefDeRef(r).map(function (e) { return e.id; });
+      var idx = estadoIdxRef(r);
+      var nidx = dir > 0 ? Math.min(idx + 1, estadoIds.length - 1) : Math.max(idx - 1, 0);
+      return Object.assign({}, r, { estado: estadoIds[nidx] });
+    });
+    cotActualizada = Object.assign({}, c, { referencias: refs });
+    return cotActualizada;
+  });
+  if (!cotActualizada) return;
+  var agregado = estadoAgregadoDeCot(cotActualizada);
+  state.pedidos = state.pedidos.map(function (p) {
+    if (p.id !== pedidoId) return p;
+    return Object.assign({}, p, { estado: agregado ? agregado.estado : p.estado, estadosDef: agregado ? agregado.estadosDef : null });
+  });
+  persist("cotizaciones"); persist("pedidos"); notify();
 }
 
 // Chips de filtro: siempre se ven las etapas por defecto, más cualquier

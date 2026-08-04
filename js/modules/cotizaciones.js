@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -22,15 +22,6 @@ function nuevoInsumo(fuente) {
   };
 }
 
-// Puente temporal: las etapas de producción ahora son por referencia (ver
-// renderEstadosRef), pero Pedidos todavía solo soporta UN flujo por pedido.
-// Al convertir, se usa el de la primera referencia que traiga uno
-// personalizado — si ninguna lo tiene, el pedido nace con el flujo estándar,
-// igual que antes de este cambio.
-function primerFlujoEstadosDeCot(cot) {
-  var conFlujo = (cot.referencias || []).filter(function (r) { return r.estadosDef && r.estadosDef.length; })[0];
-  return conFlujo ? conFlujo.estadosDef : null;
-}
 
 // Dos pestañas arriba (estilo hoja de cálculo, a la derecha): "Historial"
 // es siempre un índice liviano — una tarjeta chica por cotización, sin el
@@ -768,14 +759,19 @@ export var actions = {
       var totales = calcCotizacionTotales(cot);
       var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
       var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
-      var estadosDef = primerFlujoEstadosDeCot(cot);
+      // El pedido guarda un estado/flujo "agregado" (el de su referencia menos
+      // avanzada) solo para que el filtro por etapa, el KPI y el PDF sigan
+      // funcionando sin cambios — el progreso real, referencia por
+      // referencia, se edita y se lee siempre desde la cotización (ver
+      // pedidos.js: "advance-ref"/"retreat-ref").
+      var agregado = estadoAgregadoDeCot(cot);
       var nuevoP = {
         id: uid(), clienteId: cot.clienteId || "", cliente: cot.cliente, tipoCliente: "propio", descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
-        cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: "", estado: estadosDef ? estadosDef[0].id : "nuevo", cotizacionId: cot.id,
+        cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
         numeroOp: generarNumeroOp(todosNumerosOp()),
         iva: cot.iva || { activo: false, porcentaje: 19 },
         abonos: [],
-        estadosDef: estadosDef,
+        estadosDef: agregado ? agregado.estadosDef : null,
         // La comisión de vendedor definida en la cotización se traslada al pedido
         // resultante (misma estructura), para que no haya que volver a definirla.
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null
@@ -961,13 +957,15 @@ export var actions = {
     var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
     var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
     if (!window.confirm("¿Aplicar estos valores al pedido original?\n\nEl total, la descripción, la cantidad, el vendedor y las etapas del pedido se reemplazan por los de esta cotización. Los abonos que ya se hayan cobrado NO se pierden.")) return;
-    var estadosDef = primerFlujoEstadosDeCot(cot);
+    var agregado = estadoAgregadoDeCot(cot);
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== cot.pedidoOrigenId) return p;
       return Object.assign({}, p, {
         descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
         cantidad: String(cantidadTotal), total: totales.precioTotal,
-        iva: cot.iva || p.iva, estadosDef: estadosDef,
+        iva: cot.iva || p.iva,
+        estado: agregado ? agregado.estado : p.estado,
+        estadosDef: agregado ? agregado.estadosDef : null,
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor
       });
     });

@@ -21,6 +21,39 @@ export function estadoLabelDe(p) {
   return found ? found.label : (p.estado || "—");
 }
 
+// ---------- estados de producción por REFERENCIA (dentro de una cotización) ----------
+// Cada referencia de una cotización puede llevar su propio flujo (ver
+// cotizaciones.js: renderEstadosRef) y, una vez el pedido entra a producción,
+// su propio progreso — no todas las piezas de un mismo pedido avanzan al
+// mismo ritmo (ver pedidos.js, que ya no muestra un solo "tape" para todo el
+// pedido sino el progreso de cada referencia).
+export function estadosDefDeRef(ref) {
+  return (ref && ref.estadosDef && ref.estadosDef.length) ? ref.estadosDef : ESTADOS_DEFAULT;
+}
+export function estadoIdxRef(ref) {
+  var def = estadosDefDeRef(ref);
+  var idx = def.map(function (e) { return e.id; }).indexOf(ref.estado);
+  return idx < 0 ? 0 : idx;
+}
+// El pedido en sí sigue guardando un solo `estado`/`estadosDef` (de eso
+// dependen el filtro por etapa, el KPI "Pedidos activos" y el PDF de
+// producción — no vale la pena rehacerlos ahora mismo) — pero ese valor deja
+// de editarse directo: se recalcula solo a partir de la referencia MENOS
+// avanzada cada vez que una referencia avanza o retrocede (ver pedidos.js:
+// "advance-ref"/"retreat-ref"), para que un pedido nunca aparezca "más
+// adelantado" de lo que en verdad está su pieza más atrasada.
+export function estadoAgregadoDeCot(cot) {
+  var refs = (cot && cot.referencias) || [];
+  if (!refs.length) return null;
+  var peor = refs[0], peorIdx = estadoIdxRef(refs[0]);
+  refs.forEach(function (r) {
+    var idx = estadoIdxRef(r);
+    if (idx < peorIdx) { peor = r; peorIdx = idx; }
+  });
+  var def = estadosDefDeRef(peor);
+  return { estado: def[peorIdx].id, estadosDef: (peor.estadosDef && peor.estadosDef.length) ? peor.estadosDef : null };
+}
+
 // ---------- finanzas ----------
 // Un movimiento registrado en Finanzas SIEMPRE es dinero que ya se movió: no
 // existe más el estado "pendiente" a nivel de movimiento (ver README,

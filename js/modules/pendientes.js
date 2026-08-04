@@ -59,13 +59,15 @@ export function render() {
       '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button></div>';
   });
   if ((cfg.nomina || []).length === 0) { html += '<div class="empty">Aún no registras personas en nómina.</div>'; }
-  html += '<div class="form-grid" style="margin-top:12px;">' +
+  html += renderPendForm("emp", "+ Agregar persona a nómina",
+    '<div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input data-form="emp" data-field="nombre" value="' + esc(fe.nombre) + '" /></div>' +
     '<div class="field"><label>Cargo</label><input data-form="emp" data-field="cargo" value="' + esc(fe.cargo) + '" placeholder="Ej. Costurera" /></div>' +
     '<div class="field"><label>Salario mensual</label><input type="number" data-form="emp" data-field="salario" value="' + esc(fe.salario) + '" placeholder="0" /></div>' +
     '<button class="btn" data-action="add-emp">Agregar a nómina</button>' +
-    "</div>" +
-    '<div class="form-grid" style="margin-top:14px;">' +
+    "</div>");
+  html += '<hr class="stitch" />';
+  html += '<div class="form-grid">' +
     '<div class="field"><label>Periodo de pago</label><select data-action-change="set-periodo-pago">' +
     Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], cfg.periodoPago || "mensual"); }).join("") +
     "</select></div>" +
@@ -95,7 +97,8 @@ export function render() {
       '<button class="btn danger small" data-action="remove-gasto-fijo" data-id="' + g.id + '">✕</button></div>';
   });
   if ((cfg.gastosFijos || []).length === 0) { html += '<div class="empty">Aún no registras gastos fijos.</div>'; }
-  html += '<div class="form-grid" style="margin-top:12px;">' +
+  html += renderPendForm("gastoFijo", "+ Agregar gasto fijo",
+    '<div class="form-grid">' +
     '<div class="field wide"><label>Concepto</label><input data-form="gastoFijo" data-field="nombre" value="' + esc(gf.nombre) + '" placeholder="Ej. Arriendo del taller" /></div>' +
     '<div class="field"><label>Monto</label><input type="number" data-form="gastoFijo" data-field="monto" value="' + esc(gf.monto) + '" placeholder="0" /></div>' +
     '<div class="field"><label>Periodo</label><select data-form="gastoFijo" data-field="periodo">' +
@@ -103,26 +106,28 @@ export function render() {
     "</select></div>" +
     '<div class="field"><label>Día(s) de pago (opcional)' + renderHelp("Puedes poner varios separados por coma. Ej. \"1,15\" (día del mes) o, si el periodo es semanal, \"6\" para sábado.") + '</label><input data-form="gastoFijo" data-field="diasPago" value="' + esc(gf.diasPago) + '" placeholder="Ej. 1,15" /></div>' +
     '<button class="btn" data-action="add-gasto-fijo">Agregar gasto fijo</button>' +
-    "</div>" +
-    "</div>";
+    "</div>");
+  html += "</div>";
 
   // ---------- Meta (periodo graduable) ----------
   var meta = cfg.meta || { label: "", monto: 0, periodo: "mensual" };
   var balancePeriodo = calcBalancePeriodo(meta.periodo || "mensual");
   var progresoMeta = num(meta.monto) > 0 ? Math.max(0, Math.min(100, (balancePeriodo / num(meta.monto)) * 100)) : null;
   html += '<div class="card"><div class="section-title small">Meta' +
-    renderHelp("Define una meta de balance neto para el periodo que elijas (semana, quincena o mes). El progreso se ve en detalle en Configuración → Reporte financiero; aquí solo la defines.") +
-    '</div><div class="form-grid">' +
+    renderHelp("Define una meta de balance neto para el periodo que elijas (semana, quincena o mes). El progreso se ve en detalle en Resumen → Reporte financiero; aquí solo la defines.") +
+    "</div>";
+  if (progresoMeta !== null) {
+    html += '<div class="section-sub" style="margin-bottom:0;">Progreso de este periodo — <b style="color:var(--ink);">' + esc(meta.label || "Meta") + "</b>: <b style=\"color:var(--ink);\">" + progresoMeta.toFixed(0) + "%</b> (" + fmt(balancePeriodo) + " de " + fmt(meta.monto) + ")</div>";
+  }
+  html += renderPendForm("meta", progresoMeta !== null ? "Editar meta" : "+ Definir una meta",
+    '<div class="form-grid">' +
     '<div class="field wide"><label>Etiqueta</label><input id="inp-meta-label" value="' + esc(meta.label) + '" placeholder="Ej. Meta de balance neto" /></div>' +
     '<div class="field"><label>Monto objetivo</label><input type="number" id="inp-meta-monto" value="' + esc(meta.monto) + '" placeholder="0" /></div>' +
     '<div class="field"><label>Periodo</label><select id="inp-meta-periodo">' +
     Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], meta.periodo || "mensual"); }).join("") +
     "</select></div>" +
     '<button class="btn" data-action="save-meta">Guardar meta</button>' +
-    "</div>";
-  if (progresoMeta !== null) {
-    html += '<div class="section-sub" style="margin-top:10px;margin-bottom:0;">Progreso de este periodo: <b style="color:var(--ink);">' + progresoMeta.toFixed(0) + "%</b> (" + fmt(balancePeriodo) + " de " + fmt(meta.monto) + ")</div>";
-  }
+    "</div>");
   html += "</div>";
 
   // ---------- Deudas ----------
@@ -157,7 +162,8 @@ export function render() {
       "</div>";
   });
   if (state.deudas.length === 0) { html += '<div class="empty">Sin deudas pendientes.</div>'; }
-  html += '<div class="form-grid" style="margin-top:12px;">' +
+  html += renderPendForm("deuda", "+ Agregar deuda",
+    '<div class="form-grid">' +
     '<div class="field wide"><label>Concepto</label><input data-form="deuda" data-field="concepto" value="' + esc(fd.concepto) + '" placeholder="Ej. Préstamo máquina plana" /></div>' +
     '<div class="field"><label>Con quién</label><input data-form="deuda" data-field="contraparte" value="' + esc(fd.contraparte) + '" placeholder="Opcional" /></div>' +
     '<div class="field"><label>Monto total</label><input type="number" data-form="deuda" data-field="monto" value="' + esc(fd.monto) + '" placeholder="0" /></div>' +
@@ -168,8 +174,8 @@ export function render() {
     '<div class="field"><label>Día(s) de pago (opcional)' + renderHelp(fd.periodo === "semanal" ? "Puedes elegir uno o varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"6\" para sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input data-form="deuda" data-field="diasPago" value="' + esc(fd.diasPago) + '" placeholder="' + (fd.periodo === "semanal" ? "Ej. 6" : "Ej. 1,15") + '" /></div>' +
     '<div class="field"><label>Vence (opcional, si no usas periodo)</label><input type="date" data-form="deuda" data-field="fechaVencimiento" value="' + esc(fd.fechaVencimiento) + '" /></div>' +
     '<button class="btn" data-action="add-deuda">Agregar deuda</button>' +
-    "</div>" +
-    "</div>";
+    "</div>");
+  html += "</div>";
 
   // ---------- Historial de deudas (pagadas por completo) ----------
   // A diferencia del historial de PAGOS de una deuda activa (que ya no se
@@ -214,6 +220,24 @@ export function render() {
 
 function fechaCorta(fecha) {
   return fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }).replace(".", "");
+}
+
+// Cada "agregar nuevo/a X" de esta pestaña (empleado, gasto fijo, meta,
+// deuda) vive detrás de este mismo botón — colapsado por defecto, para que
+// la pestaña muestre las tablas (lo que se consulta seguido) sin ~19 campos
+// de formulario siempre abiertos al lado. Mismo patrón que ya usan las
+// secciones colapsables de Cotizaciones.
+function renderPendForm(key, labelBoton, contenidoHtml) {
+  var abierto = !!state.pendFormsAbiertos[key];
+  // data-key (no data-form): data-form ya lo usa el patrón genérico de
+  // core/dom.js para saber en qué borrador de state.form* escribir cada
+  // input — este botón no es un input de ningún formulario, solo el
+  // interruptor que lo muestra/oculta.
+  if (!abierto) {
+    return '<button class="btn ghost small" style="margin-top:12px;" data-action="toggle-pend-form" data-key="' + key + '">' + esc(labelBoton) + "</button>";
+  }
+  return '<div style="margin-top:12px;">' + contenidoHtml +
+    '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-pend-form" data-key="' + key + '">Cancelar</button></div>';
 }
 
 // Fila de deuda en modo edición: todos los campos (incluido periodo/días,
@@ -305,6 +329,11 @@ function sincronizarEventoGastoFijo(g) {
 }
 
 export var actions = {
+  "toggle-pend-form": function (el) {
+    var key = el.getAttribute("data-key");
+    state.pendFormsAbiertos = Object.assign({}, state.pendFormsAbiertos, { [key]: !state.pendFormsAbiertos[key] });
+    notify();
+  },
   "add-emp": function () {
     var fe = state.formEmp;
     if (!fe.nombre || !fe.salario) return;

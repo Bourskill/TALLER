@@ -175,6 +175,19 @@ assert(state.cotizaciones[0].estado === "convertida", "convierte cotización en 
 assert(state.pedidos.length === 2, "el pedido convertido aparece en Pedidos");
 assert(state.tab === "pedidos", "navega a Pedidos tras convertir");
 
+// --- pedidos: progreso de producción POR REFERENCIA (no un solo "tape" para
+// todo el pedido) — el pedido recién convertido trae la referencia de la
+// cotización de origen, con su propio avance. ---
+const pedidoConvertidoId = state.pedidos[0].id;
+const refIdProduccion = state.cotizaciones[0].referencias[0].id;
+assert(!!document.querySelector('[data-action="advance-ref"][data-pedido="' + pedidoConvertidoId + '"][data-ref="' + refIdProduccion + '"]'), "la tarjeta del pedido muestra el botón de avanzar por referencia");
+const estadoRefAntes = state.cotizaciones[0].referencias[0].estado;
+const estadoPedidoAntes = state.pedidos[0].estado;
+click('[data-action="advance-ref"][data-pedido="' + pedidoConvertidoId + '"][data-ref="' + refIdProduccion + '"]');
+assert(state.cotizaciones[0].referencias[0].estado !== estadoRefAntes, "avanzar la referencia cambia su propio estado en la cotización de origen");
+assert(state.pedidos[0].estado !== estadoPedidoAntes, "el estado agregado del pedido se resincroniza tras avanzar la referencia");
+assert(state.pedidos[0].estado === state.cotizaciones[0].referencias[0].estado, "con una sola referencia, el estado del pedido coincide con el de esa referencia (es la única, así que también es la 'menos avanzada')");
+
 // --- notas (antes "pendientes": tareas/mejoras) ---
 click('[data-action="tab"][data-tab="notas"]');
 setInput('[data-form="pend"][data-field="texto"]', "Comprar hilo");
@@ -184,18 +197,24 @@ click('[data-action="toggle-pend"][data-id="' + state.pendientes[0].id + '"]');
 assert(state.pendientes[0].hecho === true, "marca nota como hecha");
 
 // --- pendientes (nómina, gastos fijos, meta, deudas) ---
+// Los formularios de "agregar" viven colapsados detrás de un botón (menos
+// ruido visual junto a las tablas) — hay que abrirlos antes de poder tocar
+// sus campos.
 click('[data-action="tab"][data-tab="pendientes"]');
+click('[data-action="toggle-pend-form"][data-key="emp"]');
 setInput('[data-form="emp"][data-field="nombre"]', "Costurera 1");
 setInput('[data-form="emp"][data-field="salario"]', "1200000");
 click('[data-action="add-emp"]');
 assert(state.config.nomina.length === 1, "agrega persona a nómina");
 
+click('[data-action="toggle-pend-form"][data-key="gastoFijo"]');
 setInput('[data-form="gastoFijo"][data-field="nombre"]', "Arriendo");
 setInput('[data-form="gastoFijo"][data-field="monto"]', "500000");
 click('[data-action="add-gasto-fijo"]');
 assert(state.config.gastosFijos.length === 1, "agrega gasto fijo");
 assert(state.config.gastosFijos[0].periodo === "mensual", "gasto fijo nace con periodo mensual por defecto");
 
+click('[data-action="toggle-pend-form"][data-key="deuda"]');
 setInput('[data-form="deuda"][data-field="concepto"]', "Préstamo máquina");
 setInput('[data-form="deuda"][data-field="monto"]', "300000");
 click('[data-action="add-deuda"]');

@@ -112,6 +112,10 @@ export const state = {
   formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: "" },
   formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: "" },
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")
+  // { emp: bool, gastoFijo: bool, meta: bool, deuda: bool } — formularios de
+  // "agregar nuevo/a X" en Pendientes, colapsados por defecto para que la
+  // pestaña no muestre ~19 campos siempre abiertos junto a las tablas.
+  pendFormsAbiertos: {},
   flujoEstadosAbierto: "", // id del flujo de producción con sus etapas desplegadas en Plantillas (o "")
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
