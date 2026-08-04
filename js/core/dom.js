@@ -184,7 +184,17 @@ var actionRegistry = Object.assign(
 // form -> clave en `state` que guarda su borrador.
 var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte" };
 
+var rendering = false;
+var pendingRerender = false;
+
 export function render() {
+  // Blindaje contra reentradas: si algo dispara notify() DENTRO de este mismo
+  // render (ej. un evento sincrónico que mutó el estado a medio camino), no
+  // se anida otro render inmediatamente — se encola uno solo para justo
+  // después de que termine el actual, sin perder el cambio.
+  if (rendering) { pendingRerender = true; return; }
+  rendering = true;
+
   document.documentElement.setAttribute("data-theme", state.ui.tema === "claro" ? "light" : "dark");
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
@@ -210,6 +220,17 @@ export function render() {
       "</div>" +
       renderImagenPreview();
 
+    // Blindaje contra un quirk de Chrome: si el elemento con foco (ej. un
+    // <select> cuyo desplegable nativo seguía abierto) sigue activo justo
+    // cuando se reemplaza innerHTML, el navegador puede lanzar internamente
+    // un blur A MITAD del reemplazo y tirar "Failed to set the 'innerHTML'
+    // property... the node to be removed is no longer a child of this node".
+    // Sacarle el foco a mano ANTES de tocar innerHTML evita esa carrera — si
+    // el elemento tenía id, el foco se restaura de todos modos más abajo.
+    if (active && typeof active.blur === "function" && app && app.contains(active)) {
+      active.blur();
+    }
+
     app.innerHTML = html;
     bindEvents();
 
@@ -225,6 +246,9 @@ export function render() {
     state.lastError = e && e.message ? e.message : String(e);
     var app2 = document.getElementById("app");
     if (app2) app2.innerHTML = '<div class="error-box">Ocurrió un error y el panel no pudo dibujarse:\n' + esc(state.lastError) + "</div>";
+  } finally {
+    rendering = false;
+    if (pendingRerender) { pendingRerender = false; render(); }
   }
 }
 
