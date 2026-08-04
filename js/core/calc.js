@@ -693,6 +693,33 @@ export function stockTotalProducto(producto) {
   if (!producto) return 0;
   return (producto.variantesTalla || []).reduce(function (a, v) { return a + num(v.stock); }, 0);
 }
+// Validación ATÓMICA antes de descontar stock de verdad: agrupa varias
+// líneas [{productoId, talla, cantidad}] por producto+talla (varias líneas
+// de la misma talla en un mismo pedido/remisión suman) y las compara contra
+// el stock real disponible AHORA — sin tocar nada. Devuelve la lista de
+// déficits (vacía = alcanza para todo). Quien llama debe chequear esto ANTES
+// de mutar cualquier cosa, para no crear un pedido/remisión a medias (cobrar
+// por unidades que en realidad no había) — es la causa raíz del bug de
+// "pedir 2 con 1 de stock": antes cada línea se validaba contra el stock
+// SIN restar lo que otras líneas del mismo borrador ya habían apartado.
+export function validarStockLineas(lineas) {
+  var necesitado = {};
+  (lineas || []).forEach(function (l) {
+    var key = l.productoId + "|" + l.talla;
+    necesitado[key] = (necesitado[key] || 0) + num(l.cantidad);
+  });
+  var deficits = [];
+  Object.keys(necesitado).forEach(function (key) {
+    var i = key.indexOf("|");
+    var productoId = key.slice(0, i), talla = key.slice(i + 1);
+    var producto = productoById(productoId);
+    var disponible = producto ? stockTalla(producto, talla) : 0;
+    if (necesitado[key] > disponible) {
+      deficits.push({ productoId: productoId, talla: talla, productoNombre: producto ? producto.nombre : "(producto eliminado)", solicitado: necesitado[key], disponible: disponible });
+    }
+  });
+  return deficits;
+}
 export function clientesFiltrados() {
   var q = norm(state.filtroClientes).trim();
   var list = state.clientes.slice().sort(function (a, b) { return norm(a.nombre) < norm(b.nombre) ? -1 : 1; });

@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -820,11 +820,12 @@ export var actions = {
         estadosDef: agregado ? agregado.estadosDef : null,
         // La comisión de vendedor definida en la cotización se traslada al pedido
         // resultante (misma estructura), para que no haya que volver a definirla.
-        vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null
+        vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null,
+        stockConsumido: [] // se completa abajo con lo que en verdad se descontó, para poder revertirlo si el pedido se elimina
       };
       state.pedidos.unshift(nuevoP);
       state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
-      descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
+      nuevoP.stockConsumido = descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
       persist("pedidos"); persist("cotizaciones");
       state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
@@ -881,6 +882,9 @@ export var actions = {
     });
     persist("cotizaciones"); notify();
   },
+  // Igual que toggle-comision en pedidos.js: desmarcar "pagada" revierte de
+  // verdad el movimiento (no solo la etiqueta), para que volver a marcarla
+  // pagada después no duplique el pago en Finanzas.
   "toggle-comision-cot": function (el) {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
@@ -888,9 +892,11 @@ export var actions = {
     var pagando = cot.vendedor.estado !== "pagado";
     if (pagando) {
       var valor = calcComisionValorCot(cot);
-      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: cot.pedidoId || "", cotizacionId: cot.id });
-      persist("tx");
+      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: cot.pedidoId || "", cotizacionId: cot.id, origenComisionCotId: id });
+    } else {
+      state.tx = state.tx.filter(function (t) { return t.origenComisionCotId !== id; });
     }
+    persist("tx");
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== id) return c;
       return Object.assign({}, c, { vendedor: Object.assign({}, c.vendedor, { estado: pagando ? "pagado" : "pendiente" }) });
@@ -1006,6 +1012,11 @@ export var actions = {
     var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
     if (!window.confirm("¿Aplicar estos valores al pedido original?\n\nEl total, la descripción, la cantidad, el vendedor y las etapas del pedido se reemplazan por los de esta cotización. Los abonos que ya se hayan cobrado NO se pierden.")) return;
     var agregado = estadoAgregadoDeCot(cot);
+    // Se descuenta ANTES de tocar el pedido (no depende de él) — lo REAL
+    // aplicado se suma (no reemplaza) al stockConsumido que el pedido ya
+    // tuviera, para no perder el rastro de un descuento anterior si esto se
+    // aplica más de una vez sobre el mismo pedido escalado.
+    var stockAplicado = descontarStockPorTallas(cot, "pedido:" + cot.pedidoOrigenId);
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== cot.pedidoOrigenId) return p;
       return Object.assign({}, p, {
@@ -1014,11 +1025,11 @@ export var actions = {
         iva: cot.iva || p.iva,
         estado: agregado ? agregado.estado : p.estado,
         estadosDef: agregado ? agregado.estadosDef : null,
-        vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor
+        vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor,
+        stockConsumido: (p.stockConsumido || []).concat(stockAplicado)
       });
     });
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId }) : c; });
-    descontarStockPorTallas(cot, "pedido:" + cot.pedidoOrigenId);
     // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
@@ -1078,14 +1089,14 @@ export var actions = {
   }
 };
 
-// Al convertir una cotización en pedido (o aplicarla a uno existente), cada
-// referencia ligada a un producto del catálogo (ref.productoId, ver acción
-// "aplicar-producto") descuenta su stock real, agrupando las filas de
-// "Tallas y observaciones" por talla — es la única forma confiable de saber
-// CUÁNTAS unidades de CADA talla salieron. Sin filas de detalle no hay talla
-// que agrupar, así que esa referencia no descuenta stock solo (queda como
-// límite conocido, ajustable a mano en Productos).
-function descontarStockPorTallas(cot, origen) {
+// Cada referencia ligada a un producto del catálogo (ref.productoId, ver
+// acción "aplicar-producto") agrupa sus filas de "Tallas y observaciones" por
+// talla — es la única forma confiable de saber CUÁNTAS unidades de CADA
+// talla salieron. Sin filas de detalle no hay talla que agrupar, así que esa
+// referencia no cuenta (queda como límite conocido, ajustable a mano en
+// Productos). Función pura: no toca stock, solo arma la lista de líneas.
+function lineasStockDeCot(cot) {
+  var lineas = [];
   (cot.referencias || []).forEach(function (ref) {
     if (!ref.productoId) return;
     var porTalla = {};
@@ -1095,9 +1106,35 @@ function descontarStockPorTallas(cot, origen) {
       porTalla[talla] = (porTalla[talla] || 0) + 1;
     });
     Object.keys(porTalla).forEach(function (talla) {
-      ajustarStockProducto(ref.productoId, talla, -porTalla[talla], "Convertido desde cotización — " + (ref.nombre || cot.descripcion), origen);
+      lineas.push({ productoId: ref.productoId, talla: talla, cantidad: porTalla[talla] });
     });
   });
+  return lineas;
+}
+
+// Al convertir una cotización en pedido (o aplicarla a uno existente) se
+// descuenta el stock real. Si no alcanza para todo lo cotizado, NO se
+// bloquea la conversión (la venta ya pasó en la vida real; bloquear acá
+// trabaría al usuario) pero tampoco se aplica en silencio: se avisa
+// exactamente qué faltó, y se devuelve lo REALMENTE descontado (no lo
+// cotizado) para que el pedido resultante pueda revertirse sin descuadrarse
+// si más adelante se elimina.
+function descontarStockPorTallas(cot, origen) {
+  var lineas = lineasStockDeCot(cot);
+  if (!lineas.length) return [];
+  var deficits = validarStockLineas(lineas);
+  if (deficits.length) {
+    window.alert("Ojo: no había stock suficiente para todo lo cotizado — se descontó lo que había disponible:\n\n" +
+      deficits.map(function (d) { return "- " + d.productoNombre + " (" + d.talla + "): se necesitaban " + d.solicitado + ", solo había " + d.disponible; }).join("\n") +
+      "\n\nRevisa y repón el stock en Catálogo si hace falta.");
+  }
+  var aplicado = [];
+  lineas.forEach(function (l) {
+    var producto = productoById(l.productoId);
+    var real = ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Convertido desde cotización — " + cot.descripcion, origen);
+    if (real) aplicado.push({ productoId: l.productoId, productoNombre: producto ? producto.nombre : "", talla: l.talla, cantidad: Math.abs(real) });
+  });
+  return aplicado;
 }
 
 // Aplica una función de transformación a una cotización completa, guarda y notifica.

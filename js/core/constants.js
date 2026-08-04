@@ -49,7 +49,8 @@ export const KEYS = {
   pdfContador: "cotizaciones:pdf-contador",
   ui: "ui:preferencias",
   catalogoPropuestas: "cotizaciones:catalogo-propuestas", // cambios de catálogo hechos por un vendedor, a la espera de aprobación del admin
-  productos: "productos:lista" // catálogo de prendas ya hechas (con stock por talla) — distinto del catálogo de insumos
+  productos: "productos:lista", // catálogo de prendas ya hechas (con stock por talla) — distinto del catálogo de insumos
+  productoPropuestas: "productos:propuestas" // precio/movimientos de stock propuestos por un vendedor, a la espera de aprobación del admin
 };
 
 // Claves de `state` que, si las edita alguien con rol "vendedor", no se

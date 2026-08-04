@@ -402,31 +402,40 @@ export var actions = {
   // se registra el movimiento correspondiente en Finanzas con la fecha de
   // hoy — así queda constancia (antes solo se marcaba el estado, sin dejar
   // registro ni fecha).
+  // Toggle bidireccional por PERIODO puntual: marcar pagado crea el
+  // movimiento de ESE periodo; desmarcarlo (deshacer un clic accidental) lo
+  // revierte — pero solo el de este periodo (origenGastoFijoPeriodo incluye
+  // la clave del periodo), nunca los de periodos anteriores ya cerrados. Sin
+  // esto, volver a marcar pagado el mismo periodo más tarde duplicaría el
+  // gasto en Finanzas (mismo problema que ya se corrigió en comisiones).
   "toggle-gasto-fijo-pagado": function (el) {
     var id = el.getAttribute("data-id");
     var gastoFijo = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
     if (!gastoFijo) return;
     var pendiente = calcGastoFijoPendiente(gastoFijo) > 0;
+    // Misma lógica de "clave de periodo" que periodoKey() en core/calc.js.
+    var periodo = gastoFijo.periodo || "mensual";
+    var hoy = new Date();
+    var y = hoy.getFullYear(), m = String(hoy.getMonth() + 1).padStart(2, "0"), d = hoy.getDate();
+    var clave = y + "-" + m;
+    if (periodo === "quincenal") clave = y + "-" + m + "-" + (d <= 15 ? "Q1" : "Q2");
+    if (periodo === "semanal") {
+      var inicioAno = new Date(hoy.getFullYear(), 0, 1);
+      var dias = Math.floor((hoy - inicioAno) / 86400000);
+      var semana = Math.ceil((dias + inicioAno.getDay() + 1) / 7);
+      clave = y + "-W" + semana;
+    }
+    var origenPeriodo = id + "|" + clave;
     state.config.gastosFijos = (state.config.gastosFijos || []).map(function (g) {
       if (g.id !== id) return g;
-      // Misma lógica de "clave de periodo" que periodoKey() en core/calc.js.
-      var periodo = g.periodo || "mensual";
-      var hoy = new Date();
-      var y = hoy.getFullYear(), m = String(hoy.getMonth() + 1).padStart(2, "0"), d = hoy.getDate();
-      var clave = y + "-" + m;
-      if (periodo === "quincenal") clave = y + "-" + m + "-" + (d <= 15 ? "Q1" : "Q2");
-      if (periodo === "semanal") {
-        var inicioAno = new Date(hoy.getFullYear(), 0, 1);
-        var dias = Math.floor((hoy - inicioAno) / 86400000);
-        var semana = Math.ceil((dias + inicioAno.getDay() + 1) / 7);
-        clave = y + "-W" + semana;
-      }
       return Object.assign({}, g, { pagadoHasta: pendiente ? clave : "" });
     });
     if (pendiente) {
-      state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Gasto fijo — " + gastoFijo.nombre, monto: num(gastoFijo.monto), contraparte: gastoFijo.nombre, fecha: todayStr(), pedidoId: "", gastoFijoId: gastoFijo.id });
-      persist("tx");
+      state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Gasto fijo — " + gastoFijo.nombre, monto: num(gastoFijo.monto), contraparte: gastoFijo.nombre, fecha: todayStr(), pedidoId: "", gastoFijoId: gastoFijo.id, origenGastoFijoPeriodo: origenPeriodo });
+    } else {
+      state.tx = state.tx.filter(function (t) { return t.origenGastoFijoPeriodo !== origenPeriodo; });
     }
+    persist("tx");
     persist("config"); notify();
     var actualizado = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
     if (actualizado) sincronizarEventoGastoFijo(actualizado);

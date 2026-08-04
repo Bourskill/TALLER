@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
@@ -660,10 +660,18 @@ export var actions = {
     var card = el.closest(".card");
     var talla = card ? val(card, "pedido-producto-talla") : "";
     var cantidad = num(card ? val(card, "pedido-producto-cantidad") : 0);
-    var disponible = stockTalla(producto, talla);
     if (!talla || cantidad <= 0) return;
-    if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
     var fp = state.formPedido;
+    // Resta lo que ESTE mismo borrador ya venía apartando de la misma talla
+    // (ej. dos líneas de "M" antes de crear el pedido) — si no se resta acá,
+    // cada línea se valida contra el stock TOTAL sin enterarse de la otra, y
+    // se puede terminar pidiendo de más (con 1 en stock, agregar la línea dos
+    // veces "pasaba" porque cada clic veía el mismo 1 disponible).
+    var yaApartado = (fp.stockConsumido || [])
+      .filter(function (l) { return l.productoId === productoId && l.talla === talla; })
+      .reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+    var disponible = stockTalla(producto, talla) - yaApartado;
+    if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
     fp.stockConsumido = (fp.stockConsumido || []).concat([{ productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad }]);
     var linea = producto.nombre + " (Talla " + talla + ") x" + cantidad;
     fp.descripcion = fp.descripcion ? (fp.descripcion + "; " + linea) : linea;
@@ -676,11 +684,24 @@ export var actions = {
     var esConsignacion = fp.esConsignacion;
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
     var stockConsumido = esConsignacion ? [] : (fp.stockConsumido || []);
+    // Chequeo atómico justo antes de crear nada: si el stock cambió desde que
+    // se armaron las líneas (ej. el borrador quedó abierto un rato y otra
+    // venta se llevó ese stock mientras tanto), no se crea el pedido a medias
+    // — se avisa y se corta acá, sin tocar plata ni stock.
+    if (stockConsumido.length) {
+      var deficits = validarStockLineas(stockConsumido);
+      if (deficits.length) {
+        window.alert("No hay stock suficiente para crear este pedido — el stock cambió mientras lo armabas:\n\n" +
+          deficits.map(function (d) { return "- " + d.productoNombre + " (" + d.talla + "): pediste " + d.solicitado + ", disponibles " + d.disponible; }).join("\n") +
+          "\n\nQuita o ajusta esas líneas e intenta de nuevo.");
+        return;
+      }
+    }
     var nuevoPedido = {
       id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: fp.descripcion,
       cantidad: fp.cantidad, total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
       fechaEntrega: fp.fechaEntrega,
-      stockConsumido: stockConsumido,
+      stockConsumido: [], // se completa abajo con lo que en verdad se descontó (ver ajustarStockProducto)
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
       // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
@@ -699,11 +720,17 @@ export var actions = {
       state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono inicial — " + fp.descripcion, monto: abonoInicial, contraparte: fp.cliente, fecha: todayStr(), pedidoId: nuevoPedido.id, origenAbonoId: abonoInicialId });
       persist("tx");
     }
-    state.pedidos.unshift(nuevoPedido);
-    // El stock del catálogo baja recién ahora, que el pedido ya es real.
+    // El stock del catálogo baja recién ahora, que el pedido ya es real. Se
+    // guarda en el pedido lo REALMENTE descontado (valor de retorno), no lo
+    // solicitado — así, si el pedido se elimina más adelante, se restituye
+    // exactamente lo mismo que se movió, nunca de más.
+    var stockConsumidoReal = [];
     stockConsumido.forEach(function (l) {
-      ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Venta directa — " + fp.descripcion, "pedido:" + nuevoPedido.id);
+      var aplicado = ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Venta directa — " + fp.descripcion, "pedido:" + nuevoPedido.id);
+      if (aplicado) stockConsumidoReal.push({ productoId: l.productoId, productoNombre: l.productoNombre, talla: l.talla, cantidad: Math.abs(aplicado) });
     });
+    nuevoPedido.stockConsumido = stockConsumidoReal;
+    state.pedidos.unshift(nuevoPedido);
     state.formPedido = {
       clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -831,6 +858,18 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var items = state.remisionBuilder.items;
     if (!items.length || state.remisionBuilder.pedidoId !== id) return;
+    // Una remisión es un documento formal (va firmado) — a diferencia de la
+    // venta directa, acá se BLOQUEA en vez de aplicar parcial si el stock ya
+    // no alcanza (ej. cambió mientras se armaba la remisión, con el
+    // constructor abierto un rato). Nunca se genera un documento que diga
+    // "se entregaron 5" si en realidad solo había 3.
+    var deficits = validarStockLineas(items.map(function (it) { return { productoId: it.productoId, talla: it.talla, cantidad: it.cantidad }; }));
+    if (deficits.length) {
+      window.alert("El stock ya no alcanza para esta remisión (cambió mientras la armabas):\n\n" +
+        deficits.map(function (d) { return "- " + d.productoNombre + " (" + d.talla + "): pediste " + d.solicitado + ", disponibles " + d.disponible; }).join("\n") +
+        "\n\nAjusta las cantidades y confirma de nuevo.");
+      return;
+    }
     var remision = { id: uid(), fecha: todayStr(), codigoPublico: codigoPublico(), items: items, nota: "" };
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
@@ -935,6 +974,12 @@ export var actions = {
     state.cotizacionesVista = "nueva";
     notify();
   },
+  // Toggle bidireccional: marcar pagada crea el movimiento en Finanzas;
+  // desmarcarla (deshacer un clic accidental) lo REVIERTE por completo en vez
+  // de solo cambiar la etiqueta — si no, volver a marcarla pagada más tarde
+  // crearía un segundo movimiento para la misma comisión (plata duplicada).
+  // origenComisionPedidoId es lo que permite encontrar y borrar ESE
+  // movimiento puntual sin tocar otros (mismo patrón que remove-cot-gasto).
   "toggle-comision": function (el) {
     var id = el.getAttribute("data-id");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
@@ -942,9 +987,11 @@ export var actions = {
     var pagando = ped.vendedor.estado !== "pagado";
     if (pagando) {
       var valor = calcComisionValor(ped);
-      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + ped.vendedor.nombre, monto: valor, contraparte: ped.vendedor.nombre, fecha: todayStr(), pedidoId: ped.id });
-      persist("tx");
+      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + ped.vendedor.nombre, monto: valor, contraparte: ped.vendedor.nombre, fecha: todayStr(), pedidoId: ped.id, origenComisionPedidoId: id });
+    } else {
+      state.tx = state.tx.filter(function (t) { return t.origenComisionPedidoId !== id; });
     }
+    persist("tx");
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
       return Object.assign({}, p, { vendedor: Object.assign({}, p.vendedor, { estado: pagando ? "pagado" : "pendiente" }) });
@@ -1061,7 +1108,16 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
-    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.')) return;
+    // El stock sí se restituye solo (más abajo), pero la plata que este
+    // pedido ya generó en Finanzas (abonos, comisión pagada, ventas de
+    // consignación) NO se toca ni se borra al eliminarlo — eliminar el
+    // pedido no debe hacer parecer que ese dinero nunca entró/salió. Se
+    // avisa acá para que quede claro antes de confirmar, no después.
+    var dineroVinculado = num(pedido.abono);
+    if (pedido.vendedor && pedido.vendedor.estado === "pagado") dineroVinculado += calcComisionValor(pedido);
+    if (pedido.consignacion) dineroVinculado += (pedido.consignacion.ventas || []).reduce(function (a, v) { return a + num(v.montoTotal); }, 0);
+    var avisoDinero = dineroVinculado > 0 ? ("\n\nOjo: este pedido ya tiene " + fmt(dineroVinculado) + " en movimientos de Finanzas (abonos/comisión/ventas) — esos movimientos NO se eliminan ni se revierten solos.") : "";
+    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero)) return;
     state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
     persist("pedidos"); persist("pedidosPapelera"); notify();
@@ -1086,14 +1142,26 @@ export var actions = {
     if (otrosNumeros.indexOf(restaurado.numeroOp) >= 0) {
       restaurado.numeroOp = generarNumeroOp(todosNumerosOp());
     }
+    // Vuelve a descontar el stock que se le había restituido al eliminarlo.
+    // Si mientras estuvo en la papelera ese stock ya se vendió por otro lado,
+    // se guarda en el pedido restaurado lo que en verdad se pudo volver a
+    // apartar (no lo que tenía antes) y se avisa — nunca debe quedar
+    // reclamando stock que ya no existe.
+    var stockConsumidoReal = [];
+    var faltantes = [];
+    (restaurado.stockConsumido || []).forEach(function (l) {
+      var aplicado = Math.abs(ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Pedido restaurado desde la papelera", "pedido:" + restaurado.id));
+      if (aplicado) stockConsumidoReal.push({ productoId: l.productoId, productoNombre: l.productoNombre, talla: l.talla, cantidad: aplicado });
+      if (aplicado < l.cantidad) faltantes.push({ productoNombre: l.productoNombre, talla: l.talla, faltan: l.cantidad - aplicado });
+    });
+    restaurado.stockConsumido = stockConsumidoReal;
     state.pedidos.unshift(restaurado);
     persist("pedidos"); persist("pedidosPapelera"); notify();
     sincronizarEventoPedido(restaurado);
-    // Vuelve a descontar el stock que se le había restituido al eliminarlo
-    // (best-effort: si la talla ya no existe en el catálogo, simplemente no hace nada).
-    (restaurado.stockConsumido || []).forEach(function (l) {
-      ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Pedido restaurado desde la papelera", "pedido:" + restaurado.id);
-    });
+    if (faltantes.length) {
+      window.alert('Se restauró el pedido "' + restaurado.numeroOp + '", pero parte del stock que tenía reservado ya se vendió mientras estuvo en la papelera:\n\n' +
+        faltantes.map(function (f) { return "- " + f.productoNombre + " (" + f.talla + "): faltaron " + f.faltan; }).join("\n"));
+    }
   },
   "eliminar-pedido-definitivo": function (el) {
     var id = el.getAttribute("data-id");

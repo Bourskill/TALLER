@@ -95,6 +95,17 @@ export const state = {
   productos: [],
   productoImagenSubiendo: {}, // { [productoId]: true } mientras se sube su foto a Drive — nunca se persiste
   productoMovimientosAbierto: "", // id del producto con su bitácora de stock desplegada (o "")
+  // Propuestas de vendedor pendientes de aprobación del admin: SOLO dos
+  // acciones puntuales (editar el precio de venta, o un "Registrar
+  // movimiento" manual de stock) — las bajas automáticas de stock por una
+  // venta o remisión real NUNCA quedan pendientes, se aplican ya mismo (es
+  // la venta real, no una edición). Es un parche quirúrgico por producto
+  // {id, tipo:"movimiento"|"campo", productoId, productoNombre, autor,
+  // fecha, payload} — no una copia de todo el catálogo — para que aprobarla
+  // más tarde se aplique sobre el producto tal como esté EN ESE MOMENTO, no
+  // sobre una foto vieja que ya no refleje ventas más recientes. Ver
+  // core/stock.js: proponerCambioProducto/aprobarPropuestaProducto.
+  productoPropuestas: [],
   // Mismo patrón de pestañas que Cotizaciones: "nueva" es un formulario chico
   // enfocado que, al crear, deja abierto el detalle completo del producto
   // recién creado (productoEditando) — nunca una lista completa a la vez. La
@@ -215,6 +226,7 @@ export async function loadAll() {
     plantillasEstados: KEYS.plantillasEstados,
     catalogoPropuestas: KEYS.catalogoPropuestas,
     productos: KEYS.productos,
+    productoPropuestas: KEYS.productoPropuestas,
     ui: KEYS.ui
   };
   var nombres = Object.keys(claves);
@@ -252,6 +264,7 @@ export async function loadAll() {
     if (datos.plantillasEstados) state.plantillasEstados = datos.plantillasEstados;
     if (datos.catalogoPropuestas) state.catalogoPropuestas = datos.catalogoPropuestas;
     if (datos.productos) state.productos = datos.productos;
+    if (datos.productoPropuestas) state.productoPropuestas = datos.productoPropuestas;
     if (datos.ui) state.ui = Object.assign({}, DEFAULT_UI, datos.ui, { navGroups: Object.assign({}, DEFAULT_UI.navGroups, datos.ui.navGroups || {}) });
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora

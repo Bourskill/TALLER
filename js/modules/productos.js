@@ -17,17 +17,57 @@ import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
-import { ajustarStockProducto } from "../core/stock.js";
+import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcRefTotales, stockTotalProducto } from "../core/calc.js";
+import { getSession } from "../core/auth.js";
 
 var INS_COLS = "1fr 60px 90px 150px 70px 30px";
 var TALLA_COLS = "1fr 90px 30px";
 var MOV_COLS = "90px 90px 70px 70px 1fr";
 
 export function render() {
+  var session = getSession();
+  var html = renderPropuestasPendientesProducto(session);
   var vista = state.productosVista || "nueva";
-  var html = renderTabsProductos(vista);
+  html += renderTabsProductos(vista);
   html += vista === "catalogo" ? renderCatalogoGrid() : renderEditorProducto();
+  return html;
+}
+
+// El admin ve TODAS las propuestas (precio o movimiento de stock) de
+// cualquier vendedor y puede aprobarlas/descartarlas; un vendedor solo ve si
+// las suyas siguen pendientes (para saber que aún no se aplicaron). Mismo
+// espíritu que renderPropuestasPendientes en catalogo.js, pero con el detalle
+// propio de cada tipo de propuesta (precio vs. movimiento de stock).
+function renderPropuestasPendientesProducto(session) {
+  var propuestas = state.productoPropuestas || [];
+  var esAdmin = !session || session.rol !== "vendedor";
+  var visibles = esAdmin ? propuestas : propuestas.filter(function (p) { return p.autor === (session.vendedorNombre || session.email); });
+  if (!visibles.length) return "";
+
+  if (!esAdmin) {
+    return '<div class="card" style="border-color:var(--warning);"><div class="section-title small">Cambios pendientes de aprobación</div>' +
+      '<div class="section-sub">El precio de venta y los movimientos manuales de stock los aprueba el admin — mientras tanto, el producto sigue mostrando el valor anterior. Pendiente' + (visibles.length === 1 ? "" : "s") + ": " +
+      visibles.map(function (p) { return esc(p.productoNombre) + " (" + (p.tipo === "campo" ? "precio" : "movimiento de stock") + ")"; }).join(", ") + "</div></div>";
+  }
+
+  var html = '<div class="card" style="border-color:var(--warning);"><div class="section-title small">Cambios pendientes de aprobación' +
+    renderHelp("Un vendedor propuso un cambio de precio o un movimiento manual de stock. Su cambio NO se aplica hasta que lo apruebes — las bajas de stock por una venta o remisión real nunca pasan por acá, se aplican de inmediato.") +
+    "</div>";
+  visibles.forEach(function (p) {
+    var detalle = p.tipo === "campo"
+      ? ("Precio de venta: " + fmtMoney(p.payload.valorAnterior) + " → " + fmtMoney(p.payload.valorNuevo))
+      : ((p.payload.tipoMov === "salida" ? "Salida" : "Entrada") + " de " + p.payload.cantidad + " — talla " + esc(p.payload.talla) + (p.payload.nota ? " (" + esc(p.payload.nota) + ")" : ""));
+    html += '<div class="tx-row" style="grid-template-columns:1fr 1fr 140px 160px;">' +
+      '<span class="mobile-th">Producto</span><span><b>' + esc(p.productoNombre) + "</b></span>" +
+      '<span class="mobile-th">Cambio</span><span>' + detalle + "</span>" +
+      '<span class="mobile-th">Propuesto por</span><span class="tag" style="background:var(--surface-3);">' + esc(p.autor) + " · " + esc(new Date(p.fecha).toLocaleString("es-CO")) + "</span>" +
+      '<span style="display:flex;gap:6px;justify-content:flex-end;">' +
+      '<button class="btn success small" data-action="aprobar-propuesta-producto" data-id="' + p.id + '">Aprobar</button>' +
+      '<button class="btn danger small" data-action="descartar-propuesta-producto" data-id="' + p.id + '">Descartar</button>' +
+      "</span></div>";
+  });
+  html += "</div>";
   return html;
 }
 
@@ -334,11 +374,26 @@ export var actions = {
     if (state.productoEditando === id) state.productoEditando = "";
     persist("productos"); notify();
   },
+  // El precio de venta es el único campo del producto que un vendedor no
+  // puede cambiar directo — igual que el precio de un insumo, queda como
+  // propuesta a la espera de que el admin la apruebe (ver core/stock.js).
+  // El resto de los campos (nombre, categoría, referencia, consumo, flujo)
+  // se quedan editables directo: no son tan sensibles para la plata del taller.
   "set-pro-campo": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
     var numerico = campo === "consumoSugerido" || campo === "precioVenta";
+    var valor = numerico ? num(el.value) : el.value;
+    var session = getSession();
+    if (campo === "precioVenta" && session && session.rol === "vendedor") {
+      var producto = (state.productos || []).filter(function (p) { return p.id === id; })[0];
+      if (!producto || num(producto.precioVenta) === valor) { notify(); return; }
+      proponerCambioProducto(producto, "campo", { campo: "precioVenta", valorAnterior: num(producto.precioVenta), valorNuevo: valor }, session);
+      window.alert("El cambio de precio queda pendiente de aprobación del admin — no se aplica todavía.");
+      notify();
+      return;
+    }
     mapPro(id, function (p) {
-      var patch = {}; patch[campo] = numerico ? num(el.value) : el.value;
+      var patch = {}; patch[campo] = valor;
       return Object.assign({}, p, patch);
     });
   },
@@ -432,6 +487,10 @@ export var actions = {
       return Object.assign({}, p, { variantesTalla: variantes });
     });
   },
+  // Un movimiento MANUAL de stock (esta acción) hecho por un vendedor queda
+  // pendiente de aprobación — a diferencia de una baja automática por una
+  // venta o remisión real (esas se aplican siempre de inmediato, en
+  // add-pedido/confirmar-remision/descontarStockPorTallas: no pasan por acá).
   "add-pro-stock": function (el) {
     var id = el.getAttribute("data-id");
     var card = el.closest("[data-producto-id]");
@@ -440,13 +499,37 @@ export var actions = {
     var cantidad = num(val(card, "stock-cantidad-" + id));
     var nota = val(card, "stock-nota-" + id);
     if (!talla || cantidad <= 0) return;
+    var session = getSession();
+    if (session && session.rol === "vendedor") {
+      var producto = (state.productos || []).filter(function (p) { return p.id === id; })[0];
+      if (!producto) return;
+      proponerCambioProducto(producto, "movimiento", { talla: talla, cantidad: cantidad, tipoMov: tipo, nota: nota }, session);
+      window.alert("El movimiento de stock queda pendiente de aprobación del admin — el stock no cambia todavía.");
+      notify();
+      return;
+    }
     var delta = tipo === "salida" ? -cantidad : cantidad;
-    ajustarStockProducto(id, talla, delta, nota, "");
+    var aplicado = ajustarStockProducto(id, talla, delta, nota, "");
+    // ajustarStockProducto nunca deja bajar de 0: si se pidió una salida
+    // mayor a lo disponible, avisa cuánto quedó realmente registrado en vez
+    // de fallar en silencio (para que la bitácora nunca mienta).
+    if (tipo === "salida" && Math.abs(aplicado) < cantidad) {
+      window.alert("Solo había " + Math.abs(aplicado) + " en stock de la talla " + talla + " — se registró esa salida, no las " + cantidad + " pedidas.");
+    }
     notify();
   },
   "toggle-pro-movimientos": function (el) {
     var id = el.getAttribute("data-id");
     state.productoMovimientosAbierto = state.productoMovimientosAbierto === id ? "" : id;
+    notify();
+  },
+  "aprobar-propuesta-producto": function (el) {
+    aprobarPropuestaProducto(el.getAttribute("data-id"));
+    notify();
+  },
+  "descartar-propuesta-producto": function (el) {
+    if (!window.confirm("¿Descartar esta propuesta? El producto no cambia.")) return;
+    descartarPropuestaProducto(el.getAttribute("data-id"));
     notify();
   }
 };

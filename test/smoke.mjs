@@ -10,9 +10,30 @@ if (!global.URL.createObjectURL) global.URL.createObjectURL = () => "blob:mock";
 if (!global.URL.revokeObjectURL) global.URL.revokeObjectURL = () => {};
 global.alert = dom.window.alert = () => {}; // jsPDF no está cargado en este entorno de prueba
 global.confirm = dom.window.confirm = () => true; // simula que el usuario siempre acepta el confirm()
+global.sessionStorage = dom.window.sessionStorage; // para simular login de vendedor/admin (ver core/auth.js)
+
+// Mock mínimo de window.storage (interfaz get/set de core/sheetsStorage.js) en
+// memoria — sin esto STORAGE_OK queda en false y persist() es un no-op total,
+// lo que dejaría sin probar el gate de aprobación para vendedores (vive
+// DENTRO de persist(), ver core/store.js). Debe asignarse ANTES de importar
+// core/store.js: STORAGE_OK se evalúa una sola vez, al cargar ese módulo.
+const _memStorage = {};
+global.window.storage = {
+  get: async function (key) { return _memStorage[key] !== undefined ? { value: _memStorage[key] } : null; },
+  set: async function (key, value) { _memStorage[key] = value; return true; }
+};
 
 const { render } = await import("../js/core/dom.js");
 const { loadAll, state } = await import("../js/core/store.js");
+const auth = await import("../js/core/auth.js");
+function loginComo(rol, nombre, email) {
+  sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
+    session: { email: email, rol: rol, vendedorNombre: nombre },
+    accessToken: "fake-" + email,
+    expiraEl: Date.now() + 999999
+  }));
+  auth.restaurarSesion();
+}
 
 function click(selector) {
   const el = document.querySelector(selector);
@@ -363,6 +384,47 @@ click('[data-action="remove-pedido"][data-id="' + pedidoVentaDirecta.id + '"]');
 producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 20, "el stock se restituye al eliminar el pedido");
 
+// --- BUG REPORTADO: pedir un producto dos veces cuando solo hay 1 en stock
+// no debe alcanzar a "pasar" (antes cada línea se validaba contra el stock
+// SIN restar lo que la otra línea del mismo borrador ya había apartado), y
+// cancelar el pedido debe devolver EXACTAMENTE lo que se descontó — nunca de
+// más (antes el pedido guardaba lo PEDIDO, no lo aplicado, y al cancelar se
+// restituía de más). ---
+click('[data-action="tab"][data-tab="productos"]');
+click('[data-action="producto-vista"][data-val="nueva"]');
+click('[data-action="cerrar-producto-editor"]');
+setInput('[data-form="producto"][data-field="nombre"]', "Camiseta unica");
+click('[data-action="add-producto"]');
+const prodUnicoId = state.productos[state.productos.length - 1].id;
+document.querySelector('[data-role="nueva-talla-' + prodUnicoId + '"]').value = "M";
+click('[data-action="add-pro-talla"][data-id="' + prodUnicoId + '"]');
+document.querySelector('[data-role="stock-cantidad-' + prodUnicoId + '"]').value = "1";
+click('[data-action="add-pro-stock"][data-id="' + prodUnicoId + '"]');
+assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 1, "producto de prueba nace con 1 solo en stock");
+
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="nueva"]');
+setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+setInput('#inp-buscar-producto-pedido', "Camiseta unica");
+render();
+click('.producto-combo-item[data-id="' + prodUnicoId + '"]');
+document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
+document.querySelector('[data-role="pedido-producto-cantidad"]').value = "1";
+click('[data-action="add-pedido-producto-linea"][data-id="' + prodUnicoId + '"]');
+assert(state.formPedido.stockConsumido.length === 1, "primera línea de 1 unidad se agrega (había 1 en stock)");
+document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
+document.querySelector('[data-role="pedido-producto-cantidad"]').value = "1";
+click('[data-action="add-pedido-producto-linea"][data-id="' + prodUnicoId + '"]');
+assert(state.formPedido.stockConsumido.length === 1, "segunda línea de la MISMA talla se rechaza (ya no queda disponible dentro de este mismo borrador)");
+
+click('[data-action="add-pedido"]');
+const pedidoUnico = state.pedidos.find(p => (p.stockConsumido || []).some(l => l.productoId === prodUnicoId));
+assert(!!pedidoUnico && pedidoUnico.stockConsumido[0].cantidad === 1, "el pedido registra exactamente 1 unidad consumida");
+assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 0, "el stock queda en 0 tras crear el pedido");
+click('[data-action="toggle-pedido-panel"][data-id="' + pedidoUnico.id + '"]');
+click('[data-action="remove-pedido"][data-id="' + pedidoUnico.id + '"]');
+assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 1, "al cancelar el pedido, el stock vuelve EXACTO a 1 (no 2, no 3)");
+
 // --- cotizaciones: aplicar un producto del catálogo a una referencia también
 // descuenta stock — pero solo al convertir en pedido, agrupando las filas de
 // "Tallas y observaciones" por talla ---
@@ -426,5 +488,56 @@ assert(pedidoConsigActualizado.consignacion.ventas[0].montoTotal === 80000, "cal
 const { calcConsignacionDisponiblePorTalla } = await import("../js/core/calc.js");
 const seguimiento = calcConsignacionDisponiblePorTalla(pedidoConsigActualizado);
 assert(seguimiento[0].disponible === 3, "el seguimiento por talla refleja lo vendido (5 enviadas - 2 vendidas = 3 disponibles)");
+
+// --- comisión de vendedor: desmarcar "pagada" debe revertir el movimiento
+// de verdad (no solo la etiqueta) — si no, volver a marcarla pagada crea un
+// segundo movimiento duplicado para la misma comisión. ---
+const txAntesToggle = state.tx.length;
+click('[data-action="toggle-comision"][data-id="' + pedidoConVendedor.id + '"]');
+assert(state.pedidos.find(p => p.id === pedidoConVendedor.id).vendedor.estado === "pendiente", "desmarca la comisión como pendiente");
+assert(state.tx.length === txAntesToggle - 1, "desmarcarla revierte (borra) el movimiento que se había creado, no lo deja huérfano");
+click('[data-action="toggle-comision"][data-id="' + pedidoConVendedor.id + '"]');
+assert(state.tx.length === txAntesToggle, "volver a marcarla pagada crea un solo movimiento (no quedan dos por la misma comisión)");
+
+// --- permisos: un vendedor no puede cambiar el precio de un producto ni
+// registrar un movimiento de stock directo — queda pendiente de aprobación
+// del admin, y las bajas de stock por una venta/remisión real (ya probadas
+// arriba) NUNCA pasan por este control. ---
+loginComo("vendedor", "Vendedor de prueba", "vendedor@taller.test");
+assert(!!auth.getSession() && auth.getSession().rol === "vendedor", "sesión de vendedor simulada");
+render();
+click('[data-action="tab"][data-tab="productos"]');
+click('[data-action="producto-vista"][data-val="catalogo"]');
+click('[data-action="abrir-producto-editor"][data-id="' + prodUnicoId + '"]');
+const precioAntesVendedor = state.productos.find(p => p.id === prodUnicoId).precioVenta;
+const precioInputVendedor = document.querySelector('input[data-action-change="set-pro-campo"][data-id="' + prodUnicoId + '"][data-campo="precioVenta"]');
+precioInputVendedor.value = "123456";
+precioInputVendedor.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.productos.find(p => p.id === prodUnicoId).precioVenta === precioAntesVendedor, "el precio NO cambia cuando lo edita un vendedor");
+assert(state.productoPropuestas.some(p => p.productoId === prodUnicoId && p.tipo === "campo"), "queda una propuesta pendiente con el cambio de precio");
+
+document.querySelector('[data-role="stock-cantidad-' + prodUnicoId + '"]').value = "50";
+click('[data-action="add-pro-stock"][data-id="' + prodUnicoId + '"]');
+assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 1, "el stock NO cambia cuando el movimiento manual lo registra un vendedor");
+assert(state.productoPropuestas.some(p => p.productoId === prodUnicoId && p.tipo === "movimiento"), "queda una propuesta pendiente con el movimiento de stock");
+
+const avisoVendedorResumen = (() => { state.tab = "resumen"; render(); return document.body.textContent.includes("cambio propuesto") || document.body.textContent.includes("cambios propuestos"); })();
+assert(!avisoVendedorResumen, "el aviso de cambios pendientes en Resumen es solo para el admin, un vendedor no lo ve");
+
+// el admin entra, ve el aviso en Resumen, y aprueba ambas propuestas
+auth.logout();
+render();
+state.tab = "resumen";
+render();
+assert(document.body.textContent.includes("cambio propuesto") || document.body.textContent.includes("cambios propuestos"), "el admin ve el aviso de cambios pendientes en Resumen");
+click('[data-action="kpi-nav"][data-tab="productos"]');
+assert(state.tab === "productos", "el aviso lleva directo a Productos para revisarlos");
+const propuestaPrecio = state.productoPropuestas.find(p => p.productoId === prodUnicoId && p.tipo === "campo");
+const propuestaStock = state.productoPropuestas.find(p => p.productoId === prodUnicoId && p.tipo === "movimiento");
+click('[data-action="aprobar-propuesta-producto"][data-id="' + propuestaPrecio.id + '"]');
+click('[data-action="aprobar-propuesta-producto"][data-id="' + propuestaStock.id + '"]');
+assert(state.productos.find(p => p.id === prodUnicoId).precioVenta === 123456, "al aprobar, el precio propuesto por el vendedor se aplica");
+assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 51, "al aprobar, el movimiento de stock propuesto se aplica (1 + 50 = 51)");
+assert(!state.productoPropuestas.some(p => p.productoId === prodUnicoId), "no quedan propuestas pendientes de este producto");
 
 console.log("\n✅ Todos los checks de humo pasaron.");

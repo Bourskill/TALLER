@@ -11,6 +11,7 @@ import {
 } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
+import { getSession } from "../core/auth.js";
 
 export function render() {
   var proximas = state.pedidos
@@ -22,6 +23,8 @@ export function render() {
   var cotizacionesAbiertas = state.cotizaciones.filter(function (c) { return c.estado !== "convertida"; }).slice(0, 5);
 
   var html = renderKpis();
+
+  html += renderAvisoPropuestasPendientes();
 
   html += renderGraficaResumen();
 
@@ -87,6 +90,32 @@ function renderKpis() {
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
     "</div>";
 }
+// Aviso para el admin de cambios propuestos por un vendedor que siguen sin
+// revisar (precio de insumo/producto, movimiento manual de stock, categoría)
+// — antes solo se veían si el admin entraba puntualmente a Catálogo o
+// Productos; acá queda visible apenas entra al panel, con acceso directo a
+// revisarlos. Un vendedor no ve este aviso (ya ve si LO SUYO sigue pendiente
+// dentro de cada pestaña) — es información de gestión, no de su propio trabajo.
+function renderAvisoPropuestasPendientes() {
+  var session = getSession();
+  if (session && session.rol === "vendedor") return "";
+  var catalogo = (state.catalogoPropuestas || []).length;
+  var productos = (state.productoPropuestas || []).length;
+  var total = catalogo + productos;
+  if (!total) return "";
+  var detalle = [];
+  if (catalogo) detalle.push(catalogo + " de insumos");
+  if (productos) detalle.push(productos + " de producto/stock");
+  return '<div class="card" style="border-color:var(--warning);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">' +
+    '<div><div class="section-title small" style="margin:0;">⏳ ' + total + (total === 1 ? " cambio propuesto" : " cambios propuestos") + " por revisar" +
+    renderHelp("Un vendedor propuso cambios (precio, categoría, o un movimiento manual de stock) que no se aplican hasta que los apruebes. Las ventas y remisiones reales nunca pasan por acá — se aplican de inmediato.") +
+    '</div><div class="section-sub" style="margin:4px 0 0;">' + detalle.join(" · ") + "</div></div>" +
+    '<span style="display:flex;gap:8px;">' +
+    (catalogo ? '<button class="btn ghost small" data-action="kpi-nav" data-tab="catalogo">Revisar insumos</button>' : "") +
+    (productos ? '<button class="btn ghost small" data-action="kpi-nav" data-tab="productos">Revisar productos</button>' : "") +
+    "</span></div>";
+}
+
 // KPI "Por pagar" inteligente: en vez del total acumulado, muestra lo más
 // urgente — obligaciones vencidas (si las hay) o el próximo vencimiento. El
 // total general de todo lo pendiente sigue viviendo en Pendientes.
