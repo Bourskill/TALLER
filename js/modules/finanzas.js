@@ -303,6 +303,12 @@ export var actions = {
     // Pedidos había quedado activa, sin esto quedaría "escondido" detrás de
     // esa vista al llegar — mismo reset que ya hace la acción "tab" genérica.
     state.filtroPedidosVista = "activos";
+    // BUG: sin esto, un pedido de origen aterrizaba en la pestaña "+ Nuevo
+    // pedido" (formulario en blanco) en vez de "Historial", que es donde
+    // vive la tarjeta real — el botón "parecía" no llevar a ningún lado.
+    // pedidosVista por defecto es "nueva" (ver DEFAULT en store.js), así que
+    // hay que forzarlo a "historial" para que la tarjeta exista en el DOM.
+    if (origen.tipo === "pedido") state.pedidosVista = "historial";
     // Cotizaciones no tiene un anchor para hacer scroll (Historial ya no
     // muestra más que tarjetas chicas) — en su lugar, abre el detalle
     // completo directo, igual que "Ver cotización relacionada" en Pedidos.

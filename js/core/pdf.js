@@ -288,7 +288,11 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
   doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
   doc.text((state.config.nombre || "Mi Taller"), marginX, y);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(110, 110, 110);
-  doc.text("Periodo: " + etiquetaPeriodo + "  (" + desde + " a " + hasta + ")", pageW - marginX, y, { align: "right" });
+  // etiquetaPeriodo YA es "desde a hasta" (o solo la fecha si es un único
+  // día) — armado en resumen.js a partir de los mismos campos del
+  // formulario. Repetir "(desde a hasta)" acá al lado imprimía la misma
+  // fecha dos veces seguidas en el PDF.
+  doc.text("Periodo: " + etiquetaPeriodo, pageW - marginX, y, { align: "right" });
   y += 20;
 
   var resumen = calcResumenMovimientos(movimientos);

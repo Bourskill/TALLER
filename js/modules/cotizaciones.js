@@ -853,8 +853,7 @@ export var actions = {
         bodyHtml: plantillaCorreoHtml({
           cfg: state.config,
           saludo: "Hola " + (cot.cliente || "") + ",",
-          mensaje: "Adjuntamos la cotización de \"" + (cot.descripcion || "tu pedido") + "\". Cualquier duda, quedamos atentos.",
-          docTitulo: "Cotización"
+          mensaje: "Adjuntamos la cotización de \"" + (cot.descripcion || "tu pedido") + "\". Cualquier duda, quedamos atentos."
         }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
@@ -1001,17 +1000,34 @@ export var actions = {
       reader.readAsArrayBuffer(file);
     }
   },
-  "descargar-plantilla-csv": function () {
-    var matriz = [
-      ["nombre", "talla", "numero", "tipo", "observaciones"],
-      ["Juan Pérez", "M", "10", "Jugador", ""],
-      ["María López", "S", "7", "Arquero", "Pedido especial"]
+  // ExcelJS (no SheetJS: la edición comunitaria de SheetJS no escribe
+  // estilos, se perderían al generar el archivo) — encabezado con el mismo
+  // fondo oscuro + texto blanco que usan las tablas de los PDF de la app
+  // (ver headStyles fillColor [30,30,30] en core/pdf.js), para que la
+  // plantilla se sienta parte del mismo sistema visual.
+  "descargar-plantilla-csv": async function () {
+    var libro = new window.ExcelJS.Workbook();
+    var hoja = libro.addWorksheet("Tallas");
+    hoja.columns = [
+      { header: "nombre", key: "nombre", width: 22 },
+      { header: "talla", key: "talla", width: 10 },
+      { header: "numero", key: "numero", width: 10 },
+      { header: "tipo", key: "tipo", width: 16 },
+      { header: "observaciones", key: "observaciones", width: 26 }
     ];
-    var hoja = window.XLSX.utils.aoa_to_sheet(matriz);
-    hoja["!cols"] = [{ wch: 20 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 24 }];
-    var libro = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(libro, hoja, "Tallas");
-    window.XLSX.writeFile(libro, "plantilla-tallas-referencia.xlsx");
+    hoja.getRow(1).eachCell(function (cell) {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E1E1E" } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    });
+    hoja.addRow({ nombre: "Juan Pérez", talla: "M", numero: "10", tipo: "Jugador", observaciones: "" });
+    hoja.addRow({ nombre: "María López", talla: "S", numero: "7", tipo: "Arquero", observaciones: "Pedido especial" });
+    var buffer = await libro.xlsx.writeBuffer();
+    var blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "plantilla-tallas-referencia.xlsx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   },
   // Cuando la cotización nace de "escalar" un pedido rápido (ver pedidos.js:
   // escalar-a-cotizacion), no se crea un pedido nuevo al convertir — se

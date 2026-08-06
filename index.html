@@ -12,14 +12,22 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
-<!-- Lectura/escritura de Excel (.xlsx) real — plantilla de tallas en
-     Cotizaciones (antes CSV, que Excel abre mal por defecto). Script
-     clásico: queda disponible como window.XLSX. -->
+<!-- Lectura de Excel (.xlsx) real — importar la plantilla de tallas ya
+     diligenciada en Cotizaciones. Script clásico: queda disponible como
+     window.XLSX. La edición comunitaria de SheetJS no escribe estilos de
+     celda (se pierden al generar el archivo), así que la DESCARGA de la
+     plantilla (con el encabezado con color) usa ExcelJS en su lugar, ver
+     abajo. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<!-- Generación de Excel (.xlsx) CON estilo (color de encabezado, igual al de
+     las tablas de los PDF) — plantilla descargable de tallas en
+     Cotizaciones. Script clásico: queda disponible como window.ExcelJS. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 
 <!-- Gráficas del panel Resumen (Chart.js). Script clásico: queda disponible
      como window.Chart. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 
 <!-- Login con Google (core/auth.js). Script clásico: expone window.google. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>

@@ -940,8 +940,7 @@ export var actions = {
         bodyHtml: plantillaCorreoHtml({
           cfg: state.config,
           saludo: "Hola " + (ped.cliente || "") + ",",
-          mensaje: "Adjuntamos la remisión de lo entregado. Cualquier duda, quedamos atentos.",
-          docTitulo: "Remisión"
+          mensaje: "Adjuntamos la remisión de lo entregado. Cualquier duda, quedamos atentos."
         }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
@@ -1268,8 +1267,7 @@ export var actions = {
         bodyHtml: plantillaCorreoHtml({
           cfg: state.config,
           saludo: "Hola " + (ped.cliente || "") + ",",
-          mensaje: "Adjuntamos la factura de \"" + (ped.descripcion || "tu pedido") + "\". Gracias por tu confianza.",
-          docTitulo: "Factura"
+          mensaje: "Adjuntamos la factura de \"" + (ped.descripcion || "tu pedido") + "\". Gracias por tu confianza."
         }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
@@ -1296,8 +1294,7 @@ export var actions = {
         bodyHtml: plantillaCorreoHtml({
           cfg: state.config,
           saludo: "Hola " + (ped.cliente || "") + ",",
-          mensaje: "Adjuntamos el recibo correspondiente a tu abono. Gracias por tu pago.",
-          docTitulo: "Recibo de abono"
+          mensaje: "Adjuntamos el recibo correspondiente a tu abono. Gracias por tu pago."
         }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes
