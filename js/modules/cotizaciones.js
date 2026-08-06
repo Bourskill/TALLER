@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, codigoPublico } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
@@ -416,7 +416,7 @@ function renderRefCard(cotId, ref) {
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
     '<select class="mini-input addFromCatalog" style="max-width:240px" data-action-change="add-insumo-catalogo" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
-    '<option value="">+ Agregar desde catálogo…</option>' +
+    '<option value="">+ Insumos predeterminados…</option>' +
     (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
     "</select>" +
     '<button class="btn ghost small" data-action="add-insumo-personalizado" data-cot="' + cotId + '" data-ref="' + ref.id + '">+ Insumo personalizado</button>' +
@@ -509,9 +509,9 @@ function renderDetalleReferencia(cotId, ref) {
     '<button class="btn ghost small" data-action="add-ref-detalle" data-cot="' + cotId + '" data-ref="' + ref.id + '">Agregar fila</button>' +
     "</div>";
   html += '<div class="inline-form" style="margin-top:6px;">' +
-    '<label class="btn ghost small" style="cursor:pointer;">📥 Importar CSV<input type="file" accept=".csv,text/csv" data-action-change="import-ref-detalle-csv" data-cot="' + cotId + '" data-ref="' + ref.id + '" style="display:none" /></label>' +
-    '<button class="btn ghost small" data-action="descargar-plantilla-csv">Descargar plantilla CSV</button>' +
-    renderHelp("El CSV debe tener columnas: nombre, talla, numero, tipo, observaciones (en cualquier orden). Descarga la plantilla para verlo con un ejemplo. Funciona con archivos exportados desde Excel como CSV.") +
+    '<label class="btn ghost small" style="cursor:pointer;">📥 Importar Excel<input type="file" accept=".xlsx,.xls,.csv" data-action-change="import-ref-detalle-csv" data-cot="' + cotId + '" data-ref="' + ref.id + '" style="display:none" /></label>' +
+    '<button class="btn ghost small" data-action="descargar-plantilla-csv">Descargar plantilla Excel</button>' +
+    renderHelp("El archivo debe tener columnas: nombre, talla, numero, tipo, observaciones (en cualquier orden). Descarga la plantilla para verlo con un ejemplo — es un .xlsx normal, se abre bien tanto en Excel como en Sheets. También aceptamos CSV si lo prefieres.") +
     "</div>";
   return html;
 }
@@ -972,29 +972,46 @@ export var actions = {
       return Object.assign({}, r, { detalle: detalle });
     });
   },
+  // Acepta .xlsx/.xls (vía SheetJS, cargado como window.XLSX en index.html)
+  // y sigue aceptando .csv (por si alguien todavía exporta así) — se elige
+  // el parser según la extensión del archivo.
   "import-ref-detalle-csv": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     var file = el.files && el.files[0];
     if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var filas = parseDetalleCSV(String(reader.result));
+    var esCsv = /\.csv$/i.test(file.name);
+    function aplicar(filas) {
       if (!filas.length) {
-        window.alert("No se encontraron filas válidas en el CSV. Revisa que tenga columnas: nombre, talla, numero, tipo, observaciones (y que 'nombre' no esté vacío).");
+        window.alert("No se encontraron filas válidas en el archivo. Revisa que tenga columnas: nombre, talla, numero, tipo, observaciones (y que 'nombre' no esté vacío).");
         return;
       }
       mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
-    };
-    reader.readAsText(file, "UTF-8");
+    }
+    var reader = new FileReader();
+    if (esCsv) {
+      reader.onload = function () { aplicar(parseDetalleCSV(String(reader.result))); };
+      reader.readAsText(file, "UTF-8");
+    } else {
+      reader.onload = function () {
+        var libro = window.XLSX.read(reader.result, { type: "array" });
+        var hoja = libro.Sheets[libro.SheetNames[0]];
+        var matriz = window.XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: "" });
+        aplicar(parseDetalleFilas(matriz));
+      };
+      reader.readAsArrayBuffer(file);
+    }
   },
   "descargar-plantilla-csv": function () {
-    var contenido = "nombre,talla,numero,tipo,observaciones\nJuan Pérez,M,10,Jugador,\nMaría López,S,7,Arquero,Pedido especial\n";
-    var blob = new Blob(["﻿" + contenido], { type: "text/csv;charset=utf-8;" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url; a.download = "plantilla-tallas-referencia.csv";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    var matriz = [
+      ["nombre", "talla", "numero", "tipo", "observaciones"],
+      ["Juan Pérez", "M", "10", "Jugador", ""],
+      ["María López", "S", "7", "Arquero", "Pedido especial"]
+    ];
+    var hoja = window.XLSX.utils.aoa_to_sheet(matriz);
+    hoja["!cols"] = [{ wch: 20 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 24 }];
+    var libro = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(libro, hoja, "Tallas");
+    window.XLSX.writeFile(libro, "plantilla-tallas-referencia.xlsx");
   },
   // Cuando la cotización nace de "escalar" un pedido rápido (ver pedidos.js:
   // escalar-a-cotizacion), no se crea un pedido nuevo al convertir — se

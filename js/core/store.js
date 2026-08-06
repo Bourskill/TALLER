@@ -145,22 +145,29 @@ export const state = {
     tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: ""
   },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() },
-  formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "" },
+  formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
   formEmp: { nombre: "", cargo: "", salario: "" },
+  nominaPagoId: "", // id de la persona con el mini-formulario de "Pagar" abierto (o "")
+  formNominaPago: { bono: "", descuento: "", fecha: "" },
   formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: "" },
   formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: "" },
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")
+  deudasVista: "activas", // "activas" | "historial" — pestañas de la sección Deudas en Pendientes
+  comisionVendedorExpandido: "", // nombre del vendedor con el detalle desplegado en "Comisiones de vendedores" (o "")
   // { emp: bool, gastoFijo: bool, meta: bool, deuda: bool } — formularios de
   // "agregar nuevo/a X" en Pendientes, colapsados por defecto para que la
   // pestaña no muestre ~19 campos siempre abiertos junto a las tablas.
   pendFormsAbiertos: {},
   flujoEstadosAbierto: "", // id del flujo de producción con sus etapas desplegadas en Plantillas (o "")
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
+  reembolsoAbierto: "", // id del pedido con el mini-formulario de reembolso abierto (o "")
+  formReembolso: { monto: "", fecha: "", motivo: "" },
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
 
+  finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
   filtroPedidos: "todos",
   filtroPedidosSoloSaldo: false,

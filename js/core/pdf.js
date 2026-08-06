@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, calcGastoInsumosMensual } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -324,6 +324,42 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
     columnStyles: { 4: { halign: "right" } },
     theme: "grid"
   });
+
+  y = doc.lastAutoTable.finalY + 26;
+  var pageH = doc.internal.pageSize.getHeight();
+
+  // Gasto en insumos por mes — mismo cálculo que el panel en vivo de Resumen
+  // (calcGastoInsumosMensual), acotado a los meses dentro del rango del
+  // reporte para que el PDF y la pantalla nunca cuenten periodos distintos.
+  var mesDesde = desde.slice(0, 7), mesHasta = hasta.slice(0, 7);
+  var mesesInsumos = calcGastoInsumosMensual().filter(function (m) { return m.mes >= mesDesde && m.mes <= mesHasta; });
+
+  if (mesesInsumos.length) {
+    if (y + 40 > pageH - 60) { doc.addPage(); y = 54; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+    doc.text("GASTO EN INSUMOS POR MES", marginX, y);
+    y += 18;
+
+    var filasInsumos = [];
+    mesesInsumos.forEach(function (m) {
+      filasInsumos.push([m.mes, "TOTAL DEL MES", money(m.total)]);
+      m.insumos.forEach(function (i) { filasInsumos.push(["", i.nombre, money(i.costoTotal)]); });
+    });
+    doc.autoTable({
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [["Mes", "Insumo", "Costo"]],
+      body: filasInsumos,
+      styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+      headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: { 2: { halign: "right" } },
+      didParseCell: function (data) {
+        if (data.row.raw && data.row.raw[1] === "TOTAL DEL MES") data.cell.styles.fontStyle = "bold";
+      },
+      theme: "grid"
+    });
+    y = doc.lastAutoTable.finalY + 20;
+  }
 
   doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
 }

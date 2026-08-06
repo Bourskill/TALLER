@@ -14,6 +14,7 @@ export function render() {
     '<div class="field"><label>Categoría</label><select data-form="pend" data-field="categoria">' + opt("tarea", "Tarea del día a día", f.categoria) + opt("mejora", "Mejora del negocio", f.categoria) + "</select></div>" +
     '<div class="field"><label>Prioridad</label><select data-form="pend" data-field="prioridad">' + opt("alta", "Alta", f.prioridad) + opt("media", "Media", f.prioridad) + opt("baja", "Baja", f.prioridad) + "</select></div>" +
     '<div class="field"><label>Fecha (opcional)</label><input type="date" data-form="pend" data-field="fecha" value="' + esc(f.fecha || "") + '" /></div>' +
+    '<div class="field"><label>Hora (opcional)</label><input type="time" data-form="pend" data-field="hora" value="' + esc(f.hora || "") + '" /></div>' +
     '<button class="btn" data-action="add-pend">Agregar</button>' +
     "</div></div>";
 
@@ -35,7 +36,7 @@ function grupoPend(titulo, items) {
   items.forEach(function (p) {
     html += '<div class="pend-item ' + (p.hecho ? "done" : "") + '">' +
       '<input type="checkbox" data-action="toggle-pend" data-id="' + p.id + '" ' + (p.hecho ? "checked" : "") + " />" +
-      '<span class="pend-text">' + esc(p.texto) + (p.fecha ? (' <span class="muted" style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;">· ' + esc(p.fecha) + "</span>") : "") + "</span>" +
+      '<span class="pend-text">' + esc(p.texto) + (p.fecha ? (' <span class="muted" style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;">· ' + esc(p.fecha) + (p.hora ? " " + esc(p.hora) : "") + "</span>") : "") + "</span>" +
       '<span class="prio ' + p.prioridad + '">' + p.prioridad + "</span>" +
       '<button class="btn danger small" data-action="remove-pend" data-id="' + p.id + '">✕</button>' +
       "</div>";
@@ -59,8 +60,9 @@ function sincronizarEventoNota(nota) {
     return;
   }
   var fecha = new Date(nota.fecha + "T00:00:00");
-  var titulo = (nota.categoria === "mejora" ? "💡 " : "📝 ") + nota.texto;
-  sincronizarEvento(nota.calendarEventId, eventoUnDia(titulo, "Prioridad: " + nota.prioridad, fecha)).then(function (eventId) {
+  var titulo = (nota.categoria === "mejora" ? "💡 " : "📝 ") + nota.texto + (nota.hora ? " (" + nota.hora + ")" : "");
+  var descripcion = "Prioridad: " + nota.prioridad + (nota.hora ? " · Hora: " + nota.hora : "");
+  sincronizarEvento(nota.calendarEventId, eventoUnDia(titulo, descripcion, fecha)).then(function (eventId) {
     var idx = state.pendientes.findIndex(function (x) { return x.id === nota.id; });
     if (idx === -1 || state.pendientes[idx].calendarEventId === eventId) return;
     state.pendientes = state.pendientes.map(function (x) { return x.id === nota.id ? Object.assign({}, x, { calendarEventId: eventId }) : x; });
@@ -72,8 +74,8 @@ export var actions = {
   "add-pend": function () {
     var fpe = state.formPend;
     if (!fpe.texto) return;
-    state.pendientes.unshift({ id: uid(), texto: fpe.texto, categoria: fpe.categoria, prioridad: fpe.prioridad, fecha: fpe.fecha || "", hecho: false, calendarEventId: "" });
-    state.formPend = { texto: "", categoria: "tarea", prioridad: "media", fecha: "" };
+    state.pendientes.unshift({ id: uid(), texto: fpe.texto, categoria: fpe.categoria, prioridad: fpe.prioridad, fecha: fpe.fecha || "", hora: fpe.hora || "", hecho: false, calendarEventId: "" });
+    state.formPend = { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" };
     persist("pendientes"); notify();
     sincronizarEventoNota(state.pendientes[0]);
   },

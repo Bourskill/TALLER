@@ -132,18 +132,27 @@ export function parseDetalleCSV(text) {
     return result.map(function (s) { return s.trim(); });
   }
 
+  var filas = lines.slice(1).map(parseLine);
+  return parseDetalleFilas([parseLine(lines[0])].concat(filas));
+}
+
+// Misma l\u00F3gica de mapeo de columnas que parseDetalleCSV, pero a partir de una
+// matriz ya parseada (fila 0 = encabezado) \u2014 usada tanto por el CSV de arriba
+// como por el importador de Excel (ver cotizaciones.js: SheetJS entrega la
+// hoja como esta misma forma de matriz v\u00EDa sheet_to_json(ws, {header:1})).
+export function parseDetalleFilas(matriz) {
+  if (!matriz || matriz.length < 2) return [];
   function normHead(h) {
-    return h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    return String(h == null ? "" : h).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   }
   var mapaCampos = { nombre: "nombre", talla: "talla", numero: "numero", num: "numero", tipo: "tipo", observaciones: "observaciones", obs: "observaciones", nota: "observaciones", notas: "observaciones" };
-  var header = parseLine(lines[0]).map(normHead);
+  var header = matriz[0].map(normHead);
 
-  return lines.slice(1).map(function (line) {
-    var cols = parseLine(line);
+  return matriz.slice(1).map(function (cols) {
     var fila = { id: uid(), nombre: "", talla: "", numero: "", tipo: "", observaciones: "" };
     header.forEach(function (h, i) {
       var campo = mapaCampos[h];
-      if (campo) fila[campo] = (cols[i] || "").trim();
+      if (campo) fila[campo] = String(cols[i] == null ? "" : cols[i]).trim();
     });
     return fila;
   }).filter(function (f) { return f.nombre; });

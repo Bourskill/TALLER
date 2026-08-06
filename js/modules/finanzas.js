@@ -6,15 +6,36 @@ import { renderHelp } from "../core/components.js";
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
 
+// Dos pestañas (mismo patrón "gsheet-tabs" que Cotizaciones/Pedidos/
+// Clientes/Deudas): "Registrar movimiento" es solo el formulario de alta, y
+// "Historial" es la lista agrupada con filtros/búsqueda — antes vivían
+// siempre juntos, apilados, así que el formulario ocupaba espacio arriba de
+// todo aunque lo único que quisieras hacer fuera revisar movimientos viejos.
 export function render() {
-  if (state.filtroTxVista === "papelera") return renderPapelera();
+  var vista = state.finanzasVista || "nuevo";
+  var html = renderTabsFinanzas(vista);
+  if (vista === "historial") {
+    html += state.filtroTxVista === "papelera" ? renderPapelera() : renderHistorial();
+  } else {
+    html += renderFormMovimiento();
+  }
+  return html;
+}
 
+function renderTabsFinanzas(vista) {
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "nuevo" ? "active" : "") + '" data-action="finanzas-vista" data-val="nuevo">+ Registrar movimiento</button>' +
+    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="finanzas-vista" data-val="historial">Historial' + (state.tx.length ? " (" + state.tx.length + ")" : "") + "</button>" +
+    "</div>";
+}
+
+function renderFormMovimiento() {
   var f = state.formTx;
   var datalist = '<datalist id="dl-personas">' +
     (state.config.nomina || []).map(function (e) { return '<option value="' + esc(e.nombre) + '">'; }).join("") +
     "</datalist>";
 
-  var html = datalist + '<div class="card"><div class="section-title small">Registrar movimiento</div><div class="form-grid">' +
+  return datalist + '<div class="card"><div class="section-title small">Registrar movimiento</div><div class="form-grid">' +
     '<div class="field"><label>Tipo</label><select data-form="tx" data-field="tipo">' +
     opt("ingreso", "Ingreso", f.tipo) + opt("gasto", "Gasto", f.tipo) + opt("nomina", "Nómina", f.tipo) +
     "</select></div>" +
@@ -28,8 +49,10 @@ export function render() {
     "</select></div>" +
     '<button class="btn" data-action="add-tx">Agregar</button>' +
     "</div></div>";
+}
 
-  html += '<div class="field" style="max-width:360px;margin-bottom:10px;"><input id="inp-buscar-tx" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, producción o fecha…" value="' + esc(state.buscarTx || "") + '" data-live-filter="buscarTx" /></div>';
+function renderHistorial() {
+  var html = '<div class="field" style="max-width:360px;margin-bottom:10px;"><input id="inp-buscar-tx" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, producción o fecha…" value="' + esc(state.buscarTx || "") + '" data-live-filter="buscarTx" /></div>';
 
   html += '<div class="filters">';
   [["todos", "Todos"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["nomina", "Nómina"], ["comision", "Comisiones"]].forEach(function (c) {
@@ -210,11 +233,16 @@ export var actions = {
     state.filtroTxVista = state.filtroTxVista === "papelera" ? "activos" : "papelera";
     notify();
   },
+  "finanzas-vista": function (el) {
+    state.finanzasVista = el.getAttribute("data-val");
+    notify();
+  },
   "add-tx": function () {
     var f = state.formTx;
     if (!f.concepto || !f.monto) return;
     state.tx.unshift({ id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha, pedidoId: f.pedidoId || "" });
     state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" };
+    state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
     persist("tx"); notify();
   },
   "editar-tx": function (el) {

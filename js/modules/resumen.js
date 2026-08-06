@@ -28,6 +28,8 @@ export function render() {
 
   html += renderGraficaResumen();
 
+  html += renderRendimientoPlanta();
+
   html += '<div class="card"><div class="section-title">Próximas entregas</div><div class="section-sub">Pedidos ordenados por fecha comprometida</div>';
   if (proximas.length === 0) { html += '<div class="empty">No hay entregas programadas todavía.</div>'; }
   proximas.forEach(function (p) {
@@ -136,52 +138,142 @@ function renderKpiPorPagar(r) {
 // entrar: sin controles, un rango fijo. Mismo cálculo (calcSerieMovimientos)
 // que usaría cualquier otro reporte de la app, así que nunca puede "llevar
 // la cuenta distinto".
+//
+// Dibujada con Chart.js (window.Chart, cargado en index.html) en vez del SVG
+// a mano de antes — se ve mejor y trae tooltips/leyenda gratis. Como esta
+// app re-renderiza TODO el HTML como string en cada notify() (sin virtual
+// DOM), el <canvas> se recrea de cero en cada render — Chart.js necesita
+// engancharse DESPUÉS de que ese HTML ya esté en el DOM real, así que la
+// instancia se crea en afterRender() (ver core/dom.js), no acá.
 function renderGraficaResumen() {
+  var serie = serieResumen30Dias();
+  var html = '<div class="card"><div class="section-title">Ingresos y gastos' +
+    '<span style="font-weight:400;font-size:12px;color:var(--ink-faint);margin-left:8px;">últimos 30 días</span></div>';
+  if (!serie.puntos.length) {
+    return html + '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div></div>';
+  }
+  return html + '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div></div>';
+}
+
+function serieResumen30Dias() {
   var hasta = todayStr();
   var d = new Date(); d.setDate(d.getDate() - 29);
-  var desde = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  var desde = isoDate(d);
   var movimientos = state.tx.filter(function (t) { return t.fecha >= desde && t.fecha <= hasta; });
-  var serie = calcSerieMovimientos(movimientos, desde, hasta);
-  return '<div class="card"><div class="section-title">Ingresos y gastos' +
-    '<span style="font-weight:400;font-size:12px;color:var(--ink-faint);margin-left:8px;">últimos 30 días</span></div>' +
-    renderGraficaBarras(serie) +
+  return calcSerieMovimientos(movimientos, desde, hasta);
+}
+
+// "Rendimiento de planta": no cuánto stock hay (eso vive en Catálogo), sino
+// cuántas prendas SALIERON (ventas + remisiones de consignación) cada día —
+// un proxy directo de cuánto está produciendo/despachando el taller día a
+// día. Reutiliza movimientosStock (ver core/stock.js), que ya documenta cada
+// salida real de stock — no es un dato nuevo que haya que empezar a llevar.
+function renderRendimientoPlanta() {
+  var datos = datosPrendasPorDia();
+  var html = '<div class="card"><div class="section-title">Rendimiento de planta' +
+    '<span style="font-weight:400;font-size:12px;color:var(--ink-faint);margin-left:8px;">prendas producidas — últimos 30 días</span>' +
+    renderHelp("Cuenta las salidas de stock del Catálogo (ventas directas y remisiones de consignación) por día — cuántas prendas terminadas salieron de la planta cada día, no cuánto queda en stock.") +
+    "</div>";
+  if (!datos.total) {
+    return html + '<div class="empty" style="padding:10px 0;">Sin salidas de stock registradas en este rango.</div></div>';
+  }
+  return html + '<div style="position:relative;height:200px;"><canvas id="chart-prendas-dia"></canvas></div>' +
+    '<div class="section-sub" style="margin-top:8px;">' + datos.total + " prendas en los últimos 30 días · promedio " + (datos.total / 30).toFixed(1) + "/día</div>" +
     "</div>";
 }
 
-// SVG plano, sin librería externa — reutiliza los colores semánticos ya
-// definidos en variables.css, así queda bien en modo claro y oscuro sin
-// código aparte. Barras pareadas ingresos/gastos por punto.
-function renderGraficaBarras(serie) {
-  if (!serie.puntos.length) return '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div>';
-  var W = 640, H = 200, padL = 50, padB = 20, padT = 10, padR = 10;
-  var innerW = W - padL - padR, innerH = H - padT - padB;
-  var maxVal = serie.puntos.reduce(function (m, p) { return Math.max(m, p.ingresos, p.gastos); }, 0) || 1;
-  var n = serie.puntos.length;
-  var groupW = innerW / n;
-  var barW = Math.max(2, Math.min(18, groupW / 3));
-  var mostrarEtiquetas = n <= 14;
+function datosPrendasPorDia() {
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var dias = [];
+  for (var i = 29; i >= 0; i--) {
+    var d = new Date(hoy); d.setDate(d.getDate() - i);
+    dias.push(isoDate(d));
+  }
+  var porDia = {};
+  dias.forEach(function (k) { porDia[k] = 0; });
+  (state.productos || []).forEach(function (p) {
+    (p.movimientosStock || []).forEach(function (m) {
+      if (m.tipo === "salida" && porDia.hasOwnProperty(m.fecha)) porDia[m.fecha] += num(m.cantidad);
+    });
+  });
+  var total = dias.reduce(function (a, k) { return a + porDia[k]; }, 0);
+  return { labels: dias, valores: dias.map(function (k) { return porDia[k]; }), total: total };
+}
 
-  var gridLines = [0, 0.5, 1].map(function (f) {
-    var yy = padT + innerH - f * innerH;
-    return '<line x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '" stroke="var(--border-soft)" stroke-width="1" />' +
-      '<text x="' + (padL - 6) + '" y="' + (yy + 3) + '" font-size="9" text-anchor="end" fill="var(--ink-faint)">' + esc(fmtCorto(f * maxVal)) + "</text>";
-  }).join("");
+function etiquetaFechaCorta(iso) {
+  var partes = iso.split("-");
+  return partes[2] + "/" + partes[1];
+}
 
-  var bars = serie.puntos.map(function (p, i) {
-    var xGroup = padL + i * groupW + groupW / 2;
-    var hIng = (p.ingresos / maxVal) * innerH, hGas = (p.gastos / maxVal) * innerH;
-    var xIng = xGroup - barW - 2, xGas = xGroup + 2;
-    var etiqueta = etiquetaPuntoGrafica(p.clave, serie.granularidad);
-    return '<rect x="' + xIng + '" y="' + (padT + innerH - hIng) + '" width="' + barW + '" height="' + hIng + '" fill="var(--success)" rx="2"><title>Ingresos ' + esc(etiqueta) + ": " + esc(fmt(p.ingresos)) + '</title></rect>' +
-      '<rect x="' + xGas + '" y="' + (padT + innerH - hGas) + '" width="' + barW + '" height="' + hGas + '" fill="var(--danger)" rx="2"><title>Gastos ' + esc(etiqueta) + ": " + esc(fmt(p.gastos)) + '</title></rect>' +
-      (mostrarEtiquetas ? '<text x="' + xGroup + '" y="' + (H - 4) + '" font-size="9" text-anchor="middle" fill="var(--ink-faint)">' + esc(etiqueta) + "</text>" : "");
-  }).join("");
+function cssVar(nombre) {
+  return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
+}
 
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;max-height:220px;display:block;" role="img" aria-label="Ingresos y gastos por periodo">' + gridLines + bars + "</svg>" +
-    '<div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--ink-faint);">' +
-    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--success);border-radius:2px;margin-right:4px;"></span>Ingresos</span>' +
-    '<span><span style="display:inline-block;width:9px;height:9px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Gastos</span>' +
-    "</div>";
+var chartIngresosGastos = null, chartPrendasDia = null;
+
+// Único punto imperativo de este módulo (todo lo demás es render() puro que
+// devuelve un string) — llamado por core/dom.js justo después de insertar el
+// HTML en el DOM real. Si el CDN de Chart.js no cargó (ej. sin internet), se
+// sale en silencio: el resto del panel (KPIs, reporte financiero, etc.)
+// sigue funcionando igual, solo faltan estas dos gráficas.
+export function afterRender() {
+  if (typeof window.Chart === "undefined") return;
+  dibujarChartIngresosGastos();
+  dibujarChartPrendasDia();
+}
+
+function dibujarChartIngresosGastos() {
+  if (chartIngresosGastos) { chartIngresosGastos.destroy(); chartIngresosGastos = null; }
+  var canvas = document.getElementById("chart-ingresos-gastos");
+  if (!canvas) return;
+  var serie = serieResumen30Dias();
+  if (!serie.puntos.length) return;
+  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft");
+  chartIngresosGastos = new window.Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: serie.puntos.map(function (p) { return etiquetaPuntoGrafica(p.clave, serie.granularidad); }),
+      datasets: [
+        { label: "Ingresos", data: serie.puntos.map(function (p) { return p.ingresos; }), backgroundColor: cssVar("--success"), borderRadius: 4, maxBarThickness: 22 },
+        { label: "Gastos", data: serie.puntos.map(function (p) { return p.gastos; }), backgroundColor: cssVar("--danger"), borderRadius: 4, maxBarThickness: 22 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: ink, boxWidth: 10, boxHeight: 10 } },
+        tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmt(ctx.parsed.y); } } }
+      },
+      scales: {
+        x: { ticks: { color: ink }, grid: { display: false } },
+        y: { ticks: { color: ink, callback: function (v) { return fmtCorto(v); } }, grid: { color: grid }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function dibujarChartPrendasDia() {
+  if (chartPrendasDia) { chartPrendasDia.destroy(); chartPrendasDia = null; }
+  var canvas = document.getElementById("chart-prendas-dia");
+  if (!canvas) return;
+  var datos = datosPrendasPorDia();
+  if (!datos.total) return;
+  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft"), accent = cssVar("--info");
+  chartPrendasDia = new window.Chart(canvas, {
+    type: "line",
+    data: {
+      labels: datos.labels.map(etiquetaFechaCorta),
+      datasets: [{ label: "Prendas producidas", data: datos.valores, borderColor: accent, backgroundColor: accent, tension: 0.3, fill: false, pointRadius: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ctx.parsed.y + " prendas"; } } } },
+      scales: {
+        x: { ticks: { color: ink, maxTicksLimit: 10 }, grid: { display: false } },
+        y: { ticks: { color: ink, precision: 0 }, grid: { color: grid }, beginAtZero: true }
+      }
+    }
+  });
 }
 function etiquetaPuntoGrafica(clave, granularidad) {
   if (granularidad === "mes") {

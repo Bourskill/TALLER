@@ -114,7 +114,7 @@ function renderPlantillaCard(p) {
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
     '<select class="mini-input" style="max-width:240px" data-action-change="add-pla-insumo-catalogo" data-pla="' + p.id + '">' +
-    '<option value="">+ Agregar desde catálogo…</option>' +
+    '<option value="">+ Insumos predeterminados…</option>' +
     (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
     "</select>" +
     '<button class="btn ghost small" data-action="add-pla-insumo-custom" data-pla="' + p.id + '">+ Insumo personalizado</button>' +

@@ -10,7 +10,7 @@ import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe } from "../core/utils.js";
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
-  calcDeudaValorCuota, calcDeudaSaldoPendiente
+  calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor
 } from "../core/calc.js";
 import { PERIODOS_PAGO } from "../core/constants.js";
 import { renderHelp } from "../core/components.js";
@@ -36,11 +36,19 @@ export function render() {
         // Para deudas: "monto" ya es el valor de la cuota que vence (no el
         // saldo total), con un contador discreto tipo "2/6". El saldo total
         // de la deuda queda disponible al pasar el mouse.
-        html += '<div class="tx-row" style="grid-template-columns:1fr 110px 90px;padding:4px 0;">' +
-          '<span class="mobile-th">Concepto</span><span>' + esc(it.concepto) + (it.contador ? ' <span style="font-size:10px;font-weight:700;color:var(--ink-faint);background:var(--surface-3);padding:1px 6px;border-radius:8px;">' + esc(it.contador) + "</span>" : "") + "</span>" +
+        // it.nombreVendedor marca las filas de "Comisiones de vendedores":
+        // son un total agregado (varios pedidos/cotizaciones), así que en
+        // vez de un monto suelto se pueden desplegar para ver — y saltar a
+        // verificar — cada pedido/cotización detrás de ese total.
+        var expandible = !!it.nombreVendedor;
+        var expandido = expandible && state.comisionVendedorExpandido === it.nombreVendedor;
+        html += '<div class="tx-row" style="grid-template-columns:1fr 110px 90px;padding:4px 0;' + (expandible ? "cursor:pointer;" : "") + '"' +
+          (expandible ? ' data-action="toggle-comision-vendedor" data-nombre="' + esc(it.nombreVendedor) + '"' : "") + '>' +
+          '<span class="mobile-th">Concepto</span><span>' + (expandible ? (expandido ? "▾ " : "▸ ") : "") + esc(it.concepto) + (it.contador ? ' <span style="font-size:10px;font-weight:700;color:var(--ink-faint);background:var(--surface-3);padding:1px 6px;border-radius:8px;">' + esc(it.contador) + "</span>" : "") + "</span>" +
           '<span class="mobile-th">Vence</span>' + "<span style=\"font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-faint);\">" + (it.fecha ? fechaCorta(it.fecha) : "Sin fecha") + "</span>" +
           '<span class="mobile-th">Monto</span><span class="amount"' + (it.montoTotal !== undefined && it.montoTotal !== it.monto ? ' title="Saldo total de la deuda: ' + fmt(it.montoTotal) + '"' : "") + '>' + fmt(it.monto) + "</span>" +
           "</div>";
+        if (expandido) html += renderDetalleComisionVendedor(it.nombreVendedor);
       });
       html += "</div>";
     });
@@ -49,14 +57,30 @@ export function render() {
   html += "</div>";
 
   // ---------- Nómina y equipo ----------
+  // Rediseño: cada persona ahora tiene un botón "Pagar" directo en su fila
+  // (antes había que ir a Finanzas y armar el movimiento a mano) con un
+  // mini-formulario para sumar bonos/horas extra o restar descuentos sobre
+  // su salario base — el monto final se calcula solo. El pill de estado usa
+  // calcNominaPagadaEmpleado (por persona) — a diferencia de "Por pagar" /
+  // calcNominaPendiente, que sigue siendo el pool agregado de TODOS.
   var fe = state.formEmp;
+  var periodoNomina = cfg.periodoPago || "mensual";
   html += '<div class="card"><div class="section-title small">Nómina y equipo' +
-    renderHelp("Define quién trabaja contigo y su salario MENSUAL. El periodo de pago define cada cuánto se considera \"pendiente\" en el KPI Por pagar.") +
+    renderHelp("Define quién trabaja contigo y su salario MENSUAL. \"Pagar\" registra el pago de esa persona en Finanzas — puedes sumarle un bono/hora extra o restarle un descuento antes de confirmar.") +
     '</div>';
-  html += '<div class="emp-row" style="font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario</span><span></span></div>';
+  html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 110px 130px 170px;font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario</span><span>Este periodo</span><span></span></div>';
   (cfg.nomina || []).forEach(function (e) {
-    html += '<div class="emp-row"><span class="mobile-th">Nombre</span><span>' + esc(e.nombre) + '</span><span class="mobile-th">Cargo</span><span>' + esc(e.cargo || "—") + '</span><span class="mobile-th">Salario</span><span class="amount">' + fmt(e.salario) + "</span>" +
-      '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button></div>';
+    var pagado = calcNominaPagadaEmpleado(e.nombre, periodoNomina);
+    html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 110px 130px 170px;">' +
+      '<span class="mobile-th">Nombre</span><span>' + esc(e.nombre) + '</span>' +
+      '<span class="mobile-th">Cargo</span><span>' + esc(e.cargo || "—") + '</span>' +
+      '<span class="mobile-th">Salario</span><span class="amount">' + fmt(e.salario) + "</span>" +
+      '<span class="mobile-th">Este periodo</span><span><span class="status-pill ' + (pagado >= num(e.salario) && num(e.salario) > 0 ? "pagado" : "pendiente") + '">' + (pagado > 0 ? fmt(pagado) + " pagado" : "pendiente") + "</span></span>" +
+      '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+      '<button class="btn small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Pagar</button>' +
+      '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button>' +
+      "</span></div>";
+    if (state.nominaPagoId === e.id) html += renderFormNominaPago(e);
   });
   if ((cfg.nomina || []).length === 0) { html += '<div class="empty">Aún no registras personas en nómina.</div>'; }
   html += renderPendForm("emp", "+ Agregar persona a nómina",
@@ -69,12 +93,11 @@ export function render() {
   html += '<hr class="stitch" />';
   html += '<div class="form-grid">' +
     '<div class="field"><label>Periodo de pago</label><select data-action-change="set-periodo-pago">' +
-    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], cfg.periodoPago || "mensual"); }).join("") +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodoNomina); }).join("") +
     "</select></div>" +
-    '<div class="field"><label>Otras personas que colaboran (sin nómina fija)</label><input type="number" id="inp-numextra" data-action-change="set-numextra" value="' + esc(cfg.numExtra) + '" /></div>' +
-    '<div class="field"><label>Día(s) de pago' + renderHelp(cfg.periodoPago === "semanal" ? "Puedes elegir varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"2,6\" para martes y sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input id="inp-dia-pago-nomina" data-action-change="set-dia-pago-nomina" value="' + esc((diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina })).join(",")) + '" placeholder="' + (cfg.periodoPago === "semanal" ? "Ej. 6 (sábado)" : "Ej. 1,15") + '" /></div>' +
+    '<div class="field"><label>Día(s) de pago' + renderHelp(periodoNomina === "semanal" ? "Puedes elegir varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"2,6\" para martes y sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input id="inp-dia-pago-nomina" data-action-change="set-dia-pago-nomina" value="' + esc((diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina })).join(",")) + '" placeholder="' + (periodoNomina === "semanal" ? "Ej. 6 (sábado)" : "Ej. 1,15") + '" /></div>' +
     "</div>" +
-    '<div class="section-sub" style="margin-top:6px;margin-bottom:0;">Próximo pago de nómina: <b style="color:var(--ink);">' + fechaCorta(calcFechaVencimientoPeriodo(cfg.periodoPago || "mensual", diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina }))) + "</b></div>" +
+    '<div class="section-sub" style="margin-top:6px;margin-bottom:0;">Próximo pago de nómina: <b style="color:var(--ink);">' + fechaCorta(calcFechaVencimientoPeriodo(periodoNomina, diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina }))) + "</b></div>" +
     "</div>";
 
   // ---------- Gastos fijos (periodizables) ----------
@@ -131,9 +154,55 @@ export function render() {
   html += "</div>";
 
   // ---------- Deudas ----------
+  // Dos pestañas (mismo patrón "gsheet-tabs" que Cotizaciones/Pedidos/
+  // Clientes/Finanzas): "Activas" es la tabla operativa de deudas pendientes
+  // con su formulario de alta; "Historial" es el registro de deudas ya
+  // saldadas por completo — antes eran dos tarjetas siempre apiladas,
+  // ocupando espacio aunque no hubiera nada pendiente que ver en una de ellas.
+  html += renderTabsDeudas();
+  html += (state.deudasVista === "historial") ? renderDeudasHistorial() : renderDeudasActivas();
+
+  // La comisión de vendedores ya no tiene panel aparte: aparece agrupada por
+  // vendedor dentro del desglose de "Cuentas por pagar" de arriba (categoría
+  // "Comisiones de vendedores"). Para pagar o definir la fecha de pago de
+  // cada comisión, se sigue haciendo desde la tarjeta del pedido o cotización
+  // correspondiente.
+
+  return html;
+}
+
+// Detalle desplegado bajo la fila agregada de un vendedor en "Comisiones de
+// vendedores": cada pedido/cotización detrás de ese total, con un botón para
+// saltar directo a verificarlo — mismo patrón de navegación que "↗ Origen"
+// en Finanzas (ver-origen-tx), pero yendo directo al pedido/cotización en
+// vez de partir de un movimiento ya creado (acá la comisión sigue pendiente,
+// todavía no hay tx de la que partir).
+function renderDetalleComisionVendedor(nombre) {
+  var items = calcDetalleComisionesVendedor(nombre);
+  if (!items.length) return "";
+  var html = '<div style="margin:2px 0 8px;padding-left:10px;border-left:2px solid var(--border-soft);display:flex;flex-direction:column;gap:4px;">';
+  items.forEach(function (it) {
+    html += '<div class="tx-row" style="grid-template-columns:1fr 90px 90px;padding:2px 0;">' +
+      '<span style="font-size:12px;color:var(--ink-soft);">' + esc(it.label) + "</span>" +
+      '<span class="amount" style="font-size:12px;">' + fmt(it.monto) + "</span>" +
+      '<button class="btn ghost small" data-action="ir-a-comision-origen" data-tipo="' + it.tipo + '" data-id="' + it.id + '">↗ Ver</button>' +
+      "</div>";
+  });
+  return html + "</div>";
+}
+
+function renderTabsDeudas() {
+  var vista = state.deudasVista || "activas";
+  return '<div class="gsheet-tabs">' +
+    '<button class="gsheet-tab ' + (vista === "activas" ? "active" : "") + '" data-action="deudas-vista" data-val="activas">Deudas' + (state.deudas.length ? " (" + state.deudas.length + ")" : "") + "</button>" +
+    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="deudas-vista" data-val="historial">Historial' + (state.deudasHistorial.length ? " (" + state.deudasHistorial.length + ")" : "") + "</button>" +
+    "</div>";
+}
+
+function renderDeudasActivas() {
   var fd = state.formDeuda;
-  html += '<div class="card"><div class="section-title small">Deudas' +
-    renderHelp("Préstamos, proveedores u otras deudas del taller. Define cuotas, periodo y día(s) de pago desde ya (si aplica); \"Pagar\" registra la cuota siguiente (o el saldo completo si es pago único) como gasto en Finanzas. En cuanto queda pagada por completo, la deuda sale de esta lista y se mueve entera al Historial de deudas.") +
+  var html = '<div class="card"><div class="section-title small">Deudas' +
+    renderHelp("Préstamos, proveedores u otras deudas del taller. Define cuotas, periodo y día(s) de pago desde ya (si aplica); \"Pagar\" registra la cuota siguiente (o el saldo completo si es pago único) como gasto en Finanzas. En cuanto queda pagada por completo, la deuda sale de esta lista y se mueve entera a la pestaña Historial.") +
     "</div>";
   html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 100px 90px 120px 150px;font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Concepto</span><span>Con quién</span><span>Saldo</span><span>Cuotas</span><span>Periodo</span><span></span></div>';
   state.deudas.forEach(function (d) {
@@ -176,45 +245,41 @@ export function render() {
     '<button class="btn" data-action="add-deuda">Agregar deuda</button>' +
     "</div>");
   html += "</div>";
+  return html;
+}
 
-  // ---------- Historial de deudas (pagadas por completo) ----------
-  // A diferencia del historial de PAGOS de una deuda activa (que ya no se
-  // muestra suelto), esto es un registro de DEUDAS completas: cuando una
-  // deuda termina de pagarse, se saca por completo de la tabla de arriba y
-  // aparece aquí — no es una bitácora de movimientos, es "a dónde se van"
-  // las deudas ya saldadas.
-  html += '<div class="card"><div class="section-title small">Historial de deudas' +
+// ---------- Historial de deudas (pagadas por completo) ----------
+// A diferencia del historial de PAGOS de una deuda activa (que ya no se
+// muestra suelto), esto es un registro de DEUDAS completas: cuando una
+// deuda termina de pagarse, se saca por completo de la tabla de Activas y
+// aparece aquí — no es una bitácora de movimientos, es "a dónde se van" las
+// deudas ya saldadas.
+function renderDeudasHistorial() {
+  var html = '<div class="card"><div class="section-title small">Historial de deudas' +
     renderHelp("Deudas ya pagadas por completo. En cuanto \"Pagar\" salda la última cuota (o el pago único), la deuda se mueve aquí entera y deja de contar como pendiente.") +
     "</div>";
   if (state.deudasHistorial.length === 0) {
     html += '<div class="empty">Aún no hay deudas pagadas por completo.</div>';
-  } else {
-    html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">';
-    state.deudasHistorial.slice().reverse().forEach(function (d) {
-      var cuotas = num(d.cuotas) || 1;
-      html += '<div data-deuda-id="' + d.id + '" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;">' +
-        '<div style="min-width:0;">' +
-        '<div style="font-weight:700;font-size:13px;">' + esc(d.concepto) + "</div>" +
-        '<div style="font-size:11.5px;color:var(--ink-faint);margin-top:2px;">' +
-        (d.contraparte ? esc(d.contraparte) + " · " : "") +
-        (cuotas > 1 ? cuotas + (cuotas === 1 ? " cuota" : " cuotas") + " · " : "Pago único · ") +
-        "Saldada el " + (d.fechaCompletada ? fechaCorta(new Date(d.fechaCompletada + "T00:00:00")) : "—") +
-        "</div></div>" +
-        '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
-        '<span class="amount">' + fmt(d.monto) + "</span>" +
-        '<button class="btn ghost small" data-action="remove-deuda-historial" data-id="' + d.id + '" title="Quitar del historial (no borra los movimientos ya creados en Finanzas)">✕</button>' +
-        "</div></div>";
-    });
     html += "</div>";
+    return html;
   }
-  html += "</div>";
-
-  // La comisión de vendedores ya no tiene panel aparte: aparece agrupada por
-  // vendedor dentro del desglose de "Cuentas por pagar" de arriba (categoría
-  // "Comisiones de vendedores"). Para pagar o definir la fecha de pago de
-  // cada comisión, se sigue haciendo desde la tarjeta del pedido o cotización
-  // correspondiente.
-
+  html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">';
+  state.deudasHistorial.slice().reverse().forEach(function (d) {
+    var cuotas = num(d.cuotas) || 1;
+    html += '<div data-deuda-id="' + d.id + '" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface-2);border-radius:10px;">' +
+      '<div style="min-width:0;">' +
+      '<div style="font-weight:700;font-size:13px;">' + esc(d.concepto) + "</div>" +
+      '<div style="font-size:11.5px;color:var(--ink-faint);margin-top:2px;">' +
+      (d.contraparte ? esc(d.contraparte) + " · " : "") +
+      (cuotas > 1 ? cuotas + (cuotas === 1 ? " cuota" : " cuotas") + " · " : "Pago único · ") +
+      "Saldada el " + (d.fechaCompletada ? fechaCorta(new Date(d.fechaCompletada + "T00:00:00")) : "—") +
+      "</div></div>" +
+      '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
+      '<span class="amount">' + fmt(d.monto) + "</span>" +
+      '<button class="btn ghost small" data-action="remove-deuda-historial" data-id="' + d.id + '" title="Quitar del historial (no borra los movimientos ya creados en Finanzas)">✕</button>' +
+      "</div></div>";
+  });
+  html += "</div></div>";
   return html;
 }
 
@@ -238,6 +303,28 @@ function renderPendForm(key, labelBoton, contenidoHtml) {
   }
   return '<div style="margin-top:12px;">' + contenidoHtml +
     '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-pend-form" data-key="' + key + '">Cancelar</button></div>';
+}
+
+// Mini-formulario de pago que se abre bajo la fila de UNA persona en Nómina
+// al hacer clic en "Pagar". El monto final (salario + bono - descuento) se
+// recalcula en cada render a partir de state.formNominaPago, así que se ve
+// en vivo mientras se escribe — sin JS aparte, mismo patrón que el resto de
+// la app (re-renderiza todo el árbol en cada notify()).
+function renderFormNominaPago(e) {
+  var fp = state.formNominaPago;
+  var bono = num(fp.bono), descuento = num(fp.descuento);
+  var total = Math.max(0, num(e.salario) + bono - descuento);
+  return '<div style="background:var(--surface-2);border-radius:10px;padding:10px 12px;margin:2px 0 10px;">' +
+    '<div class="form-grid">' +
+    '<div class="field"><label>Bono / horas extra (opcional)</label><input type="number" data-form="nominaPago" data-field="bono" value="' + esc(fp.bono) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Descuento (opcional)' + renderHelp("Ej. un préstamo, una ausencia. Se resta del salario base de este pago.") + '</label><input type="number" data-form="nominaPago" data-field="descuento" value="' + esc(fp.descuento) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Fecha</label><input type="date" data-form="nominaPago" data-field="fecha" value="' + esc(fp.fecha || todayStr()) + '" /></div>' +
+    "</div>" +
+    '<div class="section-sub" style="margin:8px 0;">Total a pagar: <b style="color:var(--ink);">' + fmt(total) + "</b> (" + fmt(e.salario) + (bono ? " + " + fmt(bono) + " bono" : "") + (descuento ? " − " + fmt(descuento) + " descuento" : "") + ")</div>" +
+    '<div class="pedido-actions">' +
+    '<button class="btn small" data-action="pagar-nomina" data-id="' + e.id + '">Confirmar pago</button>' +
+    '<button class="btn ghost small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Cancelar</button>' +
+    "</div></div>";
 }
 
 // Fila de deuda en modo edición: todos los campos (incluido periodo/días,
@@ -334,6 +421,34 @@ export var actions = {
     state.pendFormsAbiertos = Object.assign({}, state.pendFormsAbiertos, { [key]: !state.pendFormsAbiertos[key] });
     notify();
   },
+  "deudas-vista": function (el) {
+    state.deudasVista = el.getAttribute("data-val");
+    notify();
+  },
+  "toggle-comision-vendedor": function (el) {
+    var nombre = el.getAttribute("data-nombre");
+    state.comisionVendedorExpandido = state.comisionVendedorExpandido === nombre ? "" : nombre;
+    notify();
+  },
+  "ir-a-comision-origen": function (el) {
+    var tipo = el.getAttribute("data-tipo"), id = el.getAttribute("data-id");
+    state.sidebarMobileOpen = false;
+    if (tipo === "cotizacion") {
+      state.tab = "cotizaciones";
+      state.cotizacionEditando = id;
+      state.cotizacionesVista = "nueva";
+      notify();
+      return;
+    }
+    state.tab = "pedidos";
+    state.filtroPedidosVista = "activos";
+    state.pedidosVista = "historial";
+    notify();
+    setTimeout(function () {
+      var card = document.querySelector('[data-pedido-id="' + id + '"]');
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  },
   "add-emp": function () {
     var fe = state.formEmp;
     if (!fe.nombre || !fe.salario) return;
@@ -349,9 +464,25 @@ export var actions = {
     state.config.nomina = (state.config.nomina || []).filter(function (e) { return e.id !== id; });
     persist("config"); notify();
   },
-  "set-numextra": function (el) {
-    state.config.numExtra = num(el.value);
-    persist("config"); notify();
+  "toggle-nomina-pago": function (el) {
+    var id = el.getAttribute("data-id");
+    state.nominaPagoId = state.nominaPagoId === id ? "" : id;
+    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr() };
+    notify();
+  },
+  "pagar-nomina": function (el) {
+    var id = el.getAttribute("data-id");
+    var e = (state.config.nomina || []).filter(function (e) { return e.id === id; })[0];
+    if (!e) return;
+    var fp = state.formNominaPago;
+    var bono = num(fp.bono), descuento = num(fp.descuento);
+    var monto = Math.max(0, num(e.salario) + bono - descuento);
+    if (monto <= 0) return;
+    var concepto = "Nómina — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
+    state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, fecha: fp.fecha || todayStr(), pedidoId: "" });
+    state.nominaPagoId = "";
+    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr() };
+    persist("tx"); notify();
   },
   "set-periodo-pago": function (el) {
     state.config.periodoPago = el.value;

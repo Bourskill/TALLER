@@ -74,7 +74,6 @@ export const DEFAULT_CONFIG = {
   // Se ve en el sidebar y, si está definido, también en el PDF de cotización.
   logoUrl: "",
   nomina: [],
-  numExtra: 0,
   // Cada cuánto pagas la nómina: cambia cómo se calcula el KPI "Nómina pendiente"
   // (los salarios se definen siempre en valor MENSUAL en el listado de nómina).
   periodoPago: "mensual", // "mensual" | "quincenal" | "semanal"

@@ -78,7 +78,7 @@ export function plantillaCorreoHtml(opts) {
     '<div style="padding:28px;color:#26262e;">' +
     '<div style="font-size:15px;margin-bottom:14px;">' + esc(opts.saludo || "Hola,") + "</div>" +
     '<div style="font-size:14.5px;line-height:1.55;color:#3c3c46;">' + parrafos + "</div>" +
-    (opts.docTitulo ? '<div style="margin-top:18px;padding:14px 16px;background:#f7f7fb;border-left:3px solid ' + esc(color) + ';border-radius:6px;font-size:13.5px;color:#3c3c46;">📎 ' + esc(opts.docTitulo) + " adjunto en este correo (PDF)</div>" : "") +
+    (opts.docTitulo ? '<div style="margin-top:18px;padding:14px 16px;background:#f7f7fb;border-left:3px solid ' + esc(color) + ';border-radius:6px;font-size:13.5px;color:#3c3c46;">📎 Adjunto en este correo (PDF): ' + esc(opts.docTitulo) + "</div>" : "") +
     "</div>" +
     '<div style="padding:16px 28px;background:#faf9fc;border-top:1px solid #eeeef3;font-size:11.5px;color:#9a9aa6;">' +
     esc(nombre) + (pieContacto ? " · " + esc(pieContacto) : "") +

@@ -292,7 +292,7 @@ function renderCosteoProduccion(p) {
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
     '<select class="mini-input" style="max-width:240px" data-action-change="add-pro-insumo-catalogo" data-pro="' + p.id + '">' +
-    '<option value="">+ Agregar desde catálogo…</option>' +
+    '<option value="">+ Insumos predeterminados…</option>' +
     (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
     "</select>" +
     '<button class="btn ghost small" data-action="add-pro-insumo-custom" data-pro="' + p.id + '">+ Insumo personalizado</button>' +

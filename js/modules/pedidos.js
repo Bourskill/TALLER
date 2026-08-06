@@ -468,7 +468,11 @@ function renderPanelPedido(p, saldo) {
   html += '<div class="pedido-panel-col"><div class="cot-col-title">💰 Dinero</div>';
   html += renderVendedor(p);
   html += (saldo > 0 ? renderAbonoForm(p) : "");
+  if (state.reembolsoAbierto === p.id) html += renderReembolsoForm(p);
   html += renderAbonosPedido(p);
+  if (num(p.abono) > 0 && state.reembolsoAbierto !== p.id) {
+    html += '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-reembolso-form" data-id="' + p.id + '" title="Registrar que se le devolvió dinero al cliente">↩ Registrar reembolso al cliente</button>';
+  }
   html += "</div>";
 
   html += '<div class="pedido-panel-col"><div class="cot-col-title">📄 PDF y documentos</div>' +
@@ -544,12 +548,39 @@ function renderAbonoForm(p) {
     "</div>";
 }
 
+// Reembolso a un cliente: se registra como una entrada más en p.abonos (con
+// tipo:"reembolso") para que quede en el mismo listado cronológico, pero
+// RESTA de p.abono en vez de sumar — así el saldo del pedido vuelve a subir
+// automáticamente, sin tocar la fórmula calcSaldoPedido (total - abono) que
+// ya usa el resto de la app. El movimiento en Finanzas es un "gasto" (plata
+// que sale del taller), vinculado al pedido igual que cualquier abono.
+function renderReembolsoForm(p) {
+  var fr = state.formReembolso;
+  var disponible = num(p.abono);
+  return '<div class="inline-form" style="flex-wrap:wrap;background:var(--surface-2);border-radius:10px;padding:8px 10px;margin-top:8px;">' +
+    '<input type="number" class="mini-input" data-form="reembolso" data-field="monto" value="' + esc(fr.monto) + '" placeholder="Monto (máx. ' + fmt(disponible) + ')" style="width:150px" />' +
+    '<input type="date" class="mini-input" data-form="reembolso" data-field="fecha" value="' + esc(fr.fecha || todayStr()) + '" style="width:135px" />' +
+    '<input class="mini-input" data-form="reembolso" data-field="motivo" value="' + esc(fr.motivo) + '" placeholder="Motivo (opcional)" style="width:170px" />' +
+    '<button class="btn danger small" data-action="add-reembolso" data-id="' + p.id + '">Confirmar reembolso</button>' +
+    '<button class="btn ghost small" data-action="toggle-reembolso-form" data-id="' + p.id + '">Cancelar</button>' +
+    "</div>";
+}
+
 function renderAbonosPedido(p) {
   var abonos = p.abonos || [];
   if (!abonos.length) return "";
   var html = '<div class="section-sub" style="margin-top:8px;">Abonos registrados</div>' +
     '<div class="tx-row head" style="grid-template-columns:100px 90px 110px 1fr 100px;"><span>Fecha</span><span>Monto</span><span>Método</span><span>Comprobante</span><span></span></div>';
   abonos.forEach(function (a) {
+    if (a.tipo === "reembolso") {
+      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;">' +
+        '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
+        '<span class="mobile-th">Monto</span><span class="amount neg">-' + fmt(a.monto) + "</span>" +
+        '<span class="mobile-th">Método</span><span style="color:var(--danger);font-weight:700;">↩ Reembolso</span>' +
+        '<span class="mobile-th">Comprobante</span><span class="muted">' + esc(a.motivo || "—") + "</span>" +
+        "<span></span></div>";
+      return;
+    }
     if (state.abonoEditando === a.id) {
       html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;" data-abono-edit-row="' + a.id + '">' +
         '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" style="width:100%" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
@@ -705,7 +736,10 @@ export var actions = {
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
       // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
-      estado: esConsignacion ? "entregado" : "cotizacion",
+      // "nuevo" (primer estado de ESTADOS_DEFAULT) — no "cotizacion", que no
+      // existe en la lista de estados y dejaba el badge y "Próximas
+      // entregas" mostrando el texto crudo en vez de una etapa real.
+      estado: esConsignacion ? "entregado" : "nuevo",
       numeroOp: generarNumeroOp(todosNumerosOp()),
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
@@ -1024,6 +1058,34 @@ export var actions = {
       }
     }
     notify();
+  },
+  "toggle-reembolso-form": function (el) {
+    var id = el.getAttribute("data-id");
+    state.reembolsoAbierto = state.reembolsoAbierto === id ? "" : id;
+    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
+    notify();
+  },
+  "add-reembolso": function (el) {
+    var id = el.getAttribute("data-id");
+    var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!ped) return;
+    var fr = state.formReembolso;
+    var monto = num(fr.monto);
+    var disponible = num(ped.abono);
+    if (!monto || monto <= 0) return;
+    if (monto > disponible) { window.alert("No puedes reembolsar más de lo que el cliente ha abonado (" + fmt(disponible) + ")."); return; }
+    if (!window.confirm('¿Registrar un reembolso de ' + fmt(monto) + ' a "' + ped.cliente + '"?\n\nEsto crea un movimiento de gasto en Finanzas y reduce el abono registrado de este pedido.')) return;
+    var reembolsoId = uid();
+    var fecha = fr.fecha || todayStr();
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Reembolso — " + ped.descripcion + (fr.motivo ? " (" + fr.motivo + ")" : ""), monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id });
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      var abonos = (p.abonos || []).concat([{ id: reembolsoId, monto: monto, fecha: fecha, tipo: "reembolso", motivo: fr.motivo || "", comprobanteUrl: "" }]);
+      return Object.assign({}, p, { abonos: abonos, abono: Math.max(0, num(p.abono) - monto) });
+    });
+    state.reembolsoAbierto = "";
+    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
+    persist("tx"); persist("pedidos"); notify();
   },
   "add-abono": function (el) {
     var id = el.getAttribute("data-id");

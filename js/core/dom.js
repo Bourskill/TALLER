@@ -107,6 +107,7 @@ var coreActions = {
     state.filtroPedidosVista = "activos";
     if (state.tab === "cotizaciones") state.cotizacionesVista = "historial";
     if (state.tab === "pedidos") state.pedidosVista = "historial";
+    if (state.tab === "finanzas") state.finanzasVista = "historial";
     var filtroTx = el.getAttribute("data-filtro-tx");
     if (filtroTx) state.filtroTx = filtroTx;
     if (el.getAttribute("data-filtro-saldo")) state.filtroPedidosSoloSaldo = true;
@@ -182,7 +183,7 @@ var actionRegistry = Object.assign(
 );
 
 // form -> clave en `state` que guarda su borrador.
-var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte", producto: "formProducto" };
+var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte", producto: "formProducto", nominaPago: "formNominaPago", reembolso: "formReembolso" };
 
 var rendering = false;
 var pendingRerender = false;
@@ -233,6 +234,11 @@ export function render() {
 
     app.innerHTML = html;
     bindEvents();
+    // Punto de extensión para módulos que necesitan JS imperativo después de
+    // que su HTML ya quedó en el DOM (ej. Resumen instanciando gráficas de
+    // Chart.js sobre un <canvas> — no se puede hacer solo con el string de
+    // render()). Opcional: la mayoría de los módulos no lo necesitan.
+    if (mod && mod.afterRender) mod.afterRender();
 
     if (activeId) {
       var el2 = document.getElementById(activeId);

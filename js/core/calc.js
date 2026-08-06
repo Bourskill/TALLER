@@ -224,7 +224,11 @@ export function calcPorPagarDesglose() {
       categoria: "Comisiones de vendedores",
       monto: saldosVendedores.reduce(function (a, v) { return a + v.monto; }, 0),
       items: saldosVendedores.map(function (v) {
-        return { concepto: v.nombre + " (" + v.cantidad + (v.cantidad === 1 ? " pedido" : " pedidos") + ")", monto: v.monto, fecha: v.fechaPago ? new Date(v.fechaPago + "T00:00:00") : null };
+        // nombreVendedor: marca este item como expandible en Pendientes (ver
+        // renderCategoriaComisiones) — permite desplegar el detalle pedido
+        // por pedido y saltar directo a verificarlo, en vez de solo ver el
+        // total consolidado de este vendedor.
+        return { concepto: v.nombre + " (" + v.cantidad + (v.cantidad === 1 ? " pedido" : " pedidos") + ")", monto: v.monto, fecha: v.fechaPago ? new Date(v.fechaPago + "T00:00:00") : null, nombreVendedor: v.nombre };
       })
     });
   }
@@ -398,6 +402,25 @@ export function calcSaldosVendedores() {
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
 
+// El detalle (pedido por pedido / cotización por cotización) detrás del
+// saldo agregado de UN vendedor en calcSaldosVendedores — para poder
+// desplegarlo en Pendientes y saltar directo a verificar el pedido de
+// origen, en vez de solo ver el total consolidado.
+export function calcDetalleComisionesVendedor(nombre) {
+  var items = [];
+  state.pedidos.forEach(function (p) {
+    if (p.vendedor && p.vendedor.nombre === nombre && p.vendedor.estado !== "pagado") {
+      items.push({ tipo: "pedido", id: p.id, label: (p.numeroOp || "Pedido") + " — " + p.cliente + " · " + p.descripcion, monto: calcComisionValor(p) });
+    }
+  });
+  state.cotizaciones.forEach(function (c) {
+    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre === nombre && c.vendedor.estado !== "pagado") {
+      items.push({ tipo: "cotizacion", id: c.id, label: "Cotización — " + c.cliente + " · " + c.descripcion, monto: calcComisionValorCot(c) });
+    }
+  });
+  return items;
+}
+
 
 // "¿ya se pagó en ESTE periodo?" sin importar si el periodo es mensual,
 // quincenal o semanal.
@@ -459,8 +482,15 @@ export function calcPedidosActivos() {
 export function calcNominaMensualDefinida() {
   return (state.config.nomina || []).reduce(function (a, e) { return a + num(e.salario); }, 0);
 }
-export function calcNumPersonas() {
-  return (state.config.nomina || []).length + num(state.config.numExtra);
+// Cuánto de la nómina de UNA persona ya se registró como pagado (tx tipo
+// "nomina" con esa contraparte) dentro del periodo actual — a diferencia de
+// calcNominaPendiente (que es el pool agregado de TODOS), esto es para
+// mostrar el estado "pagado/pendiente" por fila en Pendientes → Nómina.
+export function calcNominaPagadaEmpleado(nombre, periodo) {
+  var miPeriodo = periodoKey(todayStr(), periodo);
+  return state.tx
+    .filter(function (t) { return t.tipo === "nomina" && t.contraparte === nombre && periodoKey(t.fecha, periodo) === miPeriodo; })
+    .reduce(function (a, t) { return a + num(t.monto); }, 0);
 }
 // Cada gasto fijo tiene su propio periodo (mensual/quincenal/semanal) y guarda
 // en qué periodo se marcó "pagado" por última vez (pagadoHasta). Si ese periodo
