@@ -446,7 +446,11 @@ export var actions = {
     notify();
     setTimeout(function () {
       var card = document.querySelector('[data-pedido-id="' + id + '"]');
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Destello (2 titileos) para identificar la tarjeta — ver
+      // @keyframes destello en css/base.css.
+      card.classList.add("destello");
     }, 60);
   },
   "add-emp": function () {

@@ -479,6 +479,13 @@ function renderPanelPedido(p, saldo) {
     '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
     '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
     '<button class="btn ghost cot-doc-btn" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Clientes)">✉ Enviar factura</button>';
+  // Un pedido convertido desde una cotización nace SIN fecha de entrega (la
+  // cotización no la captura) y, hasta ahora, no había forma de agregarla
+  // después de creado — quedaba fuera de "Próximas entregas" para siempre.
+  // Editable acá para cualquier pedido, en cualquier momento.
+  html += '<div class="field" style="margin-top:8px;"><label>Fecha de entrega' +
+    renderHelp("Determina si el pedido aparece en \"Próximas entregas\" del Resumen. Si el pedido viene de una cotización convertida, nace sin fecha — agrégala acá.") +
+    '</label><input type="date" data-action-change="set-pedido-fecha-entrega" data-id="' + p.id + '" value="' + esc(p.fechaEntrega || "") + '" /></div>';
   html += '<div class="field" style="margin-top:8px;"><label>Observaciones generales del pedido' +
     renderHelp("Para una nota que aplica a todo el pedido, no a una talla en particular (esas se editan en la cotización de origen). Se incluye en el PDF de orden de producción.") +
     '</label><textarea rows="2" data-action-change="set-pedido-obs-generales" data-id="' + p.id + '" placeholder="Ej. Todo el pedido en tela impermeable, entregar en cajas separadas por talla...">' + esc(p.observacionesGenerales || "") + "</textarea></div>";
@@ -1234,6 +1241,13 @@ export var actions = {
     var id = el.getAttribute("data-id");
     state.pedidos = state.pedidos.map(function (p) { return p.id === id ? Object.assign({}, p, { observacionesGenerales: el.value }) : p; });
     persist("pedidos"); notify();
+  },
+  "set-pedido-fecha-entrega": function (el) {
+    var id = el.getAttribute("data-id");
+    state.pedidos = state.pedidos.map(function (p) { return p.id === id ? Object.assign({}, p, { fechaEntrega: el.value }) : p; });
+    persist("pedidos"); notify();
+    var actualizado = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (actualizado) sincronizarEventoPedido(actualizado);
   },
   "generar-pdf-pedido": function (el) {
     var id = el.getAttribute("data-id");

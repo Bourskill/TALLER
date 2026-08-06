@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, calcGastoInsumosMensual } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, calcGastoInsumosRango } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -332,34 +332,32 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
   y = doc.lastAutoTable.finalY + 26;
   var pageH = doc.internal.pageSize.getHeight();
 
-  // Gasto en insumos por mes — mismo cálculo que el panel en vivo de Resumen
-  // (calcGastoInsumosMensual), acotado a los meses dentro del rango del
-  // reporte para que el PDF y la pantalla nunca cuenten periodos distintos.
-  var mesDesde = desde.slice(0, 7), mesHasta = hasta.slice(0, 7);
-  var mesesInsumos = calcGastoInsumosMensual().filter(function (m) { return m.mes >= mesDesde && m.mes <= mesHasta; });
+  // Gasto en insumos del periodo — a diferencia del panel en vivo de Resumen
+  // (calcGastoInsumosMensual, que SIEMPRE desglosa por mes calendario porque
+  // no tiene un rango propio), este reporte ya tiene su propio rango de
+  // fechas (hoy, esta semana, un rango a medida...), que no siempre coincide
+  // con meses completos — así que usa calcGastoInsumosRango(desde, hasta):
+  // un total consolidado del MISMO rango que el resto del reporte, sin
+  // desglose por mes ni columna de fecha repetida.
+  var gastoInsumos = calcGastoInsumosRango(desde, hasta);
 
-  if (mesesInsumos.length) {
+  if (gastoInsumos.insumos.length) {
     if (y + 40 > pageH - 60) { doc.addPage(); y = 54; }
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-    doc.text("GASTO EN INSUMOS POR MES", marginX, y);
+    doc.text("GASTO EN INSUMOS DEL PERIODO", marginX, y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80, 80, 80);
+    doc.text(money(gastoInsumos.total), pageW - marginX, y, { align: "right" });
     y += 18;
 
-    var filasInsumos = [];
-    mesesInsumos.forEach(function (m) {
-      filasInsumos.push([m.mes, "TOTAL DEL MES", money(m.total)]);
-      m.insumos.forEach(function (i) { filasInsumos.push(["", i.nombre, money(i.costoTotal)]); });
-    });
+    var filasInsumos = gastoInsumos.insumos.map(function (i) { return [i.nombre, money(i.costoTotal)]; });
     doc.autoTable({
       startY: y,
       margin: { left: marginX, right: marginX },
-      head: [["Mes", "Insumo", "Costo"]],
+      head: [["Insumo", "Costo"]],
       body: filasInsumos,
       styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
       headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
-      columnStyles: { 2: { halign: "right" } },
-      didParseCell: function (data) {
-        if (data.row.raw && data.row.raw[1] === "TOTAL DEL MES") data.cell.styles.fontStyle = "bold";
-      },
+      columnStyles: { 1: { halign: "right" } },
       theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 20;

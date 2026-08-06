@@ -11,6 +11,13 @@ import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./cons
 import { todayStr, uid } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
+import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
+
+// Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
+// pestaña con columnas reales (ver core/sheetsTabular.js) — Fase 1 de la
+// reorganización de la Sheet. El resto de las claves (pedidos, cotizaciones,
+// config...) sigue viviendo en "kv" hasta que se migren con el mismo patrón.
+var TABLAS_SHEET = { tx: tablaMovimientos, clientes: tablaClientes };
 
 export const STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
 
@@ -41,8 +48,10 @@ if (syncChannel) {
 // pestañas). A diferencia de loadAll(), no corre las migraciones de datos
 // antiguos: esas solo tienen sentido en la carga inicial de la app.
 async function reloadKey(key) {
-  if (!STORAGE_OK || !KEYS[key]) return;
+  if (!STORAGE_OK) return;
   try {
+    if (TABLAS_SHEET[key]) { state[key] = await TABLAS_SHEET[key].leer(); notify(); return; }
+    if (!KEYS[key]) return;
     var r = await window.storage.get(KEYS[key], false);
     var valor = r ? safeParse(r.value, undefined) : undefined;
     if (key === "config") {
@@ -274,6 +283,25 @@ export async function loadAll() {
     if (datos.productoPropuestas) state.productoPropuestas = datos.productoPropuestas;
     if (datos.ui) state.ui = Object.assign({}, DEFAULT_UI, datos.ui, { navGroups: Object.assign({}, DEFAULT_UI.navGroups, datos.ui.navGroups || {}) });
 
+    // Fase 1 de la reorganización de la Sheet: "tx" y "clientes" ya viven en
+    // su propia pestaña con columnas reales (ver TABLAS_SHEET arriba), no en
+    // el blob de "kv" leído justo arriba. state.tx/state.clientes YA quedaron
+    // asignados desde "kv" (líneas de arriba) como piso de seguridad: si algo
+    // falla acá (sin conexión, la pestaña nueva no se pudo crear por
+    // permisos, etc.), la app sigue funcionando con lo último guardado en
+    // "kv" en vez de romperse o quedar vacía.
+    await Promise.allSettled(Object.keys(TABLAS_SHEET).map(function (key) {
+      return TABLAS_SHEET[key].leer().then(function (items) {
+        if (items.length === 0 && state[key] && state[key].length) {
+          // Pestaña nueva vacía pero "kv" ya tenía datos: primera vez que se
+          // activa esta migración para esta clave — se copian una sola vez
+          // (sin borrar el blob de "kv", que queda como respaldo).
+          return TABLAS_SHEET[key].escribir(state[key]);
+        }
+        state[key] = items;
+      }).catch(function (e) { console.error("No se pudo leer la hoja estructurada de " + key + " — se sigue usando lo último guardado en kv", e); });
+    }));
+
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora
     // vive en la REFERENCIA de la cotización de origen (así se puede
     // diferenciar por referencia cuando una cotización tiene varias). Si un
@@ -313,7 +341,8 @@ export async function persist(key) {
     return proponerCambio(key, session);
   }
   try {
-    await window.storage.set(KEYS[key], JSON.stringify(state[key]), false);
+    if (TABLAS_SHEET[key]) { await TABLAS_SHEET[key].escribir(state[key]); }
+    else { await window.storage.set(KEYS[key], JSON.stringify(state[key]), false); }
     if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
   } catch (e) {
     console.error("No se pudo guardar", key, e);

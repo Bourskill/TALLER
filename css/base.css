@@ -6,3 +6,19 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-u
 .empty b{color:var(--ink-soft);}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .error-box{background:var(--danger-soft);border:1px solid var(--danger);color:var(--danger-ink);border-radius:var(--radius);padding:14px;font-size:12.5px;margin-bottom:16px;font-family:'IBM Plex Mono',monospace;white-space:pre-wrap;}
+
+/* Destello al llegar desde un botón "↗ Origen"/"↗ Ver" (Finanzas, Comisiones
+   de vendedores): 2 titileos tipo hover para identificar la tarjeta/fila
+   correcta entre varias — genérico (no depende del tipo de tarjeta) porque
+   se usa tanto para pedidos como para gastos fijos/deudas en Pendientes. La
+   clase se agrega a mano desde JS justo después del scrollIntoView y no hace
+   falta quitarla: la animación termina sola y cualquier render posterior
+   regenera el elemento desde cero, sin la clase. */
+/* Sin bloque 0%/100%: por spec, un keyframe que omite una propiedad en esos
+   puntos usa el valor de base del elemento (el que tendría sin animar) — así
+   el destello vuelve siempre al fondo REAL de cada elemento (var(--surface)
+   en una tarjeta de pedido, transparente en una fila de tabla), en vez de
+   forzar un color fijo que no aplicaría igual en todos los casos donde se
+   usa esta clase. */
+@keyframes destello{50%{background-color:var(--accent-soft);}}
+.destello{animation:destello .5s ease-in-out 2;}

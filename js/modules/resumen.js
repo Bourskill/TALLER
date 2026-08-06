@@ -14,10 +14,17 @@ import { generarPDFReporteFinanciero } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
 
 export function render() {
-  var proximas = state.pedidos
-    .filter(function (p) { return p.estado !== "entregado" && p.fechaEntrega; })
+  var activos = state.pedidos.filter(function (p) { return p.estado !== "entregado"; });
+  var proximas = activos
+    .filter(function (p) { return p.fechaEntrega; })
     .sort(function (a, b) { return new Date(a.fechaEntrega) - new Date(b.fechaEntrega); })
     .slice(0, 5);
+  // Un pedido convertido desde una cotización nace SIN fecha de entrega (se
+  // agrega después, desde la tarjeta del pedido) — sin este mensaje, un
+  // taller donde TODOS los pedidos activos vienen de cotizaciones veía "No
+  // hay entregas programadas" para siempre, indistinguible de "no tengo
+  // pedidos activos".
+  var activosSinFecha = activos.length - activos.filter(function (p) { return p.fechaEntrega; }).length;
   var deudores = listaDeudores().slice(0, 6);
   var urgentes = state.pendientes.filter(function (p) { return !p.hecho && p.prioridad === "alta"; }).slice(0, 5);
   var cotizacionesAbiertas = state.cotizaciones.filter(function (c) { return c.estado !== "convertida"; }).slice(0, 5);
@@ -31,7 +38,11 @@ export function render() {
   html += renderRendimientoPlanta();
 
   html += '<div class="card"><div class="section-title">Próximas entregas</div><div class="section-sub">Pedidos ordenados por fecha comprometida</div>';
-  if (proximas.length === 0) { html += '<div class="empty">No hay entregas programadas todavía.</div>'; }
+  if (proximas.length === 0) {
+    html += activosSinFecha > 0
+      ? '<div class="empty">Tienes ' + activosSinFecha + (activosSinFecha === 1 ? " pedido activo sin" : " pedidos activos sin") + ' fecha de entrega definida — agrégala desde la tarjeta del pedido (sección "PDF y documentos") para que aparezcan acá.</div>'
+      : '<div class="empty">No hay entregas programadas todavía.</div>';
+  }
   proximas.forEach(function (p) {
     var saldo = num(p.total) - num(p.abono);
     html += '<div class="tx-row" style="grid-template-columns:110px 1fr 130px 100px;">' +

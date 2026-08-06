@@ -903,3 +903,27 @@ export function calcGastoInsumosMensual() {
     return { mes: bucket.mes, total: bucket.total, insumos: insumos };
   });
 }
+
+// Mismo cálculo que calcGastoInsumosMensual, pero para el reporte financiero
+// en PDF: ese reporte usa un rango de fechas arbitrario (hoy, esta semana,
+// un rango personalizado...), no siempre meses completos — bucketear por mes
+// ahí no solo era una columna de más, sino que además colaba insumos de
+// FUERA del rango elegido (un reporte del 15 al 20 de agosto arrastraba todo
+// agosto). Total y lista consolidados en uno solo, sin desglose por mes.
+export function calcGastoInsumosRango(desde, hasta) {
+  var mapa = {};
+  var total = 0;
+  state.cotizaciones.forEach(function (c) {
+    var fecha = c.fecha || "";
+    if (!fecha || fecha < desde || fecha > hasta) return;
+    var refMapa = agregarInsumosDeReferencias(c.referencias || []);
+    Object.keys(refMapa).forEach(function (k) {
+      var item = refMapa[k];
+      if (!mapa[k]) mapa[k] = { nombre: item.nombre, unidad: item.unidad, costoTotal: 0 };
+      mapa[k].costoTotal += item.costoTotal;
+      total += item.costoTotal;
+    });
+  });
+  var insumos = Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
+  return { total: total, insumos: insumos };
+}
