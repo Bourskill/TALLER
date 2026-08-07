@@ -43,7 +43,7 @@ export function renderClienteCombo(form, inputId, f) {
         return '<div class="combo-item" data-action="select-cliente" data-form="' + form + '" data-id="' + c.id + '"><b>' + esc(c.nombre) + '</b><span>' + esc(c.cedula || "sin documento") + (c.ciudad ? " · " + esc(c.ciudad) : "") + '</span></div>';
       }).join("") + '</div>';
     } else {
-      html += '<div class="combo-suggestions"><div class="combo-empty">Sin coincidencias — se guardará como cliente libre (o regístralo en la pestaña Clientes).</div></div>';
+      html += '<div class="combo-suggestions"><div class="combo-empty">Sin coincidencias — se guardará como cliente libre (o regístralo en la pestaña Contactos).</div></div>';
     }
   }
   html += "</div>";

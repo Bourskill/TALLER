@@ -1,9 +1,10 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, uid, val, num, fmt, exigirCampos } from "../core/utils.js";
+import { esc, uid, val, num, fmt, opt, norm, exigirCampos } from "../core/utils.js";
 import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
 import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
 import { renderHelp } from "../core/components.js";
+import { TIPOS_RELACION_CONTACTO } from "../core/constants.js";
 
 // Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo cliente" es solo el
 // formulario de alta, y "Historial" agrupa la búsqueda y la lista completa
@@ -18,23 +19,62 @@ export function render() {
 function renderTabsClientes(vista) {
   var total = state.clientes.length;
   return '<div class="gsheet-tabs">' +
-    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cliente-vista" data-val="nueva">+ Nuevo cliente</button>' +
+    '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cliente-vista" data-val="nueva">+ Nuevo contacto</button>' +
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="cliente-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
     "</div>";
 }
 
+// Etiqueta del botón "Agregar ___" según el tipo elegido — "cliente"/
+// "proveedor"/"punto" en vez de un genérico "contacto" sin contexto.
+var ETIQ_TIPO_BOTON = { cliente: "cliente", proveedor: "proveedor", punto_consignacion: "punto" };
+
+function renderChipsCategoriaInsumo(seleccionadas, action) {
+  var categorias = state.catalogoCategorias || [];
+  if (!categorias.length) return '<div class="section-sub" style="margin:0;">Aún no tienes categorías de insumo — créalas en Catálogo.</div>';
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+    categorias.map(function (cat) {
+      var marcada = (seleccionadas || []).indexOf(cat.id) !== -1;
+      return '<button type="button" class="chip ' + (marcada ? "active" : "") + '" data-action="' + action + '" data-val="' + cat.id + '">' + esc(cat.nombre) + "</button>";
+    }).join("") + "</div>";
+}
+function opcionesPuntuacion(actual) {
+  return '<option value="0"' + (!actual ? " selected" : "") + ">Sin calificar</option>" +
+    [1, 2, 3, 4, 5].map(function (n) { return '<option value="' + n + '" ' + (Number(actual) === n ? "selected" : "") + '>' + "⭐".repeat(n) + "</option>"; }).join("");
+}
+// Campos exclusivos de un proveedor, en el formulario "+ Nuevo contacto"
+// (borrador reactivo en state.formCliente).
+function renderCamposProveedorForm(f) {
+  return '<div class="field wide"><label>Qué insumos vende' + renderHelp("Marca las categorías de tu Catálogo de insumos que este proveedor te surte — sirve para filtrar rápido a quién pedirle cada cosa.") + '</label>' +
+    renderChipsCategoriaInsumo(f.categoriasInsumo, "toggle-categoria-insumo-form") + "</div>" +
+    '<div class="field wide"><label>Descripción / notas</label><textarea class="mini-input" style="width:100%;min-height:56px;resize:vertical;" data-form="cliente" data-field="descripcion" placeholder="Ej. buena calidad de licra, entrega en 3 días...">' + esc(f.descripcion || "") + "</textarea></div>" +
+    '<div class="field"><label>Puntuación' + renderHelp("Qué tan buena experiencia ha sido comprarle — puramente para tu referencia.") + '</label><select data-form="cliente" data-field="puntuacion">' + opcionesPuntuacion(f.puntuacion) + "</select></div>";
+}
+// Mismos campos, pero en modo edición de un contacto ya guardado (data-role,
+// se leen al Guardar — igual que el resto de renderClienteEdit). Las
+// categorías sí necesitan un pequeño borrador reactivo aparte
+// (state.clienteEditCategorias) porque alternar chips no es un valor único
+// que "val()" pueda leer de un solo input al guardar.
+function renderCamposProveedorEdit(c) {
+  var seleccionadas = state.clienteEditCategorias || c.categoriasInsumo || [];
+  return '<div class="field wide"><label>Qué insumos vende</label>' +
+    renderChipsCategoriaInsumo(seleccionadas, "toggle-categoria-insumo-edit") + "</div>" +
+    '<div class="field wide"><label>Descripción / notas</label><textarea class="mini-input" style="width:100%;min-height:56px;resize:vertical;" data-role="edit-descripcion">' + esc(c.descripcion || "") + "</textarea></div>" +
+    '<div class="field"><label>Puntuación</label><select class="mini-input" data-role="edit-puntuacion">' + opcionesPuntuacion(c.puntuacion) + "</select></div>";
+}
+
 function renderFormNuevoCliente() {
   var f = state.formCliente;
-  var esPunto = f.tipoRelacion === "punto_consignacion";
-  var html = '<div class="card"><div class="section-title small">Nuevo cliente' +
-    renderHelp("Un \"Punto de consignación\" es un local externo donde exhibís mercancía sin cobrarla de una vez — el local se queda con una comisión solo por lo que efectivamente venda. Se gestiona igual que un cliente normal, pero con una comisión por defecto que se precarga al enviarle un pedido en consignación (ver Pedidos).") +
+  var tipo = f.tipoRelacion || "cliente";
+  var esPunto = tipo === "punto_consignacion";
+  var esProveedor = tipo === "proveedor";
+  var html = '<div class="card"><div class="section-title small">Nuevo contacto' +
+    renderHelp("Un mismo directorio para todos: clientes que te compran, proveedores que te venden insumos, y puntos de consignación (locales donde exhibís mercancía sin cobrarla de una vez — se quedan con una comisión solo por lo que vendan).") +
     '</div><div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input data-form="cliente" data-field="nombre" value="' + esc(f.nombre) + '" placeholder="Nombre completo" /></div>' +
     '<div class="field"><label>Tipo</label><select data-action-change="set-cliente-tipo-relacion">' +
-    '<option value="cliente"' + (esPunto ? "" : " selected") + '>Cliente</option>' +
-    '<option value="punto_consignacion"' + (esPunto ? " selected" : "") + '>🏬 Punto de consignación</option>' +
+    Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], tipo); }).join("") +
     "</select></div>" +
-    '<div class="field"><label>Cédula / RUT</label><input data-form="cliente" data-field="cedula" value="' + esc(f.cedula) + '" placeholder="Documento" /></div>' +
+    '<div class="field"><label>Cédula / RUT / NIT</label><input data-form="cliente" data-field="cedula" value="' + esc(f.cedula) + '" placeholder="Documento" /></div>' +
     '<div class="field"><label>Teléfono</label><input data-form="cliente" data-field="telefono" value="' + esc(f.telefono) + '" placeholder="Opcional" /></div>' +
     '<div class="field"><label>Correo</label><input type="email" data-form="cliente" data-field="correo" value="' + esc(f.correo) + '" placeholder="Opcional" /></div>' +
     '<div class="field wide"><label>Dirección</label><input data-form="cliente" data-field="direccion" value="' + esc(f.direccion) + '" placeholder="Para envíos" /></div>' +
@@ -49,7 +89,8 @@ function renderFormNuevoCliente() {
       "</select></div>" +
       '<div class="field"><label>Valor</label><input type="number" data-form="cliente" data-field="comisionDefaultValor" value="' + esc(f.comisionDefaultValor) + '" placeholder="Ej. 20" /></div>'
       : "") +
-    '<button class="btn" data-action="add-cliente">Agregar ' + (esPunto ? "punto" : "cliente") + "</button>" +
+    (esProveedor ? renderCamposProveedorForm(f) : "") +
+    '<button class="btn" data-action="add-cliente">Agregar ' + (ETIQ_TIPO_BOTON[tipo] || "contacto") + "</button>" +
     "</div></div>";
   return html;
 }
@@ -68,19 +109,25 @@ function renderHistorialClientes() {
   lista.forEach(function (c) {
     if (state.clienteEditando === c.id) { html += renderClienteEdit(c); return; }
     var esPuntoC = c.tipoRelacion === "punto_consignacion";
+    var esProveedorC = c.tipoRelacion === "proveedor";
     var roster = c.roster || [];
     var rosterAbierto = state.clienteRosterAbierto === c.id;
     var historial = calcHistorialCliente(c.id);
     html += '<div class="cliente-card">' +
       '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) +
       (esPuntoC ? ' <span class="badge info" title="Punto de consignación">🏬 Consignación</span>' : "") +
+      (esProveedorC ? ' <span class="badge" title="Proveedor">🧵 Proveedor' + (c.puntuacion ? " " + "⭐".repeat(Number(c.puntuacion)) : "") + "</span>" : "") +
       (historial.esRecurrente ? ' <span class="badge success" title="Más de un pedido registrado">↻ Recurrente</span>' : "") +
       "</span>" +
       '<span style="display:flex;gap:6px;">' +
-      '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>" +
+      (esProveedorC
+        ? '<button class="btn ghost small" data-action="toggle-cliente-precios" data-id="' + c.id + '">💲 Precios y compras' + ((c.preciosPorInsumo || []).length ? " (" + c.preciosPorInsumo.length + ")" : "") + "</button>"
+        : '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>") +
       '<button class="btn ghost small" data-action="editar-cliente" data-id="' + c.id + '">Editar</button>' +
       '<button class="btn danger small" data-action="remove-cliente" data-id="' + c.id + '">Eliminar</button>' +
       "</span></div>" +
+      (esProveedorC && (c.categoriasInsumo || []).length ? '<div class="section-sub" style="margin:2px 0 8px;">Vende: ' + esc((c.categoriasInsumo || []).map(function (catId) { var cat = (state.catalogoCategorias || []).filter(function (x) { return x.id === catId; })[0]; return cat ? cat.nombre : ""; }).filter(Boolean).join(", ")) + "</div>" : "") +
+      (esProveedorC && c.descripcion ? '<div class="section-sub" style="margin:2px 0 8px;">' + esc(c.descripcion) + "</div>" : "") +
       // Resumen comercial primero (es lo que se busca al abrir un cliente:
       // cuánto ha comprado, cuándo fue la última vez) y recién después la
       // ficha de datos — antes el historial quedaba enterrado como una celda
@@ -102,6 +149,7 @@ function renderHistorialClientes() {
       campoCliente("Cuenta", c.cuenta ? (c.cuenta + (c.entidad ? " · " + c.entidad : "")) : "") +
       "</div>" +
       (rosterAbierto ? renderRoster(c, roster) : "") +
+      (state.clientePreciosAbierto === c.id ? renderPreciosProveedor(c) : "") +
       "</div>";
   });
   return html;
@@ -146,20 +194,94 @@ function renderRoster(c, roster) {
   return html;
 }
 
+// Lista de precios del proveedor: qué le compras y a cuánto, con tramos por
+// cantidad (ej. 1-49 a $500, 50+ a $450) — puramente informativo, NO
+// recalcula el costo del Catálogo solo (ver decisión: "manual, con acceso
+// rápido" en vez de promedio ponderado automático, porque el taller no
+// maneja inventario de insumos). Debajo va el historial de compras reales,
+// que sí se arma solo a partir de los movimientos ya registrados.
+function renderPreciosProveedor(c) {
+  var precios = c.preciosPorInsumo || [];
+  var insumosDisponibles = (state.catalogoInsumos || []).filter(function (i) {
+    return !precios.some(function (p) { return p.insumoId === i.id; });
+  });
+  var COLS_TRAMO = "1fr 1fr 30px";
+  var html = '<div class="card nested" style="margin-top:12px;"><div class="section-title small" style="font-size:12.5px;">Lista de precios' +
+    renderHelp("Cuánto te cobra este proveedor por cada insumo, con tramos según la cantidad (ej. 1-49 unidades a $500, 50+ a $450). Es solo información de referencia para negociar/comparar — no cambia el costo del Catálogo por sí sola.") +
+    "</div>";
+  if (!precios.length) {
+    html += '<div class="empty" style="padding:8px 0;">Sin insumos con precio registrado todavía.</div>';
+  } else {
+    precios.forEach(function (p) {
+      html += '<div style="margin:10px 0;padding:10px 12px;background:var(--surface-2);border-radius:8px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><b style="font-size:13px;">' + esc(p.insumoNombre) + "</b>" +
+        '<button class="btn danger small" data-action="remove-proveedor-insumo-precio" data-id="' + c.id + '" data-precio="' + p.id + '">✕ Quitar</button></div>' +
+        '<div class="det-row head" style="grid-template-columns:' + COLS_TRAMO + ';"><span>Cantidad mínima</span><span>Precio</span><span></span></div>';
+      (p.tramos || []).forEach(function (t) {
+        html += '<div class="det-row" style="grid-template-columns:' + COLS_TRAMO + ';">' +
+          '<input type="number" class="mini-input" value="' + esc(t.cantidadMinima) + '" placeholder="Ej. 1" data-action-change="set-proveedor-tramo-campo" data-id="' + c.id + '" data-precio="' + p.id + '" data-tramo="' + t.id + '" data-campo="cantidadMinima" />' +
+          '<input type="number" class="mini-input" value="' + esc(t.precio) + '" placeholder="0" data-action-change="set-proveedor-tramo-campo" data-id="' + c.id + '" data-precio="' + p.id + '" data-tramo="' + t.id + '" data-campo="precio" />' +
+          '<button class="btn danger small" data-action="remove-proveedor-tramo" data-id="' + c.id + '" data-precio="' + p.id + '" data-tramo="' + t.id + '">✕</button>' +
+          "</div>";
+      });
+      if (!(p.tramos || []).length) html += '<div class="empty" style="padding:6px 0;">Sin tramos — agrega al menos uno.</div>';
+      html += '<button class="btn ghost small" style="margin-top:6px;" data-action="add-proveedor-tramo" data-id="' + c.id + '" data-precio="' + p.id + '">+ Agregar tramo de cantidad</button>' +
+        "</div>";
+    });
+  }
+  html += '<div class="row-actions" style="margin-top:8px;">' +
+    (insumosDisponibles.length
+      ? '<select class="mini-input" style="max-width:240px" data-action-change="add-proveedor-insumo-precio" data-id="' + c.id + '">' +
+        '<option value="">+ Agregar insumo con precio…</option>' +
+        insumosDisponibles.map(function (i) { return '<option value="' + i.id + '">' + esc(i.nombre) + "</option>"; }).join("") +
+        "</select>"
+      : '<span class="section-sub" style="margin:0;">Todos tus insumos del catálogo ya tienen precio de este proveedor.</span>') +
+    "</div>";
+  html += renderHistorialComprasProveedor(c);
+  html += "</div>";
+  return html;
+}
+
+// Se arma SOLO a partir de state.tx (nunca un registro aparte que se pueda
+// desincronizar): cualquier movimiento marcado con este proveedor —desde
+// "Registrar costo real" en una cotización o "Es compra de insumo" en
+// Finanzas— aparece aquí. Si el concepto coincide con un insumo del
+// catálogo, se ofrece un atajo de un clic para actualizar su costo de
+// referencia (nunca automático: siempre pide confirmar el valor).
+function renderHistorialComprasProveedor(c) {
+  var compras = (state.tx || []).filter(function (t) { return t.proveedorId === c.id; });
+  var html = '<hr class="stitch" style="margin:14px 0;" /><div class="section-title small" style="font-size:12.5px;">Historial de compras reales' +
+    renderHelp("Se arma solo a partir de los movimientos de Finanzas marcados con este proveedor — no es un registro aparte. \"Usar como costo de referencia\" actualiza el costo del insumo en Catálogo (te pide confirmar el valor, nunca lo cambia solo).") +
+    "</div>";
+  if (!compras.length) {
+    html += '<div class="empty" style="padding:8px 0;">Sin compras registradas a este proveedor todavía.</div>';
+    return html + "</div>";
+  }
+  html += '<div class="tx-row head" style="grid-template-columns:85px 1fr 90px 1fr;"><span>Fecha</span><span>Concepto</span><span>Monto</span><span></span></div>';
+  compras.forEach(function (t) {
+    var matchInsumo = t.insumoNombre ? (state.catalogoInsumos || []).filter(function (i) { return norm(i.nombre) === norm(t.insumoNombre); })[0] : null;
+    html += '<div class="tx-row" style="grid-template-columns:85px 1fr 90px 1fr;">' +
+      '<span class="mobile-th">Fecha</span><span>' + esc(t.fecha) + "</span>" +
+      '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
+      '<span class="mobile-th">Monto</span><span class="amount">' + fmt(t.monto) + "</span>" +
+      (matchInsumo ? '<button class="btn ghost small" data-action="usar-precio-como-costo" data-tx="' + t.id + '" data-insumo="' + matchInsumo.id + '">Usar como costo de referencia</button>' : "<span></span>") +
+      "</div>";
+  });
+  return html;
+}
+
 // Modo edición explícito (Guardar/Cancelar), mismo patrón que la edición de
 // deudas en pendientes.js: todos los campos quedan editables a la vez en
 // vez de inputs sueltos siempre activos en la tarjeta.
 function renderClienteEdit(c) {
-  var esPuntoC = c.tipoRelacion === "punto_consignacion";
   var comDefault = c.comisionDefault || { tipo: "porcentaje", valor: "" };
   return '<div class="cliente-card" data-cliente-edit-row="' + c.id + '">' +
     '<div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input class="mini-input" data-role="edit-nombre" value="' + esc(c.nombre) + '" /></div>' +
     '<div class="field"><label>Tipo</label><select class="mini-input" data-role="edit-tipo-relacion">' +
-    '<option value="cliente"' + (esPuntoC ? "" : " selected") + '>Cliente</option>' +
-    '<option value="punto_consignacion"' + (esPuntoC ? " selected" : "") + '>🏬 Punto de consignación</option>' +
+    Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], c.tipoRelacion || "cliente"); }).join("") +
     "</select></div>" +
-    '<div class="field"><label>Cédula / RUT</label><input class="mini-input" data-role="edit-cedula" value="' + esc(c.cedula || "") + '" /></div>' +
+    '<div class="field"><label>Cédula / RUT / NIT</label><input class="mini-input" data-role="edit-cedula" value="' + esc(c.cedula || "") + '" /></div>' +
     '<div class="field"><label>Teléfono</label><input class="mini-input" data-role="edit-telefono" value="' + esc(c.telefono || "") + '" /></div>' +
     '<div class="field"><label>Correo</label><input type="email" class="mini-input" data-role="edit-correo" value="' + esc(c.correo || "") + '" /></div>' +
     '<div class="field wide"><label>Dirección</label><input class="mini-input" data-role="edit-direccion" value="' + esc(c.direccion || "") + '" /></div>' +
@@ -172,6 +294,7 @@ function renderClienteEdit(c) {
     '<option value="fijo"' + (comDefault.tipo === "fijo" ? " selected" : "") + '>$ fijo por unidad</option>' +
     "</select></div>" +
     '<div class="field"><label>Valor comisión</label><input type="number" class="mini-input" data-role="edit-comision-valor" value="' + esc(comDefault.valor || "") + '" /></div>' +
+    renderCamposProveedorEdit(c) +
     "</div>" +
     '<div class="pedido-actions" style="margin-top:10px;">' +
     '<button class="btn small" data-action="guardar-cliente-edit" data-id="' + c.id + '">Guardar</button>' +
@@ -207,18 +330,30 @@ export var actions = {
     state.formCliente.tipoRelacion = el.value;
     notify();
   },
+  "toggle-categoria-insumo-form": function (el) {
+    var val = el.getAttribute("data-val");
+    var actuales = state.formCliente.categoriasInsumo || [];
+    state.formCliente.categoriasInsumo = actuales.indexOf(val) === -1 ? actuales.concat([val]) : actuales.filter(function (v) { return v !== val; });
+    notify();
+  },
   "add-cliente": function () {
     var fcli = state.formCliente;
     if (!exigirCampos([["Nombre", fcli.nombre]])) return;
-    var esPunto = fcli.tipoRelacion === "punto_consignacion";
+    var tipo = fcli.tipoRelacion || "cliente";
+    var esPunto = tipo === "punto_consignacion";
+    var esProveedor = tipo === "proveedor";
     var nuevo = {
       id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo, contactResourceName: "",
-      tipoRelacion: fcli.tipoRelacion || "cliente",
+      tipoRelacion: tipo,
       comisionDefault: esPunto ? { tipo: fcli.comisionDefaultTipo || "porcentaje", valor: num(fcli.comisionDefaultValor) } : null,
+      categoriasInsumo: esProveedor ? (fcli.categoriasInsumo || []) : [],
+      descripcion: esProveedor ? fcli.descripcion : "",
+      puntuacion: esProveedor ? num(fcli.puntuacion) : 0,
+      preciosPorInsumo: [],
       roster: []
     };
     state.clientes.unshift(nuevo);
-    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "" };
+    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
     // Salta al Historial para confirmar de una vez que quedó registrado.
     state.clientesVista = "historial";
     persist("clientes"); notify();
@@ -234,11 +369,21 @@ export var actions = {
     if (c.contactResourceName) eliminarContacto(c.contactResourceName).catch(function (e) { console.error("No se pudo borrar el contacto en Google Contacts", e); });
   },
   "editar-cliente": function (el) {
-    state.clienteEditando = el.getAttribute("data-id");
+    var id = el.getAttribute("data-id");
+    var c = state.clientes.filter(function (c) { return c.id === id; })[0];
+    state.clienteEditando = id;
+    state.clienteEditCategorias = c ? (c.categoriasInsumo || []).slice() : [];
     notify();
   },
   "cancelar-edicion-cliente": function () {
     state.clienteEditando = "";
+    state.clienteEditCategorias = [];
+    notify();
+  },
+  "toggle-categoria-insumo-edit": function (el) {
+    var val = el.getAttribute("data-val");
+    var actuales = state.clienteEditCategorias || [];
+    state.clienteEditCategorias = actuales.indexOf(val) === -1 ? actuales.concat([val]) : actuales.filter(function (v) { return v !== val; });
     notify();
   },
   "guardar-cliente-edit": function (el) {
@@ -250,6 +395,7 @@ export var actions = {
     var tipoRelacionEl = fila.querySelector('[data-role="edit-tipo-relacion"]');
     var tipoRelacion = tipoRelacionEl ? tipoRelacionEl.value : "cliente";
     var comTipoEl = fila.querySelector('[data-role="edit-comision-tipo"]');
+    var categoriasInsumo = (state.clienteEditCategorias || []).slice();
     state.clientes = state.clientes.map(function (c) {
       if (c.id !== id) return c;
       return Object.assign({}, c, {
@@ -263,13 +409,102 @@ export var actions = {
         cuenta: val(fila, "edit-cuenta"),
         entidad: val(fila, "edit-entidad"),
         tipoRelacion: tipoRelacion,
-        comisionDefault: tipoRelacion === "punto_consignacion" ? { tipo: comTipoEl ? comTipoEl.value : "porcentaje", valor: num(val(fila, "edit-comision-valor")) } : null
+        comisionDefault: tipoRelacion === "punto_consignacion" ? { tipo: comTipoEl ? comTipoEl.value : "porcentaje", valor: num(val(fila, "edit-comision-valor")) } : null,
+        categoriasInsumo: tipoRelacion === "proveedor" ? categoriasInsumo : (c.categoriasInsumo || []),
+        descripcion: val(fila, "edit-descripcion"),
+        puntuacion: num(val(fila, "edit-puntuacion"))
       });
     });
     state.clienteEditando = "";
+    state.clienteEditCategorias = [];
     persist("clientes"); notify();
     var actualizado = state.clientes.filter(function (c) { return c.id === id; })[0];
     if (actualizado) sincronizarClienteContacto(actualizado);
+  },
+  // ---------- Precios y compras del proveedor ----------
+  "toggle-cliente-precios": function (el) {
+    var id = el.getAttribute("data-id");
+    state.clientePreciosAbierto = state.clientePreciosAbierto === id ? "" : id;
+    notify();
+  },
+  "add-proveedor-insumo-precio": function (el) {
+    if (!el.value) return;
+    var id = el.getAttribute("data-id");
+    var insumo = (state.catalogoInsumos || []).filter(function (i) { return i.id === el.value; })[0];
+    if (!insumo) return;
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      var precios = (c.preciosPorInsumo || []).concat([{ id: uid(), insumoId: insumo.id, insumoNombre: insumo.nombre, tramos: [{ id: uid(), cantidadMinima: 1, precio: insumo.costo || 0 }] }]);
+      return Object.assign({}, c, { preciosPorInsumo: precios });
+    });
+    persist("clientes"); notify();
+  },
+  "remove-proveedor-insumo-precio": function (el) {
+    var id = el.getAttribute("data-id"), precioId = el.getAttribute("data-precio");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      return Object.assign({}, c, { preciosPorInsumo: (c.preciosPorInsumo || []).filter(function (p) { return p.id !== precioId; }) });
+    });
+    persist("clientes"); notify();
+  },
+  "add-proveedor-tramo": function (el) {
+    var id = el.getAttribute("data-id"), precioId = el.getAttribute("data-precio");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      var precios = (c.preciosPorInsumo || []).map(function (p) {
+        if (p.id !== precioId) return p;
+        return Object.assign({}, p, { tramos: (p.tramos || []).concat([{ id: uid(), cantidadMinima: 1, precio: 0 }]) });
+      });
+      return Object.assign({}, c, { preciosPorInsumo: precios });
+    });
+    persist("clientes"); notify();
+  },
+  "remove-proveedor-tramo": function (el) {
+    var id = el.getAttribute("data-id"), precioId = el.getAttribute("data-precio"), tramoId = el.getAttribute("data-tramo");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      var precios = (c.preciosPorInsumo || []).map(function (p) {
+        if (p.id !== precioId) return p;
+        return Object.assign({}, p, { tramos: (p.tramos || []).filter(function (t) { return t.id !== tramoId; }) });
+      });
+      return Object.assign({}, c, { preciosPorInsumo: precios });
+    });
+    persist("clientes"); notify();
+  },
+  "set-proveedor-tramo-campo": function (el) {
+    var id = el.getAttribute("data-id"), precioId = el.getAttribute("data-precio"), tramoId = el.getAttribute("data-tramo"), campo = el.getAttribute("data-campo");
+    state.clientes = state.clientes.map(function (c) {
+      if (c.id !== id) return c;
+      var precios = (c.preciosPorInsumo || []).map(function (p) {
+        if (p.id !== precioId) return p;
+        var tramos = (p.tramos || []).map(function (t) {
+          if (t.id !== tramoId) return t;
+          var patch = {}; patch[campo] = num(el.value);
+          return Object.assign({}, t, patch);
+        });
+        return Object.assign({}, p, { tramos: tramos });
+      });
+      return Object.assign({}, c, { preciosPorInsumo: precios });
+    });
+    persist("clientes"); notify();
+  },
+  // Atajo de un clic para llevar el precio de una compra real al costo de
+  // referencia del insumo en Catálogo — SIEMPRE pide confirmar el valor (no
+  // asume que el monto total de la compra es el costo por unidad, y nunca
+  // promedia con compras anteriores: decisión explícita de no automatizar
+  // el costeo mientras el taller no maneje inventario real de insumos).
+  "usar-precio-como-costo": function (el) {
+    var insumoId = el.getAttribute("data-insumo");
+    var txId = el.getAttribute("data-tx");
+    var insumo = (state.catalogoInsumos || []).filter(function (i) { return i.id === insumoId; })[0];
+    if (!insumo) return;
+    var tx = (state.tx || []).filter(function (t) { return t.id === txId; })[0];
+    var sugerido = window.prompt('Nuevo costo de referencia para "' + insumo.nombre + '" (por ' + (insumo.unidad || "UND") + '):', tx ? tx.monto : insumo.costo);
+    if (sugerido === null) return;
+    var valor = num(sugerido);
+    if (valor <= 0) return;
+    state.catalogoInsumos = (state.catalogoInsumos || []).map(function (i) { return i.id === insumoId ? Object.assign({}, i, { costo: valor }) : i; });
+    persist("catalogoInsumos"); notify();
   },
   "toggle-cliente-roster": function (el) {
     var id = el.getAttribute("data-id");

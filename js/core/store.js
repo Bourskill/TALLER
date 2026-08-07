@@ -127,6 +127,12 @@ export const state = {
   productoEditando: "", // id del producto con el detalle completo abierto en la pestaña "nueva" (o "" = formulario en blanco)
   formProducto: { nombre: "", categoria: "", referencia: "", precioVenta: "" },
   filtroProductosCategoria: "todos",
+  // Picker de "Insumos predeterminados" al armar un producto del catálogo
+  // (mismo patrón ventana-explorador que insumoPicker* de Cotizaciones).
+  productoInsumoPickerAbierto: "", // id del producto con el picker abierto (o "")
+  productoInsumoPickerCategoria: "todos",
+  productoInsumoPickerBusqueda: "",
+  productoInsumoPickerSeleccion: [],
   pedidoProductoBusqueda: "", // texto de búsqueda del picker de producto en el formulario de pedido (nombre/referencia/categoría)
   // Remisión de consignación en construcción (ver "Agregar remisión" en un
   // pedido de consignación, modules/pedidos.js): se acumulan líneas de
@@ -154,16 +160,20 @@ export const state = {
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
     // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).
-    tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: ""
+    // "proveedor": vende insumos — categoriasInsumo/descripcion/puntuacion son propias de este tipo.
+    tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "",
+    categoriasInsumo: [], descripcion: "", puntuacion: ""
   },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
-  formEmp: { nombre: "", cargo: "", salario: "", periodo: "" },
+  formEmp: { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [] },
   nominaPagoId: "", // id de la persona con el mini-formulario de "Pagar" abierto (o "")
+  empEditando: "", // id de la persona en nómina actualmente en modo edición (o "")
+  empEditDraft: null, // { periodo, diasPago } — borrador reactivo del periodo/día mientras se edita (ver renderFilaEdicionEmp)
   formNominaPago: { bono: "", descuento: "", fecha: "" },
-  formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: "" },
-  formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: "" },
+  formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: [] },
+  formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [] },
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")
   deudasVista: "activas", // "activas" | "historial" — pestañas de la sección Deudas en Pendientes
   comisionVendedorExpandido: "", // nombre del vendedor con el detalle desplegado en "Comisiones de vendedores" (o "")
@@ -211,7 +221,9 @@ export const state = {
   cotVendedorEditando: "", // id de la cotización con el formulario de vendedor/comisión desplegado, o "" (por defecto solo se ve un resumen de una línea)
   clientesVista: "nueva", // "nueva" | "historial" — pestañas superiores de Clientes, mismo patrón que Cotizaciones
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
+  clienteEditCategorias: [], // borrador reactivo de categoriasInsumo mientras se edita un proveedor (ver renderCamposProveedorEdit)
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
+  clientePreciosAbierto: "", // id del proveedor con su panel de "Precios y compras" desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a
   // Drive — nunca se persiste, es puramente visual (igual que refImagenSubiendo).
   configPiePaginaSubiendo: false,

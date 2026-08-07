@@ -4,6 +4,7 @@ import { TIPOS_COSTO, ORIGEN_PRODUCCION } from "../core/constants.js";
 import { renderTipoCostoOptions } from "../core/components.js";
 import { renderHelp } from "../core/components.js";
 import { getSession } from "../core/auth.js";
+import { proveedoresDeContactos } from "../core/calc.js";
 
 var COLS = "1fr 150px 90px 110px 170px 160px 40px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
@@ -102,13 +103,30 @@ function renderFilaInsumo(c, categorias) {
     Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], c.origen || "taller"); }).join("") +
     "</select>" +
     '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '">✕</button>' +
+    (c.origen === "proveedor" ? renderSelectorProveedorInsumo(c) : "") +
     "</div>";
+}
+
+// Solo cuando el insumo es "comprado a proveedor": a cuál de los Contactos
+// marcados como proveedor se le compra — spanea todo el ancho de la fila
+// (grid-column:1/-1) porque no todas las filas lo necesitan, así que no
+// forma parte de las columnas fijas de la tabla.
+function renderSelectorProveedorInsumo(c) {
+  var proveedores = proveedoresDeContactos();
+  if (!proveedores.length) {
+    return '<div class="section-sub" style="grid-column:1/-1;margin:4px 0 0;">Sin proveedores registrados aún — agrégalos en Contactos (tipo Proveedor).</div>';
+  }
+  return '<div style="grid-column:1/-1;margin-top:4px;"><label class="mini-label" style="display:block;margin-bottom:2px;">Proveedor</label>' +
+    '<select class="mini-input" style="max-width:280px" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="proveedorId">' +
+    '<option value="">Elegir proveedor…</option>' +
+    proveedores.map(function (p) { return '<option value="' + p.id + '" ' + (c.proveedorId === p.id ? "selected" : "") + '>' + esc(p.nombre) + "</option>"; }).join("") +
+    "</select></div>";
 }
 
 export var actions = {
   "add-cat-item": function () {
     var catActiva = state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "";
-    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, origen: "taller" }]);
+    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, origen: "taller", proveedorId: "" }]);
     persist("catalogoInsumos"); notify();
   },
   "remove-cat-item": function (el) {

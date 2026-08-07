@@ -774,6 +774,12 @@ export function calcDeudasPendientes() {
 export function clienteById(id) {
   return state.clientes.filter(function (c) { return c.id === id; })[0] || null;
 }
+// Contactos marcados como proveedor (tipoRelacion === "proveedor") — se usa
+// en Catálogo/Productos (elegir quién surte un insumo/producto comprado) y
+// en el registro de compras reales (cotización/Finanzas).
+export function proveedoresDeContactos() {
+  return state.clientes.filter(function (c) { return c.tipoRelacion === "proveedor"; });
+}
 
 // ---------- productos (prendas ya hechas, con stock por talla) ----------
 export function productoById(id) {

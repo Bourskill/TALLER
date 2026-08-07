@@ -44,7 +44,7 @@ var TABS = [
   ["productos", "Catálogo", productos],
   ["catalogo", "Insumos", catalogo],
   ["plantillas", "Plantillas", plantillas],
-  ["clientes", "Clientes", clientes],
+  ["clientes", "Contactos", clientes],
   ["pendientes", "Pendientes", pendientes],
   ["notas", "Notas", notas],
   ["config", "Configuración", config]

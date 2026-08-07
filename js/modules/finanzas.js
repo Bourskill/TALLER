@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx } from "../core/calc.js";
+import { esc, opt, num, uid, todayStr, fmt, norm, val, exigirCampos } from "../core/utils.js";
+import { clienteById, periodoKey, origenDeTx, proveedoresDeContactos } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
@@ -50,6 +50,14 @@ function renderFormMovimiento() {
     '<div class="field wide"><label class="mini-label" style="display:flex;align-items:center;gap:6px;font-weight:600;"><input type="checkbox" data-role="tx-es-insumo" /> 📦 Es compra de insumo' +
     renderHelp("Márcalo si este gasto es una compra REAL de insumo (tela, hilo, etc.) — así cuenta en \"de los cuales, insumos\" del reporte financiero de Resumen, aparte de los demás gastos. Es el segundo camino (junto con \"Registrar costo real\" en una cotización) para que un gasto de insumos deje de ser solo una estimación.") +
     "</label></div>" +
+    '<div class="field"><label>Insumo (opcional)</label><select data-role="tx-insumo">' +
+    '<option value="">Sin especificar</option>' +
+    (state.catalogoInsumos || []).map(function (i) { return '<option value="' + esc(i.nombre) + '">' + esc(i.nombre) + "</option>"; }).join("") +
+    "</select></div>" +
+    '<div class="field"><label>Proveedor (opcional)</label><select data-role="tx-proveedor">' +
+    '<option value="">Sin especificar</option>' +
+    proveedoresDeContactos().map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
+    "</select></div>" +
     '<div class="field wide"><label>Cotización relacionada (opcional)</label><select data-form="tx" data-field="cotizacionId">' +
     '<option value="">Sin cotización</option>' +
     state.cotizaciones.map(function (c) { return '<option value="' + c.id + '" ' + (f.cotizacionId === c.id ? "selected" : "") + '>' + esc(c.descripcion) + " — " + esc(c.cliente) + "</option>"; }).join("") +
@@ -275,7 +283,8 @@ export var actions = {
     var esInsumo = !!(chkInsumo && chkInsumo.checked);
     state.tx.unshift({
       id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha,
-      pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "", esInsumo: esInsumo ? "1" : ""
+      pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "", esInsumo: esInsumo ? "1" : "",
+      insumoNombre: card ? val(card, "tx-insumo") : "", proveedorId: card ? val(card, "tx-proveedor") : ""
     });
     state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco

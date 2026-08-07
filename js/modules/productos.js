@@ -14,13 +14,13 @@
 // cards (foto, nombre, categoría, precio, stock) — clic en cualquiera abre su
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, val, opt, exigirCampos } from "../core/utils.js";
+import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
-import { calcRefTotales, stockTotalProducto } from "../core/calc.js";
+import { calcRefTotales, stockTotalProducto, proveedoresDeContactos } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
-import { ORIGEN_PRODUCCION } from "../core/constants.js";
+import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
 
 var INS_COLS = "1fr 60px 90px 150px 70px 30px";
 var TALLA_COLS = "1fr 90px 30px";
@@ -32,6 +32,7 @@ export function render() {
   var vista = state.productosVista || "nueva";
   html += renderTabsProductos(vista);
   html += vista === "catalogo" ? renderCatalogoGrid() : renderEditorProducto();
+  html += renderInsumoPickerProducto();
   return html;
 }
 
@@ -261,6 +262,19 @@ function renderProductoCard(p) {
   return html;
 }
 
+// Solo cuando el producto es "comprado a proveedor": a cuál Contacto (tipo
+// Proveedor) se le compra.
+function renderSelectorProveedorProducto(p) {
+  var proveedores = proveedoresDeContactos();
+  if (!proveedores.length) {
+    return '<div class="field"><label>Proveedor</label><div class="section-sub" style="margin:0;">Sin proveedores registrados — agrégalos en Contactos.</div></div>';
+  }
+  return '<div class="field"><label>Proveedor</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="proveedorId">' +
+    '<option value="">Elegir proveedor…</option>' +
+    proveedores.map(function (pr) { return '<option value="' + pr.id + '" ' + (p.proveedorId === pr.id ? "selected" : "") + '>' + esc(pr.nombre) + "</option>"; }).join("") +
+    "</select></div>";
+}
+
 // Insumos + consumo + flujo de producción quedan agrupados y colapsados por
 // defecto (a menos que ya tenga insumos cargados) — es el detalle "de cómo se
 // hace/cuesta", no lo primero que hace falta para poder vender el producto.
@@ -278,7 +292,7 @@ function renderCosteoProduccion(p) {
   html += '<div class="form-grid" style="margin-top:10px;">' +
     '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
     (p.origen === "proveedor"
-      ? '<div class="field"><label>Flujo de producción</label><div class="section-sub" style="margin:0;">Producto comprado a proveedor — sin fases de producción propias en el taller.</div></div>'
+      ? '<div class="field"><label>Flujo de producción</label><div class="section-sub" style="margin:0;">Producto comprado a proveedor — sin fases de producción propias en el taller.</div></div>' + renderSelectorProveedorProducto(p)
       : ('<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
         '<option value="">Estándar</option>' +
         flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
@@ -300,12 +314,82 @@ function renderCosteoProduccion(p) {
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
-    '<select class="mini-input" style="max-width:240px" data-action-change="add-pro-insumo-catalogo" data-pro="' + p.id + '">' +
-    '<option value="">+ Insumos predeterminados…</option>' +
-    (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
-    "</select>" +
+    '<button class="btn ghost small" data-action="abrir-insumo-picker-producto" data-pro="' + p.id + '">📂 Insumos predeterminados…</button>' +
     '<button class="btn ghost small" data-action="add-pro-insumo-custom" data-pro="' + p.id + '">+ Insumo personalizado</button>' +
     "</div>";
+  return html;
+}
+
+// Mismo patrón de "ventana tipo explorador" que el selector de insumos en
+// Cotizaciones (categorías a la izquierda, búsqueda arriba, selección
+// múltiple con checkbox) — antes acá era un <select> plano que, con decenas
+// de insumos, obligaba a leer una lista larga sin poder filtrar ni ver el
+// costo antes de elegir.
+function renderInsumoPickerProducto() {
+  var proId = state.productoInsumoPickerAbierto;
+  if (!proId) return "";
+  var categorias = state.catalogoCategorias || [];
+  var lista = state.catalogoInsumos || [];
+  var catActiva = state.productoInsumoPickerCategoria || "todos";
+  var q = norm(state.productoInsumoPickerBusqueda || "").trim();
+  var seleccion = state.productoInsumoPickerSeleccion || [];
+
+  function enCategoria(i, catId) {
+    if (catId === "todos") return true;
+    if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
+    return i.categoriaId === catId;
+  }
+  function cuenta(catId) {
+    return lista.filter(function (i) { return enCategoria(i, catId) && (!q || norm(i.nombre).indexOf(q) >= 0); }).length;
+  }
+  var visibles = lista.filter(function (i) {
+    return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
+  });
+
+  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
+    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
+    .concat([{ id: "sin", nombre: "Sin categoría" }]);
+
+  var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker-producto">' +
+    '<div class="picker-modal" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker-producto" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="picker-search"><input id="inp-insumo-picker-producto-buscar" class="mini-input" style="width:100%" placeholder="Buscar insumo por nombre o unidad…" value="' + esc(state.productoInsumoPickerBusqueda || "") + '" data-live-filter="productoInsumoPickerBusqueda" /></div>' +
+    '<div class="picker-body">' +
+    '<div class="picker-side">' +
+    itemsCat.map(function (c) {
+      var n = cuenta(c.id);
+      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-producto-categoria" data-val="' + esc(c.id) + '">' +
+        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
+    }).join("") +
+    "</div>" +
+    '<div class="picker-list">';
+
+  if (!lista.length) {
+    html += '<div class="empty">Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Catálogo</b> para poder reutilizarlos acá.</div>';
+  } else if (!visibles.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.productoInsumoPickerBusqueda) + '"' : "") + ".</div>";
+  } else {
+    visibles.forEach(function (i) {
+      var marcado = seleccion.indexOf(i.id) !== -1;
+      html += '<label class="picker-item ' + (marcado ? "sel" : "") + '">' +
+        '<input type="checkbox" data-action="toggle-insumo-picker-producto-item" data-id="' + i.id + '" ' + (marcado ? "checked" : "") + " />" +
+        '<span class="picker-item-info"><b>' + esc(i.nombre) + "</b><small>" + esc(i.unidad || "UND") + " · " + esc((TIPOS_COSTO[i.tipo] || {}).label || i.tipo || "") + "</small></span>" +
+        '<span class="amount">' + fmtMoney(i.costo) + "</span>" +
+        "</label>";
+    });
+  }
+
+  html += "</div></div>" +
+    '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">' + (seleccion.length ? seleccion.length + (seleccion.length === 1 ? " insumo seleccionado" : " insumos seleccionados") : "Marca los insumos que quieras agregar") + "</span>" +
+    '<span style="display:flex;gap:8px;">' +
+    '<button class="btn ghost small" data-action="cerrar-insumo-picker-producto">Cancelar</button>' +
+    '<button class="btn" ' + (seleccion.length ? "" : "disabled") + ' data-action="confirmar-insumo-picker-producto" data-pro="' + proId + '">Agregar' + (seleccion.length ? " (" + seleccion.length + ")" : "") + "</button>" +
+    "</span></div>" +
+    "</div></div>";
   return html;
 }
 
@@ -445,14 +529,39 @@ export var actions = {
       return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", cantidad: 1 }]) });
     });
   },
-  "add-pro-insumo-catalogo": function (el) {
-    if (!el.value) return;
+  "abrir-insumo-picker-producto": function (el) {
+    state.productoInsumoPickerAbierto = el.getAttribute("data-pro");
+    state.productoInsumoPickerCategoria = "todos";
+    state.productoInsumoPickerBusqueda = "";
+    state.productoInsumoPickerSeleccion = [];
+    notify();
+  },
+  "cerrar-insumo-picker-producto": function () {
+    state.productoInsumoPickerAbierto = "";
+    notify();
+  },
+  "set-insumo-picker-producto-categoria": function (el) {
+    state.productoInsumoPickerCategoria = el.getAttribute("data-val");
+    notify();
+  },
+  "toggle-insumo-picker-producto-item": function (el) {
+    var id = el.getAttribute("data-id");
+    var seleccion = state.productoInsumoPickerSeleccion || [];
+    state.productoInsumoPickerSeleccion = seleccion.indexOf(id) === -1 ? seleccion.concat([id]) : seleccion.filter(function (s) { return s !== id; });
+    notify();
+  },
+  "confirmar-insumo-picker-producto": function (el) {
     var id = el.getAttribute("data-pro");
-    var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === el.value; })[0];
-    if (!item) return;
-    mapPro(id, function (p) {
-      return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1 }]) });
-    });
+    var seleccion = state.productoInsumoPickerSeleccion || [];
+    var items = (state.catalogoInsumos || []).filter(function (i) { return seleccion.indexOf(i.id) !== -1; });
+    if (items.length) {
+      mapPro(id, function (p) {
+        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1 }; });
+        return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
+      });
+    }
+    state.productoInsumoPickerAbierto = "";
+    notify();
   },
   "remove-pro-insumo": function (el) {
     var id = el.getAttribute("data-pro"), insId = el.getAttribute("data-ins");
@@ -544,7 +653,7 @@ export var actions = {
 };
 
 function nuevoProducto() {
-  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [], origen: "taller" };
+  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [], origen: "taller", proveedorId: "" };
 }
 
 function mapPro(id, transform) {

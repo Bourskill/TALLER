@@ -23,7 +23,9 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   { key: "origenComisionCotId", header: "origen_comision_cotizacion_id" },
   { key: "origenComisionPedidoId", header: "origen_comision_pedido_id" },
   { key: "origenGastoId", header: "origen_gasto_real_id" },
-  { key: "esInsumo", header: "es_compra_insumo" }
+  { key: "esInsumo", header: "es_compra_insumo" },
+  { key: "proveedorId", header: "proveedor_id" },
+  { key: "insumoNombre", header: "insumo_nombre" }
 ]);
 
 export var tablaClientes = crearTablaSheet("Clientes", [
@@ -41,7 +43,11 @@ export var tablaClientes = crearTablaSheet("Clientes", [
   { key: "tipoRelacion", header: "tipo_relacion" },
   { key: "comisionDefaultTipo", header: "comision_tipo" },
   { key: "comisionDefaultValor", header: "comision_valor", numero: true },
-  { key: "roster", header: "roster_json", json: true, jsonDefault: function () { return []; } }
+  { key: "roster", header: "roster_json", json: true, jsonDefault: function () { return []; } },
+  { key: "categoriasInsumo", header: "categorias_insumo_json", json: true, jsonDefault: function () { return []; } },
+  { key: "descripcion", header: "descripcion" },
+  { key: "puntuacion", header: "puntuacion", numero: true },
+  { key: "preciosPorInsumo", header: "precios_por_insumo_json", json: true, jsonDefault: function () { return []; } }
 ], {
   // El estado usa comisionDefault:{tipo,valor}|null (solo aplica a puntos de
   // consignación) — se aplana a dos columnas planas para la Sheet y se

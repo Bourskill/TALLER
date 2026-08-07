@@ -135,3 +135,13 @@ export const ORIGEN_PRODUCCION = {
   taller: "Fabricado en el taller",
   proveedor: "Comprado a proveedor"
 };
+
+// Tipo de relación en Contactos (antes solo "Clientes"): un mismo directorio
+// para quien te compra (cliente), quien te vende insumos (proveedor) y los
+// puntos de consignación — cada uno con sus propios campos condicionales
+// (ver modules/clientes.js).
+export const TIPOS_RELACION_CONTACTO = {
+  cliente: "Cliente",
+  proveedor: "🧵 Proveedor",
+  punto_consignacion: "🏬 Punto de consignación"
+};

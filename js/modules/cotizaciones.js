@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -402,6 +402,12 @@ function renderTabProduccion(c, totales, real) {
     compras.map(function (comp) { return '<option value="insumo::' + esc(comp.nombre) + '">Insumo: ' + esc(comp.nombre) + "</option>"; }).join("") +
     "</select>" +
     '<input class="mini-input" data-role="gasto-nota" placeholder="Nota / imprevisto" />' +
+    (proveedoresDeContactos().length
+      ? ('<select class="mini-input" style="grid-column:1/-1;" data-role="gasto-proveedor">' +
+        '<option value="">Proveedor (opcional)</option>' +
+        proveedoresDeContactos().map(function (pr) { return '<option value="' + pr.id + '">' + esc(pr.nombre) + "</option>"; }).join("") +
+        "</select>")
+      : "") +
     "</div>";
   htmlCostosReales += '<div class="row-actions" style="margin-top:10px;">' +
     '<button class="btn ghost small" data-action="add-cot-gasto" data-id="' + c.id + '" title="Ajusta el resultado real de ESTA cotización Y crea un movimiento de gasto en Finanzas — es dinero que ya salió, no una estimación.">Registrar costo real</button>' +
@@ -435,7 +441,7 @@ function renderProduccionDocumentos(c) {
   html += '<div class="cot-docs-col">' +
     '<div class="cot-docs-titulo">Para el cliente</div>' +
     '<button class="btn cot-doc-btn" data-action="generar-pdf" data-id="' + c.id + '">📄 Generar PDF para el cliente</button>' +
-    '<button class="btn ghost cot-doc-btn" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Clientes)">✉ Enviar por correo</button>' +
+    '<button class="btn ghost cot-doc-btn" data-action="enviar-cotizacion-correo" data-id="' + c.id + '" title="Envía el PDF de la cotización al correo del cliente (debe estar registrado en Contactos)">✉ Enviar por correo</button>' +
     "</div>";
 
   html += '<div class="cot-docs-col">' +
@@ -957,6 +963,7 @@ export var actions = {
     var destinoVal = destinoSel ? destinoSel.value : "total";
     var destino = "total", destinoNombre = "";
     if (destinoVal && destinoVal.indexOf("insumo::") === 0) { destino = "insumo"; destinoNombre = destinoVal.slice("insumo::".length); }
+    var proveedorId = val(cotCard, "gasto-proveedor");
     if (!concepto || monto <= 0) return;
     var cotActual = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cotActual) return;
@@ -977,7 +984,8 @@ export var actions = {
       id: uid(), tipo: "gasto",
       concepto: "Costo real — " + concepto + (destino === "insumo" ? " (" + destinoNombre + ")" : "") + " — " + cotActual.descripcion,
       monto: monto, contraparte: "", fecha: todayStr(), pedidoId: "",
-      cotizacionId: id, origenGastoId: nuevoGasto.id, esInsumo: destino === "insumo" ? "1" : ""
+      cotizacionId: id, origenGastoId: nuevoGasto.id, esInsumo: destino === "insumo" ? "1" : "",
+      proveedorId: proveedorId || "", insumoNombre: destino === "insumo" ? destinoNombre : ""
     });
     guardarCotizaciones(); persist("tx"); notify();
   },
@@ -1060,7 +1068,7 @@ export var actions = {
     if (!cot) return;
     var cliente = cot.clienteId ? clienteById(cot.clienteId) : null;
     var correo = cliente && cliente.correo;
-    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Contactos para poder enviarle el PDF.'); return; }
     try {
       var pdf = await generarPDFCotizacion(cot, { enviarPorCorreo: true });
       await enviarCorreoConAdjunto({

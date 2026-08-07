@@ -67,7 +67,7 @@ function renderFormNuevoPedido() {
     "</div></div>";
   html += '<hr class="stitch" />';
   if (f.esConsignacion) {
-    html += '<div class="cot-col-title">Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Clientes, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Contactos, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
@@ -572,7 +572,7 @@ function renderPanelPedido(p, saldo) {
   html += '<div class="pedido-panel-col"><div class="cot-col-title">📄 PDF y documentos</div>' +
     '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
     '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
-    '<button class="btn ghost cot-doc-btn" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Clientes)">✉ Enviar factura</button>';
+    '<button class="btn ghost cot-doc-btn" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Contactos)">✉ Enviar factura</button>';
   // Un pedido convertido desde una cotización nace SIN fecha de entrega (la
   // cotización no la captura) y, hasta ahora, no había forma de agregarla
   // después de creado — quedaba fuera de "Próximas entregas" para siempre.
@@ -781,7 +781,7 @@ export var actions = {
     var fp = state.formPedido;
     fp.esConsignacion = el.getAttribute("data-val") === "consignacion";
     // Si el cliente elegido ya tiene una comisión por defecto (punto de
-    // consignación registrado en Clientes), se precarga para no repetirla.
+    // consignación registrado en Contactos), se precarga para no repetirla.
     if (fp.esConsignacion && fp.clienteId) {
       var cli = clienteById(fp.clienteId);
       if (cli && cli.comisionDefault) {
@@ -1119,7 +1119,7 @@ export var actions = {
     if (!remision) return;
     var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
     var correo = cliente && cliente.correo;
-    if (!correo) { window.alert('Este punto de consignación no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    if (!correo) { window.alert('Este punto de consignación no tiene correo registrado. Agrégaselo en la pestaña Contactos para poder enviarle el PDF.'); return; }
     try {
       var pdf = await generarPDFRemision(ped, remision, { enviarPorCorreo: true });
       await enviarCorreoConAdjunto({
@@ -1453,7 +1453,7 @@ export var actions = {
     if (!ped) return;
     var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
     var correo = cliente && cliente.correo;
-    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Contactos para poder enviarle el PDF.'); return; }
     try {
       var pdf = await generarPDFFactura(ped, { enviarPorCorreo: true });
       await enviarCorreoConAdjunto({
@@ -1480,7 +1480,7 @@ export var actions = {
     if (!abono) return;
     var cliente = ped.clienteId ? clienteById(ped.clienteId) : null;
     var correo = cliente && cliente.correo;
-    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Clientes para poder enviarle el PDF.'); return; }
+    if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Contactos para poder enviarle el PDF.'); return; }
     try {
       var pdf = await generarPDFRecibo(ped, abono, { enviarPorCorreo: true });
       await enviarCorreoConAdjunto({

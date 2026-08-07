@@ -332,9 +332,15 @@ function fmtCorto(n) {
 // TODO el histórico, sin relación con el rango de fechas del otro, que solo
 // servía para el PDF). El mismo rango alimenta los números en vivo y el PDF
 // — nunca puede pasar que la pantalla y el PDF de un mismo periodo digan
-// cosas distintas, porque los dos usan calcResumenMovimientos(). El gasto en
-// insumos por mes vive acá también, como parte del mismo reporte, en vez de
-// como una tarjeta aparte sin relación aparente.
+// cosas distintas, porque los dos usan calcResumenMovimientos().
+//
+// "Insumos cotizados por mes" (estimado, ver renderGastoInsumos más abajo)
+// vive en su PROPIA tarjeta aparte, con borde de advertencia — antes convivía
+// dentro de esta misma tarjeta de reporte y, aunque los números nunca se
+// mezclaban en el cálculo, visualmente parecía que sí (la queja más repetida
+// de este reporte era justo esa: "por qué las estimaciones aparecen como
+// gastos" — separarlas del todo en tarjetas distintas es lo único que elimina
+// la ambigüedad de raíz, no solo el texto de ayuda).
 function renderReportePeriodo() {
   var fr = state.formReporte;
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
@@ -368,36 +374,38 @@ function renderReportePeriodo() {
     '<button class="btn ghost small" data-action="export-csv">Descargar CSV de todos los movimientos</button>' +
     "</div>";
 
-  html += '<hr class="stitch" />';
-  html += renderGastoInsumos();
-
   html += "</div>";
+  html += renderGastoInsumos();
   return html;
 }
 
 // "Inventario negativo" (ver calcGastoInsumosMensual en core/calc.js): no
 // cuánto insumo hay en stock, sino cuánto se gastó en insumos cada mes —
-// para saber cuándo conviene empezar a comprar al por mayor. Parte del
-// reporte financiero (no un rango de fechas propio: siempre por mes).
+// para saber cuándo conviene empezar a comprar al por mayor. TARJETA APARTE
+// del reporte financiero (con borde de advertencia), a propósito: aunque el
+// número nunca se mezcló en el cálculo de "Gastos", vivir dentro de la misma
+// tarjeta hacía parecer que sí — separarla del todo, visualmente, es lo que
+// elimina la ambigüedad de raíz.
 function renderGastoInsumos() {
   var meses = calcGastoInsumosMensual();
   var abierto = !!state.gastoInsumosAbierto;
   var totalGlobal = meses.reduce(function (a, m) { return a + m.total; }, 0);
 
+  var html = '<div class="card" style="border-color:var(--warning);margin-top:14px;">';
   // Colapsado por defecto: es un reporte de consulta ocasional ("¿ya me
   // conviene comprar al por mayor?"), no algo que se mire todos los días, y
   // en un taller con meses de historia ocupaba media pantalla del Resumen.
-  var html = '<div class="section-title small" style="cursor:pointer;display:flex;align-items:center;gap:8px;" data-action="toggle-gasto-insumos">' +
+  html += '<div class="section-title small" style="cursor:pointer;display:flex;align-items:center;gap:8px;margin:0;" data-action="toggle-gasto-insumos">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierto ? "▾" : "▸") + "</button>" +
-    "<span>Insumos cotizados por mes — estimado, no es gasto real</span>" +
-    renderHelp("⚠️ ESTO ES UNA ESTIMACIÓN, no dinero que ya salió: suma lo cotizado en todas las cotizaciones de ese mes (se hayan convertido en pedido o no). No es un inventario de lo que tenés guardado tampoco (no manejás stock de insumos) — sirve para decidir cuándo conviene empezar a comprar al por mayor. Para que un gasto de insumos cuente como REAL (y aparezca en \"Gastos\" y en \"de los cuales, insumos\" de arriba), regístralo como costo real en la cotización o marca \"Es compra de insumo\" al registrar un movimiento en Finanzas.") +
+    "<span>⚠️ Insumos cotizados por mes — ESTIMADO, no es gasto real</span>" +
+    renderHelp("Esto NO es dinero que ya salió del taller: suma lo cotizado en todas las cotizaciones de ese mes (se hayan convertido en pedido o no). Tampoco es un inventario de lo que tenés guardado (no manejás stock de insumos) — sirve solo para decidir cuándo conviene empezar a comprar al por mayor. Para que un gasto de insumos cuente como REAL (y aparezca en \"Gastos\" y \"de los cuales, insumos\" del Reporte financiero de arriba), regístralo como costo real en la cotización o marca \"Es compra de insumo\" al registrar un movimiento en Finanzas.") +
     (meses.length ? '<span class="amount" style="margin-left:auto;font-size:13px;">' + fmt(totalGlobal) + "</span>" : "") +
     "</div>";
 
   if (!meses.length) {
-    return html + '<div class="empty">Todavía no hay cotizaciones con insumos para reportar.</div>';
+    return html + '<div class="empty">Todavía no hay cotizaciones con insumos para reportar.</div></div>';
   }
-  if (!abierto) return html;
+  if (!abierto) return html + "</div>";
 
   var COLS = "1fr 110px";
   meses.slice(0, 6).forEach(function (m) {
@@ -415,7 +423,7 @@ function renderGastoInsumos() {
       html += '<div class="section-sub" style="margin:6px 0 0;">y ' + (m.insumos.length - 12) + " insumo(s) más en este mes.</div>";
     }
   });
-  return html;
+  return html + "</div>";
 }
 function etiquetaMes(mes) {
   var partes = mes.split("-");
