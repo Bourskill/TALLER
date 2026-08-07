@@ -7,6 +7,14 @@ import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe } from "./utils.js";
 import { ESTADOS_DEFAULT } from "./constants.js";
 
+// Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
+// producción propias en el taller) — a diferencia de ESTADOS_DEFAULT (5
+// etapas de producción real), acá solo hay que saber si ya llegó o no.
+var ESTADOS_PROVEEDOR_DEFAULT = [
+  { id: "pendiente", label: "Pendiente proveedor" },
+  { id: "recibido", label: "Recibido" }
+];
+
 // ---------- estados de producción por pedido ----------
 // Un pedido puede traer su propio flujo de estados (definido desde la
 // cotización de origen, ver cotizaciones.js: c.estadosDef) porque no todas
@@ -28,7 +36,9 @@ export function estadoLabelDe(p) {
 // mismo ritmo (ver pedidos.js, que ya no muestra un solo "tape" para todo el
 // pedido sino el progreso de cada referencia).
 export function estadosDefDeRef(ref) {
-  return (ref && ref.estadosDef && ref.estadosDef.length) ? ref.estadosDef : ESTADOS_DEFAULT;
+  if (ref && ref.estadosDef && ref.estadosDef.length) return ref.estadosDef;
+  if (ref && ref.origen === "proveedor") return ESTADOS_PROVEEDOR_DEFAULT;
+  return ESTADOS_DEFAULT;
 }
 export function estadoIdxRef(ref) {
   var def = estadosDefDeRef(ref);
@@ -85,15 +95,22 @@ export function calcNominaPagada() {
 // el reporte EN VIVO de Configuración y el PDF nunca puedan mostrar números
 // distintos para el mismo rango de movimientos.
 export function calcResumenMovimientos(movimientos) {
-  var ingresos = 0, gastos = 0, nomina = 0, comisiones = 0;
+  var ingresos = 0, gastos = 0, nomina = 0, comisiones = 0, insumosReales = 0;
   (movimientos || []).forEach(function (t) {
     var v = num(t.monto);
     if (t.tipo === "ingreso") ingresos += v;
     else if (t.tipo === "nomina") { gastos += v; nomina += v; }
     else if (t.tipo === "comision") { gastos += v; comisiones += v; }
-    else gastos += v;
+    else {
+      gastos += v;
+      // insumosReales es un DESGLOSE dentro de "gastos" (compras de insumo
+      // reales, marcadas desde "Registrar costo real" en cotización o desde
+      // el checkbox "Es compra de insumo" en Finanzas) — no se suma aparte,
+      // solo se separa para mostrarla como sub-línea del reporte.
+      if (t.esInsumo) insumosReales += v;
+    }
   });
-  return { ingresos: ingresos, gastos: gastos, nomina: nomina, comisiones: comisiones, balance: ingresos - gastos };
+  return { ingresos: ingresos, gastos: gastos, nomina: nomina, comisiones: comisiones, insumosReales: insumosReales, balance: ingresos - gastos };
 }
 // Agrupa los movimientos de un rango en puntos para graficar ingresos vs.
 // gastos — la granularidad se adapta al tamaño del rango (día si es corto,
@@ -192,13 +209,12 @@ export function calcPorPagarDesglose() {
     .filter(function (it) { return it.monto > 0; });
   if (itemsGastosFijos.length) categorias.push({ categoria: "Gastos fijos", monto: itemsGastosFijos.reduce(function (a, it) { return a + it.monto; }, 0), items: itemsGastosFijos });
 
-  var nominaPend = calcNominaPendiente();
-  if (nominaPend > 0) {
-    categorias.push({
-      categoria: "Nómina", monto: nominaPend,
-      items: [{ concepto: "Nómina del periodo", monto: nominaPend, fecha: calcFechaVencimientoPeriodo(state.config.periodoPago || "mensual", diasPagoDe({ diasPago: state.config.diasPagoNomina, diaPago: state.config.diaPagoNomina })) }]
-    });
-  }
+  var itemsNomina = (state.config.nomina || [])
+    .map(function (e) {
+      return { concepto: "Nómina — " + e.nombre, monto: calcNominaPendienteEmpleado(e), fecha: calcFechaVencimientoPeriodo(periodoDeEmpleado(e), diasPagoDeEmpleado(e)) };
+    })
+    .filter(function (it) { return it.monto > 0; });
+  if (itemsNomina.length) categorias.push({ categoria: "Nómina", monto: itemsNomina.reduce(function (a, it) { return a + it.monto; }, 0), items: itemsNomina });
 
   var itemsDeudas = state.deudas
     .map(function (d) {
@@ -317,10 +333,10 @@ export function calcResumenPorPagar() {
     if (pend > 0) items.push({ monto: pend, fecha: calcFechaVencimientoPeriodo(g.periodo || "mensual", diasPagoDe(g)) });
   });
 
-  var nominaPend = calcNominaPendiente();
-  if (nominaPend > 0) {
-    items.push({ monto: nominaPend, fecha: calcFechaVencimientoPeriodo(state.config.periodoPago || "mensual", diasPagoDe({ diasPago: state.config.diasPagoNomina, diaPago: state.config.diaPagoNomina })) });
-  }
+  (state.config.nomina || []).forEach(function (e) {
+    var pend = calcNominaPendienteEmpleado(e);
+    if (pend > 0) items.push({ monto: pend, fecha: calcFechaVencimientoPeriodo(periodoDeEmpleado(e), diasPagoDeEmpleado(e)) });
+  });
 
   state.deudas.forEach(function (d) {
     var saldo = calcDeudaSaldoPendiente(d);
@@ -459,20 +475,31 @@ export function calcBalancePeriodo(periodo) {
     .filter(function (t) { return periodoKey(t.fecha, periodo) === miPeriodo; })
     .reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
 }
+// Cada persona puede tener su propio periodo de pago (mensual/quincenal/
+// semanal) y su(s) propio(s) día(s) — antes era una sola config global para
+// TODO el taller, lo que hacía imposible pagarle a alguien semanal y a otro
+// quincenal. Si la persona no trae `periodo`/`diasPago` propios (registros
+// viejos), cae al config global — mismo espíritu que diasPagoDe() para no
+// requerir una migración destructiva de los que ya existen.
+export function periodoDeEmpleado(e) {
+  return (e && e.periodo) || state.config.periodoPago || "mensual";
+}
+export function diasPagoDeEmpleado(e) {
+  var propios = diasPagoDe(e);
+  if (propios.length) return propios;
+  return diasPagoDe({ diasPago: state.config.diasPagoNomina, diaPago: state.config.diaPagoNomina });
+}
+// Cuánto le falta pagar a UNA persona en su periodo actual (a su propio
+// ritmo) — base de calcNominaPendiente() (el pool de todos) y de cada fila
+// en Pendientes → Nómina.
+export function calcNominaPendienteEmpleado(e) {
+  var periodo = periodoDeEmpleado(e);
+  var aPagar = calcSalarioPorPeriodo(e, periodo);
+  var pagado = calcNominaPagadaEmpleado(e.nombre, periodo);
+  return Math.max(0, aPagar - pagado);
+}
 export function calcNominaPendiente() {
-  // La porción de la nómina fija definida en Configuración correspondiente
-  // al periodo de pago actual (mensual/quincenal/semanal), si todavía no se
-  // registró como pagada (tx tipo "nomina") en ese periodo. Ya no existe un
-  // "pendiente manual" aparte: un pago de nómina que aún no se hizo no es un
-  // movimiento de Finanzas, así que no vive ahí.
-  var periodo = state.config.periodoPago || "mensual";
-  var factor = factorPeriodo(periodo);
-  var miPeriodo = periodoKey(todayStr(), periodo);
-  var definidaPeriodo = calcNominaMensualDefinida() / factor;
-  var pagadaEstePeriodo = state.tx
-    .filter(function (t) { return t.tipo === "nomina" && periodoKey(t.fecha, periodo) === miPeriodo; })
-    .reduce(function (a, t) { return a + num(t.monto); }, 0);
-  return Math.max(0, definidaPeriodo - pagadaEstePeriodo);
+  return (state.config.nomina || []).reduce(function (a, e) { return a + calcNominaPendienteEmpleado(e); }, 0);
 }
 
 // ---------- pedidos / equipo ----------
@@ -501,10 +528,6 @@ export function calcSalarioPorPeriodo(e, periodoPago) {
   if (salarioBaseDe(e) === periodoPago) return num(e.salario);
   return calcSalarioMensual(e) / factorPeriodo(periodoPago);
 }
-export function calcNominaMensualDefinida() {
-  return (state.config.nomina || []).reduce(function (a, e) { return a + calcSalarioMensual(e); }, 0);
-}
-
 // Rango de fechas del periodo de pago que está corriendo AHORA — lo que
 // contesta "¿este pago qué días cubre?". Usa los mismos cortes que
 // periodoKey() (de donde sale si un pago cuenta como "de este periodo"), para

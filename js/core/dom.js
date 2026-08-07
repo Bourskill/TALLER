@@ -219,7 +219,8 @@ export function render() {
       '<div class="sidebar-overlay" data-action="toggle-sidebar-mobile"></div>' +
       '<main class="main"><div class="main-inner">' + mainInner + "</div></main>" +
       "</div>" +
-      renderImagenPreview();
+      renderImagenPreview() +
+      renderToast();
 
     // Blindaje contra un quirk de Chrome: si el elemento con foco (ej. un
     // <select> cuyo desplegable nativo seguía abierto) sigue activo justo
@@ -359,6 +360,11 @@ function renderImagenPreview() {
     '<button class="imgprev-close" data-action="cerrar-imagen-preview" aria-label="Cerrar">✕</button>' +
     '<img class="imgprev-img" src="' + esc(state.imagenPreview) + '" alt="" />' +
     "</div>";
+}
+
+function renderToast() {
+  if (!state.toast) return "";
+  return '<div class="toast">' + esc(state.toast.msg) + "</div>";
 }
 
 function bindEvents() {

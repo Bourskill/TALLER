@@ -27,6 +27,7 @@ import { SPREADSHEET_ID } from "./google-config.js";
 
 var sheetsExistentesCache = null; // Set de nombres de pestaña ya confirmados — evita
 // consultar "¿existe la pestaña?" en cada guardado, solo la primera vez.
+var headersVerificados = {}; // nombre de pestaña -> true, una vez confirmado/completado su encabezado esta sesión.
 
 async function asegurarPestana(token, nombre, columnas) {
   if (!sheetsExistentesCache) {
@@ -34,10 +35,28 @@ async function asegurarPestana(token, nombre, columnas) {
     sheetsExistentesCache = {};
     nombres.forEach(function (n) { sheetsExistentesCache[n] = true; });
   }
-  if (sheetsExistentesCache[nombre]) return;
-  await sheetsAddSheet(token, SPREADSHEET_ID, nombre);
-  await sheetsValuesUpdate(token, SPREADSHEET_ID, nombre + "!A1:" + letraColumna(columnas.length) + "1", [columnas.map(function (c) { return c.header; })]);
-  sheetsExistentesCache[nombre] = true;
+  if (!sheetsExistentesCache[nombre]) {
+    await sheetsAddSheet(token, SPREADSHEET_ID, nombre);
+    await sheetsValuesUpdate(token, SPREADSHEET_ID, nombre + "!A1:" + letraColumna(columnas.length) + "1", [columnas.map(function (c) { return c.header; })]);
+    sheetsExistentesCache[nombre] = true;
+    headersVerificados[nombre] = true;
+    return;
+  }
+  // La pestaña ya existía de antes de que el esquema ganara columnas nuevas
+  // (ej. origenGastoId/esInsumo en tablaMovimientos): la fila de encabezados
+  // de una Sheet real no se reescribe sola, así que hay que completarla a
+  // mano o quedarían columnas sin nombre — los DATOS igual se escriben en la
+  // posición correcta (el orden lo define `columnas`, no el header), esto es
+  // solo para que la fila 1 siga siendo legible si el usuario abre la Sheet
+  // directamente. Se revisa una sola vez por pestaña por sesión.
+  if (headersVerificados[nombre]) return;
+  headersVerificados[nombre] = true;
+  var filaActual = await sheetsValuesGet(token, SPREADSHEET_ID, nombre + "!A1:" + letraColumna(columnas.length) + "1");
+  var actuales = (filaActual && filaActual[0]) || [];
+  if (actuales.length >= columnas.length) return;
+  var faltantes = columnas.slice(actuales.length).map(function (c) { return c.header; });
+  var rangoFaltante = nombre + "!" + letraColumna(actuales.length + 1) + "1:" + letraColumna(columnas.length) + "1";
+  await sheetsValuesUpdate(token, SPREADSHEET_ID, rangoFaltante, [faltantes]);
 }
 
 function letraColumna(n) {

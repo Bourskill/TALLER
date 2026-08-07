@@ -1,11 +1,11 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
-import { esc, num, uid, fmt } from "../core/utils.js";
-import { TIPOS_COSTO } from "../core/constants.js";
+import { esc, num, uid, fmt, opt } from "../core/utils.js";
+import { TIPOS_COSTO, ORIGEN_PRODUCCION } from "../core/constants.js";
 import { renderTipoCostoOptions } from "../core/components.js";
 import { renderHelp } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 
-var COLS = "1fr 150px 90px 110px 170px 40px";
+var COLS = "1fr 150px 90px 110px 170px 160px 40px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
 
 function renderPropuestasPendientes(session) {
@@ -77,7 +77,7 @@ export function render() {
     if (!g.items.length && categoriaActiva === "todos") return; // no mostrar grupos vacíos en la vista "Todas"
     huboAlgo = true;
     html += '<div class="section-sub" style="margin-top:16px;">' + esc(g.nombre) + " (" + g.items.length + ")</div>";
-    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Categoría</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span></span></div>';
+    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Categoría</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Origen</span><span></span></div>';
     if (!g.items.length) { html += '<div class="empty" style="padding:8px 0;">Sin insumos en esta categoría todavía.</div>'; }
     g.items.forEach(function (c) { html += renderFilaInsumo(c, categorias); });
   });
@@ -98,6 +98,9 @@ function renderFilaInsumo(c, categorias) {
     '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(c.unidad) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="unidad" />' +
     '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(c.costo) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="costo" />' +
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
+    '<span class="mobile-th">Origen</span><select class="mini-input" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="origen">' +
+    Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], c.origen || "taller"); }).join("") +
+    "</select>" +
     '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '">✕</button>' +
     "</div>";
 }
@@ -105,7 +108,7 @@ function renderFilaInsumo(c, categorias) {
 export var actions = {
   "add-cat-item": function () {
     var catActiva = state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "";
-    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva }]);
+    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, origen: "taller" }]);
     persist("catalogoInsumos"); notify();
   },
   "remove-cat-item": function (el) {

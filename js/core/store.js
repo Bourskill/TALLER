@@ -80,6 +80,9 @@ export const state = {
   // Estado puramente visual del cajón del menú en móvil: nunca se persiste
   // (siempre debe arrancar cerrado al recargar).
   sidebarMobileOpen: false,
+  // Aviso flotante temporal (toast): { msg } o null. Puramente visual, nunca
+  // se persiste — ver mostrarToast() más abajo.
+  toast: null,
   tx: [],
   txPapelera: [], // movimientos eliminados (papelera): se pueden restaurar o borrar definitivo
   pedidos: [],
@@ -135,7 +138,7 @@ export const state = {
 
   // Borradores de formularios. Viven en el estado (no en el DOM) para sobrevivir
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
-  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" },
+  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -156,7 +159,7 @@ export const state = {
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
-  formEmp: { nombre: "", cargo: "", salario: "" },
+  formEmp: { nombre: "", cargo: "", salario: "", periodo: "" },
   nominaPagoId: "", // id de la persona con el mini-formulario de "Pagar" abierto (o "")
   formNominaPago: { bono: "", descuento: "", fecha: "" },
   formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: "" },
@@ -215,6 +218,8 @@ export const state = {
   filtroClientes: "",
   filtroCatalogoCategoria: "todos",
   buscarPedidos: "",
+  buscarPedidosDraft: "", // texto en vivo dentro del picker de búsqueda de pedidos (ver renderPedidosBuscarPicker)
+  pedidosBuscarAbierto: false, // picker de búsqueda de pedidos abierto/cerrado — nunca se persiste
   buscarTx: "",
   filtroTxPeriodo: "todos",
   filtroTxVista: "activos", // "activos" | "papelera"
@@ -404,4 +409,19 @@ export async function descartarPropuesta(id) {
 // sin necesitar importar el motor de render.
 export function notify() {
   document.dispatchEvent(new CustomEvent("app:render"));
+}
+
+var toastTimer = null;
+// Aviso flotante que se muestra unos segundos y desaparece solo — para
+// confirmaciones rápidas (ej. "vinculado al producto del catálogo") que no
+// necesitan quedar como texto permanente en pantalla. Un toast nuevo
+// reemplaza al anterior (y su temporizador) en vez de acumularse.
+export function mostrarToast(msg) {
+  state.toast = { msg: msg };
+  notify();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () {
+    state.toast = null;
+    notify();
+  }, 3200);
 }

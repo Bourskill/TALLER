@@ -198,8 +198,30 @@ function renderProductoElegido(p) {
     "</div>";
 }
 
+// Compartido entre el listado principal y el picker de búsqueda (mismos
+// criterios: N.º OP, cédula, cliente, descripción o fecha de entrega).
+function filtrarPedidosPorTexto(pedidos, q) {
+  q = norm(q || "").trim();
+  if (!q) return pedidos;
+  return pedidos.filter(function (p) {
+    var cliente = p.clienteId ? clienteById(p.clienteId) : null;
+    var cedula = cliente ? cliente.cedula : "";
+    return norm(p.numeroOp).indexOf(q) >= 0 || norm(cedula).indexOf(q) >= 0 ||
+      norm(p.cliente).indexOf(q) >= 0 || norm(p.descripcion).indexOf(q) >= 0 || norm(p.fechaEntrega).indexOf(q) >= 0;
+  });
+}
+
 function renderHistorialPedidos() {
-  var html = '<div class="field" style="max-width:340px;margin-bottom:10px;"><input id="inp-buscar-pedidos" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidos || "") + '" data-live-filter="buscarPedidos" /></div>';
+  // La barra de búsqueda siempre visible se reemplazó por un botón que abre
+  // un picker (mismo patrón que el selector de insumos en Cotizaciones) —
+  // más fácil de tocar en móvil que un input angosto siempre en pantalla. Si
+  // ya hay una búsqueda activa, el botón se reemplaza por un chip con lo que
+  // se está buscando, para no perder de vista que el listado está filtrado.
+  var q = norm(state.buscarPedidos || "").trim();
+  var html = q
+    ? ('<div class="filters" style="margin-bottom:10px;"><button class="chip active" data-action="abrir-pedidos-buscar">🔍 "' + esc(state.buscarPedidos) + '"</button>' +
+      '<button class="btn ghost small" data-action="limpiar-busqueda-pedidos">✕ Quitar búsqueda</button></div>')
+    : ('<div style="margin-bottom:10px;"><button class="btn ghost" data-action="abrir-pedidos-buscar">🔍 Buscar pedido</button></div>');
 
   html += '<div class="filters"><button class="chip ' + (state.filtroPedidos === "todos" ? "active" : "") + '" data-action="filtro-pedidos" data-val="todos">Todos</button>';
   chipsEstadosDisponibles().forEach(function (e) {
@@ -211,15 +233,7 @@ function renderHistorialPedidos() {
 
   var filtered = state.filtroPedidos === "todos" ? state.pedidos : state.pedidos.filter(function (p) { return p.estado === state.filtroPedidos; });
   if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return num(p.total) - num(p.abono) > 0; }); }
-  var q = norm(state.buscarPedidos || "").trim();
-  if (q) {
-    filtered = filtered.filter(function (p) {
-      var cliente = p.clienteId ? clienteById(p.clienteId) : null;
-      var cedula = cliente ? cliente.cedula : "";
-      return norm(p.numeroOp).indexOf(q) >= 0 || norm(cedula).indexOf(q) >= 0 ||
-        norm(p.cliente).indexOf(q) >= 0 || norm(p.descripcion).indexOf(q) >= 0 || norm(p.fechaEntrega).indexOf(q) >= 0;
-    });
-  }
+  filtered = filtrarPedidosPorTexto(filtered, q);
   if (filtered.length === 0) { html += '<div class="empty">No hay pedidos <b>' + (state.filtroPedidos !== "todos" || q ? "que coincidan" : "todavía") + "</b>.</div>"; }
 
   filtered.forEach(function (p) {
@@ -259,6 +273,50 @@ function renderHistorialPedidos() {
       (abierto ? renderPanelPedido(p, saldo) : "") +
       "</div>";
   });
+  html += renderPedidosBuscarPicker();
+  return html;
+}
+
+// Modal de búsqueda (mismo patrón .picker-overlay/.picker-modal que el
+// selector de insumos en Cotizaciones — ya responsive: pantalla completa en
+// móvil, modal centrado en desktop). Muestra resultados en vivo mientras se
+// escribe; elegir uno cierra el modal y salta a esa tarjeta en la lista de
+// abajo (mismo scroll + "destello" que "↗ Ver" en Pendientes).
+function renderPedidosBuscarPicker() {
+  if (!state.pedidosBuscarAbierto) return "";
+  var q = norm(state.buscarPedidosDraft || "").trim();
+  var resultados = q ? filtrarPedidosPorTexto(state.pedidos, q).slice(0, 30) : [];
+
+  var html = '<div class="picker-overlay" data-action="cerrar-pedidos-buscar">' +
+    '<div class="picker-modal" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Buscar pedido</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-pedidos-buscar" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="picker-search"><input id="inp-pedidos-buscar-picker" class="mini-input" style="width:100%" placeholder="N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidosDraft || "") + '" data-live-filter="buscarPedidosDraft" /></div>' +
+    '<div class="picker-list">';
+
+  if (!q) {
+    html += '<div class="empty">Escribe para buscar entre tus ' + state.pedidos.length + " pedido(s).</div>";
+  } else if (!resultados.length) {
+    html += '<div class="empty">Sin coincidencias para "' + esc(state.buscarPedidosDraft) + '".</div>';
+  } else {
+    resultados.forEach(function (p) {
+      var cliente = p.clienteId ? clienteById(p.clienteId) : null;
+      var saldo = num(p.total) - num(p.abono);
+      html += '<div class="picker-item" data-action="ir-a-pedido-desde-picker" data-id="' + p.id + '">' +
+        '<span></span>' +
+        '<span class="picker-item-info"><b>' + esc(p.numeroOp || "OP-????") + " — " + esc(p.cliente) + "</b>" +
+        "<small>" + esc(p.descripcion) + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + "</small></span>" +
+        '<span class="amount">' + (saldo > 0 ? "saldo " + fmt(saldo) : fmt(p.total)) + "</span>" +
+        "</div>";
+    });
+  }
+
+  html += "</div></div>" +
+    '<div class="picker-foot"><span class="section-sub" style="margin:0;">' + (resultados.length ? resultados.length + " resultado(s)" : "") + "</span>" +
+    '<button class="btn ghost small" data-action="cerrar-pedidos-buscar">Cerrar</button></div>' +
+    "</div></div>";
   return html;
 }
 
@@ -690,6 +748,32 @@ export var actions = {
   "toggle-filtro-saldo": function () {
     state.filtroPedidosSoloSaldo = !state.filtroPedidosSoloSaldo;
     notify();
+  },
+  "abrir-pedidos-buscar": function () {
+    state.buscarPedidosDraft = state.buscarPedidos || "";
+    state.pedidosBuscarAbierto = true;
+    notify();
+  },
+  "cerrar-pedidos-buscar": function () {
+    state.pedidosBuscarAbierto = false;
+    notify();
+  },
+  "limpiar-busqueda-pedidos": function () {
+    state.buscarPedidos = "";
+    state.buscarPedidosDraft = "";
+    notify();
+  },
+  "ir-a-pedido-desde-picker": function (el) {
+    var id = el.getAttribute("data-id");
+    state.buscarPedidos = state.buscarPedidosDraft;
+    state.pedidosBuscarAbierto = false;
+    notify();
+    setTimeout(function () {
+      var card = document.querySelector('[data-pedido-id="' + id + '"]');
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.add("destello");
+    }, 60);
   },
   // Control segmentado "Venta directa | Consignación" (antes un checkbox que
   // solo se podía alternar, sin poder ver cuál era la otra opción).

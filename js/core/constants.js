@@ -125,3 +125,13 @@ export const TIPOS_COSTO = {
   fijo_pedido: { label: "Fijo por pedido", ayuda: "costo = costo total ÷ cantidad de prendas del pedido" },
   por_prenda: { label: "Fijo por prenda", ayuda: "costo = costo × cantidad indicada" }
 };
+
+// De dónde sale un insumo o producto: fabricado dentro del taller (pasa por
+// fases de producción propias) o comprado ya hecho a un proveedor externo
+// (no tiene fases que seguir — se recibe y ya). Un producto/referencia
+// "proveedor" oculta el flujo de producción en Catálogo y usa un progreso de
+// solo 2 etapas (pendiente/recibido) en vez del flujo completo.
+export const ORIGEN_PRODUCCION = {
+  taller: "Fabricado en el taller",
+  proveedor: "Comprado a proveedor"
+};

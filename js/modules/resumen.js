@@ -356,6 +356,7 @@ function renderReportePeriodo() {
   html += '<div class="report-grid" style="margin-top:14px;">' +
     '<div class="report-item"><div class="rl">Ingresos</div><div class="rv" style="color:var(--success-ink);">' + fmt(resumen.ingresos) + "</div></div>" +
     '<div class="report-item"><div class="rl">Gastos</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.gastos) + "</div></div>" +
+    '<div class="report-item"><div class="rl">De los cuales, insumos' + renderHelp("Parte de \"Gastos\" que corresponde a compras de insumo YA REALES — registradas como costo real en una cotización, o marcadas \"Es compra de insumo\" al registrar un movimiento en Finanzas. No confundir con \"Insumos cotizados por mes\" de más abajo, que es solo una estimación.") + '</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.insumosReales) + "</div></div>" +
     '<div class="report-item"><div class="rl">Nómina</div><div class="rv" style="color:var(--warning-ink);">' + fmt(resumen.nomina) + "</div></div>" +
     '<div class="report-item"><div class="rl">Comisiones</div><div class="rv" style="color:var(--info-ink);">' + fmt(resumen.comisiones) + "</div></div>" +
     '<div class="report-item"><div class="rl">Balance neto</div><div class="rv">' + fmt(resumen.balance) + "</div></div>" +
@@ -388,8 +389,8 @@ function renderGastoInsumos() {
   // en un taller con meses de historia ocupaba media pantalla del Resumen.
   var html = '<div class="section-title small" style="cursor:pointer;display:flex;align-items:center;gap:8px;" data-action="toggle-gasto-insumos">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierto ? "▾" : "▸") + "</button>" +
-    "<span>Gasto en insumos por mes</span>" +
-    renderHelp("No es un inventario de lo que tenés guardado (no manejás stock) — es cuánto gastaste en insumos cada mes, sumado desde las cotizaciones de ese mes. Sirve para decidir cuándo conviene empezar a comprar al por mayor — ahí sí tendría sentido llevar inventario de verdad.") +
+    "<span>Insumos cotizados por mes — estimado, no es gasto real</span>" +
+    renderHelp("⚠️ ESTO ES UNA ESTIMACIÓN, no dinero que ya salió: suma lo cotizado en todas las cotizaciones de ese mes (se hayan convertido en pedido o no). No es un inventario de lo que tenés guardado tampoco (no manejás stock de insumos) — sirve para decidir cuándo conviene empezar a comprar al por mayor. Para que un gasto de insumos cuente como REAL (y aparezca en \"Gastos\" y en \"de los cuales, insumos\" de arriba), regístralo como costo real en la cotización o marca \"Es compra de insumo\" al registrar un movimiento en Finanzas.") +
     (meses.length ? '<span class="amount" style="margin-left:auto;font-size:13px;">' + fmt(totalGlobal) + "</span>" : "") +
     "</div>";
 

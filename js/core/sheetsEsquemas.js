@@ -21,7 +21,9 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   { key: "origenAbonoId", header: "origen_abono_id" },
   { key: "origenGastoFijoPeriodo", header: "origen_gasto_fijo_periodo" },
   { key: "origenComisionCotId", header: "origen_comision_cotizacion_id" },
-  { key: "origenComisionPedidoId", header: "origen_comision_pedido_id" }
+  { key: "origenComisionPedidoId", header: "origen_comision_pedido_id" },
+  { key: "origenGastoId", header: "origen_gasto_real_id" },
+  { key: "esInsumo", header: "es_compra_insumo" }
 ]);
 
 export var tablaClientes = crearTablaSheet("Clientes", [

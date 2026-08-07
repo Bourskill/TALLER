@@ -47,6 +47,13 @@ function renderFormMovimiento() {
     '<option value="">Sin pedido (movimiento suelto)</option>' +
     state.pedidos.map(function (p) { return '<option value="' + p.id + '" ' + (f.pedidoId === p.id ? "selected" : "") + '>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente) + " — " + esc(p.descripcion) + "</option>"; }).join("") +
     "</select></div>" +
+    '<div class="field wide"><label class="mini-label" style="display:flex;align-items:center;gap:6px;font-weight:600;"><input type="checkbox" data-role="tx-es-insumo" /> 📦 Es compra de insumo' +
+    renderHelp("Márcalo si este gasto es una compra REAL de insumo (tela, hilo, etc.) — así cuenta en \"de los cuales, insumos\" del reporte financiero de Resumen, aparte de los demás gastos. Es el segundo camino (junto con \"Registrar costo real\" en una cotización) para que un gasto de insumos deje de ser solo una estimación.") +
+    "</label></div>" +
+    '<div class="field wide"><label>Cotización relacionada (opcional)</label><select data-form="tx" data-field="cotizacionId">' +
+    '<option value="">Sin cotización</option>' +
+    state.cotizaciones.map(function (c) { return '<option value="' + c.id + '" ' + (f.cotizacionId === c.id ? "selected" : "") + '>' + esc(c.descripcion) + " — " + esc(c.cliente) + "</option>"; }).join("") +
+    "</select></div>" +
     '<button class="btn" data-action="add-tx">Agregar</button>' +
     "</div></div>";
 }
@@ -260,11 +267,17 @@ export var actions = {
     state.finanzasVista = el.getAttribute("data-val");
     notify();
   },
-  "add-tx": function () {
+  "add-tx": function (el) {
     var f = state.formTx;
     if (!exigirCampos([["Concepto", f.concepto], ["Monto", f.monto]])) return;
-    state.tx.unshift({ id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha, pedidoId: f.pedidoId || "" });
-    state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" };
+    var card = el.closest(".card");
+    var chkInsumo = card ? card.querySelector('[data-role="tx-es-insumo"]') : null;
+    var esInsumo = !!(chkInsumo && chkInsumo.checked);
+    state.tx.unshift({
+      id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha,
+      pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "", esInsumo: esInsumo ? "1" : ""
+    });
+    state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
     persist("tx"); notify();
   },

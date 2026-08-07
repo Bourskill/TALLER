@@ -1,4 +1,4 @@
-import { state, persist, notify } from "../core/store.js";
+import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
@@ -6,11 +6,11 @@ import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.j
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp, sincronizarEventoPedido } from "./pedidos.js";
-import { ESTADOS_DEFAULT, TIPOS_COSTO } from "../core/constants.js";
+import { ESTADOS_DEFAULT, TIPOS_COSTO, ORIGEN_PRODUCCION } from "../core/constants.js";
 import { ajustarStockProducto } from "../core/stock.js";
 
 function nuevaReferencia() {
-  return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [] };
+  return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [], origen: "taller" };
 }
 function nuevoInsumo(fuente) {
   return {
@@ -404,14 +404,14 @@ function renderTabProduccion(c, totales, real) {
     '<input class="mini-input" data-role="gasto-nota" placeholder="Nota / imprevisto" />' +
     "</div>";
   htmlCostosReales += '<div class="row-actions" style="margin-top:10px;">' +
-    '<button class="btn ghost small" data-action="add-cot-gasto" data-id="' + c.id + '" title="Solo ajusta el resultado real de ESTA cotización — no crea un movimiento en Finanzas ni afecta el KPI.">Registrar costo real</button>' +
+    '<button class="btn ghost small" data-action="add-cot-gasto" data-id="' + c.id + '" title="Ajusta el resultado real de ESTA cotización Y crea un movimiento de gasto en Finanzas — es dinero que ya salió, no una estimación.">Registrar costo real</button>' +
     (c.estado === "convertida"
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como un solo movimiento en Finanzas, para llevar el registro completo por pedido.">Registrar estimado completo como movimiento</button>'
       : '<span class="tag" style="background:var(--surface-3);" title="Disponible una vez esta cotización ya sea un pedido — es una medida de seguridad para no registrar gastos sin que exista un pedido con abono real.">🔒 Estimado completo (disponible al convertir en pedido)</span>') +
     "</div>";
   html += '<hr class="stitch cot-section-divider" />';
   html += '<div class="cot-col-title">Costos reales registrados' +
-    renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro también crea un movimiento en Finanzas, para que la caja quede sincronizada.") +
+    renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro crea también un movimiento de gasto en Finanzas, así la caja y \"de los cuales, insumos\" del reporte quedan sincronizados. Esto es distinto del panel \"Gasto en insumos por mes\" de Resumen, que es solo una ESTIMACIÓN de lo cotizado.") +
     "</div>";
   html += htmlCostosReales;
 
@@ -494,6 +494,10 @@ function renderRefCard(cotId, ref) {
     '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="consumoAprox" /></span>' +
     '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="cantidadPedida" /></span>' +
     '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="precioVenta" /></span>' +
+    '<span><label>Origen' + renderHelp("Si es comprada a proveedor, el progreso de producción pasa a ser solo \"pendiente/recibido\" en vez del flujo completo de fases.") + '</label><select class="mini-input" style="flex:1;" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="origen">' +
+    Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], ref.origen || "taller"); }).join("") +
+    "</select></span>" +
+    (ref.origen === "proveedor" ? ('<span><label>Entrega esperada del proveedor</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="fechaEntregaProveedor" /></span>') : "") +
     '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia" data-cot="' + cotId + '" data-ref="' + ref.id + '">Eliminar referencia</button>' +
     "</div>" +
     "</div>" +
@@ -530,8 +534,7 @@ function renderRefCard(cotId, ref) {
       state.productos.map(function (p) { return '<option value="' + p.id + '" ' + (ref.productoId === p.id ? "selected" : "") + '>' + esc(p.nombre) + "</option>"; }).join("") +
       "</select>"
     ) : "") +
-    "</div>" +
-    (ref.productoId ? '<div class="combo-linked">✓ Vinculado al producto del catálogo — al convertir en pedido, el stock de las tallas de "Tallas y observaciones" se descuenta solo</div>' : "");
+    "</div>";
 
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
@@ -781,7 +784,8 @@ export var actions = {
   },
   "set-ref-campo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), campo = el.getAttribute("data-campo");
-    var numerico = campo !== "nombre";
+    var textual = campo === "nombre" || campo === "origen" || campo === "fechaEntregaProveedor";
+    var numerico = !textual;
     mapRef(cotId, refId, function (r) {
       var valor = numerico ? num(el.value) : el.value;
       // No puede haber menos cantidad que filas ya cargadas en "Tallas y
@@ -928,17 +932,22 @@ export var actions = {
       var nuevosInsumos = (prod.insumos || []).map(function (ins) {
         return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
       });
-      var patch = { insumos: (r.insumos || []).concat(nuevosInsumos), productoId: prod.id };
+      var patch = { insumos: (r.insumos || []).concat(nuevosInsumos), productoId: prod.id, origen: prod.origen || "taller" };
       if (!r.nombre) patch.nombre = prod.nombre;
       if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
       if (prod.imagenUrl && !r.imagenUrl) patch.imagenUrl = prod.imagenUrl;
       if (prod.precioVenta && (!r.precioVenta || Number(r.precioVenta) === 0)) patch.precioVenta = num(prod.precioVenta);
-      if (prod.flujoEstadosId) {
+      if (prod.origen === "proveedor") {
+        // Comprado a proveedor: sin flujo de fases propio — se usa el
+        // default de 2 etapas (pendiente/recibido) de estadosDefDeRef().
+        patch.estadosDef = [];
+      } else if (prod.flujoEstadosId) {
         var flujoP = (state.plantillasEstados || []).filter(function (f) { return f.id === prod.flujoEstadosId; })[0];
         if (flujoP) patch.estadosDef = flujoP.estados.map(function (e) { return { id: e.id, label: e.label }; });
       }
       return Object.assign({}, r, patch);
     });
+    mostrarToast('✓ Vinculado a "' + prod.nombre + '" — el stock de las tallas se descuenta solo al convertir en pedido.');
   },
   "add-cot-gasto": function (el) {
     var id = el.getAttribute("data-id");
@@ -949,16 +958,28 @@ export var actions = {
     var destino = "total", destinoNombre = "";
     if (destinoVal && destinoVal.indexOf("insumo::") === 0) { destino = "insumo"; destinoNombre = destinoVal.slice("insumo::".length); }
     if (!concepto || monto <= 0) return;
-    // "Registrar costo real" SOLO ajusta el resultado real de la cotización
-    // (costo/ganancia real). NO crea un movimiento en Finanzas ni afecta el
-    // KPI — para eso está el botón "Registrar estimado completo como
-    // movimiento", disponible una vez la cotización ya es un pedido.
+    var cotActual = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+    if (!cotActual) return;
+    var nuevoGasto = { id: uid(), concepto: concepto, monto: monto, nota: nota, destino: destino, destinoNombre: destinoNombre, fecha: todayStr() };
+    // "Registrar costo real" ajusta el resultado real de ESTA cotización
+    // (c.gastosReales[], para el comparativo estimado-vs-real) Y crea el
+    // movimiento correspondiente en Finanzas — es, junto con marcar "Es
+    // compra de insumo" al registrar un movimiento a mano, una de las dos
+    // formas en que un gasto de insumos pasa de ESTIMADO a REAL. Antes no
+    // creaba el movimiento pese a que el texto de ayuda ya decía que sí —
+    // esto implementa esa intención original.
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== id) return c;
-      var gastos = (c.gastosReales || []).concat([{ id: uid(), concepto: concepto, monto: monto, nota: nota, destino: destino, destinoNombre: destinoNombre, fecha: todayStr() }]);
+      var gastos = (c.gastosReales || []).concat([nuevoGasto]);
       return Object.assign({}, c, { gastosReales: gastos });
     });
-    guardarCotizaciones(); notify();
+    state.tx.unshift({
+      id: uid(), tipo: "gasto",
+      concepto: "Costo real — " + concepto + (destino === "insumo" ? " (" + destinoNombre + ")" : "") + " — " + cotActual.descripcion,
+      monto: monto, contraparte: "", fecha: todayStr(), pedidoId: "",
+      cotizacionId: id, origenGastoId: nuevoGasto.id, esInsumo: destino === "insumo" ? "1" : ""
+    });
+    guardarCotizaciones(); persist("tx"); notify();
   },
   "set-cot-iva": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");

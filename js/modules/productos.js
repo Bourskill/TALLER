@@ -14,12 +14,13 @@
 // cards (foto, nombre, categoría, precio, stock) — clic en cualquiera abre su
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, val, exigirCampos } from "../core/utils.js";
+import { esc, num, uid, val, opt, exigirCampos } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcRefTotales, stockTotalProducto } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
+import { ORIGEN_PRODUCCION } from "../core/constants.js";
 
 var INS_COLS = "1fr 60px 90px 150px 70px 30px";
 var TALLA_COLS = "1fr 90px 30px";
@@ -200,11 +201,14 @@ function renderProductoCard(p) {
 
   var html = '<div class="card" data-producto-id="' + p.id + '">' +
     '<div class="pedido-top" style="align-items:flex-start;">' + renderProductoThumb(p) +
-    '<div class="form-grid" style="flex:1;grid-template-columns:2fr 1fr 1fr 1fr;">' +
+    '<div class="form-grid" style="flex:1;grid-template-columns:2fr 1fr 1fr 1fr 1fr;">' +
     '<div class="field"><label>Nombre</label><input class="mini-input" style="width:100%;font-weight:700;" value="' + esc(p.nombre) + '" placeholder="Ej. Camiseta básica algodón" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="nombre" /></div>' +
     '<div class="field"><label>Categoría</label><input class="mini-input" style="width:100%" value="' + esc(p.categoria || "") + '" placeholder="Ej. Camisetas" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="categoria" /></div>' +
     '<div class="field"><label>Referencia / SKU</label><input class="mini-input" style="width:100%" value="' + esc(p.referencia || "") + '" placeholder="Ej. CAM-001" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="referencia" /></div>' +
     '<div class="field"><label>Precio de venta</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.precioVenta) + '" placeholder="0" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="precioVenta" /></div>' +
+    '<div class="field"><label>Origen' + renderHelp("Si es comprado a proveedor, no tiene fases de producción propias en el taller — el selector de \"Flujo de producción\" de abajo se oculta.") + '</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="origen">' +
+    Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], p.origen || "taller"); }).join("") +
+    "</select></div>" +
     "</div><button class=\"btn danger small\" data-action=\"remove-producto\" data-id=\"" + p.id + "\">Eliminar producto</button></div>";
 
   html += '<div class="ref-summary" style="margin-top:14px;">' +
@@ -273,10 +277,12 @@ function renderCosteoProduccion(p) {
 
   html += '<div class="form-grid" style="margin-top:10px;">' +
     '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
-    '<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
-    '<option value="">Estándar</option>' +
-    flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
-    "</select></div>" +
+    (p.origen === "proveedor"
+      ? '<div class="field"><label>Flujo de producción</label><div class="section-sub" style="margin:0;">Producto comprado a proveedor — sin fases de producción propias en el taller.</div></div>'
+      : ('<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
+        '<option value="">Estándar</option>' +
+        flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
+        "</select></div>")) +
     "</div>";
 
   html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
@@ -538,7 +544,7 @@ export var actions = {
 };
 
 function nuevoProducto() {
-  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [] };
+  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [], origen: "taller" };
 }
 
 function mapPro(id, transform) {
