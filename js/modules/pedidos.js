@@ -38,59 +38,85 @@ function renderTabsPedidos(vista) {
     "</div>";
 }
 
+// Suma la cantidad y arma la descripción de un pedido rápido a partir de sus
+// líneas (producto de catálogo o texto libre) — se calcula siempre a partir
+// de las líneas, nunca se escribe a mano, para que sea imposible crear un
+// pedido de "1 und" sin que quede claro 1 und DE QUÉ.
+function resumenLineasPedido(lineas) {
+  lineas = lineas || [];
+  var cantidad = lineas.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+  var descripcion = lineas.map(function (l) {
+    var nombre = l.productoNombre || l.textoDescripcion || "";
+    return nombre + (l.talla ? " (" + l.talla + ")" : "") + " x" + l.cantidad;
+  }).join(", ");
+  return { cantidad: cantidad, descripcion: descripcion };
+}
+
 function renderFormNuevoPedido() {
   var f = state.formPedido;
+  var lineas = f.stockConsumido || [];
+  var clienteListo = !!(f.cliente && f.cliente.trim());
+  var tieneLineas = lineas.length > 0;
   var costoNum = num(f.costo), totalNum = num(f.total);
   var gananciaHint = costoNum > 0 && totalNum > 0
     ? ('<div class="section-sub" style="margin:6px 0 0;">Ganancia estimada: <b style="color:' + (totalNum - costoNum >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + fmt(totalNum - costoNum) + " (" + ((totalNum - costoNum) / totalNum * 100).toFixed(1) + "%)</b></div>")
     : "";
   var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
-    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créala aparte en Cotizaciones y conviértela en pedido — sus valores reemplazan a los de aquí.") +
+    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. El formulario va paso a paso: primero el cliente, luego qué se lleva, y recién con eso definido aparece el resto. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créala aparte en Cotizaciones y conviértela en pedido.") +
     "</div>";
-  html += '<div class="cot-col-title" style="margin-top:6px;">Datos básicos</div><div class="form-grid">' +
+
+  // ---- 1 · Cliente y tipo de pedido (siempre visible) ----
+  html += '<div class="cot-col-title" style="margin-top:6px;">1 · Cliente y tipo de pedido</div><div class="form-grid">' +
     renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
     '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
-    '<div class="field wide"><label>Descripción</label><input data-form="pedido" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. 40 camisetas algodón" /></div>' +
-    '<div class="field"><label>' + (f.esConsignacion ? "Cantidad enviada" : "Cantidad") + '</label><input type="number" data-form="pedido" data-field="cantidad" value="' + esc(f.cantidad) + '" /></div>' +
     '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
     "</div>";
   // Control segmentado en vez de un checkbox con una frase larga al lado: las
-  // dos opciones se nombran explícitamente (antes había que deducir que "no
-  // marcado" significaba venta directa) y la explicación vive en el "?" como
-  // en el resto de la app.
-  html += '<div style="margin-top:18px;"><div class="cot-col-title">Tipo de pedido' +
+  // dos opciones se nombran explícitamente y la explicación vive en el "?".
+  html += '<div style="margin-top:14px;"><div class="cot-col-title">Tipo de pedido' +
     renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
     "</div>" +
     '<div class="segmented">' +
     '<button class="segmented-opcion ' + (f.esConsignacion ? "" : "active") + '" data-action="set-tipo-pedido" data-val="venta">🧾 Venta directa</button>' +
     '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
     "</div></div>";
+
+  if (!clienteListo) {
+    html += '<div class="empty" style="margin-top:16px;">Elige o escribe el cliente arriba para continuar armando el pedido.</div>' +
+      "</div>"; // cierra .card
+    return html;
+  }
+
+  html += '<hr class="stitch" />';
+  // ---- 2 · Qué incluye (líneas) ----
+  html += '<div class="cot-col-title">2 · Qué incluye este pedido' +
+    renderHelp((f.esConsignacion
+      ? "Elige del catálogo lo que le dejas al punto — queda como su primera remisión (con PDF) y el stock del taller baja al crear el pedido."
+      : "Cada línea (producto del catálogo, o algo que describas a mano) define su propia cantidad — la cantidad y descripción del pedido se arman solas a partir de esto, para que nunca quede una cantidad suelta sin decir de qué es.")) +
+    "</div>";
+  html += renderLineasPedido(f);
+
+  if (!tieneLineas) {
+    html += '<div class="empty" style="margin-top:10px;">Agrega al menos un producto del catálogo' + (f.esConsignacion ? "" : " o descríbelo") + " para continuar." + "</div>" +
+      "</div>"; // cierra .card
+    return html;
+  }
+
   html += '<hr class="stitch" />';
   if (f.esConsignacion) {
-    html += '<div class="cot-col-title">Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Contactos, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">3 · Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Contactos, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
       "</div>";
-    html += '<hr class="stitch" />';
-    // Antes el selector de productos solo existía para venta directa, así que
-    // un pedido de consignación nacía vacío y había que adivinar que la
-    // mercancía se cargaba después, desde "Agregar remisión" dentro de la
-    // tarjeta ya creada. Ahora se puede armar el primer envío acá mismo: lo
-    // que se elija se registra como la primera remisión (con su PDF) al crear.
-    html += '<div class="cot-col-title">Qué le vas a entregar' +
-      renderHelp("Elige del catálogo lo que le dejas al punto ahora. Al crear el pedido esto queda como su primera remisión (el documento de entrega firmable) y el stock del taller baja. Después puedes agregar más remisiones desde la tarjeta del pedido cada vez que le lleves más mercancía.") +
-      "</div>";
-    html += renderProductoPicker(f, true);
   } else {
-    html += renderProductoPicker(f);
-    html += '<div class="cot-col-title">Dinero</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">3 · Precio y pago</div><div class="form-grid">' +
       '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Abono inicial recibido</label><input type="number" data-form="pedido" data-field="abono" value="' + esc(f.abono) + '" placeholder="0" /></div>' +
       "</div>" + gananciaHint;
     html += '<hr class="stitch" />';
-    html += '<div class="cot-col-title">Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">4 · Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
       '<div class="field"><label>Tipo de comisión</label><select data-form="pedido" data-field="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + '</select></div>' +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
@@ -101,37 +127,20 @@ function renderFormNuevoPedido() {
   return html;
 }
 
-// Elegir una prenda ya hecha del catálogo (con stock) para una venta directa:
-// se agrega como texto a la Descripción, suma al Total sugerido, y queda
-// anotada en f.stockConsumido para descontarse de verdad al crear el pedido
-// (ver acción "add-pedido"). Solo aplica a venta directa — en consignación el
-// producto se agrega después, vía remisión (ver renderPedidoConsignacion).
-function renderProductoPicker(f, paraConsignacion) {
-  var productos = state.productos || [];
-  if (!productos.length) {
-    return paraConsignacion
-      ? '<div class="empty" style="padding:10px 0;">Tu catálogo está vacío. Registra primero las prendas en <b>Catálogo</b> (con su stock por talla) para poder enviarlas a un punto de consignación.</div>'
-      : "";
-  }
+// Líneas del pedido: cada una es un producto de catálogo (con talla, elegido
+// por el picker) o, solo para venta directa, algo descrito a mano — nunca
+// una cantidad suelta sin decir de qué. El descuento real de stock ocurre
+// recién al confirmar "Crear pedido" (ver acción "add-pedido"), nunca antes.
+function renderLineasPedido(f) {
+  var lineas = f.stockConsumido || [];
   var producto = f.productoSel ? productoById(f.productoSel) : null;
-  // En consignación el título ya lo pone el bloque de arriba ("Qué le vas a
-  // entregar"): repetirlo acá sería un segundo encabezado diciendo lo mismo.
-  var html = paraConsignacion ? "" : ('<div class="cot-col-title" style="margin-top:0;">Producto del catálogo (opcional)' +
-    renderHelp("Si es una prenda ya hecha (no personalizada), buscala por nombre, referencia o categoría: se agrega a la descripción, el total sugerido sube solo con su precio de venta, y el stock del taller baja al crear el pedido. La miniatura y el enlace \"Ver en Catálogo\" son para confirmar que elegiste la prenda correcta.") +
-    "</div>");
+  var html = '<div class="row-actions" style="margin-bottom:10px;">' +
+    '<button class="btn ghost small" data-action="abrir-producto-picker-pedido">🔍 Elegir producto del catálogo</button>' +
+    "</div>";
 
-  html += '<div class="field combo-wrap" style="max-width:380px;margin-top:0;">' +
-    '<input id="inp-buscar-producto-pedido" class="mini-input" style="width:100%" placeholder="Buscar por nombre, referencia o categoría…" value="' + esc(state.pedidoProductoBusqueda || "") + '" data-live-filter="pedidoProductoBusqueda" />';
-  var q = norm(state.pedidoProductoBusqueda || "").trim();
-  if (q) {
-    var matches = productos.filter(function (p) {
-      return norm(p.nombre).indexOf(q) >= 0 || norm(p.referencia || "").indexOf(q) >= 0 || norm(p.categoria || "").indexOf(q) >= 0;
-    });
-    html += '<div class="combo-suggestions">' + (matches.length
-      ? matches.map(renderSugerenciaProducto).join("")
-      : '<div class="combo-empty">Sin coincidencias.</div>') + "</div>";
+  if (!(state.productos || []).length && !f.esConsignacion) {
+    html += '<div class="section-sub" style="margin:0 0 10px;">Tu catálogo de productos está vacío — puedes seguir con líneas descritas a mano.</div>';
   }
-  html += "</div>";
 
   if (producto) {
     html += renderProductoElegido(producto);
@@ -148,41 +157,80 @@ function renderProductoPicker(f, paraConsignacion) {
         "</div>";
     }
   }
-  // Lo ya agregado se muestra como lista con opción de quitar (antes era una
-  // línea de texto corrida sin forma de deshacer una línea equivocada salvo
-  // reiniciar el formulario entero).
-  if ((f.stockConsumido || []).length) {
-    var totalUnid = f.stockConsumido.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
-    html += '<div class="tx-row head" style="margin-top:12px;grid-template-columns:1fr 80px 80px 40px;"><span>Producto</span><span>Talla</span><span>Cant.</span><span></span></div>';
-    f.stockConsumido.forEach(function (l, i) {
-      html += '<div class="tx-row" style="grid-template-columns:1fr 80px 80px 40px;">' +
-        '<span class="mobile-th">Producto</span><span>' + esc(l.productoNombre) + "</span>" +
-        '<span class="mobile-th">Talla</span><span>' + esc(l.talla) + "</span>" +
+
+  if (!f.esConsignacion) {
+    html += '<div class="inline-form" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);flex-wrap:wrap;">' +
+      '<input class="mini-input" data-role="pedido-texto-descripcion" placeholder="Algo que no está en el catálogo (ej. bordado personalizado)" style="width:260px" />' +
+      '<input type="number" class="mini-input" data-role="pedido-texto-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
+      '<button class="btn ghost small" data-action="add-pedido-texto-linea">+ Agregar</button>' +
+      "</div>";
+  }
+
+  // Lo ya agregado se muestra como lista con opción de quitar.
+  if (lineas.length) {
+    var totalUnid = lineas.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+    html += '<div class="tx-row head" style="margin-top:14px;grid-template-columns:1fr 90px 70px 40px;"><span>Qué es</span><span>Talla</span><span>Cant.</span><span></span></div>';
+    lineas.forEach(function (l, i) {
+      html += '<div class="tx-row" style="grid-template-columns:1fr 90px 70px 40px;">' +
+        '<span class="mobile-th">Qué es</span><span>' + esc(l.productoNombre || l.textoDescripcion || "—") + "</span>" +
+        '<span class="mobile-th">Talla</span><span>' + esc(l.talla || "—") + "</span>" +
         '<span class="mobile-th">Cant.</span><span>' + l.cantidad + "</span>" +
         '<button class="btn danger small" data-action="quitar-pedido-producto-linea" data-idx="' + i + '" title="Quitar esta línea">✕</button>' +
         "</div>";
     });
-    html += '<div class="section-sub" style="margin:6px 0 0;">' + totalUnid + " unidad(es) · " +
-      (paraConsignacion ? "se entregarán al punto y saldrán del stock del taller al crear." : "se descontarán del stock al crear el pedido.") + "</div>";
+    html += '<div class="section-sub" style="margin:6px 0 0;">' + totalUnid + " unidad(es) en total · " +
+      (f.esConsignacion ? "se entregarán al punto y saldrán del stock del taller al crear." : "se descontarán del stock (las de catálogo) al crear el pedido.") + "</div>";
+  } else {
+    html += '<div class="empty" style="margin-top:10px;">Sin líneas todavía.</div>';
   }
+  html += renderProductoPickerPedido();
+  return html;
+}
+
+// Modal tipo explorador para elegir el producto (mismo patrón
+// .picker-overlay/.picker-modal que Cotizaciones/Productos) — reemplaza el
+// buscador inline con sugerencias que había antes.
+function renderProductoPickerPedido() {
+  if (!state.pedidoProductoPickerAbierto) return "";
+  var productos = state.productos || [];
+  var q = norm(state.pedidoProductoBusqueda || "").trim();
+  var visibles = q ? productos.filter(function (p) {
+    return norm(p.nombre).indexOf(q) >= 0 || norm(p.referencia || "").indexOf(q) >= 0 || norm(p.categoria || "").indexOf(q) >= 0;
+  }) : productos;
+
+  var html = '<div class="picker-overlay" data-action="cerrar-producto-picker-pedido">' +
+    '<div class="picker-modal" data-action="picker-stop">' +
+    '<div class="picker-head"><div class="section-title small" style="margin:0;">Elegir producto del catálogo</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-producto-picker-pedido" aria-label="Cerrar">✕</button></div>' +
+    '<div class="picker-search"><input id="inp-producto-picker-pedido-buscar" class="mini-input" style="width:100%" placeholder="Buscar por nombre, referencia o categoría…" value="' + esc(state.pedidoProductoBusqueda || "") + '" data-live-filter="pedidoProductoBusqueda" /></div>' +
+    '<div class="picker-list">';
+
+  if (!productos.length) {
+    html += '<div class="empty">Tu catálogo está vacío — regístralo en <b>Catálogo</b> primero (con su stock por talla).</div>';
+  } else if (!visibles.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.pedidoProductoBusqueda) + '"' : "") + ".</div>";
+  } else {
+    visibles.forEach(function (p) {
+      var stockTotal = (p.variantesTalla || []).reduce(function (a, t) { return a + num(t.stock); }, 0);
+      var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
+      html += '<div class="picker-item" data-action="select-producto-pedido-picker" data-id="' + p.id + '">' +
+        "<span></span>" +
+        '<span class="picker-item-info"><b>' + esc(p.nombre) + "</b><small>" + (meta ? esc(meta) + " · " : "") + stockTotal + " en stock</small></span>" +
+        '<span class="amount">' + fmt(p.precioVenta) + "</span>" +
+        "</div>";
+    });
+  }
+
+  html += "</div></div>" +
+    '<div class="picker-foot"><span class="section-sub" style="margin:0;">' + (visibles.length ? visibles.length + " resultado(s)" : "") + "</span>" +
+    '<button class="btn ghost small" data-action="cerrar-producto-picker-pedido">Cerrar</button></div>' +
+    "</div></div>";
   return html;
 }
 
 function productoThumbHtml(p, claseThumb) {
   if (p.imagenUrl) return '<span class="' + claseThumb + '"><img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" /></span>';
   return '<span class="' + claseThumb + '">🧺</span>';
-}
-
-// Sugerencia en el buscador: miniatura + nombre + referencia/categoría +
-// stock, para poder confirmar a simple vista que es la prenda correcta antes
-// de elegirla (mismo espíritu que el combobox de cliente, con foto además).
-function renderSugerenciaProducto(p) {
-  var stockTotal = (p.variantesTalla || []).reduce(function (a, t) { return a + num(t.stock); }, 0);
-  var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
-  return '<div class="combo-item producto-combo-item" data-action="select-producto-pedido" data-id="' + p.id + '">' +
-    productoThumbHtml(p, "producto-combo-thumb") +
-    "<div><b>" + esc(p.nombre) + "</b><span>" + (meta ? esc(meta) + " · " : "") + stockTotal + " en stock</span></div>" +
-    "</div>";
 }
 
 // Una vez elegido, queda visible con su foto (para no perder de vista cuál
@@ -212,16 +260,13 @@ function filtrarPedidosPorTexto(pedidos, q) {
 }
 
 function renderHistorialPedidos() {
-  // La barra de búsqueda siempre visible se reemplazó por un botón que abre
-  // un picker (mismo patrón que el selector de insumos en Cotizaciones) —
-  // más fácil de tocar en móvil que un input angosto siempre en pantalla. Si
-  // ya hay una búsqueda activa, el botón se reemplaza por un chip con lo que
-  // se está buscando, para no perder de vista que el listado está filtrado.
-  var q = norm(state.buscarPedidos || "").trim();
-  var html = q
-    ? ('<div class="filters" style="margin-bottom:10px;"><button class="chip active" data-action="abrir-pedidos-buscar">🔍 "' + esc(state.buscarPedidos) + '"</button>' +
-      '<button class="btn ghost small" data-action="limpiar-busqueda-pedidos">✕ Quitar búsqueda</button></div>')
-    : ('<div style="margin-bottom:10px;"><button class="btn ghost" data-action="abrir-pedidos-buscar">🔍 Buscar pedido</button></div>');
+  // Barra de búsqueda fija de toda la vida: input siempre visible con
+  // filtro en vivo (estilo AJAX, debounce de 150ms — ver data-live-filter en
+  // core/dom.js), no una ventana emergente. Se probó un picker modal acá y
+  // resultó más invasivo que útil para este caso — el picker sí tiene
+  // sentido para elegir UN producto del catálogo (ver renderProductoPickerPedido),
+  // no para filtrar una lista que ya está en pantalla.
+  var html = '<div class="field" style="max-width:340px;margin-bottom:10px;"><input id="inp-buscar-pedidos" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidos || "") + '" data-live-filter="buscarPedidos" /></div>';
 
   html += '<div class="filters"><button class="chip ' + (state.filtroPedidos === "todos" ? "active" : "") + '" data-action="filtro-pedidos" data-val="todos">Todos</button>';
   chipsEstadosDisponibles().forEach(function (e) {
@@ -233,6 +278,7 @@ function renderHistorialPedidos() {
 
   var filtered = state.filtroPedidos === "todos" ? state.pedidos : state.pedidos.filter(function (p) { return p.estado === state.filtroPedidos; });
   if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return num(p.total) - num(p.abono) > 0; }); }
+  var q = norm(state.buscarPedidos || "").trim();
   filtered = filtrarPedidosPorTexto(filtered, q);
   if (filtered.length === 0) { html += '<div class="empty">No hay pedidos <b>' + (state.filtroPedidos !== "todos" || q ? "que coincidan" : "todavía") + "</b>.</div>"; }
 
@@ -273,50 +319,6 @@ function renderHistorialPedidos() {
       (abierto ? renderPanelPedido(p, saldo) : "") +
       "</div>";
   });
-  html += renderPedidosBuscarPicker();
-  return html;
-}
-
-// Modal de búsqueda (mismo patrón .picker-overlay/.picker-modal que el
-// selector de insumos en Cotizaciones — ya responsive: pantalla completa en
-// móvil, modal centrado en desktop). Muestra resultados en vivo mientras se
-// escribe; elegir uno cierra el modal y salta a esa tarjeta en la lista de
-// abajo (mismo scroll + "destello" que "↗ Ver" en Pendientes).
-function renderPedidosBuscarPicker() {
-  if (!state.pedidosBuscarAbierto) return "";
-  var q = norm(state.buscarPedidosDraft || "").trim();
-  var resultados = q ? filtrarPedidosPorTexto(state.pedidos, q).slice(0, 30) : [];
-
-  var html = '<div class="picker-overlay" data-action="cerrar-pedidos-buscar">' +
-    '<div class="picker-modal" data-action="picker-stop">' +
-    '<div class="picker-head">' +
-    '<div class="section-title small" style="margin:0;">Buscar pedido</div>' +
-    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-pedidos-buscar" aria-label="Cerrar">✕</button>' +
-    "</div>" +
-    '<div class="picker-search"><input id="inp-pedidos-buscar-picker" class="mini-input" style="width:100%" placeholder="N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidosDraft || "") + '" data-live-filter="buscarPedidosDraft" /></div>' +
-    '<div class="picker-list">';
-
-  if (!q) {
-    html += '<div class="empty">Escribe para buscar entre tus ' + state.pedidos.length + " pedido(s).</div>";
-  } else if (!resultados.length) {
-    html += '<div class="empty">Sin coincidencias para "' + esc(state.buscarPedidosDraft) + '".</div>';
-  } else {
-    resultados.forEach(function (p) {
-      var cliente = p.clienteId ? clienteById(p.clienteId) : null;
-      var saldo = num(p.total) - num(p.abono);
-      html += '<div class="picker-item" data-action="ir-a-pedido-desde-picker" data-id="' + p.id + '">' +
-        '<span></span>' +
-        '<span class="picker-item-info"><b>' + esc(p.numeroOp || "OP-????") + " — " + esc(p.cliente) + "</b>" +
-        "<small>" + esc(p.descripcion) + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + "</small></span>" +
-        '<span class="amount">' + (saldo > 0 ? "saldo " + fmt(saldo) : fmt(p.total)) + "</span>" +
-        "</div>";
-    });
-  }
-
-  html += "</div></div>" +
-    '<div class="picker-foot"><span class="section-sub" style="margin:0;">' + (resultados.length ? resultados.length + " resultado(s)" : "") + "</span>" +
-    '<button class="btn ghost small" data-action="cerrar-pedidos-buscar">Cerrar</button></div>' +
-    "</div></div>";
   return html;
 }
 
@@ -749,32 +751,6 @@ export var actions = {
     state.filtroPedidosSoloSaldo = !state.filtroPedidosSoloSaldo;
     notify();
   },
-  "abrir-pedidos-buscar": function () {
-    state.buscarPedidosDraft = state.buscarPedidos || "";
-    state.pedidosBuscarAbierto = true;
-    notify();
-  },
-  "cerrar-pedidos-buscar": function () {
-    state.pedidosBuscarAbierto = false;
-    notify();
-  },
-  "limpiar-busqueda-pedidos": function () {
-    state.buscarPedidos = "";
-    state.buscarPedidosDraft = "";
-    notify();
-  },
-  "ir-a-pedido-desde-picker": function (el) {
-    var id = el.getAttribute("data-id");
-    state.buscarPedidos = state.buscarPedidosDraft;
-    state.pedidosBuscarAbierto = false;
-    notify();
-    setTimeout(function () {
-      var card = document.querySelector('[data-pedido-id="' + id + '"]');
-      if (!card) return;
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
-      card.classList.add("destello");
-    }, 60);
-  },
   // Control segmentado "Venta directa | Consignación" (antes un checkbox que
   // solo se podía alternar, sin poder ver cuál era la otra opción).
   "set-tipo-pedido": function (el) {
@@ -791,10 +767,10 @@ export var actions = {
     }
     notify();
   },
-  // Deshace exactamente lo que aportó esa línea: la saca de la lista, le
-  // resta su subtotal al total y le quita su fragmento a la descripción — sin
-  // esto, quitar una línea dejaba el dinero y el texto inflados con algo que
-  // ya no se iba a entregar.
+  // Deshace exactamente lo que aportó esa línea: la saca de la lista y le
+  // resta su subtotal al total (la descripción/cantidad del pedido se
+  // recalculan solas a partir de las líneas que queden, ver
+  // resumenLineasPedido — no hay texto que "desarmar" a mano).
   "quitar-pedido-producto-linea": function (el) {
     var idx = num(el.getAttribute("data-idx"));
     var fp = state.formPedido;
@@ -802,19 +778,20 @@ export var actions = {
     if (!linea) return;
     fp.stockConsumido = fp.stockConsumido.filter(function (_, i) { return i !== idx; });
     fp.total = Math.max(0, num(fp.total) - num(linea.subtotal));
-    if (linea.linea) {
-      // Solo la PRIMERA coincidencia: dos líneas idénticas (mismo producto,
-      // talla y cantidad) son entradas distintas y quitar una no debe borrar
-      // el texto de las dos.
-      var partes = (fp.descripcion || "").split("; ");
-      var pos = partes.indexOf(linea.linea);
-      if (pos !== -1) partes.splice(pos, 1);
-      fp.descripcion = partes.join("; ");
-    }
     notify();
   },
-  "select-producto-pedido": function (el) {
+  "abrir-producto-picker-pedido": function () {
+    state.pedidoProductoPickerAbierto = true;
+    state.pedidoProductoBusqueda = "";
+    notify();
+  },
+  "cerrar-producto-picker-pedido": function () {
+    state.pedidoProductoPickerAbierto = false;
+    notify();
+  },
+  "select-producto-pedido-picker": function (el) {
     state.formPedido.productoSel = el.getAttribute("data-id");
+    state.pedidoProductoPickerAbierto = false;
     state.pedidoProductoBusqueda = "";
     notify();
   },
@@ -831,9 +808,8 @@ export var actions = {
     state.productosVista = "nueva";
     notify();
   },
-  // Agrega una línea de producto+talla a la descripción del pedido rápido
-  // (venta directa) y la anota en stockConsumido — el descuento real de
-  // stock ocurre recién al confirmar "Crear pedido" (ver acción "add-pedido"),
+  // Agrega una línea de producto+talla al pedido rápido — el descuento real
+  // de stock ocurre recién al confirmar "Crear pedido" (ver "add-pedido"),
   // nunca antes, para no descontar stock de un pedido que al final no se crea.
   "add-pedido-producto-linea": function (el) {
     var productoId = el.getAttribute("data-id");
@@ -854,40 +830,52 @@ export var actions = {
       .reduce(function (a, l) { return a + num(l.cantidad); }, 0);
     var disponible = stockTalla(producto, talla) - yaApartado;
     if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
-    var linea = producto.nombre + " (Talla " + talla + ") x" + cantidad;
     // En consignación no hay "total cobrado" (se factura solo lo que el punto
     // reporte vendido), así que la línea no suma dinero — solo describe lo que
-    // se entrega. `subtotal` y `linea` quedan guardados para poder revertir
-    // exactamente lo que esta línea aportó si se la quita (ver
-    // "quitar-pedido-producto-linea").
+    // se entrega. `subtotal` queda guardado para poder revertirlo si se quita
+    // la línea (ver "quitar-pedido-producto-linea").
     var subtotal = fp.esConsignacion ? 0 : num(producto.precioVenta) * cantidad;
     fp.stockConsumido = (fp.stockConsumido || []).concat([{
-      productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad,
-      linea: linea, subtotal: subtotal
+      productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad, subtotal: subtotal
     }]);
-    fp.descripcion = fp.descripcion ? (fp.descripcion + "; " + linea) : linea;
     fp.total = num(fp.total) + subtotal;
+    notify();
+  },
+  // Línea sin producto de catálogo (ej. "bordado personalizado x3") — solo
+  // para venta directa: en consignación toda línea tiene que salir de stock
+  // real para poder rastrear qué le queda al punto.
+  "add-pedido-texto-linea": function (el) {
+    var card = el.closest(".card");
+    var descripcion = card ? val(card, "pedido-texto-descripcion") : "";
+    var cantidad = num(card ? val(card, "pedido-texto-cantidad") : 0);
+    if (!descripcion || cantidad <= 0) return;
+    var fp = state.formPedido;
+    fp.stockConsumido = (fp.stockConsumido || []).concat([{
+      productoId: "", productoNombre: "", talla: "", cantidad: cantidad, subtotal: 0, textoDescripcion: descripcion
+    }]);
     notify();
   },
   "add-pedido": function () {
     var fp = state.formPedido;
+    var stockConsumido = fp.stockConsumido || [];
+    var resumen = resumenLineasPedido(stockConsumido);
     if (!exigirCampos([
       ["Cliente", fp.cliente],
-      [fp.esConsignacion ? "Descripción (o elegí al menos un producto del catálogo)" : "Descripción", fp.descripcion]
+      ["Al menos una línea (producto del catálogo" + (fp.esConsignacion ? "" : " o descrita a mano") + ")", stockConsumido.length ? "x" : ""]
     ])) return;
     var esConsignacion = fp.esConsignacion;
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
-    // En consignación las líneas elegidas TAMBIÉN salen del stock (se las
-    // lleva el punto), solo que no se registran como venta sino como la
-    // primera remisión del pedido. Antes se descartaban en silencio: se
-    // elegían productos y no pasaba nada con ellos.
-    var stockConsumido = fp.stockConsumido || [];
+    // Solo las líneas de CATÁLOGO (con productoId) mueven stock real — una
+    // línea de texto libre no tiene de dónde descontar. En consignación las
+    // líneas de catálogo TAMBIÉN salen del stock (se las lleva el punto),
+    // solo que no se registran como venta sino como la primera remisión.
+    var lineasProducto = stockConsumido.filter(function (l) { return l.productoId; });
     // Chequeo atómico justo antes de crear nada: si el stock cambió desde que
     // se armaron las líneas (ej. el borrador quedó abierto un rato y otra
     // venta se llevó ese stock mientras tanto), no se crea el pedido a medias
     // — se avisa y se corta acá, sin tocar plata ni stock.
-    if (stockConsumido.length) {
-      var deficits = validarStockLineas(stockConsumido);
+    if (lineasProducto.length) {
+      var deficits = validarStockLineas(lineasProducto);
       if (deficits.length) {
         window.alert("No hay stock suficiente para crear este pedido — el stock cambió mientras lo armabas:\n\n" +
           deficits.map(function (d) { return "- " + d.productoNombre + " (" + d.talla + "): pediste " + d.solicitado + ", disponibles " + d.disponible; }).join("\n") +
@@ -896,8 +884,8 @@ export var actions = {
       }
     }
     var nuevoPedido = {
-      id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: fp.descripcion,
-      cantidad: fp.cantidad, total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
+      id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: resumen.descripcion,
+      cantidad: String(resumen.cantidad), total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
       fechaEntrega: fp.fechaEntrega,
       stockConsumido: [], // se completa abajo con lo que en verdad se descontó (ver ajustarStockProducto)
       // Un pedido en consignación ya está producido/listo — no pasa por el
@@ -911,12 +899,11 @@ export var actions = {
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
         puntoId: fp.clienteId || "", comisionTipo: fp.consignacionComisionTipo || "porcentaje", comisionValor: num(fp.consignacionComisionValor),
-        // cantidadEnviada (envío "a granel", sin desglose por talla) solo se
-        // usa cuando NO se eligieron productos del catálogo — si se eligieron,
-        // la cantidad real vive en la remisión, con su desglose, y contarla
-        // también acá la duplicaría en el seguimiento.
+        // Todo envío en consignación ahora viene de líneas de catálogo (con
+        // desglose por talla en la remisión) — ya no hay un "envío a granel"
+        // sin producto ni talla asociados.
         precioUnitario: num(fp.consignacionPrecioUnitario),
-        cantidadEnviada: stockConsumido.length ? 0 : (num(fp.cantidad) || 0),
+        cantidadEnviada: 0,
         ventas: [], retiros: [], remisiones: []
       } : null,
       codigoPublico: codigoPublico(), calendarEventId: ""
@@ -924,7 +911,7 @@ export var actions = {
     if (abonoInicial > 0) {
       var abonoInicialId = uid();
       nuevoPedido.abonos.push({ id: abonoInicialId, monto: abonoInicial, fecha: todayStr(), metodoPago: "efectivo", comprobanteUrl: "" });
-      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono inicial — " + fp.descripcion, monto: abonoInicial, contraparte: fp.cliente, fecha: todayStr(), pedidoId: nuevoPedido.id, origenAbonoId: abonoInicialId });
+      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono inicial — " + resumen.descripcion, monto: abonoInicial, contraparte: fp.cliente, fecha: todayStr(), pedidoId: nuevoPedido.id, origenAbonoId: abonoInicialId });
       persist("tx");
     }
     // El stock del catálogo baja recién ahora, que el pedido ya es real. Se
@@ -932,9 +919,9 @@ export var actions = {
     // solicitado — así, si el pedido se elimina más adelante, se restituye
     // exactamente lo mismo que se movió, nunca de más.
     var stockConsumidoReal = [];
-    var motivo = esConsignacion ? ("Remisión a " + fp.cliente) : ("Venta directa — " + fp.descripcion);
+    var motivo = esConsignacion ? ("Remisión a " + fp.cliente) : ("Venta directa — " + resumen.descripcion);
     var origen = esConsignacion ? ("consignacion:" + nuevoPedido.id) : ("pedido:" + nuevoPedido.id);
-    stockConsumido.forEach(function (l) {
+    lineasProducto.forEach(function (l) {
       var aplicado = ajustarStockProducto(l.productoId, l.talla, -l.cantidad, motivo, origen);
       if (aplicado) stockConsumidoReal.push({ productoId: l.productoId, productoNombre: l.productoNombre, talla: l.talla, cantidad: Math.abs(aplicado) });
     });
@@ -954,7 +941,7 @@ export var actions = {
     }
     state.pedidos.unshift(nuevoPedido);
     state.formPedido = {
-      clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
+      clienteId: "", cliente: "", tipoCliente: "propio", total: "", costo: "", abono: "", fechaEntrega: "",
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
       productoSel: "", stockConsumido: []

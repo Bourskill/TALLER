@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, calcGastoInsumosRango } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -278,7 +278,7 @@ function negocioLinesFrom(cfg) {
 // Reporte financiero en PDF para un rango de fechas (fechas de corte, igual
 // que se piensa el periodo de pago de Nómina): lista los movimientos de ese
 // rango con sus totales por tipo, más el balance neto del periodo.
-export async function generarPDFReporteFinanciero(movimientos, desde, hasta, etiquetaPeriodo) {
+export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo) {
   var jsPDFCtor = window.jspdf.jsPDF;
   var doc = new jsPDFCtor({ unit: "pt", format: "letter" });
   var docNum = String(await siguienteNumeroPdf()).padStart(4, "0");
@@ -300,13 +300,17 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
   var resumenY = y;
-  [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Nómina", money(nomina)], ["Comisiones", money(comisiones)], ["Balance neto", money(balance)]].forEach(function (item, i) {
-    var colW = (pageW - marginX * 2) / 5;
-    var x = marginX + colW * i;
-    doc.setTextColor(140, 140, 140); doc.setFontSize(7.5); doc.text(item[0].toUpperCase(), x, resumenY);
-    doc.setTextColor(20, 20, 20); doc.setFontSize(11); doc.text(item[1], x, resumenY + 15);
+  // Grid de 3 columnas x 2 filas (parejo, en vez de 5 en una sola fila) —
+  // mismo balance visual que el reporte en pantalla.
+  var tiles = [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Insumos", money(resumen.insumosReales)], ["Nómina", money(nomina)], ["Comisiones", money(comisiones)], ["Balance neto", money(balance)]];
+  var colW = (pageW - marginX * 2) / 3, rowH = 34;
+  tiles.forEach(function (item, i) {
+    var col = i % 3, row = Math.floor(i / 3);
+    var x = marginX + colW * col, yy = resumenY + row * rowH;
+    doc.setTextColor(140, 140, 140); doc.setFontSize(7.5); doc.text(item[0].toUpperCase(), x, yy);
+    doc.setTextColor(20, 20, 20); doc.setFontSize(11); doc.text(item[1], x, yy + 15);
   });
-  y = resumenY + 34;
+  y = resumenY + rowH * 2;
   doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
   doc.line(marginX, y, pageW - marginX, y);
   y += 16;
@@ -315,7 +319,12 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
     .slice()
     .sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); })
     .map(function (t) {
-      return [t.fecha || "—", t.tipo, t.concepto || "—", t.contraparte || "—", (t.tipo === "ingreso" ? "+" : "-") + money(t.monto)];
+      // Compras de insumo reales se distinguen como "insumos" en la columna
+      // Tipo, aunque por dentro sigan sumando como "gasto" (ver
+      // calcResumenMovimientos) — es solo para que el reporte las identifique
+      // de un vistazo, sin inventar una categoría nueva en los cálculos.
+      var tipoMostrado = t.esInsumo ? "insumos" : t.tipo;
+      return [t.fecha || "—", tipoMostrado, t.concepto || "—", t.contraparte || "—", (t.tipo === "ingreso" ? "+" : "-") + money(t.monto)];
     });
 
   doc.autoTable({
@@ -328,40 +337,6 @@ export async function generarPDFReporteFinanciero(movimientos, desde, hasta, eti
     columnStyles: { 4: { halign: "right" } },
     theme: "grid"
   });
-
-  y = doc.lastAutoTable.finalY + 26;
-  var pageH = doc.internal.pageSize.getHeight();
-
-  // Gasto en insumos del periodo — a diferencia del panel en vivo de Resumen
-  // (calcGastoInsumosMensual, que SIEMPRE desglosa por mes calendario porque
-  // no tiene un rango propio), este reporte ya tiene su propio rango de
-  // fechas (hoy, esta semana, un rango a medida...), que no siempre coincide
-  // con meses completos — así que usa calcGastoInsumosRango(desde, hasta):
-  // un total consolidado del MISMO rango que el resto del reporte, sin
-  // desglose por mes ni columna de fecha repetida.
-  var gastoInsumos = calcGastoInsumosRango(desde, hasta);
-
-  if (gastoInsumos.insumos.length) {
-    if (y + 40 > pageH - 60) { doc.addPage(); y = 54; }
-    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-    doc.text("GASTO EN INSUMOS DEL PERIODO", marginX, y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(80, 80, 80);
-    doc.text(money(gastoInsumos.total), pageW - marginX, y, { align: "right" });
-    y += 18;
-
-    var filasInsumos = gastoInsumos.insumos.map(function (i) { return [i.nombre, money(i.costoTotal)]; });
-    doc.autoTable({
-      startY: y,
-      margin: { left: marginX, right: marginX },
-      head: [["Insumo", "Costo"]],
-      body: filasInsumos,
-      styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-      headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
-      columnStyles: { 1: { halign: "right" } },
-      theme: "grid"
-    });
-    y = doc.lastAutoTable.finalY + 20;
-  }
 
   doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
 }

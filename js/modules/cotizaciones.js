@@ -257,11 +257,16 @@ function renderCotCard(c) {
 // corrido. Las acciones (IVA, convertir, eliminar) quedan arriba a la
 // derecha, ordenadas de menos a más destructiva.
 function renderCotHead(c, iva) {
+  // Una vez convertida, el pedido resultante tiene su propio N.º de OP — se
+  // muestra acá arriba, junto al estado, para no tener que ir a Pedidos solo
+  // para confirmar con qué OP quedó esta cotización.
+  var pedidoVinculado = c.pedidoId ? state.pedidos.filter(function (p) { return p.id === c.pedidoId; })[0] : null;
   var html = '<div class="cot-head">' +
     '<div class="cot-head-info">' +
     '<div class="cot-head-top">' +
     '<input class="cot-cliente-input" value="' + esc(c.cliente) + '" placeholder="Nombre del cliente" data-action-change="set-cot-cliente" data-id="' + c.id + '" title="Editar el nombre del cliente" />' +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
+    (pedidoVinculado ? '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;" title="Pedido vinculado — clic para verlo" data-action="ver-cotizacion-relacionada-pedido" data-id="' + pedidoVinculado.id + '">' + esc(pedidoVinculado.numeroOp || "OP-????") + "</span>" : "") +
     "</div>" +
     (c.descripcion ? '<div class="cot-descripcion">' + esc(c.descripcion) + "</div>" : "") +
     '<div class="cot-meta">' +
@@ -732,6 +737,23 @@ export var actions = {
     state.cotizacionEditando = "";
     notify();
   },
+  // Salto inverso a "↗ Ver cotización relacionada" de pedidos.js: desde el
+  // N.º de OP en la cabecera de la cotización ya convertida, ir directo a
+  // esa tarjeta en Pedidos → Historial.
+  "ver-cotizacion-relacionada-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    state.tab = "pedidos";
+    state.sidebarMobileOpen = false;
+    state.filtroPedidosVista = "activos";
+    state.pedidosVista = "historial";
+    notify();
+    setTimeout(function () {
+      var card = document.querySelector('[data-pedido-id="' + id + '"]');
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.add("destello");
+    }, 60);
+  },
   "set-cot-fecha": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fecha: el.value }) : c; });
@@ -935,9 +957,15 @@ export var actions = {
     var prod = (state.productos || []).filter(function (p) { return p.id === el.value; })[0];
     if (!prod) return;
     mapRef(cotId, refId, function (r) {
-      var nuevosInsumos = (prod.insumos || []).map(function (ins) {
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
-      });
+      // Un producto de proveedor no tiene insumos propios (ver Catálogo →
+      // Productos) — se copia su costo de compra como un insumo sintético de
+      // un solo ítem, para que el costo/ganancia de la referencia lo refleje
+      // igual que en el Catálogo.
+      var nuevosInsumos = prod.origen === "proveedor"
+        ? [{ id: uid(), nombre: "Costo de compra (" + prod.nombre + ")", unidad: "UND", costo: num(prod.costoCompra), tipo: "por_prenda", cantidad: 1 }]
+        : (prod.insumos || []).map(function (ins) {
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
+        });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos), productoId: prod.id, origen: prod.origen || "taller" };
       if (!r.nombre) patch.nombre = prod.nombre;
       if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);

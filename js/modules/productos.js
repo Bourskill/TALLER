@@ -196,9 +196,14 @@ function renderProductoCard(p) {
   var tallas = p.variantesTalla || [];
   // Reusa el mismo cálculo de costo/ganancia que una referencia de cotización
   // (calcRefTotales) tratando el producto como si fuera "una referencia de
-  // cantidad 1" — mismos insumos, mismo consumo sugerido — para que el
-  // margen se documente con la misma fórmula en toda la app.
-  var calc = calcRefTotales({ consumoAprox: p.consumoSugerido, cantidadPedida: 1, precioVenta: p.precioVenta, insumos: p.insumos });
+  // cantidad 1". Un producto de proveedor no tiene insumos que sumar — se le
+  // arma un "insumo" sintético de un solo ítem con el costo de compra
+  // directo, para reusar exactamente la misma fórmula de margen que el resto
+  // de la app en vez de duplicar el cálculo.
+  var insumosParaCalculo = p.origen === "proveedor"
+    ? [{ nombre: "Costo de compra", unidad: "UND", costo: num(p.costoCompra), tipo: "por_prenda", cantidad: 1 }]
+    : p.insumos;
+  var calc = calcRefTotales({ consumoAprox: p.consumoSugerido, cantidadPedida: 1, precioVenta: p.precioVenta, insumos: insumosParaCalculo });
 
   var html = '<div class="card" data-producto-id="' + p.id + '">' +
     '<div class="pedido-top" style="align-items:flex-start;">' + renderProductoThumb(p) +
@@ -207,7 +212,7 @@ function renderProductoCard(p) {
     '<div class="field"><label>Categoría</label><input class="mini-input" style="width:100%" value="' + esc(p.categoria || "") + '" placeholder="Ej. Camisetas" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="categoria" /></div>' +
     '<div class="field"><label>Referencia / SKU</label><input class="mini-input" style="width:100%" value="' + esc(p.referencia || "") + '" placeholder="Ej. CAM-001" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="referencia" /></div>' +
     '<div class="field"><label>Precio de venta</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.precioVenta) + '" placeholder="0" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="precioVenta" /></div>' +
-    '<div class="field"><label>Origen' + renderHelp("Si es comprado a proveedor, no tiene fases de producción propias en el taller — el selector de \"Flujo de producción\" de abajo se oculta.") + '</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="origen">' +
+    '<div class="field"><label>Origen' + renderHelp("Si es comprado a proveedor, la sección de abajo cambia: en vez de insumos y flujo de producción, solo pide el costo de compra y a quién se le compra.") + '</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="origen">' +
     Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], p.origen || "taller"); }).join("") +
     "</select></div>" +
     "</div><button class=\"btn danger small\" data-action=\"remove-producto\" data-id=\"" + p.id + "\">Eliminar producto</button></div>";
@@ -275,10 +280,28 @@ function renderSelectorProveedorProducto(p) {
     "</select></div>";
 }
 
+// Un producto "comprado a proveedor" no se arma con insumos ni consumo de
+// tela (nadie va a cortar y coser algo que ya llega hecho) — lo único que
+// hace falta para saber la ganancia es cuánto costó comprarlo. Todo lo demás
+// (flujo de producción, insumos, "Insumos predeterminados") es exclusivo de
+// un producto fabricado en el taller.
+function renderCosteoCompraProveedor(p) {
+  var html = '<div class="cot-col-title" style="margin-top:0;">Costeo de compra' +
+    renderHelp("De acá sale la ganancia de arriba: precio de venta menos lo que te costó comprarlo. No hay insumos ni flujo de producción porque el producto ya llega hecho del proveedor.") +
+    "</div>";
+  html += '<div class="form-grid" style="margin-top:10px;">' +
+    '<div class="field"><label>Costo de compra (por unidad)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.costoCompra || "") + '" placeholder="0" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="costoCompra" /></div>' +
+    renderSelectorProveedorProducto(p) +
+    "</div>";
+  return html;
+}
+
 // Insumos + consumo + flujo de producción quedan agrupados y colapsados por
 // defecto (a menos que ya tenga insumos cargados) — es el detalle "de cómo se
 // hace/cuesta", no lo primero que hace falta para poder vender el producto.
 function renderCosteoProduccion(p) {
+  if (p.origen === "proveedor") return renderCosteoCompraProveedor(p);
+
   var flujos = state.plantillasEstados || [];
   var insumos = p.insumos || [];
   var abierta = p.seccionCosteoAbierta !== undefined ? !!p.seccionCosteoAbierta : insumos.length > 0;
@@ -291,12 +314,10 @@ function renderCosteoProduccion(p) {
 
   html += '<div class="form-grid" style="margin-top:10px;">' +
     '<div class="field"><label>Consumo de tela sugerido (MT)</label><input type="number" class="mini-input" style="width:100%" value="' + esc(p.consumoSugerido || "") + '" placeholder="Ej. 1.2" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="consumoSugerido" /></div>' +
-    (p.origen === "proveedor"
-      ? '<div class="field"><label>Flujo de producción</label><div class="section-sub" style="margin:0;">Producto comprado a proveedor — sin fases de producción propias en el taller.</div></div>' + renderSelectorProveedorProducto(p)
-      : ('<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
-        '<option value="">Estándar</option>' +
-        flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
-        "</select></div>")) +
+    '<div class="field"><label>Flujo de producción</label><select class="mini-input" style="width:100%" data-action-change="set-pro-campo" data-id="' + p.id + '" data-campo="flujoEstadosId">' +
+    '<option value="">Estándar</option>' +
+    flujos.map(function (f) { return '<option value="' + f.id + '" ' + (p.flujoEstadosId === f.id ? "selected" : "") + '>' + esc(f.nombre) + " (" + f.estados.length + " etapas)</option>"; }).join("") +
+    "</select></div>" +
     "</div>";
 
   html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
@@ -474,7 +495,7 @@ export var actions = {
   // se quedan editables directo: no son tan sensibles para la plata del taller.
   "set-pro-campo": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
-    var numerico = campo === "consumoSugerido" || campo === "precioVenta";
+    var numerico = campo === "consumoSugerido" || campo === "precioVenta" || campo === "costoCompra";
     var valor = numerico ? num(el.value) : el.value;
     var session = getSession();
     if (campo === "precioVenta" && session && session.rol === "vendedor") {
@@ -653,7 +674,7 @@ export var actions = {
 };
 
 function nuevoProducto() {
-  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [], origen: "taller", proveedorId: "" };
+  return { id: uid(), nombre: "Nuevo producto", categoria: "", referencia: "", imagenUrl: "", consumoSugerido: "", flujoEstadosId: "", insumos: [], precioVenta: 0, variantesTalla: [], movimientosStock: [], origen: "taller", proveedorId: "", costoCompra: 0 };
 }
 
 function mapPro(id, transform) {

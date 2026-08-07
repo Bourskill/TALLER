@@ -1,5 +1,11 @@
 .emp-row{display:grid;grid-template-columns:1fr 1fr 120px 40px;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border-soft);font-size:13px;}
 .report-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px;}
+/* Reporte financiero (Resumen): 6 tiles fijas en 3 columnas x 2 filas — a
+   diferencia del uso genérico de arriba (ej. la tarjeta de Meta en
+   Configuración, con un solo tile), acá el ancho variable de auto-fit dejaba
+   5 tiles en la primera fila y 1 sola, desbalanceada, en la segunda. */
+.report-grid-financiero{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;}
+@media (max-width:560px){ .report-grid-financiero{grid-template-columns:repeat(2,1fr);} }
 .report-item{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;}
 .report-item .rl{font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:600;letter-spacing:.04em;}
 .report-item .rv{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;margin-top:4px;}

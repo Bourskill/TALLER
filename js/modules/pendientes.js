@@ -75,6 +75,9 @@ export function render() {
     "</div>";
 
   html += '<div class="cot-col-title" style="margin-top:0;">Quién trabaja contigo</div>';
+  if ((cfg.nomina || []).length) {
+    html += '<div class="emp-row head" style="grid-template-columns:' + COLS_EMP + ';font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Periodo y día</span><span>Salario</span><span>Próximo pago</span><span>Estado</span><span>Acciones</span></div>';
+  }
   (cfg.nomina || []).forEach(function (e) {
     html += state.empEditando === e.id ? renderFilaEdicionEmp(e) : renderFilaEmp(e);
   });
@@ -301,7 +304,7 @@ function renderPendForm(key, labelBoton, contenidoHtml) {
     '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-pend-form" data-key="' + key + '">Cancelar</button></div>';
 }
 
-var COLS_EMP = "1fr 1.4fr 150px 120px 120px 190px";
+var COLS_EMP = "1.2fr 1.3fr 110px 105px 100px 195px";
 
 // Fila de solo-lectura de una persona en nómina — periodo/día/salario ya NO
 // se editan aquí en vivo (antes eran <select>/<input> siempre activos en la
@@ -321,8 +324,8 @@ function renderFilaEmp(e) {
     '<span class="mobile-th">Periodo y día</span><span>' + esc(PERIODOS_PAGO[periodoE]) + (diasE.length ? " — " + esc(textoDias(periodoE, diasE)) : " — sin día definido") + "</span>" +
     '<span class="mobile-th">Salario ' + esc(ETIQ_PERIODO[periodoE]) + "</span><span class=\"amount\">" + fmt(aPagar) + "</span>" +
     '<span class="mobile-th">Próximo pago</span><span style="font-size:11.5px;color:var(--ink-faint);font-family:\'IBM Plex Mono\',monospace;" title="Periodo en curso: ' + esc(rangoTexto(rangoE)) + '">' + fechaCorta(calcFechaVencimientoPeriodo(periodoE, diasE)) + "</span>" +
-    '<span class="mobile-th">Estado</span><span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-    '<span class="status-pill ' + (estaPagado ? "pagado" : "pendiente") + '">' + (pagado > 0 ? (estaPagado ? "pagado" : fmt(pagado) + " abonado") : "pendiente") + "</span>" +
+    '<span class="mobile-th">Estado</span><span><span class="status-pill ' + (estaPagado ? "pagado" : "pendiente") + '">' + (pagado > 0 ? (estaPagado ? "pagado" : fmt(pagado) + " abonado") : "pendiente") + "</span></span>" +
+    '<span class="mobile-th">Acciones</span><span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     '<button class="btn small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Pagar</button>' +
     '<button class="btn ghost small" data-action="editar-emp" data-id="' + e.id + '">Editar</button>' +
     '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button>' +

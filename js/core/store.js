@@ -134,6 +134,7 @@ export const state = {
   productoInsumoPickerBusqueda: "",
   productoInsumoPickerSeleccion: [],
   pedidoProductoBusqueda: "", // texto de búsqueda del picker de producto en el formulario de pedido (nombre/referencia/categoría)
+  pedidoProductoPickerAbierto: false, // ventana del picker de producto (formulario de pedido) abierta/cerrada — nunca se persiste
   // Remisión de consignación en construcción (ver "Agregar remisión" en un
   // pedido de consignación, modules/pedidos.js): se acumulan líneas de
   // producto+talla+cantidad ANTES de confirmar, para que una entrega con
@@ -146,15 +147,17 @@ export const state = {
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
   formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" },
   formPedido: {
-    clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",
+    clienteId: "", cliente: "", tipoCliente: "propio", total: "", costo: "", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
     // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
     esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
-    // Producto del catálogo agregado a este pedido de venta directa (ver
-    // "Producto del catálogo" en el formulario): productoSel es el producto
-    // elegido en el picker (antes de confirmar la línea); stockConsumido es
-    // lo ya agregado — se descuenta del stock al crear el pedido y se
-    // restituye si el pedido se elimina (ver core/stock.js).
+    // Líneas del pedido (producto de catálogo o texto libre, ver
+    // resumenLineasPedido en modules/pedidos.js) — de acá se arman solas la
+    // descripción y cantidad del pedido, nunca se escriben sueltas a mano.
+    // productoSel es el producto elegido en el picker, antes de confirmar la
+    // línea con talla+cantidad; stockConsumido es lo ya agregado — se
+    // descuenta del stock al crear el pedido y se restituye si se elimina
+    // (ver core/stock.js).
     productoSel: "", stockConsumido: []
   },
   formCliente: {
@@ -189,7 +192,6 @@ export const state = {
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
 
-  gastoInsumosAbierto: false, // sección "Gasto en insumos por mes" del reporte financiero, colapsada por defecto
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
   filtroPedidos: "todos",
@@ -230,8 +232,6 @@ export const state = {
   filtroClientes: "",
   filtroCatalogoCategoria: "todos",
   buscarPedidos: "",
-  buscarPedidosDraft: "", // texto en vivo dentro del picker de búsqueda de pedidos (ver renderPedidosBuscarPicker)
-  pedidosBuscarAbierto: false, // picker de búsqueda de pedidos abierto/cerrado — nunca se persiste
   buscarTx: "",
   filtroTxPeriodo: "todos",
   filtroTxVista: "activos", // "activos" | "papelera"

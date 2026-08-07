@@ -7,7 +7,7 @@ import { esc, fmt, todayStr, num } from "../core/utils.js";
 import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
-  calcResumenMovimientos, calcGastoInsumosMensual
+  calcResumenMovimientos
 } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero } from "../core/pdf.js";
@@ -328,25 +328,19 @@ function fmtCorto(n) {
   return fmt(n);
 }
 
-// Único panel de reporte financiero (antes había dos: uno con números de
-// TODO el histórico, sin relación con el rango de fechas del otro, que solo
-// servía para el PDF). El mismo rango alimenta los números en vivo y el PDF
-// — nunca puede pasar que la pantalla y el PDF de un mismo periodo digan
-// cosas distintas, porque los dos usan calcResumenMovimientos().
-//
-// "Insumos cotizados por mes" (estimado, ver renderGastoInsumos más abajo)
-// vive en su PROPIA tarjeta aparte, con borde de advertencia — antes convivía
-// dentro de esta misma tarjeta de reporte y, aunque los números nunca se
-// mezclaban en el cálculo, visualmente parecía que sí (la queja más repetida
-// de este reporte era justo esa: "por qué las estimaciones aparecen como
-// gastos" — separarlas del todo en tarjetas distintas es lo único que elimina
-// la ambigüedad de raíz, no solo el texto de ayuda).
+// Único panel de reporte financiero. El mismo rango alimenta los números en
+// vivo, el PDF y el CSV — nunca puede pasar que digan cosas distintas entre
+// sí, porque los tres usan calcResumenMovimientos() sobre los mismos
+// `movimientos`. Solo se reportan movimientos REALES (state.tx) — no hay
+// ningún número de estimaciones/cotizaciones acá ni en el PDF: lo cotizado
+// no es gasto hasta que se registra como costo real o como compra de insumo.
 function renderReportePeriodo() {
   var fr = state.formReporte;
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
   var resumen = calcResumenMovimientos(movimientos);
+  var comprasInsumo = movimientos.filter(function (t) { return t.esInsumo; }).sort(function (a, b) { return String(b.fecha).localeCompare(String(a.fecha)); });
   var html = '<div class="card"><div class="section-title small">Reporte financiero' +
-    renderHelp("Elige un rango de fechas (o usa los atajos) — los números y el PDF de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí. La gráfica de ingresos/gastos de los últimos 30 días está arriba, sin selector de fechas.") +
+    renderHelp("Elige un rango de fechas (o usa los atajos) — los números, el PDF y el CSV de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí. La gráfica de ingresos/gastos de los últimos 30 días está arriba, sin selector de fechas.") +
     "</div>";
   html += '<div class="filters" style="margin-bottom:10px;">' +
     ["hoy", "semana", "mes", "año"].map(function (k) {
@@ -359,10 +353,12 @@ function renderReportePeriodo() {
     '<div class="field"><label>Hasta</label><input type="date" data-form="reporte" data-field="hasta" value="' + esc(fr.hasta) + '" /></div>' +
     "</div>";
 
-  html += '<div class="report-grid" style="margin-top:14px;">' +
+  // Grid fijo de 3 columnas (antes auto-fit dejaba 5 tiles arriba y 1 solo
+  // abajo según el ancho) — 6 tiles parejos, 2 filas de 3.
+  html += '<div class="report-grid report-grid-financiero">' +
     '<div class="report-item"><div class="rl">Ingresos</div><div class="rv" style="color:var(--success-ink);">' + fmt(resumen.ingresos) + "</div></div>" +
     '<div class="report-item"><div class="rl">Gastos</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.gastos) + "</div></div>" +
-    '<div class="report-item"><div class="rl">De los cuales, insumos' + renderHelp("Parte de \"Gastos\" que corresponde a compras de insumo YA REALES — registradas como costo real en una cotización, o marcadas \"Es compra de insumo\" al registrar un movimiento en Finanzas. No confundir con \"Insumos cotizados por mes\" de más abajo, que es solo una estimación.") + '</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.insumosReales) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Insumos' + renderHelp("Compras de insumo YA REALES, parte de \"Gastos\" — registradas como costo real en una cotización, o marcadas \"Es compra de insumo\" al registrar un movimiento en Finanzas.") + '</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.insumosReales) + "</div></div>" +
     '<div class="report-item"><div class="rl">Nómina</div><div class="rv" style="color:var(--warning-ink);">' + fmt(resumen.nomina) + "</div></div>" +
     '<div class="report-item"><div class="rl">Comisiones</div><div class="rv" style="color:var(--info-ink);">' + fmt(resumen.comisiones) + "</div></div>" +
     '<div class="report-item"><div class="rl">Balance neto</div><div class="rv">' + fmt(resumen.balance) + "</div></div>" +
@@ -374,61 +370,22 @@ function renderReportePeriodo() {
     '<button class="btn ghost small" data-action="export-csv">Descargar CSV de todos los movimientos</button>' +
     "</div>";
 
-  html += "</div>";
-  html += renderGastoInsumos();
-  return html;
-}
-
-// "Inventario negativo" (ver calcGastoInsumosMensual en core/calc.js): no
-// cuánto insumo hay en stock, sino cuánto se gastó en insumos cada mes —
-// para saber cuándo conviene empezar a comprar al por mayor. TARJETA APARTE
-// del reporte financiero (con borde de advertencia), a propósito: aunque el
-// número nunca se mezcló en el cálculo de "Gastos", vivir dentro de la misma
-// tarjeta hacía parecer que sí — separarla del todo, visualmente, es lo que
-// elimina la ambigüedad de raíz.
-function renderGastoInsumos() {
-  var meses = calcGastoInsumosMensual();
-  var abierto = !!state.gastoInsumosAbierto;
-  var totalGlobal = meses.reduce(function (a, m) { return a + m.total; }, 0);
-
-  var html = '<div class="card" style="border-color:var(--warning);margin-top:14px;">';
-  // Colapsado por defecto: es un reporte de consulta ocasional ("¿ya me
-  // conviene comprar al por mayor?"), no algo que se mire todos los días, y
-  // en un taller con meses de historia ocupaba media pantalla del Resumen.
-  html += '<div class="section-title small" style="cursor:pointer;display:flex;align-items:center;gap:8px;margin:0;" data-action="toggle-gasto-insumos">' +
-    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierto ? "▾" : "▸") + "</button>" +
-    "<span>⚠️ Insumos cotizados por mes — ESTIMADO, no es gasto real</span>" +
-    renderHelp("Esto NO es dinero que ya salió del taller: suma lo cotizado en todas las cotizaciones de ese mes (se hayan convertido en pedido o no). Tampoco es un inventario de lo que tenés guardado (no manejás stock de insumos) — sirve solo para decidir cuándo conviene empezar a comprar al por mayor. Para que un gasto de insumos cuente como REAL (y aparezca en \"Gastos\" y \"de los cuales, insumos\" del Reporte financiero de arriba), regístralo como costo real en la cotización o marca \"Es compra de insumo\" al registrar un movimiento en Finanzas.") +
-    (meses.length ? '<span class="amount" style="margin-left:auto;font-size:13px;">' + fmt(totalGlobal) + "</span>" : "") +
-    "</div>";
-
-  if (!meses.length) {
-    return html + '<div class="empty">Todavía no hay cotizaciones con insumos para reportar.</div></div>';
-  }
-  if (!abierto) return html + "</div>";
-
-  var COLS = "1fr 110px";
-  meses.slice(0, 6).forEach(function (m) {
-    html += '<div class="section-sub" style="margin:16px 0 4px;display:flex;justify-content:space-between;align-items:baseline;gap:10px;">' +
-      '<b style="color:var(--ink);font-size:13px;">' + esc(etiquetaMes(m.mes)) + "</b>" +
-      '<span class="amount">' + fmt(m.total) + "</span></div>";
-    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Costo</span></div>';
-    m.insumos.slice(0, 12).forEach(function (i) {
-      html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
-        '<span class="mobile-th">Insumo</span><span>' + esc(i.nombre) + (i.unidad ? ' <span style="color:var(--ink-faint);font-size:11px;">(' + esc(i.unidad) + ")</span>" : "") + "</span>" +
-        '<span class="mobile-th">Costo</span><span class="amount">' + fmt(i.costoTotal) + "</span>" +
+  if (comprasInsumo.length) {
+    html += '<hr class="stitch" style="margin:16px 0;" />';
+    html += '<div class="section-sub" style="margin:0 0 8px;font-weight:700;color:var(--ink);">Compras de insumo en este rango (' + comprasInsumo.length + ")</div>";
+    html += '<div class="tx-row head" style="grid-template-columns:85px 90px 1fr 100px;"><span>Fecha</span><span>Tipo</span><span>Concepto</span><span>Monto</span></div>';
+    comprasInsumo.forEach(function (t) {
+      html += '<div class="tx-row" style="grid-template-columns:85px 90px 1fr 100px;">' +
+        '<span class="mobile-th">Fecha</span><span>' + esc(t.fecha) + "</span>" +
+        '<span class="mobile-th">Tipo</span><span class="tag gasto">insumos</span>' +
+        '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
+        '<span class="mobile-th">Monto</span><span class="amount neg">-' + fmt(t.monto) + "</span>" +
         "</div>";
     });
-    if (m.insumos.length > 12) {
-      html += '<div class="section-sub" style="margin:6px 0 0;">y ' + (m.insumos.length - 12) + " insumo(s) más en este mes.</div>";
-    }
-  });
-  return html + "</div>";
-}
-function etiquetaMes(mes) {
-  var partes = mes.split("-");
-  var meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
-  return meses[Number(partes[1]) - 1] + " " + partes[0];
+  }
+
+  html += "</div>";
+  return html;
 }
 
 export var actions = {
@@ -448,10 +405,6 @@ export var actions = {
       card.scrollIntoView({ behavior: "smooth", block: "start" });
       card.classList.add("destello");
     }, 60);
-  },
-  "toggle-gasto-insumos": function () {
-    state.gastoInsumosAbierto = !state.gastoInsumosAbierto;
-    notify();
   },
   "set-reporte-atajo": function (el) {
     var hoy = new Date();
@@ -477,7 +430,7 @@ export var actions = {
     if (!fr.desde || !fr.hasta) { window.alert("Elige una fecha de inicio y una de corte."); return; }
     var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
     var etiqueta = fr.desde === fr.hasta ? fr.desde : (fr.desde + " a " + fr.hasta);
-    await generarPDFReporteFinanciero(movimientos, fr.desde, fr.hasta, etiqueta);
+    await generarPDFReporteFinanciero(movimientos, etiqueta);
   },
   "export-csv": function () {
     exportCSV();
