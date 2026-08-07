@@ -24,6 +24,20 @@
 .help-tip.align-right:hover .help-bubble,.help-tip.align-right:focus .help-bubble{transform:translateY(0);}
 .help-tip:hover .help-bubble,.help-tip:focus .help-bubble{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0);pointer-events:auto;}
 
+/* En pantallas angostas el globo se ancla al VIEWPORT en vez de al ícono "?".
+   Centrado sobre el ícono (240px de ancho), un "?" cerca del borde derecho
+   dejaba medio globo fuera de la pantalla — y como `visibility:hidden` sigue
+   ocupando espacio en el layout, la página quedaba scrolleable en horizontal
+   incluso sin estar mostrando ningún globo. Con `position:fixed` + left/right
+   el globo nunca puede ser más ancho que la pantalla ni empujar el layout:
+   `position:fixed` lo saca del cálculo de scroll de la página, y al dejar
+   top/bottom en auto conserva su posición vertical natural (junto al ícono). */
+@media (max-width: 880px){
+  .help-bubble{position:fixed;left:12px;right:12px;bottom:auto;width:auto;max-width:none;transform:translateY(4px);}
+  .help-tip:hover .help-bubble,.help-tip:focus .help-bubble,
+  .help-tip.align-right:hover .help-bubble,.help-tip.align-right:focus .help-bubble{transform:translateY(0);}
+}
+
 /* KPIs seleccionables (ver core/dom.js): dan la sensación de ser un control,
    no solo un dato de lectura. */
 .kpi.kpi-clickable{cursor:pointer;}

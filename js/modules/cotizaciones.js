@@ -1,12 +1,12 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, fmt, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
-import { todosNumerosOp } from "./pedidos.js";
-import { ESTADOS_DEFAULT } from "../core/constants.js";
+import { todosNumerosOp, sincronizarEventoPedido } from "./pedidos.js";
+import { ESTADOS_DEFAULT, TIPOS_COSTO } from "../core/constants.js";
 import { ajustarStockProducto } from "../core/stock.js";
 
 function nuevaReferencia() {
@@ -37,6 +37,84 @@ export function render() {
   var vista = state.cotizacionesVista || "nueva";
   var html = renderTabsCotizaciones(vista);
   html += vista === "historial" ? renderHistorial() : renderEditor();
+  html += renderInsumoPicker();
+  return html;
+}
+
+// Explorador de insumos (modal): reemplaza al <select> plano de "+ Insumos
+// predeterminados", que solo escalaba mientras el catálogo cupiera en un
+// desplegable — con decenas de insumos obligaba a leer una lista larga sin
+// poder filtrar ni ver el costo antes de elegir. Acá hay panel de categorías
+// a la izquierda, búsqueda arriba y selección MÚLTIPLE (agregar cinco
+// insumos era abrir el select cinco veces).
+function renderInsumoPicker() {
+  var cotId = state.insumoPickerAbierto;
+  if (!cotId) return "";
+  var refId = state.insumoPickerRef;
+  var categorias = state.catalogoCategorias || [];
+  var lista = state.catalogoInsumos || [];
+  var catActiva = state.insumoPickerCategoria || "todos";
+  var q = norm(state.insumoPickerBusqueda || "").trim();
+  var seleccion = state.insumoPickerSeleccion || [];
+
+  function enCategoria(i, catId) {
+    if (catId === "todos") return true;
+    if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
+    return i.categoriaId === catId;
+  }
+  // El contador de cada categoría respeta la búsqueda activa: si buscas
+  // "hilo", cada categoría muestra cuántos hilos tiene, no su total.
+  function cuenta(catId) {
+    return lista.filter(function (i) { return enCategoria(i, catId) && (!q || norm(i.nombre).indexOf(q) >= 0); }).length;
+  }
+  var visibles = lista.filter(function (i) {
+    return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
+  });
+
+  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
+    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
+    .concat([{ id: "sin", nombre: "Sin categoría" }]);
+
+  var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker">' +
+    '<div class="picker-modal" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="picker-search"><input id="inp-insumo-picker-buscar" class="mini-input" style="width:100%" placeholder="Buscar insumo por nombre o unidad…" value="' + esc(state.insumoPickerBusqueda || "") + '" data-live-filter="insumoPickerBusqueda" /></div>' +
+    '<div class="picker-body">' +
+    '<div class="picker-side">' +
+    itemsCat.map(function (c) {
+      var n = cuenta(c.id);
+      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-categoria" data-val="' + esc(c.id) + '">' +
+        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
+    }).join("") +
+    "</div>" +
+    '<div class="picker-list">';
+
+  if (!lista.length) {
+    html += '<div class="empty">Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Insumos</b> para poder reutilizarlos acá.</div>';
+  } else if (!visibles.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.insumoPickerBusqueda) + '"' : "") + ".</div>";
+  } else {
+    visibles.forEach(function (i) {
+      var marcado = seleccion.indexOf(i.id) !== -1;
+      html += '<label class="picker-item ' + (marcado ? "sel" : "") + '">' +
+        '<input type="checkbox" data-action="toggle-insumo-picker-item" data-id="' + i.id + '" ' + (marcado ? "checked" : "") + " />" +
+        '<span class="picker-item-info"><b>' + esc(i.nombre) + "</b><small>" + esc(i.unidad || "UND") + " · " + esc((TIPOS_COSTO[i.tipo] || {}).label || i.tipo || "") + "</small></span>" +
+        '<span class="amount">' + fmt(i.costo) + "</span>" +
+        "</label>";
+    });
+  }
+
+  html += "</div></div>" +
+    '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">' + (seleccion.length ? seleccion.length + (seleccion.length === 1 ? " insumo seleccionado" : " insumos seleccionados") : "Marca los insumos que quieras agregar") + "</span>" +
+    '<span style="display:flex;gap:8px;">' +
+    '<button class="btn ghost small" data-action="cerrar-insumo-picker">Cancelar</button>' +
+    '<button class="btn" ' + (seleccion.length ? "" : "disabled") + ' data-action="confirmar-insumo-picker" data-cot="' + cotId + '" data-ref="' + refId + '">Agregar' + (seleccion.length ? " (" + seleccion.length + ")" : "") + "</button>" +
+    "</span></div>" +
+    "</div></div>";
   return html;
 }
 
@@ -57,6 +135,9 @@ function renderFormNueva() {
     renderClienteCombo("cotizacion", "cot-cliente-nombre", f) +
     '<div class="field wide"><label>Descripción</label><input data-form="cotizacion" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. Uniformes equipo San Jorge" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="cotizacion" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
+    '<div class="field"><label>Fecha de entrega (opcional)' +
+    renderHelp("Se traslada al pedido cuando conviertas esta cotización — es lo que hace que aparezca en \"Próximas entregas\" del Resumen. Si aún no la sabes, puedes definirla después.") +
+    '</label><input type="date" data-form="cotizacion" data-field="fechaEntrega" value="' + esc(f.fechaEntrega || "") + '" /></div>' +
     '<button class="btn" data-action="add-cotizacion">Crear cotización</button>' +
     "</div></div>";
 }
@@ -71,8 +152,25 @@ function renderEditor() {
   var html = '<div class="pedido-actions" style="margin-bottom:10px;">' +
     '<button class="btn ghost small" data-action="cerrar-cotizacion-editor">← Nueva cotización en blanco</button>' +
     "</div>";
+  html += renderBarraGuardado(cot);
   html += renderCotCard(cot);
   return html;
+}
+
+// Barra de guardado: aparece SOLO cuando hay cambios sin guardar en esta
+// cotización. Es sticky para que no se pierda de vista al bajar por una
+// cotización larga y quede claro que lo que se ve en pantalla todavía no es
+// lo que está guardado.
+function renderBarraGuardado(cot) {
+  if (state.cotSucia !== cot.id) return "";
+  return '<div class="save-bar">' +
+    '<span class="save-bar-msg">● Cambios sin guardar' +
+    renderHelp("Lo que editaste se ve en pantalla pero todavía no reemplazó a la cotización guardada. Guardá para confirmarlo, o descartá para volver a la última versión guardada. Registrar un costo real, pagar una comisión o convertir en pedido guardan solos (son movimientos reales, no una simulación).") +
+    "</span>" +
+    '<span style="display:flex;gap:8px;flex-wrap:wrap;">' +
+    '<button class="btn ghost small" data-action="descartar-cambios-cotizacion">Descartar</button>' +
+    '<button class="btn" data-action="guardar-cotizacion" data-id="' + cot.id + '">Guardar cambios</button>' +
+    "</span></div>";
 }
 
 // El historial es SIEMPRE un índice de tarjetas chicas — clic en cualquiera
@@ -168,6 +266,9 @@ function renderCotHead(c, iva) {
     (c.descripcion ? '<div class="cot-descripcion">' + esc(c.descripcion) + "</div>" : "") +
     '<div class="cot-meta">' +
     '<span class="cot-meta-item"><span class="cot-meta-label">Fecha</span><input type="date" class="mini-input" style="width:135px;" value="' + esc(c.fecha) + '" data-action-change="set-cot-fecha" data-id="' + c.id + '" /></span>' +
+    '<span class="cot-meta-item"><span class="cot-meta-label">Entrega' +
+    renderHelp("Fecha comprometida de entrega. Al convertir esta cotización en pedido se traslada al pedido, que es lo que alimenta \"Próximas entregas\" en el Resumen y el recordatorio en Google Calendar.") +
+    '</span><input type="date" class="mini-input" style="width:135px;" value="' + esc(c.fechaEntrega || "") + '" data-action-change="set-cot-fecha-entrega" data-id="' + c.id + '" /></span>' +
     (c.pedidoOrigenId && c.estado !== "convertida" ? '<span class="cot-meta-item" style="color:var(--accent-ink);">Escalada desde pedido rápido</span>' : "") +
     "</div>" +
     "</div>" +
@@ -415,10 +516,7 @@ function renderRefCard(cotId, ref) {
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
-    '<select class="mini-input addFromCatalog" style="max-width:240px" data-action-change="add-insumo-catalogo" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
-    '<option value="">+ Insumos predeterminados…</option>' +
-    (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
-    "</select>" +
+    '<button class="btn ghost small" data-action="abrir-insumo-picker" data-cot="' + cotId + '" data-ref="' + ref.id + '">📂 Insumos predeterminados…</button>' +
     '<button class="btn ghost small" data-action="add-insumo-personalizado" data-cot="' + cotId + '" data-ref="' + ref.id + '">+ Insumo personalizado</button>' +
     ((state.plantillasPrendas || []).length ? (
       '<select class="mini-input applyPlantilla" style="max-width:220px" data-action-change="aplicar-plantilla" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
@@ -548,6 +646,9 @@ function renderListaCompras(compras) {
 
 export var actions = {
   "cot-vista": function (el) {
+    // Irse al Historial deja el detalle atrás: si hay cambios sin guardar,
+    // se avisa antes (si no, se perderían sin que nadie los vea).
+    if (el.getAttribute("data-val") === "historial" && !confirmarSalidaSiSucia()) return;
     state.cotizacionesVista = el.getAttribute("data-val");
     notify();
   },
@@ -575,30 +676,71 @@ export var actions = {
   },
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
-    if (!fc.cliente || !fc.descripcion) return;
-    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
+    if (!exigirCampos([["Cliente", fc.cliente], ["Descripción", fc.descripcion]])) return;
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, fechaEntrega: fc.fechaEntrega || "", referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
     state.cotizaciones.unshift(nueva);
-    state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() };
+    state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" };
     // Se queda en esta misma pestaña, ahora mostrando el detalle completo de
     // la recién creada — el detalle SIEMPRE vive acá, nunca en Historial.
     state.cotizacionEditando = nueva.id;
-    persist("cotizaciones"); notify();
+    guardarCotizaciones(); // nace guardada y con su punto de retorno tomado
+    notify();
   },
   // Abrir desde Historial siempre manda a esta pestaña con el detalle
   // completo — Historial en sí nunca muestra más que la tarjeta chica.
   "abrir-cotizacion-editor": function (el) {
+    // Abrir otra cotización descarta el borrador de la anterior: se avisa
+    // antes (solo puede haber una abierta a la vez).
+    if (!confirmarSalidaSiSucia()) return;
     state.cotizacionEditando = el.getAttribute("data-id");
     state.cotizacionesVista = "nueva";
+    tomarSnapshotCotizacion();
+    notify();
+  },
+  // ---------- guardar / descartar ----------
+  "guardar-cotizacion": function (el) {
+    var id = el.getAttribute("data-id");
+    var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+    // La fecha de entrega baja al pedido vinculado recién acá (al guardar),
+    // no en cada tecla: así el pedido —y con él "Próximas entregas" y el
+    // recordatorio de Calendar— refleja siempre una fecha confirmada, no una
+    // que se estaba tanteando.
+    if (cot) propagarFechaEntrega(cot);
+    guardarCotizaciones();
+    notify();
+  },
+  "descartar-cambios-cotizacion": function () {
+    var snap = state.cotSnapshot;
+    if (!snap) { state.cotSucia = ""; notify(); return; }
+    if (!window.confirm("¿Descartar los cambios sin guardar de esta cotización?\n\nVuelve a como estaba en el último guardado.")) return;
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === snap.id ? snap : c; });
+    state.cotSucia = "";
+    state.cotSnapshot = null;
     notify();
   },
   "cerrar-cotizacion-editor": function () {
+    if (!confirmarSalidaSiSucia()) return;
     state.cotizacionEditando = "";
     notify();
   },
   "set-cot-fecha": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fecha: el.value }) : c; });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
+  },
+  // La fecha de entrega vive en la cotización y se traslada al pedido al
+  // convertir (ver "convertir-cotizacion"). Si el pedido YA existe (cotización
+  // convertida, o escalada desde un pedido rápido), se propaga de inmediato:
+  // si no, cambiar la fecha acá después de convertir no se reflejaría en
+  // ningún lado y "Próximas entregas" seguiría mostrando la vieja.
+  // Igual que el resto de la edición, queda pendiente de guardar. La bajada
+  // al pedido vinculado (si ya existe) ocurre al guardar, no en cada tecla —
+  // ver propagarFechaEntrega() dentro de "guardar-cotizacion".
+  "set-cot-fecha-entrega": function (el) {
+    var id = el.getAttribute("data-id");
+    var valor = el.value;
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fechaEntrega: valor }) : c; });
+    marcarSucia(id);
   },
   // Solo cambia el nombre mostrado (c.cliente) — si la cotización estaba
   // vinculada a un cliente registrado (clienteId), el vínculo se conserva tal
@@ -609,11 +751,14 @@ export var actions = {
     var nombre = el.value.trim();
     if (!nombre) { notify(); return; }
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { cliente: nombre }) : c; });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
   },
+  // Eliminar SÍ guarda de una: no tendría sentido dejar "pendiente de
+  // guardar" algo que ya no existe en pantalla.
   "remove-cotizacion": function (el) {
     var id = el.getAttribute("data-id");
     state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== id; });
+    if (state.cotSucia === id) { state.cotSucia = ""; state.cotSnapshot = null; }
     persist("cotizaciones"); notify();
   },
   "add-referencia": function (el) {
@@ -626,7 +771,7 @@ export var actions = {
     // La nueva referencia queda activa de una vez (si no, con varias
     // referencias tocaría buscarla entre las pestañas para empezar a cargarla).
     state.refActiva = Object.assign({}, state.refActiva, { [id]: nueva.id });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
   },
   "remove-referencia": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
@@ -684,12 +829,50 @@ export var actions = {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).concat([nuevoInsumo(null)]) }); });
   },
-  "add-insumo-catalogo": function (el) {
-    if (!el.value) return;
+  // ---------- explorador de insumos (modal) ----------
+  "abrir-insumo-picker": function (el) {
+    state.insumoPickerAbierto = el.getAttribute("data-cot");
+    state.insumoPickerRef = el.getAttribute("data-ref");
+    state.insumoPickerCategoria = "todos";
+    state.insumoPickerBusqueda = "";
+    state.insumoPickerSeleccion = [];
+    notify();
+  },
+  "cerrar-insumo-picker": function () {
+    state.insumoPickerAbierto = "";
+    state.insumoPickerRef = "";
+    state.insumoPickerSeleccion = [];
+    state.insumoPickerBusqueda = "";
+    notify();
+  },
+  // El overlay cierra al hacer clic FUERA del modal; este no-op va sobre el
+  // modal en sí para que un clic adentro no burbujee hasta el overlay y lo
+  // cierre a mitad de la selección.
+  "picker-stop": function () {},
+  "set-insumo-picker-categoria": function (el) {
+    state.insumoPickerCategoria = el.getAttribute("data-val");
+    notify();
+  },
+  "toggle-insumo-picker-item": function (el) {
+    var id = el.getAttribute("data-id");
+    var sel = state.insumoPickerSeleccion || [];
+    state.insumoPickerSeleccion = sel.indexOf(id) === -1 ? sel.concat([id]) : sel.filter(function (x) { return x !== id; });
+    notify();
+  },
+  "confirmar-insumo-picker": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
-    var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === el.value; })[0];
-    if (!item) return;
-    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).concat([nuevoInsumo(item)]) }); });
+    var ids = state.insumoPickerSeleccion || [];
+    if (!ids.length) return;
+    // Se agregan en el orden del catálogo (no en el orden en que se fueron
+    // marcando), que es el mismo que se ve en la lista de la izquierda.
+    var nuevos = (state.catalogoInsumos || [])
+      .filter(function (i) { return ids.indexOf(i.id) !== -1; })
+      .map(function (i) { return nuevoInsumo(i); });
+    state.insumoPickerAbierto = "";
+    state.insumoPickerRef = "";
+    state.insumoPickerSeleccion = [];
+    state.insumoPickerBusqueda = "";
+    mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).concat(nuevos) }); });
   },
   "remove-insumo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-insumo");
@@ -775,7 +958,7 @@ export var actions = {
       var gastos = (c.gastosReales || []).concat([{ id: uid(), concepto: concepto, monto: monto, nota: nota, destino: destino, destinoNombre: destinoNombre, fecha: todayStr() }]);
       return Object.assign({}, c, { gastosReales: gastos });
     });
-    persist("cotizaciones"); notify();
+    guardarCotizaciones(); notify();
   },
   "set-cot-iva": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
@@ -786,7 +969,7 @@ export var actions = {
       else iva.porcentaje = num(el.value);
       return Object.assign({}, c, { iva: iva });
     });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
   },
   "remove-cot-gasto": function (el) {
     var cotId = el.getAttribute("data-cot"), gastoId = el.getAttribute("data-gasto");
@@ -796,7 +979,7 @@ export var actions = {
     });
     // Elimina también el movimiento de Finanzas creado junto con este costo real.
     state.tx = state.tx.filter(function (t) { return t.origenGastoId !== gastoId; });
-    persist("cotizaciones"); persist("tx"); notify();
+    guardarCotizaciones(); persist("tx"); notify();
   },
   "convertir-cotizacion": function (el) {
     var id = el.getAttribute("data-id");
@@ -813,7 +996,10 @@ export var actions = {
       var agregado = estadoAgregadoDeCot(cot);
       var nuevoP = {
         id: uid(), clienteId: cot.clienteId || "", cliente: cot.cliente, tipoCliente: "propio", descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
-        cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
+        // La fecha de entrega se hereda de la cotización (antes nacía siempre
+        // vacía y no había forma de definirla al cotizar, así que TODO pedido
+        // convertido quedaba fuera de "Próximas entregas" del Resumen).
+        cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: cot.fechaEntrega || "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
         numeroOp: generarNumeroOp(todosNumerosOp()),
         iva: cot.iva || { activo: false, porcentaje: 19 },
         abonos: [],
@@ -821,12 +1007,21 @@ export var actions = {
         // La comisión de vendedor definida en la cotización se traslada al pedido
         // resultante (misma estructura), para que no haya que volver a definirla.
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null,
+        codigoPublico: codigoPublico(), calendarEventId: "",
         stockConsumido: [] // se completa abajo con lo que en verdad se descontó, para poder revertirlo si el pedido se elimina
       };
       state.pedidos.unshift(nuevoP);
       state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
       nuevoP.stockConsumido = descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
-      persist("pedidos"); persist("cotizaciones");
+      // Convertir consolida TODO lo que estuviera pendiente de guardar: el
+      // pedido se arma con esos valores, así que no puede quedar una versión
+      // guardada distinta de la que originó el pedido.
+      persist("pedidos"); guardarCotizaciones();
+      // Con fecha de entrega heredada, el pedido nuevo entra al Calendar igual
+      // que uno creado a mano en Pedidos (antes esto solo pasaba desde el
+      // formulario de Pedidos, así que un pedido convertido nunca generaba
+      // recordatorio).
+      sincronizarEventoPedido(nuevoP);
       state.cotizacionEditando = ""; // se va a Pedidos; que no quede "abierta" acá al volver
       state.tab = "pedidos";
       state.pedidosVista = "historial"; // aterriza viendo el pedido recién creado, no el formulario en blanco
@@ -871,7 +1066,7 @@ export var actions = {
       if (campo === "valor") v.valor = num(el.value); else v[campo] = el.value;
       return Object.assign({}, c, { vendedor: v });
     });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
   },
   "set-cot-vendedor-fecha": function (el) {
     var id = el.getAttribute("data-id");
@@ -879,7 +1074,7 @@ export var actions = {
       if (c.id !== id || !c.vendedor) return c;
       return Object.assign({}, c, { vendedor: Object.assign({}, c.vendedor, { fechaPago: el.value }) });
     });
-    persist("cotizaciones"); notify();
+    marcarSucia(id);
   },
   // Igual que toggle-comision en pedidos.js: desmarcar "pagada" revierte de
   // verdad el movimiento (no solo la etiqueta), para que volver a marcarla
@@ -900,7 +1095,7 @@ export var actions = {
       if (c.id !== id) return c;
       return Object.assign({}, c, { vendedor: Object.assign({}, c.vendedor, { estado: pagando ? "pagado" : "pendiente" }) });
     });
-    persist("cotizaciones"); notify();
+    guardarCotizaciones(); notify();
   },
   // Registra el costo total ESTIMADO de todo el pedido como un único
   // movimiento en Finanzas (a diferencia de "Registrar costo real", que
@@ -1059,6 +1254,10 @@ export var actions = {
         estado: agregado ? agregado.estado : p.estado,
         estadosDef: agregado ? agregado.estadosDef : null,
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor,
+        // Solo pisa la fecha del pedido si la cotización define una — si se
+        // dejó vacía al cotizar, se conserva la que el pedido rápido ya tenía
+        // en vez de borrársela.
+        fechaEntrega: cot.fechaEntrega || p.fechaEntrega || "",
         stockConsumido: (p.stockConsumido || []).concat(stockAplicado)
       });
     });
@@ -1066,7 +1265,7 @@ export var actions = {
     // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
-    persist("pedidos"); persist("cotizaciones"); notify();
+    persist("pedidos"); guardarCotizaciones(); notify();
   },
   "set-estado-ref-label": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx"));
@@ -1170,10 +1369,79 @@ function descontarStockPorTallas(cot, origen) {
   return aplicado;
 }
 
-// Aplica una función de transformación a una cotización completa, guarda y notifica.
+// ---------- guardado explícito ----------
+// Editar una cotización (precios, insumos, cantidades, tallas...) ya NO
+// escribe a la hoja de datos en cada tecla: el cambio queda en pantalla y la
+// cotización se marca como "sin guardar" hasta que se confirme con el botón.
+// El motivo es que una cotización es un documento que se le enseña al
+// cliente: tocarla para simular un precio no debería reemplazar en silencio
+// el que ya se había acordado.
+//
+// Excepción a propósito: las acciones que mueven PLATA o crean registros
+// reales (registrar un costo real, pagar la comisión del vendedor, convertir
+// en pedido, crear/eliminar la cotización) siguen guardando de inmediato —
+// esas no son "simular", son hechos consumados, y además tocan Finanzas, que
+// no puede quedar a medias esperando un botón.
+function marcarSucia(cotId) {
+  state.cotSucia = cotId;
+  notify();
+}
+// Foto de la cotización abierta TAL COMO ESTÁ GUARDADA, para poder volver a
+// ella con "Descartar". Se toma al abrir el editor y después de cada guardado
+// — nunca desde marcarSucia(), porque para cuando una acción marca el cambio
+// ya lo aplicó sobre state, y la foto saldría con esa primera edición adentro
+// (descartar dejaría el primer cambio pegado).
+function tomarSnapshotCotizacion() {
+  var id = state.cotizacionEditando;
+  var cot = id ? state.cotizaciones.filter(function (c) { return c.id === id; })[0] : null;
+  state.cotSnapshot = cot ? JSON.parse(JSON.stringify(cot)) : null;
+}
+// Guarda de verdad y vuelve a dejar la cotización "limpia". Cualquier acción
+// transaccional la llama, así que después de registrar un costo real o pagar
+// una comisión no queda un aviso de "sin guardar" colgado por cambios que ya
+// se guardaron.
+function guardarCotizaciones() {
+  persist("cotizaciones");
+  state.cotSucia = "";
+  tomarSnapshotCotizacion(); // el nuevo punto de retorno es lo recién guardado
+}
+// Baja la fecha de entrega de una cotización a su pedido vinculado (si ya
+// existe). Vive fuera de la acción de guardado porque también corre al
+// convertir/aplicar, donde el pedido nace o se actualiza en el mismo paso.
+function propagarFechaEntrega(cot) {
+  var pedidoId = cot.pedidoId || cot.pedidoOrigenId;
+  if (!pedidoId || !cot.fechaEntrega) return;
+  var yaIgual = state.pedidos.some(function (p) { return p.id === pedidoId && p.fechaEntrega === cot.fechaEntrega; });
+  if (yaIgual) return;
+  state.pedidos = state.pedidos.map(function (p) { return p.id === pedidoId ? Object.assign({}, p, { fechaEntrega: cot.fechaEntrega }) : p; });
+  persist("pedidos");
+  var actualizado = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+  if (actualizado) sincronizarEventoPedido(actualizado);
+}
+// Guardia común de "vas a salir con cambios sin guardar". Devuelve false si
+// el usuario cancela, para que quien la llame no siga con la navegación.
+function confirmarSalidaSiSucia() {
+  if (!state.cotSucia) return true;
+  if (window.confirm("Esta cotización tiene cambios sin guardar.\n\n¿Salir de todos modos? Los cambios se pierden.")) {
+    // Al salir sin guardar se revierte a lo último guardado — si no, los
+    // cambios quedarían vivos en memoria y el próximo guardado de CUALQUIER
+    // otra cosa los arrastraría a la hoja sin que nadie los confirmara.
+    if (state.cotSnapshot) {
+      var snap = state.cotSnapshot;
+      state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === snap.id ? snap : c; });
+    }
+    state.cotSucia = "";
+    state.cotSnapshot = null;
+    return true;
+  }
+  return false;
+}
+
+// Aplica una función de transformación a una cotización completa y la marca
+// como pendiente de guardar (no persiste — ver marcarSucia arriba).
 function conRef(cotId, transform) {
   state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? transform(c) : c; });
-  persist("cotizaciones"); notify();
+  marcarSucia(cotId);
 }
 // Agrega filas al detalle (tallas/observaciones) de una referencia y, si el
 // listado resultante queda más grande que la cantidad cotizada, la sube

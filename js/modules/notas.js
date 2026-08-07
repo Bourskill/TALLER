@@ -3,7 +3,7 @@
 // financieras (nómina, gastos fijos, meta y deudas), ver modules/pendientes.js.
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, uid } from "../core/utils.js";
+import { esc, opt, uid, exigirCampos } from "../core/utils.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 import { getSession } from "../core/auth.js";
 
@@ -73,7 +73,7 @@ function sincronizarEventoNota(nota) {
 export var actions = {
   "add-pend": function () {
     var fpe = state.formPend;
-    if (!fpe.texto) return;
+    if (!exigirCampos([["Descripción", fpe.texto]])) return;
     state.pendientes.unshift({ id: uid(), texto: fpe.texto, categoria: fpe.categoria, prioridad: fpe.prioridad, fecha: fpe.fecha || "", hora: fpe.hora || "", hecho: false, calendarEventId: "" });
     state.formPend = { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" };
     persist("pendientes"); notify();

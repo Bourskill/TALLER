@@ -479,8 +479,50 @@ export function calcNominaPendiente() {
 export function calcPedidosActivos() {
   return state.pedidos.filter(function (p) { return p.estado !== "entregado"; }).length;
 }
+// El salario de cada persona se guarda EN LA BASE que se eligió al cargarlo
+// (e.salarioPeriodo: "semanal" | "quincenal" | "mensual"), no siempre
+// mensualizado. Antes todo se guardaba como mensual obligatoriamente, lo que
+// obligaba a quien paga semanal a multiplicar "x4" a mano un número que en
+// realidad no cabe exacto en ningún mes (unos tienen 4 semanas, otros 5).
+// Los registros viejos no traen salarioPeriodo: se leen como mensual, que es
+// lo que eran, así que ningún dato existente cambia de valor.
+export function salarioBaseDe(e) {
+  return e.salarioPeriodo || "mensual";
+}
+// Equivalente MENSUAL del salario de una persona — para sumarlo con otros que
+// puedan estar definidos en otra base y para los reportes.
+export function calcSalarioMensual(e) {
+  return num(e.salario) * factorPeriodo(salarioBaseDe(e));
+}
+// Lo que se le paga a esa persona en UN periodo de pago del taller (el que
+// esté configurado en Configuración → periodoPago). Si su salario ya está
+// definido en esa misma base, es el número tal cual, sin conversión.
+export function calcSalarioPorPeriodo(e, periodoPago) {
+  if (salarioBaseDe(e) === periodoPago) return num(e.salario);
+  return calcSalarioMensual(e) / factorPeriodo(periodoPago);
+}
 export function calcNominaMensualDefinida() {
-  return (state.config.nomina || []).reduce(function (a, e) { return a + num(e.salario); }, 0);
+  return (state.config.nomina || []).reduce(function (a, e) { return a + calcSalarioMensual(e); }, 0);
+}
+
+// Rango de fechas del periodo de pago que está corriendo AHORA — lo que
+// contesta "¿este pago qué días cubre?". Usa los mismos cortes que
+// periodoKey() (de donde sale si un pago cuenta como "de este periodo"), para
+// que la fecha que se muestra y el cálculo de pendiente nunca discrepen.
+export function rangoPeriodoActual(periodo) {
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var y = hoy.getFullYear(), m = hoy.getMonth(), d = hoy.getDate();
+  if (periodo === "semanal") {
+    // Semana de domingo a sábado, igual que el corte de periodoKey().
+    var inicio = new Date(y, m, d - hoy.getDay());
+    return { desde: inicio, hasta: new Date(y, m, d - hoy.getDay() + 6) };
+  }
+  if (periodo === "quincenal") {
+    return d <= 15
+      ? { desde: new Date(y, m, 1), hasta: new Date(y, m, 15) }
+      : { desde: new Date(y, m, 16), hasta: new Date(y, m + 1, 0) };
+  }
+  return { desde: new Date(y, m, 1), hasta: new Date(y, m + 1, 0) };
 }
 // Cuánto de la nómina de UNA persona ya se registró como pagado (tx tipo
 // "nomina" con esa contraparte) dentro del periodo actual — a diferencia de

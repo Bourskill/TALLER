@@ -70,6 +70,49 @@
 .ref-fields label{flex:0 0 128px;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
 .ins-table{width:100%;margin-top:10px;font-size:12px;}
 .ins-row{display:grid;grid-template-columns:1fr 60px 90px 90px 90px 30px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border-soft);}
+
+/* Barra de "cambios sin guardar" de una cotización. Sticky: en una cotización
+   larga hay que poder guardar sin volver hasta arriba, y sobre todo no perder
+   de vista que lo que se ve todavía no es lo guardado. */
+.save-bar{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:14px;}
+.save-bar-msg{font-size:12.5px;font-weight:700;color:var(--warning-ink);display:flex;align-items:center;gap:4px;}
+
+/* ---------- explorador de insumos (modal tipo "abrir archivo") ----------
+   Panel lateral de categorías + búsqueda + selección múltiple. Sustituye al
+   <select> de "insumos predeterminados", que dejaba de servir apenas el
+   catálogo pasaba de unas pocas entradas. */
+.picker-overlay{position:fixed;inset:0;z-index:150;background:rgba(6,7,11,.7);display:flex;align-items:center;justify-content:center;padding:24px;}
+.picker-modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);width:min(820px,100%);max-height:min(620px,90vh);display:flex;flex-direction:column;box-shadow:var(--shadow-lg);overflow:hidden;}
+.picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border-soft);}
+.picker-search{padding:12px 18px;border-bottom:1px solid var(--border-soft);}
+.picker-body{display:grid;grid-template-columns:210px 1fr;flex:1;min-height:0;}
+.picker-side{border-right:1px solid var(--border-soft);overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:2px;background:var(--surface-2);}
+.picker-cat{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;border:none;border-radius:var(--radius-sm);padding:9px 11px;font-size:12.5px;font-family:inherit;color:var(--ink-soft);cursor:pointer;}
+.picker-cat:hover:not(.active){background:var(--surface-hover);color:var(--ink);}
+.picker-cat.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:700;}
+.picker-cat-n{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-faint);flex-shrink:0;}
+.picker-cat.active .picker-cat-n{color:var(--accent-ink);}
+.picker-list{overflow-y:auto;padding:8px;}
+.picker-item{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:center;padding:9px 11px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;}
+.picker-item:hover{background:var(--surface-2);}
+.picker-item.sel{background:var(--accent-soft);}
+.picker-item-info{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.picker-item-info b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.picker-item-info small{font-size:11px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.picker-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-top:1px solid var(--border-soft);background:var(--surface-2);flex-wrap:wrap;}
+
+@media (max-width: 700px){
+  .picker-overlay{padding:0;}
+  .picker-modal{max-height:100vh;height:100vh;width:100%;border-radius:0;}
+  /* El panel de categorías pasa de columna lateral a una tira horizontal
+     scrolleable arriba de la lista: en un teléfono, 210px de ancho fijo se
+     comían casi toda la pantalla. */
+  .picker-body{grid-template-columns:1fr;grid-template-rows:auto 1fr;}
+  .picker-side{flex-direction:row;overflow-x:auto;border-right:none;border-bottom:1px solid var(--border-soft);scrollbar-width:none;}
+  .picker-side::-webkit-scrollbar{display:none;}
+  .picker-cat{flex:0 0 auto;}
+}
 .ins-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
 .ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px;padding:14px 0 2px;border-top:1px dashed var(--border);}
 .ref-summary .rs-item .rl{font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}

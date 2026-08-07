@@ -14,7 +14,7 @@
 // cards (foto, nombre, categoría, precio, stock) — clic en cualquiera abre su
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, val } from "../core/utils.js";
+import { esc, num, uid, val, exigirCampos } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
@@ -86,8 +86,11 @@ function renderEditorProducto() {
   var id = state.productoEditando;
   var producto = id ? (state.productos || []).filter(function (p) { return p.id === id; })[0] : null;
   if (!producto) return renderFormNuevoProducto();
+  // "Eliminar" existía como acción pero ningún botón la llamaba: no había
+  // forma de sacar un producto del catálogo desde la interfaz.
   var html = '<div class="pedido-actions" style="margin-bottom:10px;">' +
     '<button class="btn ghost small" data-action="cerrar-producto-editor">← Nuevo producto en blanco</button>' +
+    '<span class="accion-peligro" style="margin-left:auto;"><button class="btn danger small" data-action="remove-producto" data-id="' + producto.id + '">Eliminar producto</button></span>' +
     "</div>";
   html += renderProductoCard(producto);
   return html;
@@ -344,7 +347,7 @@ export var actions = {
   },
   "add-producto": function () {
     var f = state.formProducto;
-    if (!f.nombre) return;
+    if (!exigirCampos([["Nombre", f.nombre]])) return;
     var nuevo = Object.assign(nuevoProducto(), { nombre: f.nombre, categoria: f.categoria, referencia: f.referencia, precioVenta: num(f.precioVenta) });
     state.productos = (state.productos || []).concat([nuevo]);
     state.productoEditando = nuevo.id;

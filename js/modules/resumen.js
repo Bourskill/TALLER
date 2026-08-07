@@ -37,22 +37,7 @@ export function render() {
 
   html += renderRendimientoPlanta();
 
-  html += '<div class="card"><div class="section-title">Próximas entregas</div><div class="section-sub">Pedidos ordenados por fecha comprometida</div>';
-  if (proximas.length === 0) {
-    html += activosSinFecha > 0
-      ? '<div class="empty">Tienes ' + activosSinFecha + (activosSinFecha === 1 ? " pedido activo sin" : " pedidos activos sin") + ' fecha de entrega definida — agrégala desde la tarjeta del pedido (sección "PDF y documentos") para que aparezcan acá.</div>'
-      : '<div class="empty">No hay entregas programadas todavía.</div>';
-  }
-  proximas.forEach(function (p) {
-    var saldo = num(p.total) - num(p.abono);
-    html += '<div class="tx-row" style="grid-template-columns:110px 1fr 130px 100px;">' +
-      "<span style=\"font-family:'IBM Plex Mono',monospace;\">" + esc(p.fechaEntrega) + "</span>" +
-      "<span>" + esc(p.cliente) + " — " + esc(p.descripcion) + "</span>" +
-      '<span class="tag" style="background:var(--surface-3);color:var(--accent);">' + esc(estadoLabelDe(p)) + "</span>" +
-      '<span class="amount">' + fmt(saldo) + " saldo</span>" +
-      "</div>";
-  });
-  html += "</div>";
+  html += renderProximasEntregas(proximas, activosSinFecha);
 
   html += '<div class="two-col">';
   html += '<div class="card"><div class="section-title small">Quién debe</div>';
@@ -88,6 +73,48 @@ export function render() {
 
   html += renderReportePeriodo();
   return html;
+}
+
+// Ranking de lo más próximo a entregar: puesto (1, 2, 3...), cuánto falta en
+// días (que es la pregunta real —"¿esto se me está venciendo?"— y no se
+// responde leyendo una fecha suelta), y acceso directo al pedido. La fecha
+// exacta queda como dato secundario debajo del contador.
+function renderProximasEntregas(proximas, activosSinFecha) {
+  var html = '<div class="card"><div class="section-title">Próximas entregas' +
+    renderHelp("Pedidos activos con fecha de entrega, del más próximo al más lejano. La fecha se define al cotizar (se hereda al convertir en pedido) o directamente en la tarjeta del pedido. Un pedido entregado sale de esta lista.") +
+    "</div>";
+  if (proximas.length === 0) {
+    html += activosSinFecha > 0
+      ? '<div class="empty">Tienes <b>' + activosSinFecha + (activosSinFecha === 1 ? " pedido activo</b> sin" : " pedidos activos</b> sin") + ' fecha de entrega — defínela en la cotización o en la tarjeta del pedido para que aparezcan acá.</div>'
+      : '<div class="empty">No hay entregas programadas todavía.</div>';
+    return html + "</div>";
+  }
+  proximas.forEach(function (p, i) {
+    var saldo = num(p.total) - num(p.abono);
+    var d = diasHasta(p.fechaEntrega);
+    html += '<div class="entrega-row" data-action="ir-a-pedido" data-id="' + p.id + '" title="Ver este pedido">' +
+      '<span class="entrega-puesto">' + (i + 1) + "</span>" +
+      '<span class="entrega-plazo ' + d.clase + '">' + esc(d.texto) + '<small>' + esc(p.fechaEntrega) + "</small></span>" +
+      '<span class="entrega-desc"><b>' + esc(p.cliente) + "</b><small>" + esc(p.descripcion) + "</small></span>" +
+      '<span class="tag" style="background:var(--surface-3);color:var(--accent);">' + esc(estadoLabelDe(p)) + "</span>" +
+      '<span class="amount' + (saldo > 0 ? " neg" : "") + '">' + (saldo > 0 ? fmt(saldo) + " por cobrar" : "pagado") + "</span>" +
+      "</div>";
+  });
+  return html + "</div>";
+}
+
+// Días calendario entre hoy y una fecha "YYYY-MM-DD", en texto humano. Ambas
+// se normalizan a medianoche local para que "mañana" no dependa de la hora a
+// la que se abra la app.
+function diasHasta(fechaStr) {
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  var objetivo = new Date(fechaStr + "T00:00:00");
+  var dias = Math.round((objetivo - hoy) / 86400000);
+  if (dias < 0) return { texto: "Vencido hace " + Math.abs(dias) + (Math.abs(dias) === 1 ? " día" : " días"), clase: "vencido" };
+  if (dias === 0) return { texto: "Hoy", clase: "vencido" };
+  if (dias === 1) return { texto: "Mañana", clase: "urgente" };
+  if (dias <= 7) return { texto: "En " + dias + " días", clase: "urgente" };
+  return { texto: "En " + dias + " días", clase: "" };
 }
 
 // Cifras grandes del negocio — antes vivían en Configuración (junto a marca/
@@ -353,18 +380,39 @@ function renderReportePeriodo() {
 // reporte financiero (no un rango de fechas propio: siempre por mes).
 function renderGastoInsumos() {
   var meses = calcGastoInsumosMensual();
-  var html = '<div class="section-title small">Gasto en insumos por mes' +
+  var abierto = !!state.gastoInsumosAbierto;
+  var totalGlobal = meses.reduce(function (a, m) { return a + m.total; }, 0);
+
+  // Colapsado por defecto: es un reporte de consulta ocasional ("¿ya me
+  // conviene comprar al por mayor?"), no algo que se mire todos los días, y
+  // en un taller con meses de historia ocupaba media pantalla del Resumen.
+  var html = '<div class="section-title small" style="cursor:pointer;display:flex;align-items:center;gap:8px;" data-action="toggle-gasto-insumos">' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierto ? "▾" : "▸") + "</button>" +
+    "<span>Gasto en insumos por mes</span>" +
     renderHelp("No es un inventario de lo que tenés guardado (no manejás stock) — es cuánto gastaste en insumos cada mes, sumado desde las cotizaciones de ese mes. Sirve para decidir cuándo conviene empezar a comprar al por mayor — ahí sí tendría sentido llevar inventario de verdad.") +
+    (meses.length ? '<span class="amount" style="margin-left:auto;font-size:13px;">' + fmt(totalGlobal) + "</span>" : "") +
     "</div>";
+
   if (!meses.length) {
     return html + '<div class="empty">Todavía no hay cotizaciones con insumos para reportar.</div>';
   }
+  if (!abierto) return html;
+
+  var COLS = "1fr 110px";
   meses.slice(0, 6).forEach(function (m) {
-    html += '<div class="section-sub" style="margin:14px 0 6px;display:flex;justify-content:space-between;">' +
-      "<b style=\"color:var(--ink);\">" + esc(etiquetaMes(m.mes)) + "</b><span class=\"amount\">" + fmt(m.total) + "</span></div>";
-    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
-      m.insumos.slice(0, 8).map(function (i) { return '<span class="badge">' + esc(i.nombre) + " · " + fmt(i.costoTotal) + "</span>"; }).join("") +
-      "</div>";
+    html += '<div class="section-sub" style="margin:16px 0 4px;display:flex;justify-content:space-between;align-items:baseline;gap:10px;">' +
+      '<b style="color:var(--ink);font-size:13px;">' + esc(etiquetaMes(m.mes)) + "</b>" +
+      '<span class="amount">' + fmt(m.total) + "</span></div>";
+    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Costo</span></div>';
+    m.insumos.slice(0, 12).forEach(function (i) {
+      html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+        '<span class="mobile-th">Insumo</span><span>' + esc(i.nombre) + (i.unidad ? ' <span style="color:var(--ink-faint);font-size:11px;">(' + esc(i.unidad) + ")</span>" : "") + "</span>" +
+        '<span class="mobile-th">Costo</span><span class="amount">' + fmt(i.costoTotal) + "</span>" +
+        "</div>";
+    });
+    if (m.insumos.length > 12) {
+      html += '<div class="section-sub" style="margin:6px 0 0;">y ' + (m.insumos.length - 12) + " insumo(s) más en este mes.</div>";
+    }
   });
   return html;
 }
@@ -375,6 +423,27 @@ function etiquetaMes(mes) {
 }
 
 export var actions = {
+  // Mismo patrón de "ir al registro de origen" que ya usan Finanzas
+  // ("↗ Origen") y Pendientes ("↗ Ver"): navega a Pedidos → Historial, hace
+  // scroll a la tarjeta y la hace destellar para identificarla entre varias.
+  "ir-a-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    state.tab = "pedidos";
+    state.sidebarMobileOpen = false;
+    state.filtroPedidosVista = "activos";
+    state.pedidosVista = "historial";
+    notify();
+    setTimeout(function () {
+      var card = document.querySelector('[data-pedido-id="' + id + '"]');
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.add("destello");
+    }, 60);
+  },
+  "toggle-gasto-insumos": function () {
+    state.gastoInsumosAbierto = !state.gastoInsumosAbierto;
+    notify();
+  },
   "set-reporte-atajo": function (el) {
     var hoy = new Date();
     var desde, hasta = todayStr();

@@ -153,7 +153,7 @@ export const state = {
     // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).
     tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: ""
   },
-  formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr() },
+  formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
   formEmp: { nombre: "", cargo: "", salario: "" },
@@ -176,6 +176,7 @@ export const state = {
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
 
+  gastoInsumosAbierto: false, // sección "Gasto en insumos por mes" del reporte financiero, colapsada por defecto
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
   filtroPedidos: "todos",
@@ -187,6 +188,21 @@ export const state = {
   pedidosVista: "nueva", // "nueva" | "historial" — pestañas superiores de Pedidos, mismo patrón que Cotizaciones
   cotizacionesVista: "nueva", // "nueva" | "historial" — pestañas superiores de Cotizaciones
   cotizacionEditando: "", // id de la cotización con el detalle completo abierto en la pestaña "nueva" (o "" = formulario en blanco)
+  // Guardado explícito de cotizaciones: editar ya no escribe a la hoja en
+  // cada tecla (una cotización es un documento que se le muestra al cliente,
+  // simular un precio no debe reemplazar el acordado). cotSucia es el id con
+  // cambios pendientes; cotSnapshot es la copia de la última versión GUARDADA,
+  // que "Descartar" restaura. Ninguno se persiste.
+  cotSucia: "",
+  cotSnapshot: null,
+  // Explorador de insumos (modal de Cotizaciones): reemplaza al <select> que
+  // no escalaba con un catálogo grande. Nada de esto se persiste — es estado
+  // de UI que debe arrancar cerrado en cada carga.
+  insumoPickerAbierto: "", // id de la cotización que lo abrió, o "" (cerrado)
+  insumoPickerRef: "", // id de la referencia a la que se le van a agregar los insumos
+  insumoPickerCategoria: "todos", // "todos" | "sin" | id de categoría
+  insumoPickerBusqueda: "",
+  insumoPickerSeleccion: [], // ids de insumos marcados (selección múltiple)
   refActiva: {}, // { [cotId]: refId } — qué referencia está activa en la vista de pestañas de cada cotización
   cotTabActiva: {}, // { [cotId]: "referencias"|"produccion" } — pestaña interna activa dentro del detalle de una cotización
   cotVendedorEditando: "", // id de la cotización con el formulario de vendedor/comisión desplegado, o "" (por defecto solo se ve un resumen de una línea)

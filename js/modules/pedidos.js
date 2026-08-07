@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
@@ -54,16 +54,34 @@ function renderFormNuevoPedido() {
     '<div class="field"><label>' + (f.esConsignacion ? "Cantidad enviada" : "Cantidad") + '</label><input type="number" data-form="pedido" data-field="cantidad" value="' + esc(f.cantidad) + '" /></div>' +
     '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
     "</div>";
-  html += '<div class="field" style="margin-top:16px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
-    '<input type="checkbox" data-action="toggle-es-consignacion" ' + (f.esConsignacion ? "checked" : "") + ' /> 🏬 Es consignación (enviar a un punto de venta externo, sin cobrar de una vez)' +
-    "</label></div>";
+  // Control segmentado en vez de un checkbox con una frase larga al lado: las
+  // dos opciones se nombran explícitamente (antes había que deducir que "no
+  // marcado" significaba venta directa) y la explicación vive en el "?" como
+  // en el resto de la app.
+  html += '<div style="margin-top:18px;"><div class="cot-col-title">Tipo de pedido' +
+    renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
+    "</div>" +
+    '<div class="segmented">' +
+    '<button class="segmented-opcion ' + (f.esConsignacion ? "" : "active") + '" data-action="set-tipo-pedido" data-val="venta">🧾 Venta directa</button>' +
+    '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
+    "</div></div>";
   html += '<hr class="stitch" />';
   if (f.esConsignacion) {
-    html += '<div class="cot-col-title">Consignación' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (registralo antes en Clientes, con su comisión por defecto, y así queda vinculado). El precio unitario es lo que el punto cobra al público por cada unidad; la comisión se calcula por cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
+    html += '<div class="cot-col-title">Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Clientes, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
       '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
       '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
       "</div>";
+    html += '<hr class="stitch" />';
+    // Antes el selector de productos solo existía para venta directa, así que
+    // un pedido de consignación nacía vacío y había que adivinar que la
+    // mercancía se cargaba después, desde "Agregar remisión" dentro de la
+    // tarjeta ya creada. Ahora se puede armar el primer envío acá mismo: lo
+    // que se elija se registra como la primera remisión (con su PDF) al crear.
+    html += '<div class="cot-col-title">Qué le vas a entregar' +
+      renderHelp("Elige del catálogo lo que le dejas al punto ahora. Al crear el pedido esto queda como su primera remisión (el documento de entrega firmable) y el stock del taller baja. Después puedes agregar más remisiones desde la tarjeta del pedido cada vez que le lleves más mercancía.") +
+      "</div>";
+    html += renderProductoPicker(f, true);
   } else {
     html += renderProductoPicker(f);
     html += '<div class="cot-col-title">Dinero</div><div class="form-grid">' +
@@ -78,8 +96,8 @@ function renderFormNuevoPedido() {
       '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
       "</div>";
   }
-  html += '<div style="margin-top:22px;"><button class="btn" data-action="add-pedido">Crear pedido</button></div>' +
-    '<div class="section-sub" style="margin-top:8px;margin-bottom:0;">Se le asigna un número de OP único al crearlo.</div></div>';
+  html += '<div style="margin-top:22px;"><button class="btn" data-action="add-pedido">' +
+    (f.esConsignacion ? "Crear consignación y remisión" : "Crear pedido") + "</button></div></div>";
   return html;
 }
 
@@ -88,13 +106,19 @@ function renderFormNuevoPedido() {
 // anotada en f.stockConsumido para descontarse de verdad al crear el pedido
 // (ver acción "add-pedido"). Solo aplica a venta directa — en consignación el
 // producto se agrega después, vía remisión (ver renderPedidoConsignacion).
-function renderProductoPicker(f) {
+function renderProductoPicker(f, paraConsignacion) {
   var productos = state.productos || [];
-  if (!productos.length) return "";
+  if (!productos.length) {
+    return paraConsignacion
+      ? '<div class="empty" style="padding:10px 0;">Tu catálogo está vacío. Registra primero las prendas en <b>Catálogo</b> (con su stock por talla) para poder enviarlas a un punto de consignación.</div>'
+      : "";
+  }
   var producto = f.productoSel ? productoById(f.productoSel) : null;
-  var html = '<div class="cot-col-title" style="margin-top:0;">Producto del catálogo (opcional)' +
+  // En consignación el título ya lo pone el bloque de arriba ("Qué le vas a
+  // entregar"): repetirlo acá sería un segundo encabezado diciendo lo mismo.
+  var html = paraConsignacion ? "" : ('<div class="cot-col-title" style="margin-top:0;">Producto del catálogo (opcional)' +
     renderHelp("Si es una prenda ya hecha (no personalizada), buscala por nombre, referencia o categoría: se agrega a la descripción, el total sugerido sube solo con su precio de venta, y el stock del taller baja al crear el pedido. La miniatura y el enlace \"Ver en Catálogo\" son para confirmar que elegiste la prenda correcta.") +
-    "</div>";
+    "</div>");
 
   html += '<div class="field combo-wrap" style="max-width:380px;margin-top:0;">' +
     '<input id="inp-buscar-producto-pedido" class="mini-input" style="width:100%" placeholder="Buscar por nombre, referencia o categoría…" value="' + esc(state.pedidoProductoBusqueda || "") + '" data-live-filter="pedidoProductoBusqueda" />';
@@ -124,10 +148,22 @@ function renderProductoPicker(f) {
         "</div>";
     }
   }
+  // Lo ya agregado se muestra como lista con opción de quitar (antes era una
+  // línea de texto corrida sin forma de deshacer una línea equivocada salvo
+  // reiniciar el formulario entero).
   if ((f.stockConsumido || []).length) {
-    html += '<div class="section-sub" style="margin:8px 0 0;">Se descontará del stock al crear el pedido: ' +
-      f.stockConsumido.map(function (l) { return esc(l.productoNombre) + " (" + esc(l.talla) + ") x" + l.cantidad; }).join(" · ") +
-      "</div>";
+    var totalUnid = f.stockConsumido.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+    html += '<div class="tx-row head" style="margin-top:12px;grid-template-columns:1fr 80px 80px 40px;"><span>Producto</span><span>Talla</span><span>Cant.</span><span></span></div>';
+    f.stockConsumido.forEach(function (l, i) {
+      html += '<div class="tx-row" style="grid-template-columns:1fr 80px 80px 40px;">' +
+        '<span class="mobile-th">Producto</span><span>' + esc(l.productoNombre) + "</span>" +
+        '<span class="mobile-th">Talla</span><span>' + esc(l.talla) + "</span>" +
+        '<span class="mobile-th">Cant.</span><span>' + l.cantidad + "</span>" +
+        '<button class="btn danger small" data-action="quitar-pedido-producto-linea" data-idx="' + i + '" title="Quitar esta línea">✕</button>' +
+        "</div>";
+    });
+    html += '<div class="section-sub" style="margin:6px 0 0;">' + totalUnid + " unidad(es) · " +
+      (paraConsignacion ? "se entregarán al punto y saldrán del stock del taller al crear." : "se descontarán del stock al crear el pedido.") + "</div>";
   }
   return html;
 }
@@ -621,7 +657,7 @@ function renderAbonosPedido(p) {
 // admin como un vendedor — el evento se crea en el Calendar de quien esté
 // logueado en ese momento (cada quien ve en su propia agenda lo que él mismo
 // está gestionando), igual que ya hace Gmail con el envío de PDFs.
-function sincronizarEventoPedido(p) {
+export function sincronizarEventoPedido(p) {
   if (!getSession()) return;
   if (!p.fechaEntrega) {
     if (p.calendarEventId) {
@@ -655,9 +691,11 @@ export var actions = {
     state.filtroPedidosSoloSaldo = !state.filtroPedidosSoloSaldo;
     notify();
   },
-  "toggle-es-consignacion": function () {
+  // Control segmentado "Venta directa | Consignación" (antes un checkbox que
+  // solo se podía alternar, sin poder ver cuál era la otra opción).
+  "set-tipo-pedido": function (el) {
     var fp = state.formPedido;
-    fp.esConsignacion = !fp.esConsignacion;
+    fp.esConsignacion = el.getAttribute("data-val") === "consignacion";
     // Si el cliente elegido ya tiene una comisión por defecto (punto de
     // consignación registrado en Clientes), se precarga para no repetirla.
     if (fp.esConsignacion && fp.clienteId) {
@@ -666,6 +704,28 @@ export var actions = {
         fp.consignacionComisionTipo = cli.comisionDefault.tipo || "porcentaje";
         fp.consignacionComisionValor = cli.comisionDefault.valor || "";
       }
+    }
+    notify();
+  },
+  // Deshace exactamente lo que aportó esa línea: la saca de la lista, le
+  // resta su subtotal al total y le quita su fragmento a la descripción — sin
+  // esto, quitar una línea dejaba el dinero y el texto inflados con algo que
+  // ya no se iba a entregar.
+  "quitar-pedido-producto-linea": function (el) {
+    var idx = num(el.getAttribute("data-idx"));
+    var fp = state.formPedido;
+    var linea = (fp.stockConsumido || [])[idx];
+    if (!linea) return;
+    fp.stockConsumido = fp.stockConsumido.filter(function (_, i) { return i !== idx; });
+    fp.total = Math.max(0, num(fp.total) - num(linea.subtotal));
+    if (linea.linea) {
+      // Solo la PRIMERA coincidencia: dos líneas idénticas (mismo producto,
+      // talla y cantidad) son entradas distintas y quitar una no debe borrar
+      // el texto de las dos.
+      var partes = (fp.descripcion || "").split("; ");
+      var pos = partes.indexOf(linea.linea);
+      if (pos !== -1) partes.splice(pos, 1);
+      fp.descripcion = partes.join("; ");
     }
     notify();
   },
@@ -710,18 +770,34 @@ export var actions = {
       .reduce(function (a, l) { return a + num(l.cantidad); }, 0);
     var disponible = stockTalla(producto, talla) - yaApartado;
     if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
-    fp.stockConsumido = (fp.stockConsumido || []).concat([{ productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad }]);
     var linea = producto.nombre + " (Talla " + talla + ") x" + cantidad;
+    // En consignación no hay "total cobrado" (se factura solo lo que el punto
+    // reporte vendido), así que la línea no suma dinero — solo describe lo que
+    // se entrega. `subtotal` y `linea` quedan guardados para poder revertir
+    // exactamente lo que esta línea aportó si se la quita (ver
+    // "quitar-pedido-producto-linea").
+    var subtotal = fp.esConsignacion ? 0 : num(producto.precioVenta) * cantidad;
+    fp.stockConsumido = (fp.stockConsumido || []).concat([{
+      productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad,
+      linea: linea, subtotal: subtotal
+    }]);
     fp.descripcion = fp.descripcion ? (fp.descripcion + "; " + linea) : linea;
-    fp.total = num(fp.total) + num(producto.precioVenta) * cantidad;
+    fp.total = num(fp.total) + subtotal;
     notify();
   },
   "add-pedido": function () {
     var fp = state.formPedido;
-    if (!fp.cliente || !fp.descripcion) return;
+    if (!exigirCampos([
+      ["Cliente", fp.cliente],
+      [fp.esConsignacion ? "Descripción (o elegí al menos un producto del catálogo)" : "Descripción", fp.descripcion]
+    ])) return;
     var esConsignacion = fp.esConsignacion;
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
-    var stockConsumido = esConsignacion ? [] : (fp.stockConsumido || []);
+    // En consignación las líneas elegidas TAMBIÉN salen del stock (se las
+    // lleva el punto), solo que no se registran como venta sino como la
+    // primera remisión del pedido. Antes se descartaban en silencio: se
+    // elegían productos y no pasaba nada con ellos.
+    var stockConsumido = fp.stockConsumido || [];
     // Chequeo atómico justo antes de crear nada: si el stock cambió desde que
     // se armaron las líneas (ej. el borrador quedó abierto un rato y otra
     // venta se llevó ese stock mientras tanto), no se crea el pedido a medias
@@ -751,7 +827,13 @@ export var actions = {
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
         puntoId: fp.clienteId || "", comisionTipo: fp.consignacionComisionTipo || "porcentaje", comisionValor: num(fp.consignacionComisionValor),
-        precioUnitario: num(fp.consignacionPrecioUnitario), cantidadEnviada: num(fp.cantidad) || 0, ventas: [], retiros: [], remisiones: []
+        // cantidadEnviada (envío "a granel", sin desglose por talla) solo se
+        // usa cuando NO se eligieron productos del catálogo — si se eligieron,
+        // la cantidad real vive en la remisión, con su desglose, y contarla
+        // también acá la duplicaría en el seguimiento.
+        precioUnitario: num(fp.consignacionPrecioUnitario),
+        cantidadEnviada: stockConsumido.length ? 0 : (num(fp.cantidad) || 0),
+        ventas: [], retiros: [], remisiones: []
       } : null,
       codigoPublico: codigoPublico(), calendarEventId: ""
     };
@@ -766,11 +848,26 @@ export var actions = {
     // solicitado — así, si el pedido se elimina más adelante, se restituye
     // exactamente lo mismo que se movió, nunca de más.
     var stockConsumidoReal = [];
+    var motivo = esConsignacion ? ("Remisión a " + fp.cliente) : ("Venta directa — " + fp.descripcion);
+    var origen = esConsignacion ? ("consignacion:" + nuevoPedido.id) : ("pedido:" + nuevoPedido.id);
     stockConsumido.forEach(function (l) {
-      var aplicado = ajustarStockProducto(l.productoId, l.talla, -l.cantidad, "Venta directa — " + fp.descripcion, "pedido:" + nuevoPedido.id);
+      var aplicado = ajustarStockProducto(l.productoId, l.talla, -l.cantidad, motivo, origen);
       if (aplicado) stockConsumidoReal.push({ productoId: l.productoId, productoNombre: l.productoNombre, talla: l.talla, cantidad: Math.abs(aplicado) });
     });
-    nuevoPedido.stockConsumido = stockConsumidoReal;
+    if (esConsignacion) {
+      // Lo entregado queda como la PRIMERA remisión (con su código público y
+      // su PDF firmable), igual que cualquier remisión posterior hecha desde
+      // la tarjeta — así el seguimiento por talla funciona desde el día uno.
+      // stockConsumido del pedido queda vacío a propósito: en consignación lo
+      // entregado se revierte por remisión, no por el pedido completo.
+      if (stockConsumidoReal.length) {
+        nuevoPedido.consignacion.remisiones.push({
+          id: uid(), fecha: todayStr(), codigoPublico: codigoPublico(), items: stockConsumidoReal, nota: ""
+        });
+      }
+    } else {
+      nuevoPedido.stockConsumido = stockConsumidoReal;
+    }
     state.pedidos.unshift(nuevoPedido);
     state.formPedido = {
       clienteId: "", cliente: "", tipoCliente: "propio", descripcion: "", cantidad: "1", total: "", costo: "", abono: "", fechaEntrega: "",

@@ -7,10 +7,11 @@
 // pestaña "Notas" (ver modules/notas.js).
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe } from "../core/utils.js";
+import { esc, num, uid, fmt, opt, todayStr, parseDias, diasPagoDe, exigirCampos } from "../core/utils.js";
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
-  calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor
+  calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor,
+  calcSalarioPorPeriodo, salarioBaseDe, rangoPeriodoActual
 } from "../core/calc.js";
 import { PERIODOS_PAGO } from "../core/constants.js";
 import { renderHelp } from "../core/components.js";
@@ -65,40 +66,65 @@ export function render() {
   // calcNominaPendiente, que sigue siendo el pool agregado de TODOS.
   var fe = state.formEmp;
   var periodoNomina = cfg.periodoPago || "mensual";
+  var etiquetaPeriodo = { mensual: "mensual", quincenal: "quincenal", semanal: "semanal" }[periodoNomina];
+  var rango = rangoPeriodoActual(periodoNomina);
+  var diasNomina = diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina });
+
   html += '<div class="card"><div class="section-title small">Nómina y equipo' +
-    renderHelp("Define quién trabaja contigo y su salario MENSUAL. \"Pagar\" registra el pago de esa persona en Finanzas — puedes sumarle un bono/hora extra o restarle un descuento antes de confirmar.") +
-    '</div>';
-  html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 110px 130px 170px;font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario</span><span>Este periodo</span><span></span></div>';
+    renderHelp("Primero defines cada cuánto pagas; a partir de ahí, el salario de cada persona se carga en esa misma base (si pagas semanal, escribes el valor de la semana — no un mensual dividido a ojo). \"Pagar\" registra el pago en Finanzas y permite sumar un bono o restar un descuento sobre ese valor.") +
+    "</div>";
+
+  // El periodo va PRIMERO y no al final: define en qué base se interpreta
+  // cada salario de la tabla de abajo, así que preguntarlo después (como
+  // estaba) invitaba a cargar un mensual y descubrir recién al pagar que el
+  // taller pagaba semanal.
+  html += '<div class="cot-col-title" style="margin-top:0;">1 · Cada cuánto pagas</div>';
+  html += '<div class="form-grid">' +
+    '<div class="field"><label>Periodo de pago</label><select data-action-change="set-periodo-pago">' +
+    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodoNomina); }).join("") +
+    "</select></div>" +
+    '<div class="field"><label>Día(s) de pago' + renderHelp(periodoNomina === "semanal" ? "Puedes elegir varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"2,6\" para martes y sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input id="inp-dia-pago-nomina" data-action-change="set-dia-pago-nomina" value="' + esc(diasNomina.join(",")) + '" placeholder="' + (periodoNomina === "semanal" ? "Ej. 6 (sábado)" : "Ej. 1,15") + '" /></div>' +
+    "</div>";
+  html += '<div class="section-sub" style="margin:8px 0 0;">Periodo en curso: <b style="color:var(--ink);">' + esc(rangoTexto(rango)) + "</b> · Próximo pago: <b style=\"color:var(--ink);\">" + fechaCorta(calcFechaVencimientoPeriodo(periodoNomina, diasNomina)) + "</b></div>";
+
+  html += '<hr class="stitch" />';
+  html += '<div class="cot-col-title">2 · Quién trabaja contigo</div>';
+  var COLS_EMP = "1fr 1fr 130px 150px 130px 150px";
+  html += '<div class="emp-row" style="grid-template-columns:' + COLS_EMP + ';font-size:10.5px;text-transform:uppercase;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);"><span>Nombre</span><span>Cargo</span><span>Salario ' + esc(etiquetaPeriodo) + "</span><span>Periodo en curso</span><span>Estado</span><span></span></div>";
   (cfg.nomina || []).forEach(function (e) {
     var pagado = calcNominaPagadaEmpleado(e.nombre, periodoNomina);
-    html += '<div class="emp-row" style="grid-template-columns:1fr 1fr 110px 130px 170px;">' +
-      '<span class="mobile-th">Nombre</span><span>' + esc(e.nombre) + '</span>' +
-      '<span class="mobile-th">Cargo</span><span>' + esc(e.cargo || "—") + '</span>' +
-      '<span class="mobile-th">Salario</span><span class="amount">' + fmt(e.salario) + "</span>" +
-      '<span class="mobile-th">Este periodo</span><span><span class="status-pill ' + (pagado >= num(e.salario) && num(e.salario) > 0 ? "pagado" : "pendiente") + '">' + (pagado > 0 ? fmt(pagado) + " pagado" : "pendiente") + "</span></span>" +
+    var aPagar = calcSalarioPorPeriodo(e, periodoNomina);
+    var estaPagado = aPagar > 0 && pagado >= aPagar - 0.5;
+    // Si el salario se cargó en otra base que la actual (ej. venía de antes,
+    // cuando todo era mensual, y ahora el taller paga semanal), se muestra el
+    // valor YA convertido a esta base y se aclara de dónde sale — antes el
+    // número de la tabla y el que se terminaba pagando no coincidían.
+    var baseDistinta = salarioBaseDe(e) !== periodoNomina;
+    html += '<div class="emp-row" style="grid-template-columns:' + COLS_EMP + ';">' +
+      '<span class="mobile-th">Nombre</span><span>' + esc(e.nombre) + "</span>" +
+      '<span class="mobile-th">Cargo</span><span>' + esc(e.cargo || "—") + "</span>" +
+      '<span class="mobile-th">Salario ' + esc(etiquetaPeriodo) + '</span><span class="amount"' +
+      (baseDistinta ? ' title="Cargado como ' + esc(PERIODOS_PAGO[salarioBaseDe(e)].toLowerCase()) + " de " + fmt(e.salario) + ' — convertido a este periodo"' : "") +
+      ">" + fmt(aPagar) + (baseDistinta ? ' <span style="font-size:10px;color:var(--ink-faint);">≈</span>' : "") + "</span>" +
+      '<span class="mobile-th">Periodo en curso</span><span style="font-size:11.5px;color:var(--ink-faint);font-family:\'IBM Plex Mono\',monospace;">' + esc(rangoTexto(rango)) + "</span>" +
+      '<span class="mobile-th">Estado</span><span><span class="status-pill ' + (estaPagado ? "pagado" : "pendiente") + '">' + (pagado > 0 ? (estaPagado ? "pagado" : fmt(pagado) + " abonado") : "pendiente") + "</span></span>" +
       '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Pagar</button>' +
       '<button class="btn danger small" data-action="remove-emp" data-id="' + e.id + '">✕</button>' +
       "</span></div>";
-    if (state.nominaPagoId === e.id) html += renderFormNominaPago(e);
+    if (state.nominaPagoId === e.id) html += renderFormNominaPago(e, periodoNomina, rango);
   });
   if ((cfg.nomina || []).length === 0) { html += '<div class="empty">Aún no registras personas en nómina.</div>'; }
   html += renderPendForm("emp", "+ Agregar persona a nómina",
     '<div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input data-form="emp" data-field="nombre" value="' + esc(fe.nombre) + '" /></div>' +
     '<div class="field"><label>Cargo</label><input data-form="emp" data-field="cargo" value="' + esc(fe.cargo) + '" placeholder="Ej. Costurera" /></div>' +
-    '<div class="field"><label>Salario mensual</label><input type="number" data-form="emp" data-field="salario" value="' + esc(fe.salario) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Salario ' + esc(etiquetaPeriodo) +
+    renderHelp("El valor de UN periodo de pago completo, según lo que elegiste arriba (hoy: " + PERIODOS_PAGO[periodoNomina].toLowerCase() + "). No lo conviertas a mano: si pagas semanal, escribe lo de la semana.") +
+    '</label><input type="number" data-form="emp" data-field="salario" value="' + esc(fe.salario) + '" placeholder="0" /></div>' +
     '<button class="btn" data-action="add-emp">Agregar a nómina</button>' +
     "</div>");
-  html += '<hr class="stitch" />';
-  html += '<div class="form-grid">' +
-    '<div class="field"><label>Periodo de pago</label><select data-action-change="set-periodo-pago">' +
-    Object.keys(PERIODOS_PAGO).map(function (k) { return opt(k, PERIODOS_PAGO[k], periodoNomina); }).join("") +
-    "</select></div>" +
-    '<div class="field"><label>Día(s) de pago' + renderHelp(periodoNomina === "semanal" ? "Puedes elegir varios días de la semana separados por coma usando el número: 0=Domingo, 1=Lunes... 6=Sábado. Ej. \"2,6\" para martes y sábado." : "Puedes poner varios días del mes separados por coma. Ej. \"1,15\" para pagar el 1 y el 15.") + '</label><input id="inp-dia-pago-nomina" data-action-change="set-dia-pago-nomina" value="' + esc((diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina })).join(",")) + '" placeholder="' + (periodoNomina === "semanal" ? "Ej. 6 (sábado)" : "Ej. 1,15") + '" /></div>' +
-    "</div>" +
-    '<div class="section-sub" style="margin-top:6px;margin-bottom:0;">Próximo pago de nómina: <b style="color:var(--ink);">' + fechaCorta(calcFechaVencimientoPeriodo(periodoNomina, diasPagoDe({ diasPago: cfg.diasPagoNomina, diaPago: cfg.diaPagoNomina }))) + "</b></div>" +
-    "</div>";
+  html += "</div>";
 
   // ---------- Gastos fijos (periodizables) ----------
   var gf = state.formGastoFijo;
@@ -310,21 +336,32 @@ function renderPendForm(key, labelBoton, contenidoHtml) {
 // recalcula en cada render a partir de state.formNominaPago, así que se ve
 // en vivo mientras se escribe — sin JS aparte, mismo patrón que el resto de
 // la app (re-renderiza todo el árbol en cada notify()).
-function renderFormNominaPago(e) {
+function renderFormNominaPago(e, periodoPago, rango) {
   var fp = state.formNominaPago;
   var bono = num(fp.bono), descuento = num(fp.descuento);
-  var total = Math.max(0, num(e.salario) + bono - descuento);
-  return '<div style="background:var(--surface-2);border-radius:10px;padding:10px 12px;margin:2px 0 10px;">' +
+  var base = calcSalarioPorPeriodo(e, periodoPago);
+  var total = Math.max(0, base + bono - descuento);
+  return '<div style="background:var(--surface-2);border-radius:10px;padding:12px 14px;margin:2px 0 10px;">' +
+    '<div class="section-sub" style="margin:0 0 10px;">Pago de <b style="color:var(--ink);">' + esc(e.nombre) + "</b> por el periodo <b style=\"color:var(--ink);\">" + esc(rangoTexto(rango)) + "</b></div>" +
     '<div class="form-grid">' +
     '<div class="field"><label>Bono / horas extra (opcional)</label><input type="number" data-form="nominaPago" data-field="bono" value="' + esc(fp.bono) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Descuento (opcional)' + renderHelp("Ej. un préstamo, una ausencia. Se resta del salario base de este pago.") + '</label><input type="number" data-form="nominaPago" data-field="descuento" value="' + esc(fp.descuento) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Fecha</label><input type="date" data-form="nominaPago" data-field="fecha" value="' + esc(fp.fecha || todayStr()) + '" /></div>' +
+    '<div class="field"><label>Descuento (opcional)' + renderHelp("Ej. un préstamo, una ausencia. Se resta del salario del periodo.") + '</label><input type="number" data-form="nominaPago" data-field="descuento" value="' + esc(fp.descuento) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Fecha del pago</label><input type="date" data-form="nominaPago" data-field="fecha" value="' + esc(fp.fecha || todayStr()) + '" /></div>' +
     "</div>" +
-    '<div class="section-sub" style="margin:8px 0;">Total a pagar: <b style="color:var(--ink);">' + fmt(total) + "</b> (" + fmt(e.salario) + (bono ? " + " + fmt(bono) + " bono" : "") + (descuento ? " − " + fmt(descuento) + " descuento" : "") + ")</div>" +
+    '<div class="section-sub" style="margin:10px 0;">Total a pagar: <b style="color:var(--ink);font-size:14px;">' + fmt(total) + "</b> <span style=\"color:var(--ink-faint);\">= " + fmt(base) + " salario" + (bono ? " + " + fmt(bono) + " bono" : "") + (descuento ? " − " + fmt(descuento) + " descuento" : "") + "</span></div>" +
     '<div class="pedido-actions">' +
     '<button class="btn small" data-action="pagar-nomina" data-id="' + e.id + '">Confirmar pago</button>' +
     '<button class="btn ghost small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Cancelar</button>' +
     "</div></div>";
+}
+
+// "4–10 ago" / "1–31 ago" — el rango del periodo en una sola línea corta,
+// omitiendo el mes repetido cuando desde y hasta caen en el mismo.
+function rangoTexto(rango) {
+  var mesDesde = rango.desde.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
+  var mesHasta = rango.hasta.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
+  if (mesDesde === mesHasta) return rango.desde.getDate() + "–" + rango.hasta.getDate() + " " + mesHasta;
+  return rango.desde.getDate() + " " + mesDesde + " – " + rango.hasta.getDate() + " " + mesHasta;
 }
 
 // Fila de deuda en modo edición: todos los campos (incluido periodo/días,
@@ -455,8 +492,15 @@ export var actions = {
   },
   "add-emp": function () {
     var fe = state.formEmp;
-    if (!fe.nombre || !fe.salario) return;
-    state.config.nomina = (state.config.nomina || []).concat([{ id: uid(), nombre: fe.nombre, cargo: fe.cargo, salario: num(fe.salario) }]);
+    if (!exigirCampos([["Nombre", fe.nombre], ["Salario " + PERIODOS_PAGO[state.config.periodoPago || "mensual"].toLowerCase(), fe.salario]])) return;
+    // salarioPeriodo guarda EN QUÉ BASE se cargó el monto (la que estaba
+    // seleccionada arriba al momento de agregarlo). Sin esto, cambiar después
+    // el periodo de pago del taller reinterpretaría en silencio el número de
+    // cada persona (un semanal de 300.000 pasaría a leerse como mensual).
+    state.config.nomina = (state.config.nomina || []).concat([{
+      id: uid(), nombre: fe.nombre, cargo: fe.cargo, salario: num(fe.salario),
+      salarioPeriodo: state.config.periodoPago || "mensual"
+    }]);
     state.formEmp = { nombre: "", cargo: "", salario: "" };
     persist("config"); notify();
   },
@@ -478,11 +522,16 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var e = (state.config.nomina || []).filter(function (e) { return e.id === id; })[0];
     if (!e) return;
+    var periodoPago = state.config.periodoPago || "mensual";
     var fp = state.formNominaPago;
     var bono = num(fp.bono), descuento = num(fp.descuento);
-    var monto = Math.max(0, num(e.salario) + bono - descuento);
+    // El salario del PERIODO, no el mensual crudo: si el taller paga semanal,
+    // esto cobra la semana. Antes tomaba e.salario tal cual (siempre mensual)
+    // y exigía el mes completo aunque el pago fuera semanal.
+    var monto = Math.max(0, calcSalarioPorPeriodo(e, periodoPago) + bono - descuento);
     if (monto <= 0) return;
-    var concepto = "Nómina — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
+    var rango = rangoPeriodoActual(periodoPago);
+    var concepto = "Nómina " + rangoTexto(rango) + " — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
     state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, fecha: fp.fecha || todayStr(), pedidoId: "" });
     state.nominaPagoId = "";
     state.formNominaPago = { bono: "", descuento: "", fecha: todayStr() };
@@ -500,7 +549,7 @@ export var actions = {
   },
   "add-gasto-fijo": function () {
     var gf = state.formGastoFijo;
-    if (!gf.nombre || !gf.monto) return;
+    if (!exigirCampos([["Concepto", gf.nombre], ["Monto", gf.monto]])) return;
     state.config.gastosFijos = (state.config.gastosFijos || []).concat([{ id: uid(), nombre: gf.nombre, monto: num(gf.monto), periodo: gf.periodo || "mensual", diasPago: parseDias(gf.diasPago), pagadoHasta: "", calendarEventId: "" }]);
     state.formGastoFijo = { nombre: "", monto: "", periodo: "mensual", diasPago: "" };
     persist("config"); notify();
@@ -588,7 +637,7 @@ export var actions = {
   },
   "add-deuda": function () {
     var fd = state.formDeuda;
-    if (!fd.concepto || !fd.monto) return;
+    if (!exigirCampos([["Concepto", fd.concepto], ["Monto total", fd.monto]])) return;
     state.deudas.unshift({
       id: uid(), concepto: fd.concepto, contraparte: fd.contraparte, monto: num(fd.monto),
       fechaVencimiento: fd.fechaVencimiento || "", cuotas: num(fd.cuotas) || 1, cuotasPagadas: 0,

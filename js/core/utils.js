@@ -108,6 +108,23 @@ export function diasPagoDe(obj) {
   return [];
 }
 
+// Valida los campos obligatorios de un formulario y, si falta alguno, dice
+// CUÁL falta en vez de no hacer nada. Todos los botones de "crear" de la app
+// hacían `if (!x) return;` en silencio: al usuario le quedaba un botón que
+// "no funciona" sin ninguna pista de qué le faltaba.
+//
+// pares: [["Cliente", valor], ["Descripción", valor], ...]
+// Devuelve true si están todos (y se puede seguir), false si faltó alguno.
+export function exigirCampos(pares) {
+  var faltan = pares
+    .filter(function (p) { return !String(p[1] == null ? "" : p[1]).trim(); })
+    .map(function (p) { return p[0]; });
+  if (!faltan.length) return true;
+  window.alert("Falta completar " + (faltan.length === 1 ? "este dato" : "estos datos") + " para continuar:\n\n" +
+    faltan.map(function (f) { return "· " + f; }).join("\n"));
+  return false;
+}
+
 // Parser de CSV simple (soporta separador coma o punto y coma, y comillas para
 // valores con separadores dentro). Pensado para archivos exportados desde
 // Excel/Sheets con columnas: nombre, talla, numero, tipo, observaciones —

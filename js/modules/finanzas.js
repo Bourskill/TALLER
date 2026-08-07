@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, fmt, norm } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
 import { clienteById, periodoKey, origenDeTx } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
@@ -78,13 +78,20 @@ function renderHistorial() {
     return html;
   }
 
+  // Los grupos se ordenan por su movimiento MÁS RECIENTE (no por el primero
+  // de la lista): un pedido viejo al que hoy se le registró un abono sube al
+  // tope, que es donde uno lo busca. Antes se miraba txs[0], que solo era el
+  // más reciente por casualidad —porque state.tx guarda lo último agregado
+  // primero— y dejaba de serlo apenas alguien registraba un movimiento con
+  // fecha atrasada.
   var gruposOrdenados = Object.keys(conPedido).map(function (pid) {
     var pedido = state.pedidos.filter(function (p) { return p.id === pid; })[0];
-    return { pedido: pedido, pid: pid, txs: conPedido[pid] };
+    var txs = conPedido[pid].slice().sort(compararTxRecienteFirst);
+    return { pedido: pedido, pid: pid, txs: txs, fechaTope: txs[0] ? txs[0].fecha : "" };
   }).sort(function (a, b) {
-    var fa = a.txs[0] ? a.txs[0].fecha : "", fb = b.txs[0] ? b.txs[0].fecha : "";
-    return fa < fb ? 1 : -1;
+    return String(b.fechaTope).localeCompare(String(a.fechaTope));
   });
+  sinPedido.sort(compararTxRecienteFirst);
 
   // Cada grupo agrupa TODOS los movimientos de un mismo pedido (abonos,
   // sobrecostos, comisiones, estimados...) en un solo panel, con el total
@@ -108,6 +115,17 @@ function renderHistorial() {
   }
 
   return html;
+}
+
+// Orden por defecto de CUALQUIER lista de movimientos: del más reciente al
+// más viejo por fecha. El desempate usa la posición en state.tx (que guarda
+// lo último registrado primero), así dos movimientos del mismo día quedan con
+// el recién cargado arriba en vez de en un orden arbitrario que cambia entre
+// renders.
+function compararTxRecienteFirst(a, b) {
+  var porFecha = String(b.fecha || "").localeCompare(String(a.fecha || ""));
+  if (porFecha !== 0) return porFecha;
+  return state.tx.indexOf(a) - state.tx.indexOf(b);
 }
 
 function filtrarTx() {
@@ -203,7 +221,12 @@ function renderPapelera() {
 
   html += '<div class="card">';
   html += '<div class="tx-row head"><span>Fecha</span><span>Concepto</span><span>Persona</span><span>Tipo</span><span>Monto</span><span></span></div>';
-  state.txPapelera.forEach(function (t) {
+  // Mismo orden que el historial (más reciente arriba); acá el desempate es
+  // por fecha de eliminación, que es lo último que pasó con ese movimiento.
+  state.txPapelera.slice().sort(function (a, b) {
+    var porFecha = String(b.fecha || "").localeCompare(String(a.fecha || ""));
+    return porFecha !== 0 ? porFecha : String(b.eliminadoEl || "").localeCompare(String(a.eliminadoEl || ""));
+  }).forEach(function (t) {
     html += '<div class="tx-row">' +
       "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
       '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
@@ -239,7 +262,7 @@ export var actions = {
   },
   "add-tx": function () {
     var f = state.formTx;
-    if (!f.concepto || !f.monto) return;
+    if (!exigirCampos([["Concepto", f.concepto], ["Monto", f.monto]])) return;
     state.tx.unshift({ id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha, pedidoId: f.pedidoId || "" });
     state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "" };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco

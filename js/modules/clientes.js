@@ -1,5 +1,5 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, uid, val, num, fmt } from "../core/utils.js";
+import { esc, uid, val, num, fmt, exigirCampos } from "../core/utils.js";
 import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
 import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
@@ -81,21 +81,43 @@ function renderHistorialClientes() {
       '<button class="btn ghost small" data-action="editar-cliente" data-id="' + c.id + '">Editar</button>' +
       '<button class="btn danger small" data-action="remove-cliente" data-id="' + c.id + '">Eliminar</button>' +
       "</span></div>" +
+      // Resumen comercial primero (es lo que se busca al abrir un cliente:
+      // cuánto ha comprado, cuándo fue la última vez) y recién después la
+      // ficha de datos — antes el historial quedaba enterrado como una celda
+      // más entre la cuenta bancaria y el código postal.
+      (historial.cantidadPedidos > 0
+        ? '<div class="cliente-resumen">' +
+          '<span><b>' + historial.cantidadPedidos + "</b> " + (historial.cantidadPedidos === 1 ? "pedido" : "pedidos") + "</span>" +
+          '<span><b>' + fmt(historial.totalComprado) + "</b> comprado</span>" +
+          (historial.ultimaEntrega ? "<span>última entrega <b>" + esc(historial.ultimaEntrega) + "</b></span>" : "") +
+          (esPuntoC ? "<span>comisión <b>" + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? fmt(c.comisionDefault.valor) + " por unidad" : esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta") + "</b></span>" : "") +
+          "</div>"
+        : (esPuntoC ? '<div class="cliente-resumen"><span>comisión <b>' + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? fmt(c.comisionDefault.valor) + " por unidad" : esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta") + "</b></span></div>" : "")) +
       '<div class="cliente-grid">' +
-      "<div><b>Cédula/RUT:</b> " + esc(c.cedula || "—") + "</div>" +
-      "<div><b>Teléfono:</b> " + esc(c.telefono || "—") + "</div>" +
-      "<div><b>Correo:</b> " + esc(c.correo || "—") + "</div>" +
-      "<div><b>Dirección:</b> " + esc(c.direccion || "—") + "</div>" +
-      "<div><b>Ciudad / CP:</b> " + esc(c.ciudad || "—") + (c.cp ? " / " + esc(c.cp) : "") + "</div>" +
-      "<div><b>Cuenta:</b> " + esc(c.cuenta || "—") + "</div>" +
-      "<div><b>Entidad:</b> " + esc(c.entidad || "—") + "</div>" +
-      (esPuntoC ? "<div><b>Comisión:</b> " + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? "$" + esc(c.comisionDefault.valor) + " por unidad" : (esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta")) + "</div>" : "") +
-      (historial.cantidadPedidos > 0 ? "<div><b>Pedidos:</b> " + historial.cantidadPedidos + " · " + fmt(historial.totalComprado) + " comprado" + (historial.ultimaEntrega ? " · última entrega " + esc(historial.ultimaEntrega) : "") + "</div>" : "") +
+      campoCliente("Cédula/RUT", c.cedula) +
+      campoCliente("Teléfono", c.telefono) +
+      campoCliente("Correo", c.correo) +
+      campoCliente("Dirección", c.direccion) +
+      campoCliente("Ciudad / CP", c.ciudad ? (c.ciudad + (c.cp ? " / " + c.cp : "")) : "") +
+      campoCliente("Cuenta", c.cuenta ? (c.cuenta + (c.entidad ? " · " + c.entidad : "")) : "") +
       "</div>" +
       (rosterAbierto ? renderRoster(c, roster) : "") +
       "</div>";
   });
   return html;
+}
+
+// Una celda de la ficha: etiqueta arriba (chica) y valor abajo, en vez de
+// "Etiqueta: valor" en una sola línea corrida. Un correo largo ahora tiene la
+// fila entera para él (y se corta con "…" si aun así no cabe, con el valor
+// completo disponible en el tooltip) en lugar de empujar la columna vecina
+// hasta dejarla ilegible. Un campo vacío no se dibuja: media ficha llena de
+// guiones era ruido, no información.
+function campoCliente(label, valor) {
+  var v = (valor || "").toString().trim();
+  if (!v) return "";
+  return '<div class="cliente-campo"><span class="cliente-campo-label">' + esc(label) + "</span>" +
+    '<span class="cliente-campo-valor" title="' + esc(v) + '">' + esc(v) + "</span></div>";
 }
 
 // Roster de equipo: lista nombre+número+talla guardada en el propio cliente
@@ -187,7 +209,7 @@ export var actions = {
   },
   "add-cliente": function () {
     var fcli = state.formCliente;
-    if (!fcli.nombre) return;
+    if (!exigirCampos([["Nombre", fcli.nombre]])) return;
     var esPunto = fcli.tipoRelacion === "punto_consignacion";
     var nuevo = {
       id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo, contactResourceName: "",

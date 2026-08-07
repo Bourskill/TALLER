@@ -69,9 +69,37 @@
 
   .mobile-th{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;margin-top:9px;}
   .mobile-th:first-child{margin-top:0;}
+
+  /* Las tarjetas comían ~48px de ancho útil (24px por lado) justo donde menos
+     sobra; con el padding reducido, una fila apilada gana casi media palabra
+     más por línea. */
+  .card{padding:16px 14px;}
+  .cliente-card{padding:14px;}
+
+  /* Con varias pestañas ("+ Nuevo pedido", "Historial (24)") la fila se salía
+     de la pantalla y la segunda quedaba inalcanzable: ahora la barra scrollea
+     sola en horizontal en vez de desbordar el layout completo. */
+  .gsheet-tabs{overflow-x:auto;justify-content:flex-start;flex-wrap:nowrap;scrollbar-width:none;}
+  .gsheet-tabs::-webkit-scrollbar{display:none;}
+  .gsheet-tab{flex:0 0 auto;}
+
+  /* Una sola columna: con minmax(150px,1fr) entraban dos columnas de ~150px
+     en un teléfono, y un correo o una dirección real no cabe en 150px. */
+  .cliente-grid{grid-template-columns:1fr;}
+
+  /* Los formularios en línea (abono, remisión, venta de consignación) fijan
+     anchos en px por campo; en móvil cada campo pasa a ocupar el ancho
+     completo en vez de competir por una sola línea. */
+  .inline-form{flex-direction:column;align-items:stretch;}
+  .inline-form > *{width:100% !important;max-width:none !important;}
 }
 
 @media (max-width: 480px){
   .kpis{grid-template-columns:1fr 1fr;}
   .main-inner{padding:14px 12px 76px;}
 }
+
+/* Backstop global (cualquier ancho): ningún dato de texto libre —un correo,
+   una URL de comprobante, una descripción sin espacios— debe poder empujar
+   el layout más allá de su contenedor. */
+.card, .main-inner, .pedido-card, .cliente-card, .cot-card{min-width:0;}

@@ -184,10 +184,52 @@ tipoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 ref = state.cotizaciones[0].referencias[0];
 assert(ref.insumos[0].tipo === "tela" && ref.insumos[0].costo === 8000, "actualiza costo y tipo de costo del insumo");
 
-// agregar insumo desde el catálogo
-const addCatSelect = document.querySelector('select[data-action-change="add-insumo-catalogo"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
-addCatSelect.value = catItemId;
-addCatSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+// --- guardado explícito: editar una cotización NO reescribe los datos
+// oficiales hasta confirmar; "Descartar" vuelve al último guardado ---
+assert(state.cotSucia === cotId, "editar la cotización la marca como 'cambios sin guardar'");
+assert(!!document.querySelector(".save-bar"), "aparece la barra de guardado");
+const costoInputSucio = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId + '"][data-campo="costo"]');
+costoInputSucio.value = "99999";
+costoInputSucio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 99999, "el cambio se ve en pantalla aunque no esté guardado");
+click('[data-action="descartar-cambios-cotizacion"]');
+assert(state.cotizaciones[0].referencias[0].insumos.length === 0, "descartar revierte TODOS los cambios desde el último guardado (incluido el primero)");
+assert(state.cotSucia === "", "descartar deja la cotización limpia");
+assert(!document.querySelector(".save-bar"), "la barra de guardado desaparece al descartar");
+
+// se rehace lo descartado y ahora sí se guarda
+click('[data-action="add-insumo-personalizado"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
+const insId2 = state.cotizaciones[0].referencias[0].insumos[0].id;
+const costoInput2 = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId2 + '"][data-campo="costo"]');
+costoInput2.value = "8000";
+costoInput2.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const tipoSelect2 = document.querySelector('[data-ref-id="' + refId + '"] select[data-ins="' + insId2 + '"][data-campo="tipo"]');
+tipoSelect2.value = "tela";
+tipoSelect2.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="guardar-cotizacion"][data-id="' + cotId + '"]');
+assert(state.cotSucia === "", "guardar deja la cotización limpia");
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 8000, "lo guardado conserva los valores editados");
+ref = state.cotizaciones[0].referencias[0];
+const insId3 = ref.insumos[0].id;
+// tras guardar, el nuevo punto de retorno es lo recién guardado
+const costoInput3 = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId3 + '"][data-campo="costo"]');
+costoInput3.value = "1234";
+costoInput3.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="descartar-cambios-cotizacion"]');
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 8000, "descartar después de guardar vuelve a la ÚLTIMA versión guardada, no a la original");
+
+// agregar insumo desde el catálogo — ahora vía el explorador (modal con
+// panel de categorías, buscador y selección múltiple) en vez del <select>
+// plano, que no escalaba con un catálogo grande.
+click('[data-action="abrir-insumo-picker"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
+assert(state.insumoPickerAbierto === cotId, "el explorador de insumos se abre sobre la referencia elegida");
+assert(!!document.querySelector(".picker-modal"), "el modal del explorador se renderiza");
+assert(!!document.querySelector('[data-action="set-insumo-picker-categoria"][data-val="todos"]'), "el explorador lista las categorías en el panel lateral");
+assert(!!document.querySelector("#inp-insumo-picker-buscar"), "el explorador tiene barra de búsqueda");
+click('[data-action="toggle-insumo-picker-item"][data-id="' + catItemId + '"]');
+assert(state.insumoPickerSeleccion.length === 1, "marcar un insumo lo agrega a la selección múltiple");
+click('[data-action="confirmar-insumo-picker"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
+assert(state.insumoPickerAbierto === "", "confirmar cierra el explorador");
 ref = state.cotizaciones[0].referencias[0];
 assert(ref.insumos.length === 2, "agrega insumo desde el catálogo a la referencia");
 
@@ -456,7 +498,7 @@ click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
 setInput('[data-form="pedido"][data-field="descripcion"]', "Consignación tienda");
-click('[data-action="toggle-es-consignacion"]');
+click('[data-action="set-tipo-pedido"][data-val="consignacion"]');
 click('[data-action="add-pedido"]');
 const pedidoConsig = state.pedidos.find(p => p.consignacion);
 assert(!!pedidoConsig, "crea pedido de consignación");
