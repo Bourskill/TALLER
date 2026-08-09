@@ -25,7 +25,11 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   { key: "origenGastoId", header: "origen_gasto_real_id" },
   { key: "esInsumo", header: "es_compra_insumo" },
   { key: "proveedorId", header: "proveedor_id" },
-  { key: "insumoNombre", header: "insumo_nombre" }
+  { key: "insumoNombre", header: "insumo_nombre" },
+  // Cuánto se compró (no solo cuánto costó): alimenta la columna "Cantidad"
+  // del desglose de insumos del reporte financiero.
+  { key: "cantidad", header: "cantidad", numero: true },
+  { key: "unidad", header: "unidad" }
 ]);
 
 export var tablaClientes = crearTablaSheet("Clientes", [

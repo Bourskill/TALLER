@@ -6,11 +6,13 @@ import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.j
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp, sincronizarEventoPedido } from "./pedidos.js";
-import { ESTADOS_DEFAULT, TIPOS_COSTO, ORIGEN_PRODUCCION } from "../core/constants.js";
+import { ESTADOS_DEFAULT, TIPOS_COSTO } from "../core/constants.js";
 import { ajustarStockProducto } from "../core/stock.js";
 
+// costoCompra/proveedorId solo se usan cuando origen === "proveedor" (ver
+// renderRefCard): ahí reemplazan por completo a insumos + consumoAprox.
 function nuevaReferencia() {
-  return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [], origen: "taller" };
+  return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "" };
 }
 function nuevoInsumo(fuente) {
   return {
@@ -387,9 +389,15 @@ function renderTabProduccion(c, totales, real) {
   }
 
   var compras = calcListaCompras(c);
+  // Si la cotización tiene referencias compradas a proveedor, la lista de
+  // compras trae la REFERENCIA como línea (no insumos sueltos) — el texto de
+  // la pantalla se adapta para no hablar de insumos donde no los hay.
+  var hayProveedor = (c.referencias || []).some(function (r) { return r.origen === "proveedor"; });
+  var haySoloProveedor = hayProveedor && (c.referencias || []).every(function (r) { return r.origen === "proveedor"; });
+  var palabraCompra = haySoloProveedor ? "referencia" : "insumo";
   var htmlCostosReales = "";
   (c.gastosReales || []).forEach(function (g) {
-    var etiquetaDestino = g.destino === "insumo" ? (" — insumo: " + esc(g.destinoNombre || "")) : " — costo total";
+    var etiquetaDestino = g.destino === "insumo" ? ((g.destinoEsProducto ? " — referencia: " : " — insumo: ") + esc(g.destinoNombre || "")) : " — costo total";
     var variacion = calcCotGastoVariacion(c, g);
     var estimadoBase = calcCotGastoEstimadoBase(c, g);
     var vTxt = variacion === 0 ? "igual a lo estimado" : (variacion > 0 ? "+" + fmt(variacion) + " sobre lo estimado" : "-" + fmt(Math.abs(variacion)) + " bajo lo estimado");
@@ -400,12 +408,13 @@ function renderTabProduccion(c, totales, real) {
   });
   if ((c.gastosReales || []).length === 0) { htmlCostosReales += '<div class="empty" style="padding:8px 0;">Sin costos reales registrados aún.</div>'; }
   htmlCostosReales += '<div class="cot-gasto-grid">' +
-    '<input class="mini-input" data-role="gasto-concepto" placeholder="Concepto (ej. tela)" />' +
+    '<input class="mini-input" data-role="gasto-concepto" placeholder="Concepto (ej. ' + (haySoloProveedor ? "pedido al proveedor" : "tela") + ')" />' +
     '<input type="number" class="mini-input" data-role="gasto-monto" placeholder="Costo real" />' +
     '<select class="mini-input" data-role="gasto-destino">' +
     '<option value="total">Costo real del total</option>' +
-    compras.map(function (comp) { return '<option value="insumo::' + esc(comp.nombre) + '">Insumo: ' + esc(comp.nombre) + "</option>"; }).join("") +
+    compras.map(function (comp) { return '<option value="insumo::' + esc(comp.nombre) + '">' + (comp.esProducto ? "Referencia: " : "Insumo: ") + esc(comp.nombre) + "</option>"; }).join("") +
     "</select>" +
+    '<input type="number" class="mini-input" data-role="gasto-cantidad" placeholder="Cantidad comprada (opcional)" />' +
     '<input class="mini-input" data-role="gasto-nota" placeholder="Nota / imprevisto" />' +
     (proveedoresDeContactos().length
       ? ('<select class="mini-input" style="grid-column:1/-1;" data-role="gasto-proveedor">' +
@@ -422,12 +431,14 @@ function renderTabProduccion(c, totales, real) {
     "</div>";
   html += '<hr class="stitch cot-section-divider" />';
   html += '<div class="cot-col-title">Costos reales registrados' +
-    renderHelp("Registra el costo REAL total de un insumo (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro crea también un movimiento de gasto en Finanzas, así la caja y \"de los cuales, insumos\" del reporte quedan sincronizados. Esto es distinto del panel \"Gasto en insumos por mes\" de Resumen, que es solo una ESTIMACIÓN de lo cotizado.") +
+    renderHelp("Registra el costo REAL total de un " + palabraCompra + " (o del total) — no una diferencia. La diferencia contra lo estimado se calcula sola y se ve al lado de cada línea. Cada registro crea también un movimiento de gasto en Finanzas, así la caja y el desglose de insumos del reporte quedan sincronizados. Para una referencia comprada a proveedor el costo real se registra por referencia completa, no por insumo: no los tiene.") +
     "</div>";
   html += htmlCostosReales;
 
   html += '<hr class="stitch cot-section-divider" />';
-  html += '<div class="cot-col-title">Qué falta comprar</div>';
+  html += '<div class="cot-col-title">Qué falta comprar' +
+    (hayProveedor ? renderHelp("Las referencias compradas a proveedor aparecen como una sola línea (la prenda completa, en unidades) con su proveedor al lado — no se desglosan en insumos porque llegan hechas.") : "") +
+    "</div>";
   html += renderListaCompras(compras);
 
   html += '<hr class="stitch cot-section-divider" />';
@@ -494,25 +505,84 @@ function renderReferenciasTabs(c) {
   return html;
 }
 
+// A qué Contacto (tipo Proveedor) se le compra esta referencia. Es el mismo
+// directorio que usan los productos del catálogo, así que el historial de
+// compras del proveedor y sus listas de precios sirven para las dos cosas.
+function renderSelectorProveedorRef(cotId, ref) {
+  var proveedores = proveedoresDeContactos();
+  if (!proveedores.length) {
+    return '<span><label>Proveedor</label><span class="section-sub" style="margin:0;flex:1;">Sin proveedores en Contactos.</span></span>';
+  }
+  return '<span><label>Proveedor</label><select class="mini-input" style="flex:1;" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="proveedorId">' +
+    '<option value="">Elegir proveedor…</option>' +
+    proveedores.map(function (pr) { return '<option value="' + pr.id + '" ' + (ref.proveedorId === pr.id ? "selected" : "") + ">" + esc(pr.nombre) + "</option>"; }).join("") +
+    "</select></span>";
+}
+
+// Reemplaza a la tabla de insumos para una referencia comprada: los mismos
+// indicadores de siempre (costo, ganancia, margen, totales), porque el
+// costo por unidad ya lo resuelve calcCostoUnitarioRef a partir del costo de
+// compra — no hay una segunda fórmula acá.
+function renderRefProveedorResumen(ref, calc) {
+  var proveedor = ref.proveedorId ? clienteById(ref.proveedorId) : null;
+  var html = '<div class="section-sub" style="margin:10px 0 0;">📦 Se compra hecha' +
+    (proveedor ? " a <b>" + esc(proveedor.nombre) + "</b>" : "") +
+    (ref.fechaEntregaProveedor ? " · llega el " + esc(ref.fechaEntregaProveedor) : "") +
+    " — sin insumos ni fases de producción. El progreso se sigue como pendiente/recibido.</div>";
+  html += '<div class="ref-summary">' +
+    '<div class="rs-item"><div class="rl">Costo x prenda</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (calc.margenPct >= 0 ? "pos" : "neg") + '">' + calc.margenPct.toFixed(1) + "%</span></div></div>" +
+    '<div class="rs-item"><div class="rl">Costo total (' + esc(ref.cantidadPedida) + ')</div><div class="rv">' + fmt(calc.costoTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Precio total</div><div class="rv">' + fmt(calc.precioTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (calc.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(calc.gananciaTotal) + "</div></div>" +
+    "</div>";
+  return html;
+}
+
+// El ORIGEN de la referencia no es un campo más: es lo que decide qué
+// formulario se muestra. Una referencia fabricada en el taller se costea con
+// insumos y consumo de tela; una comprada a proveedor llega hecha, así que no
+// tiene ni insumos ni consumo — su costo es el precio de compra, y lo que
+// hace falta saber es a quién se le compra y cuándo llega. Por eso va como
+// control segmentado arriba de todo, y no como un <select> perdido entre los
+// demás campos: cambiarlo reescribe la referencia entera.
 function renderRefCard(cotId, ref) {
   var calc = calcRefTotales(ref);
+  var esProveedor = ref.origen === "proveedor";
+  var attrs = ' data-cot="' + cotId + '" data-ref="' + ref.id + '"';
   var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
     '<div class="ref-top">' +
     renderThumb(cotId, ref) +
     '<div class="ref-top-info">' +
-    '<span class="ref-nombre"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="nombre" /></span>' +
+    '<span class="ref-nombre"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="nombre" /></span>' +
+    '<div class="segmented" style="margin:8px 0 4px;">' +
+    '<button class="segmented-opcion ' + (esProveedor ? "" : "active") + '" data-action="set-ref-origen"' + attrs + ' data-val="taller">🧵 Se fabrica en el taller</button>' +
+    '<button class="segmented-opcion ' + (esProveedor ? "active" : "") + '" data-action="set-ref-origen"' + attrs + ' data-val="proveedor">📦 Se compra a proveedor</button>' +
+    "</div>" +
     '<div class="ref-fields">' +
-    '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="consumoAprox" /></span>' +
-    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="cantidadPedida" /></span>' +
-    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="precioVenta" /></span>' +
-    '<span><label>Origen' + renderHelp("Si es comprada a proveedor, el progreso de producción pasa a ser solo \"pendiente/recibido\" en vez del flujo completo de fases.") + '</label><select class="mini-input" style="flex:1;" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="origen">' +
-    Object.keys(ORIGEN_PRODUCCION).map(function (k) { return opt(k, ORIGEN_PRODUCCION[k], ref.origen || "taller"); }).join("") +
-    "</select></span>" +
-    (ref.origen === "proveedor" ? ('<span><label>Entrega esperada del proveedor</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-campo="fechaEntregaProveedor" /></span>') : "") +
-    '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia" data-cot="' + cotId + '" data-ref="' + ref.id + '">Eliminar referencia</button>' +
+    (esProveedor ? "" : '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="consumoAprox" /></span>') +
+    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
+    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
+    (esProveedor
+      ? ('<span><label>Costo de compra x1' + renderHelp("Lo que te cobra el proveedor por cada unidad. Reemplaza a los insumos: de acá sale el costo y la ganancia de la referencia.") + '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.costoCompra || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="costoCompra" /></span>' +
+        renderSelectorProveedorRef(cotId, ref) +
+        '<span><label>Entrega esperada</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="fechaEntregaProveedor" /></span>')
+      : "") +
+    '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia"' + attrs + ">Eliminar referencia</button>" +
     "</div>" +
     "</div>" +
     "</div>";
+
+  // Insumos, plantillas y "aplicar producto" solo tienen sentido si la prenda
+  // se fabrica. Para una referencia de proveedor esa tabla entera sale del
+  // contexto: no hay nada que cortar, coser ni comprar por separado.
+  if (esProveedor) {
+    html += renderRefProveedorResumen(ref, calc);
+    html += renderDetalleReferencia(cotId, ref);
+    html += "</div>"; // .ref-card
+    return html;
+  }
 
   html += '<div class="ins-table">' +
     '<div class="ins-row head" style="grid-template-columns:1fr 60px 90px 150px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
@@ -642,16 +712,29 @@ function renderThumb(cotId, ref) {
   return '<span class="ref-thumb ref-thumb-cotizacion ref-thumb-empty" data-action="set-ref-imagen" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</span>';
 }
 
+// Una lista sola para las dos formas de comprar: insumos sueltos (de una
+// referencia que se fabrica) y prendas completas (de una que se compra hecha,
+// donde la línea ES la referencia — ver agregarInsumosDeReferencias). La
+// columna "Usado en" muestra las referencias en el primer caso y el proveedor
+// en el segundo, que es la información que hace falta para salir a comprar.
 function renderListaCompras(compras) {
   if (compras.length === 0) {
-    return '<div class="empty" style="padding:8px 0;">Agrega insumos a las referencias para ver aquí lo que necesitas comprar.</div>';
+    return '<div class="empty" style="padding:8px 0;">Agrega insumos a las referencias (o define el costo de compra de las que vengan de proveedor) para ver aquí lo que necesitas comprar.</div>';
   }
-  var html = '<div class="tx-row head" style="grid-template-columns:1fr 1.4fr 110px 110px;"><span>Insumo</span><span>Usado en</span><span>Cantidad a comprar</span><span>Costo total</span></div>';
+  var COLS = "1fr 1.4fr 110px 110px";
+  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Qué comprar</span><span>Para / a quién</span><span>Cantidad a comprar</span><span>Costo total</span></div>';
   compras.forEach(function (c) {
-    html += '<div class="tx-row" style="grid-template-columns:1fr 1.4fr 110px 110px;">' +
-      '<span class="mobile-th">Insumo</span><span>' + esc(c.nombre) + "</span>" +
-      '<span class="mobile-th">Usado en</span><span>' + (c.refs.length ? c.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>') + "</span>" +
-      '<span class="mobile-th">Cantidad a comprar</span><span class="amount">' + (c.tipo === "fijo_pedido" ? '<span style="color:var(--ink-faint);">servicio</span>' : (c.cantidadFisica.toFixed(2) + " " + esc(c.unidad))) + "</span>" +
+    var proveedor = c.esProducto && c.proveedorId ? clienteById(c.proveedorId) : null;
+    var paraQuien = c.esProducto
+      ? (proveedor ? '<span class="badge">📦 ' + esc(proveedor.nombre) + "</span>" : '<span class="muted">Proveedor sin definir</span>')
+      : (c.refs.length ? c.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>');
+    var cantidad = c.tipo === "fijo_pedido"
+      ? '<span style="color:var(--ink-faint);">servicio</span>'
+      : (c.esProducto ? (c.cantidadFisica + " UND") : (c.cantidadFisica.toFixed(2) + " " + esc(c.unidad)));
+    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">Qué comprar</span><span>' + (c.esProducto ? "📦 " : "") + esc(c.nombre) + "</span>" +
+      '<span class="mobile-th">Para / a quién</span><span>' + paraQuien + "</span>" +
+      '<span class="mobile-th">Cantidad a comprar</span><span class="amount">' + cantidad + "</span>" +
       '<span class="mobile-th">Costo total</span><span class="amount">' + fmt(c.costoTotal) + "</span>" +
       "</div>";
   });
@@ -810,9 +893,31 @@ export var actions = {
       return Object.assign({}, c, { referencias: (c.referencias || []).filter(function (r) { return r.id !== refId; }) });
     });
   },
+  // Cambiar el origen reescribe la referencia entera, no solo un campo: una
+  // referencia que pasa a comprarse ya no se arma con insumos ni consumo de
+  // tela (se limpian para que no queden sumando fantasmas en el costo), y una
+  // que vuelve al taller deja de tener costo de compra y proveedor. También
+  // se reinicia el flujo de etapas, porque los dos casos usan defaults
+  // distintos (ver estadosDefDeRef en core/calc.js).
+  "set-ref-origen": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
+    var origen = el.getAttribute("data-val") === "proveedor" ? "proveedor" : "taller";
+    var ref = (state.cotizaciones.filter(function (c) { return c.id === cotId; })[0] || {}).referencias || [];
+    var actual = ref.filter(function (r) { return r.id === refId; })[0];
+    if (actual && (actual.origen || "taller") === origen) return;
+    if (origen === "proveedor" && actual && (actual.insumos || []).length) {
+      if (!window.confirm("Esta referencia pasa a comprarse hecha a un proveedor: sus " + actual.insumos.length + " insumo(s) y el consumo de tela dejan de aplicar y se quitan.\n\n¿Seguir?")) return;
+    }
+    mapRef(cotId, refId, function (r) {
+      if (origen === "proveedor") {
+        return Object.assign({}, r, { origen: "proveedor", insumos: [], consumoAprox: 0, estadosDef: [], estado: "" });
+      }
+      return Object.assign({}, r, { origen: "taller", costoCompra: 0, proveedorId: "", fechaEntregaProveedor: "", estadosDef: [], estado: "" });
+    });
+  },
   "set-ref-campo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), campo = el.getAttribute("data-campo");
-    var textual = campo === "nombre" || campo === "origen" || campo === "fechaEntregaProveedor";
+    var textual = campo === "nombre" || campo === "origen" || campo === "fechaEntregaProveedor" || campo === "proveedorId";
     var numerico = !textual;
     mapRef(cotId, refId, function (r) {
       var valor = numerico ? num(el.value) : el.value;
@@ -957,25 +1062,27 @@ export var actions = {
     var prod = (state.productos || []).filter(function (p) { return p.id === el.value; })[0];
     if (!prod) return;
     mapRef(cotId, refId, function (r) {
-      // Un producto de proveedor no tiene insumos propios (ver Catálogo →
-      // Productos) — se copia su costo de compra como un insumo sintético de
-      // un solo ítem, para que el costo/ganancia de la referencia lo refleje
-      // igual que en el Catálogo.
-      var nuevosInsumos = prod.origen === "proveedor"
-        ? [{ id: uid(), nombre: "Costo de compra (" + prod.nombre + ")", unidad: "UND", costo: num(prod.costoCompra), tipo: "por_prenda", cantidad: 1 }]
-        : (prod.insumos || []).map(function (ins) {
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
-        });
-      var patch = { insumos: (r.insumos || []).concat(nuevosInsumos), productoId: prod.id, origen: prod.origen || "taller" };
+      var patch = { productoId: prod.id, origen: prod.origen || "taller" };
       if (!r.nombre) patch.nombre = prod.nombre;
-      if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
       if (prod.imagenUrl && !r.imagenUrl) patch.imagenUrl = prod.imagenUrl;
       if (prod.precioVenta && (!r.precioVenta || Number(r.precioVenta) === 0)) patch.precioVenta = num(prod.precioVenta);
       if (prod.origen === "proveedor") {
-        // Comprado a proveedor: sin flujo de fases propio — se usa el
-        // default de 2 etapas (pendiente/recibido) de estadosDefDeRef().
+        // Comprado a proveedor: la referencia hereda el costo de compra y el
+        // proveedor tal cual, sin insumos de por medio — el costo por unidad
+        // sale directo de ahí (ver calcCostoUnitarioRef). Sin flujo de fases
+        // propio: se usa el default de 2 etapas (pendiente/recibido).
+        patch.insumos = [];
+        patch.consumoAprox = 0;
+        patch.costoCompra = num(prod.costoCompra);
+        patch.proveedorId = prod.proveedorId || "";
         patch.estadosDef = [];
-      } else if (prod.flujoEstadosId) {
+      } else {
+        patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
+        }));
+        if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
+      }
+      if (prod.origen !== "proveedor" && prod.flujoEstadosId) {
         var flujoP = (state.plantillasEstados || []).filter(function (f) { return f.id === prod.flujoEstadosId; })[0];
         if (flujoP) patch.estadosDef = flujoP.estados.map(function (e) { return { id: e.id, label: e.label }; });
       }
@@ -992,10 +1099,24 @@ export var actions = {
     var destino = "total", destinoNombre = "";
     if (destinoVal && destinoVal.indexOf("insumo::") === 0) { destino = "insumo"; destinoNombre = destinoVal.slice("insumo::".length); }
     var proveedorId = val(cotCard, "gasto-proveedor");
+    var cantidad = num(val(cotCard, "gasto-cantidad"));
     if (!concepto || monto <= 0) return;
     var cotActual = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cotActual) return;
-    var nuevoGasto = { id: uid(), concepto: concepto, monto: monto, nota: nota, destino: destino, destinoNombre: destinoNombre, fecha: todayStr() };
+    // ¿El destino elegido es una referencia comprada a proveedor o un insumo
+    // suelto? Se resuelve contra la propia lista de compras (única fuente de
+    // esas líneas) y se guarda en el gasto, para que la etiqueta de la línea
+    // no tenga que adivinarlo después.
+    var lineaCompra = destino === "insumo"
+      ? calcListaCompras(cotActual).filter(function (comp) { return comp.nombre === destinoNombre; })[0]
+      : null;
+    var destinoEsProducto = !!(lineaCompra && lineaCompra.esProducto);
+    // La cantidad es opcional: si no se escribe, se toma la de la lista de
+    // compras (lo que se esperaba comprar) para que el desglose del reporte
+    // no quede con la columna vacía.
+    var cantidadFinal = cantidad > 0 ? cantidad : (lineaCompra ? num(lineaCompra.cantidadFisica) : 0);
+    var unidadFinal = lineaCompra ? (lineaCompra.unidad || "UND") : "";
+    var nuevoGasto = { id: uid(), concepto: concepto, monto: monto, nota: nota, destino: destino, destinoNombre: destinoNombre, destinoEsProducto: destinoEsProducto, cantidad: cantidadFinal, fecha: todayStr() };
     // "Registrar costo real" ajusta el resultado real de ESTA cotización
     // (c.gastosReales[], para el comparativo estimado-vs-real) Y crea el
     // movimiento correspondiente en Finanzas — es, junto con marcar "Es
@@ -1013,7 +1134,11 @@ export var actions = {
       concepto: "Costo real — " + concepto + (destino === "insumo" ? " (" + destinoNombre + ")" : "") + " — " + cotActual.descripcion,
       monto: monto, contraparte: "", fecha: todayStr(), pedidoId: "",
       cotizacionId: id, origenGastoId: nuevoGasto.id, esInsumo: destino === "insumo" ? "1" : "",
-      proveedorId: proveedorId || "", insumoNombre: destino === "insumo" ? destinoNombre : ""
+      proveedorId: proveedorId || "", insumoNombre: destino === "insumo" ? destinoNombre : "",
+      // Cantidad y unidad viajan al movimiento para que el desglose de
+      // insumos del reporte pueda mostrar "cuánto se compró", no solo cuánto
+      // costó (ver calcComprasInsumoRango en core/calc.js).
+      cantidad: cantidadFinal || "", unidad: unidadFinal
     });
     guardarCotizaciones(); persist("tx"); notify();
   },

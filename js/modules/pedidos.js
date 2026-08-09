@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
@@ -9,6 +9,7 @@ import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 import { getSession } from "../core/auth.js";
 import { ajustarStockProducto } from "../core/stock.js";
+import { subirImagenReferencia } from "../core/drive.js";
 
 // Todos los números de OP usados, activos Y en la papelera — para que un
 // pedido restaurado o uno nuevo nunca choque con uno que ya existió.
@@ -38,171 +39,355 @@ function renderTabsPedidos(vista) {
     "</div>";
 }
 
-// Suma la cantidad y arma la descripción de un pedido rápido a partir de sus
-// líneas (producto de catálogo o texto libre) — se calcula siempre a partir
-// de las líneas, nunca se escribe a mano, para que sea imposible crear un
-// pedido de "1 und" sin que quede claro 1 und DE QUÉ.
+// Suma la cantidad y arma la descripción de un pedido a partir de sus líneas
+// — se calcula siempre a partir de ellas, nunca se escribe a mano, para que
+// sea imposible crear un pedido de "1 und" sin que quede claro 1 und DE QUÉ.
 function resumenLineasPedido(lineas) {
   lineas = lineas || [];
   var cantidad = lineas.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
   var descripcion = lineas.map(function (l) {
-    var nombre = l.productoNombre || l.textoDescripcion || "";
-    return nombre + (l.talla ? " (" + l.talla + ")" : "") + " x" + l.cantidad;
+    var nombre = (l.productoNombre || l.textoDescripcion || "Sin describir").trim();
+    return nombre + (l.talla ? " (" + l.talla + ")" : "") + " x" + num(l.cantidad);
   }).join(", ");
   return { cantidad: cantidad, descripcion: descripcion };
 }
 
+// Qué le falta al borrador para poder crearse. Devolver la lista (en vez de
+// un booleano) permite decir exactamente qué falta al lado del botón, en vez
+// de dejarlo deshabilitado sin explicación o de avisar recién al enviar.
+function faltantesPedido(f) {
+  var out = [];
+  var lineas = f.lineas || [];
+  if (!(f.cliente || "").trim()) out.push(f.esConsignacion ? "el punto de consignación" : "el cliente");
+  if (!lineas.length) {
+    out.push(f.esConsignacion ? "al menos un producto del catálogo" : "al menos una línea");
+  } else {
+    var sinNombre = lineas.filter(function (l) { return !(l.productoNombre || "").trim(); }).length;
+    if (sinNombre) out.push("describir " + sinNombre + " línea(s)");
+    var sinCantidad = lineas.filter(function (l) { return num(l.cantidad) <= 0; }).length;
+    if (sinCantidad) out.push("la cantidad de " + sinCantidad + " línea(s)");
+  }
+  if (f.esConsignacion && num(f.consignacionPrecioUnitario) <= 0) out.push("el precio al público del punto");
+  return out;
+}
+
+// Formulario de pedido rápido. No es un asistente por pasos: es un formulario
+// normal cuyas secciones y campos CAMBIAN según lo que se elija. El tipo de
+// pedido va primero porque es lo que más lo reestructura (venta directa pide
+// precio y pago; consignación pide condiciones con el punto), y el resto se
+// va llenando de información a medida que se agregan líneas. El camino por
+// defecto —venta directa, un producto del catálogo— está a la vista sin
+// tener que configurar nada.
 function renderFormNuevoPedido() {
   var f = state.formPedido;
-  var lineas = f.stockConsumido || [];
-  var clienteListo = !!(f.cliente && f.cliente.trim());
-  var tieneLineas = lineas.length > 0;
-  var costoNum = num(f.costo), totalNum = num(f.total);
-  var gananciaHint = costoNum > 0 && totalNum > 0
-    ? ('<div class="section-sub" style="margin:6px 0 0;">Ganancia estimada: <b style="color:' + (totalNum - costoNum >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + fmt(totalNum - costoNum) + " (" + ((totalNum - costoNum) / totalNum * 100).toFixed(1) + "%)</b></div>")
-    : "";
+  var lineas = f.lineas || [];
+  var totales = calcTotalesLineasPedido(lineas);
+  var faltantes = faltantesPedido(f);
+
   var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
-    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. El formulario va paso a paso: primero el cliente, luego qué se lleva, y recién con eso definido aparece el resto. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créala aparte en Cotizaciones y conviértela en pedido.") +
+    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créalo en Cotizaciones y conviértelo en pedido.") +
     "</div>";
 
-  // ---- 1 · Cliente y tipo de pedido (siempre visible) ----
-  html += '<div class="cot-col-title" style="margin-top:6px;">1 · Cliente y tipo de pedido</div><div class="form-grid">' +
-    renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
-    '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
-    '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
-    "</div>";
-  // Control segmentado en vez de un checkbox con una frase larga al lado: las
-  // dos opciones se nombran explícitamente y la explicación vive en el "?".
-  html += '<div style="margin-top:14px;"><div class="cot-col-title">Tipo de pedido' +
+  html += '<div class="cot-col-title" style="margin-top:2px;">Tipo de pedido' +
     renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
     "</div>" +
     '<div class="segmented">' +
     '<button class="segmented-opcion ' + (f.esConsignacion ? "" : "active") + '" data-action="set-tipo-pedido" data-val="venta">🧾 Venta directa</button>' +
     '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
-    "</div></div>";
+    "</div>";
 
-  if (!clienteListo) {
-    html += '<div class="empty" style="margin-top:16px;">Elige o escribe el cliente arriba para continuar armando el pedido.</div>' +
-      "</div>"; // cierra .card
-    return html;
-  }
+  html += '<div class="form-grid" style="margin-top:14px;">' +
+    renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+    '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
+    '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
+    "</div>";
 
   html += '<hr class="stitch" />';
-  // ---- 2 · Qué incluye (líneas) ----
-  html += '<div class="cot-col-title">2 · Qué incluye este pedido' +
-    renderHelp((f.esConsignacion
+  html += '<div class="cot-col-title">Qué incluye este pedido' +
+    renderHelp(f.esConsignacion
       ? "Elige del catálogo lo que le dejas al punto — queda como su primera remisión (con PDF) y el stock del taller baja al crear el pedido."
-      : "Cada línea (producto del catálogo, o algo que describas a mano) define su propia cantidad — la cantidad y descripción del pedido se arman solas a partir de esto, para que nunca quede una cantidad suelta sin decir de qué es.")) +
+      : "Cada línea define qué es, cuánta cantidad y a qué precio. De ahí salen solos el total, el costo y la ganancia del pedido: nunca hay una cantidad suelta sin decir de qué, ni un total que diga algo distinto de lo que se está vendiendo.") +
     "</div>";
   html += renderLineasPedido(f);
 
-  if (!tieneLineas) {
-    html += '<div class="empty" style="margin-top:10px;">Agrega al menos un producto del catálogo' + (f.esConsignacion ? "" : " o descríbelo") + " para continuar." + "</div>" +
-      "</div>"; // cierra .card
-    return html;
-  }
-
   html += '<hr class="stitch" />';
-  if (f.esConsignacion) {
-    html += '<div class="cot-col-title">3 · Condiciones con el punto' + renderHelp("El \"Cliente\" de arriba es el punto de consignación (regístralo antes en Contactos, con su comisión por defecto, y queda vinculado solo). El precio unitario es lo que el punto le cobra al público; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") + '</div><div class="form-grid">' +
-      '<div class="field"><label>Precio unitario de venta</label><input type="number" data-form="pedido" data-field="consignacionPrecioUnitario" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" /></div>' +
-      '<div class="field"><label>Comisión del punto</label><select data-form="pedido" data-field="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
-      '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="consignacionComisionValor" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" /></div>' +
-      "</div>";
-  } else {
-    html += '<div class="cot-col-title">3 · Precio y pago</div><div class="form-grid">' +
-      '<div class="field"><label>Total cotizado</label><input type="number" data-form="pedido" data-field="total" value="' + esc(f.total) + '" placeholder="0" /></div>' +
-      '<div class="field"><label>Costo (opcional)' + renderHelp("Lo que te cuesta a ti producirlo/comprarlo. Con esto y el total, se calcula la ganancia estimada automáticamente.") + '</label><input type="number" data-form="pedido" data-field="costo" value="' + esc(f.costo) + '" placeholder="0" /></div>' +
-      '<div class="field"><label>Abono inicial recibido</label><input type="number" data-form="pedido" data-field="abono" value="' + esc(f.abono) + '" placeholder="0" /></div>' +
-      "</div>" + gananciaHint;
-    html += '<hr class="stitch" />';
-    html += '<div class="cot-col-title">4 · Vendedor (opcional)' + renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") + '</div><div class="form-grid">' +
-      '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
-      '<div class="field"><label>Tipo de comisión</label><select data-form="pedido" data-field="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + '</select></div>' +
-      '<div class="field"><label>Valor comisión</label><input type="number" data-form="pedido" data-field="vendedorValor" value="' + esc(f.vendedorValor) + '" placeholder="0" /></div>' +
-      "</div>";
-  }
-  html += '<div style="margin-top:22px;"><button class="btn" data-action="add-pedido">' +
-    (f.esConsignacion ? "Crear consignación y remisión" : "Crear pedido") + "</button></div></div>";
-  return html;
-}
+  html += f.esConsignacion ? renderCondicionesConsignacion(f, totales) : renderPrecioYPago(f, totales);
 
-// Líneas del pedido: cada una es un producto de catálogo (con talla, elegido
-// por el picker) o, solo para venta directa, algo descrito a mano — nunca
-// una cantidad suelta sin decir de qué. El descuento real de stock ocurre
-// recién al confirmar "Crear pedido" (ver acción "add-pedido"), nunca antes.
-function renderLineasPedido(f) {
-  var lineas = f.stockConsumido || [];
-  var producto = f.productoSel ? productoById(f.productoSel) : null;
-  var html = '<div class="row-actions" style="margin-bottom:10px;">' +
-    '<button class="btn ghost small" data-action="abrir-producto-picker-pedido">🔍 Elegir producto del catálogo</button>' +
+  html += '<div style="margin-top:22px;">' +
+    '<button class="btn" ' + (faltantes.length ? "disabled" : "") + ' data-action="add-pedido">' +
+    (f.esConsignacion ? "Crear consignación y remisión" : "Crear pedido") + "</button>" +
+    (faltantes.length ? '<div class="section-sub" style="margin-top:8px;">Para crearlo falta ' + esc(faltantes.join(", ")) + ".</div>" : "") +
     "</div>";
-
-  if (!(state.productos || []).length && !f.esConsignacion) {
-    html += '<div class="section-sub" style="margin:0 0 10px;">Tu catálogo de productos está vacío — puedes seguir con líneas descritas a mano.</div>';
-  }
-
-  if (producto) {
-    html += renderProductoElegido(producto);
-    var tallas = (producto.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
-    if (!tallas.length) {
-      html += '<div class="section-sub" style="margin-top:6px;color:var(--danger-ink);">Sin stock disponible en ninguna talla.</div>';
-    } else {
-      html += '<div class="inline-form" style="margin-top:8px;">' +
-        '<select class="mini-input" data-role="pedido-producto-talla" style="width:150px">' +
-        tallas.map(function (t) { return '<option value="' + esc(t.talla) + '">' + esc(t.talla) + " (" + num(t.stock) + " disp.)</option>"; }).join("") +
-        "</select>" +
-        '<input type="number" class="mini-input" data-role="pedido-producto-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
-        '<button class="btn ghost small" data-action="add-pedido-producto-linea" data-id="' + producto.id + '">+ Agregar</button>' +
-        "</div>";
-    }
-  }
-
-  if (!f.esConsignacion) {
-    html += '<div class="inline-form" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);flex-wrap:wrap;">' +
-      '<input class="mini-input" data-role="pedido-texto-descripcion" placeholder="Algo que no está en el catálogo (ej. bordado personalizado)" style="width:260px" />' +
-      '<input type="number" class="mini-input" data-role="pedido-texto-cantidad" placeholder="Cantidad" style="width:100px" min="1" />' +
-      '<button class="btn ghost small" data-action="add-pedido-texto-linea">+ Agregar</button>' +
-      "</div>";
-  }
-
-  // Lo ya agregado se muestra como lista con opción de quitar.
-  if (lineas.length) {
-    var totalUnid = lineas.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
-    html += '<div class="tx-row head" style="margin-top:14px;grid-template-columns:1fr 90px 70px 40px;"><span>Qué es</span><span>Talla</span><span>Cant.</span><span></span></div>';
-    lineas.forEach(function (l, i) {
-      html += '<div class="tx-row" style="grid-template-columns:1fr 90px 70px 40px;">' +
-        '<span class="mobile-th">Qué es</span><span>' + esc(l.productoNombre || l.textoDescripcion || "—") + "</span>" +
-        '<span class="mobile-th">Talla</span><span>' + esc(l.talla || "—") + "</span>" +
-        '<span class="mobile-th">Cant.</span><span>' + l.cantidad + "</span>" +
-        '<button class="btn danger small" data-action="quitar-pedido-producto-linea" data-idx="' + i + '" title="Quitar esta línea">✕</button>' +
-        "</div>";
-    });
-    html += '<div class="section-sub" style="margin:6px 0 0;">' + totalUnid + " unidad(es) en total · " +
-      (f.esConsignacion ? "se entregarán al punto y saldrán del stock del taller al crear." : "se descontarán del stock (las de catálogo) al crear el pedido.") + "</div>";
-  } else {
-    html += '<div class="empty" style="margin-top:10px;">Sin líneas todavía.</div>';
-  }
+  html += "</div>"; // .card
   html += renderProductoPickerPedido();
   return html;
 }
 
-// Modal tipo explorador para elegir el producto (mismo patrón
-// .picker-overlay/.picker-modal que Cotizaciones/Productos) — reemplaza el
-// buscador inline con sugerencias que había antes.
+// ---------- Líneas del pedido ----------
+// Una línea es "qué se está vendiendo": puede venir del catálogo (con su
+// foto, precio y stock por talla) o escribirse a mano para lo que no está
+// catalogado (un bordado, un arreglo). Las dos viven en la MISMA lista y se
+// editan igual — antes el producto elegido aparecía en dos lugares a la vez
+// (el resultado de la búsqueda y la tabla), y lo escrito a mano no se podía
+// ni corregir ni describir. El stock real se descuenta recién al confirmar
+// "Crear pedido" (ver la acción "add-pedido"), nunca antes.
+function renderLineasPedido(f) {
+  var lineas = f.lineas || [];
+  var html = '<div class="row-actions" style="margin-bottom:12px;flex-wrap:wrap;">' +
+    '<button class="btn ghost small" data-action="abrir-producto-picker-pedido">🔍 Elegir del catálogo</button>' +
+    (f.esConsignacion ? "" : '<button class="btn ghost small" data-action="add-pedido-linea-libre">✎ Algo que no está en el catálogo</button>') +
+    "</div>";
+
+  if (!lineas.length) {
+    html += '<div class="empty">Sin líneas todavía — ' +
+      (f.esConsignacion
+        ? "elige del catálogo lo que le vas a dejar al punto."
+        : "elige un producto del catálogo, o describe a mano lo que no esté ahí.") +
+      "</div>";
+    return html;
+  }
+
+  lineas.forEach(function (l) { html += renderLineaPedido(f, l); });
+
+  var totales = calcTotalesLineasPedido(lineas);
+  html += '<div class="section-sub" style="margin:10px 0 0;">' + totales.unidades + " unidad(es) en total · " +
+    (f.esConsignacion ? "salen del stock del taller al crear el pedido." : "las de catálogo se descuentan del stock al crear el pedido.") + "</div>";
+  return html;
+}
+
+function renderLineaPedido(f, l) {
+  var esCatalogo = l.tipo === "catalogo";
+  var producto = esCatalogo && l.productoId ? productoById(l.productoId) : null;
+  var attrs = ' data-action-change="set-pedido-linea-campo" data-linea="' + l.id + '"';
+  var subtotal = num(l.precioUnitario) * num(l.cantidad);
+
+  var html = '<div class="pedido-linea">';
+
+  // --- Cabecera: foto, qué es, y accesos directos ---
+  html += '<div class="pedido-linea-top">' + renderLineaThumb(l, producto) + '<div class="pedido-linea-id">';
+  if (esCatalogo) {
+    var meta = producto ? [producto.referencia, producto.categoria].filter(Boolean).join(" · ") : "";
+    html += "<b>" + esc(l.productoNombre || "—") + "</b>" +
+      '<div class="section-sub" style="margin:2px 0 0;">' + (meta ? esc(meta) + " · " : "") +
+      (producto && producto.origen === "proveedor" ? "📦 de proveedor" : "🧵 del taller") + "</div>";
+  } else {
+    html += '<input class="mini-input" style="width:100%;font-weight:700;" placeholder="¿Qué es? (ej. bordado personalizado)" value="' + esc(l.productoNombre || "") + '"' + attrs + ' data-campo="productoNombre" />' +
+      '<div class="section-sub" style="margin:2px 0 0;">✎ Escrito a mano — no está en el catálogo, no mueve stock</div>';
+  }
+  html += "</div>" +
+    '<div class="pedido-linea-acciones">' +
+    (esCatalogo && producto ? '<button class="btn ghost small" data-action="ver-producto-en-catalogo" data-id="' + producto.id + '" title="Abrir este producto en el Catálogo">Ver en Catálogo ↗</button>' : "") +
+    '<button class="btn danger small" data-action="quitar-pedido-linea" data-linea="' + l.id + '" title="Quitar esta línea">✕</button>' +
+    "</div></div>";
+
+  // --- Datos básicos: talla, cantidad, precio, costo ---
+  html += '<div class="pedido-linea-campos">';
+  html += '<span class="field"><label>Talla</label>' + renderLineaTalla(f, l, producto, attrs) + "</span>";
+  html += '<span class="field"><label>Cantidad</label><input type="number" min="1" class="mini-input" value="' + esc(l.cantidad) + '"' + attrs + ' data-campo="cantidad" /></span>';
+  html += '<span class="field"><label>Precio x1</label><input type="number" class="mini-input" value="' + esc(l.precioUnitario) + '" placeholder="0"' + attrs + ' data-campo="precioUnitario" /></span>';
+  html += '<span class="field"><label>Costo x1' + renderHelp("Lo que te cuesta a ti esta unidad. Si viene del catálogo llega calculado (insumos, o costo de compra si es de proveedor); puedes ajustarlo para este pedido puntual.") + '</label><input type="number" class="mini-input" value="' + esc(l.costoUnitario) + '" placeholder="0"' + attrs + ' data-campo="costoUnitario" /></span>';
+  html += '<span class="field"><label>Subtotal</label><span class="amount" style="align-self:center;">' + fmt(subtotal) + "</span></span>";
+  html += "</div>";
+
+  // --- Observación y campos propios de esta línea ---
+  html += '<input class="mini-input" style="width:100%;margin-top:8px;" placeholder="Observación de esta línea (ej. estampado al frente, entregar sin doblar)" value="' + esc(l.observacion || "") + '"' + attrs + ' data-campo="observacion" />';
+  html += renderCamposLinea(l);
+  html += "</div>"; // .pedido-linea
+  return html;
+}
+
+// La talla de un producto del catálogo sale de sus variantes con stock (no se
+// puede vender una talla que no existe); la de una línea escrita a mano es
+// texto libre, porque puede no ser una talla siquiera ("infantil", "L/XL").
+function renderLineaTalla(f, l, producto, attrs) {
+  if (l.tipo !== "catalogo") {
+    return '<input class="mini-input" placeholder="Opcional" value="' + esc(l.talla || "") + '"' + attrs + ' data-campo="talla" />';
+  }
+  var variantes = (producto && producto.variantesTalla) || [];
+  var opciones = variantes.filter(function (t) { return num(t.stock) > 0 || t.talla === l.talla; });
+  if (!opciones.length) {
+    return '<span class="section-sub" style="margin:0;color:var(--danger-ink);">Sin stock</span>';
+  }
+  return '<select class="mini-input"' + attrs + ' data-campo="talla">' +
+    opciones.map(function (t) {
+      return '<option value="' + esc(t.talla) + '" ' + (t.talla === l.talla ? "selected" : "") + ">" + esc(t.talla) + " (" + num(t.stock) + " disp.)</option>";
+    }).join("") +
+    "</select>";
+}
+
+// Foto de la línea: la del producto si viene del catálogo, o una que se suba
+// a mano para lo que no está catalogado (mismo Drive que las imágenes de
+// referencia de Cotizaciones).
+function renderLineaThumb(l, producto) {
+  if (l.tipo === "catalogo") return productoThumbHtml(producto || { imagenUrl: l.imagenUrl }, "producto-elegido-thumb");
+  if (state.refImagenSubiendo[l.id]) return '<span class="producto-elegido-thumb" title="Subiendo a Drive…">…</span>';
+  if (l.imagenUrl) {
+    return '<span class="producto-elegido-thumb"><img src="' + esc(l.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-remove" data-action="quitar-pedido-linea-imagen" data-linea="' + l.id + '" title="Quitar imagen">✕</button></span>';
+  }
+  return '<label class="producto-elegido-thumb" style="cursor:pointer;font-size:10px;text-align:center;" title="Subir una foto de lo que se está vendiendo">+ foto' +
+    '<input type="file" accept="image/*" data-action-change="set-pedido-linea-imagen" data-linea="' + l.id + '" style="display:none" /></label>';
+}
+
+// Campos propios de una línea (talla ya tiene el suyo; esto es para todo lo
+// demás que cambia de negocio a negocio: color, número, nombre bordado,
+// material...). Se guardan con la línea y viajan al pedido, así el taller no
+// depende de que la app haya adivinado de antemano qué campos necesita.
+function renderCamposLinea(l) {
+  var campos = l.campos || [];
+  var html = "";
+  if (campos.length) {
+    html += '<div class="pedido-linea-extras">';
+    campos.forEach(function (c) {
+      html += '<span class="pedido-linea-extra">' +
+        '<input class="mini-input" style="width:110px" placeholder="Campo" value="' + esc(c.nombre || "") + '" data-action-change="set-pedido-linea-extra" data-linea="' + l.id + '" data-extra="' + c.id + '" data-campo="nombre" />' +
+        '<input class="mini-input" style="width:130px" placeholder="Valor" value="' + esc(c.valor || "") + '" data-action-change="set-pedido-linea-extra" data-linea="' + l.id + '" data-extra="' + c.id + '" data-campo="valor" />' +
+        '<button class="btn danger small" data-action="quitar-pedido-linea-extra" data-linea="' + l.id + '" data-extra="' + c.id + '">✕</button>' +
+        "</span>";
+    });
+    html += "</div>";
+  }
+  html += '<button class="btn ghost small" style="margin-top:6px;" data-action="add-pedido-linea-extra" data-linea="' + l.id + '">+ Campo propio (color, número…)</button>';
+  return html;
+}
+
+// ---------- Precio y pago (venta directa) ----------
+// Ni el total ni el costo se escriben: son el resultado de las líneas. Antes
+// eran dos campos libres que podían decir cualquier cosa sin relación con lo
+// que se estaba vendiendo. Acá se muestran como indicadores, con la misma
+// forma que el resumen de una referencia de cotización.
+function renderPrecioYPago(f, totales) {
+  var abono = num(f.abono);
+  var saldo = totales.precioTotal - abono;
+  var html = '<div class="cot-col-title">Precio y pago' +
+    renderHelp("El total, el costo y la ganancia salen de las líneas de arriba. Si necesitas otro precio, cámbialo en la línea correspondiente — así el total del pedido nunca puede decir algo distinto de lo que se vendió.") +
+    "</div>";
+  html += '<div class="ref-summary" style="margin-top:10px;">' +
+    '<div class="rs-item"><div class="rl">Costo x unidad</div><div class="rv">' + fmt(totales.costoUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Ganancia x unidad</div><div class="rv">' + fmt(totales.gananciaUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (totales.margenPct >= 0 ? "pos" : "neg") + '">' + totales.margenPct.toFixed(1) + "%</span></div></div>" +
+    '<div class="rs-item"><div class="rl">Costo total</div><div class="rv">' + fmt(totales.costoTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Total del pedido</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
+    "</div>";
+  html += '<div class="form-grid" style="margin-top:12px;">' +
+    '<div class="field"><label>Abono inicial recibido</label><input type="number" class="mini-input" value="' + esc(f.abono) + '" placeholder="0" data-action-change="set-form-pedido-campo" data-campo="abono" /></div>' +
+    "</div>";
+  if (totales.precioTotal > 0) {
+    html += '<div class="section-sub" style="margin:6px 0 0;">Saldo por cobrar: <b>' + fmt(Math.max(0, saldo)) + "</b>" +
+      (abono > totales.precioTotal ? " · el abono supera el total del pedido" : "") + "</div>";
+  }
+
+  html += '<hr class="stitch" />';
+  html += renderVendedorPedido(f, totales);
+  return html;
+}
+
+// Comisión de vendedor: recogida por defecto porque no todo pedido la tiene.
+function renderVendedorPedido(f, totales) {
+  var abierta = !!state.pedidoVendedorAbierto;
+  var resumenV = f.vendedorNombre
+    ? " · " + esc(f.vendedorNombre) + " (" + (f.vendedorTipo === "fijo" ? fmt(f.vendedorValor) : num(f.vendedorValor) + "%") + ")"
+    : "";
+  var html = '<div class="cot-col-title" style="cursor:pointer;" data-action="toggle-pedido-vendedor">' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> Vendedor a comisión (opcional)" + resumenV +
+    renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") +
+    "</div>";
+  if (!abierta) return html;
+  var comision = f.vendedorTipo === "fijo" ? num(f.vendedorValor) : totales.precioTotal * (num(f.vendedorValor) / 100);
+  html += '<div class="form-grid" style="margin-top:8px;">' +
+    '<div class="field"><label>Nombre</label><input data-form="pedido" data-field="vendedorNombre" value="' + esc(f.vendedorNombre) + '" placeholder="Nombre del vendedor" /></div>' +
+    '<div class="field"><label>Tipo de comisión</label><select class="mini-input" data-action-change="set-form-pedido-campo" data-campo="vendedorTipo">' + opt("porcentaje", "% del total", f.vendedorTipo) + opt("fijo", "$ Valor fijo", f.vendedorTipo) + "</select></div>" +
+    '<div class="field"><label>Valor comisión</label><input type="number" class="mini-input" value="' + esc(f.vendedorValor) + '" placeholder="0" data-action-change="set-form-pedido-campo" data-campo="vendedorValor" /></div>' +
+    "</div>";
+  if (f.vendedorNombre && comision > 0) {
+    html += '<div class="section-sub" style="margin:6px 0 0;">Comisión: <b>' + fmt(comision) + "</b> · te quedarían " + fmt(totales.gananciaTotal - comision) + " de ganancia.</div>";
+  }
+  return html;
+}
+
+// ---------- Condiciones con el punto (consignación) ----------
+// Acá el precio SÍ es un campo: es lo que el punto le cobra al público, un
+// número acordado con él, no algo que salga del catálogo. Lo que sí se
+// calcula es qué significa ese acuerdo (comisión y ganancia estimadas).
+function renderCondicionesConsignacion(f, totales) {
+  var precioUnit = num(f.consignacionPrecioUnitario);
+  var precioPublico = precioUnit * totales.unidades;
+  var comision = f.consignacionComisionTipo === "fijo"
+    ? num(f.consignacionComisionValor) * totales.unidades
+    : precioPublico * (num(f.consignacionComisionValor) / 100);
+  var gananciaEstimada = precioPublico - comision - totales.costoTotal;
+
+  var html = '<div class="cot-col-title">Condiciones con el punto' +
+    renderHelp("El \"cliente\" de arriba es el punto de consignación (regístralo antes en Contactos, con su comisión por defecto, y queda vinculado solo). El precio al público es lo que el punto le cobra al comprador; la comisión se calcula sobre cada venta que reportes, no sobre el envío completo.") +
+    '</div><div class="form-grid">' +
+    '<div class="field"><label>Precio al público x1</label><input type="number" class="mini-input" value="' + esc(f.consignacionPrecioUnitario) + '" placeholder="0" data-action-change="set-form-pedido-campo" data-campo="consignacionPrecioUnitario" /></div>' +
+    '<div class="field"><label>Comisión del punto</label><select class="mini-input" data-action-change="set-form-pedido-campo" data-campo="consignacionComisionTipo">' + opt("porcentaje", "% de cada venta", f.consignacionComisionTipo) + opt("fijo", "$ fijo por unidad", f.consignacionComisionTipo) + "</select></div>" +
+    '<div class="field"><label>Valor comisión</label><input type="number" class="mini-input" value="' + esc(f.consignacionComisionValor) + '" placeholder="Ej. 20" data-action-change="set-form-pedido-campo" data-campo="consignacionComisionValor" /></div>' +
+    "</div>";
+
+  html += '<div class="ref-summary" style="margin-top:12px;">' +
+    '<div class="rs-item"><div class="rl">Unidades a enviar</div><div class="rv">' + totales.unidades + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Te cuesta producirlas</div><div class="rv">' + fmt(totales.costoTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Si se vende todo</div><div class="rv">' + fmt(precioPublico) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Comisión del punto</div><div class="rv">' + fmt(comision) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Ganancia estimada</div><div class="rv" style="color:' + (gananciaEstimada >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(gananciaEstimada) + "</div></div>" +
+    "</div>";
+  html += '<div class="section-sub" style="margin:8px 0 0;">Estos números son del envío completo: la plata entra recién cuando el punto reporte cada venta.</div>';
+  return html;
+}
+
+// ---------- Explorador de productos ----------
+// Misma estructura que el explorador de insumos de Cotizaciones (panel de
+// categorías a la izquierda con su contador, búsqueda arriba, lista a la
+// derecha) — es el patrón que ya conoce quien usa la app, y escala con un
+// catálogo grande donde un desplegable plano no. Elegir un producto lo
+// agrega directo como línea: no queda "seleccionado" en un segundo lugar.
 function renderProductoPickerPedido() {
   if (!state.pedidoProductoPickerAbierto) return "";
   var productos = state.productos || [];
+  var catActiva = state.pedidoProductoCategoria || "todos";
   var q = norm(state.pedidoProductoBusqueda || "").trim();
-  var visibles = q ? productos.filter(function (p) {
-    return norm(p.nombre).indexOf(q) >= 0 || norm(p.referencia || "").indexOf(q) >= 0 || norm(p.categoria || "").indexOf(q) >= 0;
-  }) : productos;
+
+  var categorias = [];
+  var vistas = {};
+  productos.forEach(function (p) {
+    var c = (p.categoria || "").trim();
+    if (c && !vistas[c]) { vistas[c] = true; categorias.push(c); }
+  });
+  categorias.sort(function (a, b) { return a.localeCompare(b); });
+
+  function enCategoria(p, catId) {
+    if (catId === "todos") return true;
+    if (catId === "sin") return !(p.categoria || "").trim();
+    return (p.categoria || "").trim() === catId;
+  }
+  function coincide(p) {
+    return !q || norm(p.nombre).indexOf(q) >= 0 || norm(p.referencia || "").indexOf(q) >= 0 || norm(p.categoria || "").indexOf(q) >= 0;
+  }
+  function cuenta(catId) {
+    return productos.filter(function (p) { return enCategoria(p, catId) && coincide(p); }).length;
+  }
+  var visibles = productos.filter(function (p) { return enCategoria(p, catActiva) && coincide(p); });
+
+  var itemsCat = [{ id: "todos", nombre: "Todos los productos" }]
+    .concat(categorias.map(function (c) { return { id: c, nombre: c }; }))
+    .concat([{ id: "sin", nombre: "Sin categoría" }]);
 
   var html = '<div class="picker-overlay" data-action="cerrar-producto-picker-pedido">' +
     '<div class="picker-modal" data-action="picker-stop">' +
-    '<div class="picker-head"><div class="section-title small" style="margin:0;">Elegir producto del catálogo</div>' +
-    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-producto-picker-pedido" aria-label="Cerrar">✕</button></div>' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Productos del catálogo</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-producto-picker-pedido" aria-label="Cerrar">✕</button>' +
+    "</div>" +
     '<div class="picker-search"><input id="inp-producto-picker-pedido-buscar" class="mini-input" style="width:100%" placeholder="Buscar por nombre, referencia o categoría…" value="' + esc(state.pedidoProductoBusqueda || "") + '" data-live-filter="pedidoProductoBusqueda" /></div>' +
+    '<div class="picker-body">' +
+    '<div class="picker-side">' +
+    itemsCat.map(function (c) {
+      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-pedido-picker-categoria" data-val="' + esc(c.id) + '">' +
+        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + cuenta(c.id) + "</span></button>";
+    }).join("") +
+    "</div>" +
     '<div class="picker-list">';
 
   if (!productos.length) {
@@ -212,38 +397,51 @@ function renderProductoPickerPedido() {
   } else {
     visibles.forEach(function (p) {
       var stockTotal = (p.variantesTalla || []).reduce(function (a, t) { return a + num(t.stock); }, 0);
-      var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
-      html += '<div class="picker-item" data-action="select-producto-pedido-picker" data-id="' + p.id + '">' +
-        "<span></span>" +
-        '<span class="picker-item-info"><b>' + esc(p.nombre) + "</b><small>" + (meta ? esc(meta) + " · " : "") + stockTotal + " en stock</small></span>" +
+      var meta = [p.referencia, p.origen === "proveedor" ? "📦 de proveedor" : "🧵 del taller"].filter(Boolean).join(" · ");
+      html += '<div class="picker-item con-thumb ' + (stockTotal > 0 ? "" : "sin-stock") + '" data-action="select-producto-pedido-picker" data-id="' + p.id + '">' +
+        productoThumbHtml(p, "picker-item-thumb") +
+        '<span class="picker-item-info"><b>' + esc(p.nombre) + "</b><small>" + esc(meta) + " · " +
+        (stockTotal > 0 ? stockTotal + " en stock" : "sin stock") + "</small></span>" +
         '<span class="amount">' + fmt(p.precioVenta) + "</span>" +
         "</div>";
     });
   }
 
   html += "</div></div>" +
-    '<div class="picker-foot"><span class="section-sub" style="margin:0;">' + (visibles.length ? visibles.length + " resultado(s)" : "") + "</span>" +
+    '<div class="picker-foot"><span class="section-sub" style="margin:0;">' + (visibles.length ? visibles.length + " producto(s)" : "") + "</span>" +
     '<button class="btn ghost small" data-action="cerrar-producto-picker-pedido">Cerrar</button></div>' +
     "</div></div>";
   return html;
 }
 
 function productoThumbHtml(p, claseThumb) {
-  if (p.imagenUrl) return '<span class="' + claseThumb + '"><img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" /></span>';
+  if (p && p.imagenUrl) return '<span class="' + claseThumb + '"><img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" /></span>';
   return '<span class="' + claseThumb + '">🧺</span>';
 }
 
-// Una vez elegido, queda visible con su foto (para no perder de vista cuál
-// se está agregando) y un enlace directo a su detalle en el Catálogo, por si
-// hace falta comprobar del todo que es el producto correcto.
-function renderProductoElegido(p) {
-  var meta = [p.referencia, p.categoria].filter(Boolean).join(" · ");
-  return '<div class="producto-elegido">' +
-    productoThumbHtml(p, "producto-elegido-thumb") +
-    '<div style="flex:1;min-width:0;"><b>' + esc(p.nombre) + "</b>" + (meta ? '<div class="section-sub" style="margin:2px 0 0;">' + esc(meta) + "</div>" : "") + "</div>" +
-    '<button class="btn ghost small" data-action="ver-producto-en-catalogo" data-id="' + p.id + '" title="Abrir este producto en el Catálogo, en otra pestaña, para confirmar que es el correcto">Ver en Catálogo ↗</button>' +
-    '<button class="btn ghost small" data-action="quitar-pedido-producto-sel" title="Elegir otro producto">✕</button>' +
-    "</div>";
+// Lo que se vendió, tal como quedó registrado: la observación y los campos
+// propios de cada línea (color, número, lo que el taller haya necesitado) no
+// sirven de nada si solo se pueden escribir y nunca se pueden volver a leer —
+// es la lista que se consulta al producir y al entregar. Los pedidos
+// anteriores a las líneas no tienen este detalle y siguen mostrando solo su
+// descripción de siempre arriba.
+function renderDetalleLineasPedido(p) {
+  var lineas = p.lineas || [];
+  if (!lineas.length) return "";
+  var conDetalle = lineas.some(function (l) { return (l.observacion || "").trim() || (l.campos || []).length; });
+  if (!conDetalle) return "";
+  var html = '<div class="pedido-lineas-detalle">';
+  lineas.forEach(function (l) {
+    var extras = (l.campos || []).filter(function (c) { return (c.nombre || "").trim() || (c.valor || "").trim(); });
+    if (!(l.observacion || "").trim() && !extras.length) return;
+    html += '<div class="pedido-meta"><b>' + esc(l.productoNombre || "—") + "</b>" +
+      (l.talla ? " (" + esc(l.talla) + ")" : "") + " ×" + num(l.cantidad) +
+      (l.observacion ? " — " + esc(l.observacion) : "") +
+      extras.map(function (c) { return ' <span class="badge">' + esc(c.nombre || "—") + ": " + esc(c.valor || "—") + "</span>"; }).join("") +
+      "</div>";
+  });
+  html += "</div>";
+  return html;
 }
 
 // Compartido entre el listado principal y el picker de búsqueda (mismos
@@ -307,6 +505,7 @@ function renderHistorialPedidos() {
       "</div><div class=\"pedido-money\"><div class=\"total\">" + fmt(p.total) + "</div>" +
       '<div class="saldo ' + (saldo > 0 ? "" : (num(p.total) > 0 ? "ok" : "neutral")) + '">' + (saldo > 0 ? "saldo " + fmt(saldo) : (num(p.total) > 0 ? "cobrado completo" : "sin valor asignado")) + "</div>" +
       "</div></div>" +
+      renderDetalleLineasPedido(p) +
       (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p)) +
       '<div class="pedido-actions">' +
       '<span class="accion-grupo">' +
@@ -767,109 +966,194 @@ export var actions = {
     }
     notify();
   },
-  // Deshace exactamente lo que aportó esa línea: la saca de la lista y le
-  // resta su subtotal al total (la descripción/cantidad del pedido se
-  // recalculan solas a partir de las líneas que queden, ver
-  // resumenLineasPedido — no hay texto que "desarmar" a mano).
-  "quitar-pedido-producto-linea": function (el) {
-    var idx = num(el.getAttribute("data-idx"));
+  // Campos del borrador que, al cambiar, tienen que redibujar el formulario
+  // porque de ellos dependen indicadores en pantalla (saldo por cobrar,
+  // comisión estimada, ganancia del envío). Los campos que no alimentan
+  // ningún cálculo siguen con data-form, que no re-renderiza.
+  "set-form-pedido-campo": function (el) {
+    state.formPedido[el.getAttribute("data-campo")] = el.value;
+    notify();
+  },
+  "toggle-pedido-vendedor": function () {
+    state.pedidoVendedorAbierto = !state.pedidoVendedorAbierto;
+    notify();
+  },
+  "quitar-pedido-linea": function (el) {
+    var lineaId = el.getAttribute("data-linea");
     var fp = state.formPedido;
-    var linea = (fp.stockConsumido || [])[idx];
-    if (!linea) return;
-    fp.stockConsumido = fp.stockConsumido.filter(function (_, i) { return i !== idx; });
-    fp.total = Math.max(0, num(fp.total) - num(linea.subtotal));
+    fp.lineas = (fp.lineas || []).filter(function (l) { return l.id !== lineaId; });
     notify();
   },
   "abrir-producto-picker-pedido": function () {
     state.pedidoProductoPickerAbierto = true;
     state.pedidoProductoBusqueda = "";
+    state.pedidoProductoCategoria = "todos";
     notify();
   },
   "cerrar-producto-picker-pedido": function () {
     state.pedidoProductoPickerAbierto = false;
     notify();
   },
-  "select-producto-pedido-picker": function (el) {
-    state.formPedido.productoSel = el.getAttribute("data-id");
-    state.pedidoProductoPickerAbierto = false;
-    state.pedidoProductoBusqueda = "";
+  "set-pedido-picker-categoria": function (el) {
+    state.pedidoProductoCategoria = el.getAttribute("data-val");
     notify();
   },
-  "quitar-pedido-producto-sel": function () {
-    state.formPedido.productoSel = "";
-    notify();
-  },
-  // Manda a Catálogo a ver el detalle completo del producto elegido en el
-  // picker — sirve para comprobar del todo que es el correcto (foto grande,
-  // tallas, etc.) antes de seguir armando el pedido.
+  // Desde una línea, ir al detalle completo del producto en Catálogo — para
+  // comprobar foto, tallas o stock sin perder el pedido que se está armando.
   "ver-producto-en-catalogo": function (el) {
     state.tab = "productos";
     state.productoEditando = el.getAttribute("data-id");
     state.productosVista = "nueva";
     notify();
   },
-  // Agrega una línea de producto+talla al pedido rápido — el descuento real
-  // de stock ocurre recién al confirmar "Crear pedido" (ver "add-pedido"),
-  // nunca antes, para no descontar stock de un pedido que al final no se crea.
-  "add-pedido-producto-linea": function (el) {
-    var productoId = el.getAttribute("data-id");
-    var producto = productoById(productoId);
+  // Elegir un producto lo AGREGA como línea de una vez, con su foto, precio y
+  // costo ya resueltos. Antes quedaba "seleccionado" en una tarjeta aparte y
+  // había que confirmarlo con talla y cantidad en un segundo mini-formulario:
+  // el mismo producto se veía en dos lugares y no estaba claro cuál mandaba.
+  "select-producto-pedido-picker": function (el) {
+    var producto = productoById(el.getAttribute("data-id"));
     if (!producto) return;
-    var card = el.closest(".card");
-    var talla = card ? val(card, "pedido-producto-talla") : "";
-    var cantidad = num(card ? val(card, "pedido-producto-cantidad") : 0);
-    if (!talla || cantidad <= 0) return;
+    var conStock = (producto.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
+    if (!conStock.length) {
+      window.alert('"' + producto.nombre + '" no tiene stock en ninguna talla.\n\nRegistra una entrada en Catálogo → ' + producto.nombre + " antes de venderlo.");
+      return;
+    }
     var fp = state.formPedido;
-    // Resta lo que ESTE mismo borrador ya venía apartando de la misma talla
-    // (ej. dos líneas de "M" antes de crear el pedido) — si no se resta acá,
-    // cada línea se valida contra el stock TOTAL sin enterarse de la otra, y
-    // se puede terminar pidiendo de más (con 1 en stock, agregar la línea dos
-    // veces "pasaba" porque cada clic veía el mismo 1 disponible).
-    var yaApartado = (fp.stockConsumido || [])
-      .filter(function (l) { return l.productoId === productoId && l.talla === talla; })
-      .reduce(function (a, l) { return a + num(l.cantidad); }, 0);
-    var disponible = stockTalla(producto, talla) - yaApartado;
-    if (cantidad > disponible) { window.alert("Cantidad inválida (disponibles: " + disponible + ")."); return; }
-    // En consignación no hay "total cobrado" (se factura solo lo que el punto
-    // reporte vendido), así que la línea no suma dinero — solo describe lo que
-    // se entrega. `subtotal` queda guardado para poder revertirlo si se quita
-    // la línea (ver "quitar-pedido-producto-linea").
-    var subtotal = fp.esConsignacion ? 0 : num(producto.precioVenta) * cantidad;
-    fp.stockConsumido = (fp.stockConsumido || []).concat([{
-      productoId: producto.id, productoNombre: producto.nombre, talla: talla, cantidad: cantidad, subtotal: subtotal
+    fp.lineas = (fp.lineas || []).concat([{
+      id: uid(), tipo: "catalogo",
+      productoId: producto.id, productoNombre: producto.nombre, imagenUrl: producto.imagenUrl || "",
+      talla: conStock[0].talla, cantidad: 1,
+      precioUnitario: num(producto.precioVenta),
+      // El costo llega calculado con la misma fórmula del catálogo (insumos,
+      // o costo de compra si el producto es de proveedor) — ver
+      // calcCostoUnitarioProducto. Queda editable por si este pedido puntual
+      // costó distinto.
+      costoUnitario: calcCostoUnitarioProducto(producto),
+      observacion: "", campos: []
     }]);
-    fp.total = num(fp.total) + subtotal;
+    state.pedidoProductoPickerAbierto = false;
+    state.pedidoProductoBusqueda = "";
     notify();
   },
-  // Línea sin producto de catálogo (ej. "bordado personalizado x3") — solo
-  // para venta directa: en consignación toda línea tiene que salir de stock
-  // real para poder rastrear qué le queda al punto.
-  "add-pedido-texto-linea": function (el) {
-    var card = el.closest(".card");
-    var descripcion = card ? val(card, "pedido-texto-descripcion") : "";
-    var cantidad = num(card ? val(card, "pedido-texto-cantidad") : 0);
-    if (!descripcion || cantidad <= 0) return;
+  // Línea de algo que no está en el catálogo (un bordado, un arreglo, un
+  // domicilio). Nace vacía y se llena en la misma tarjeta que las demás: no
+  // hay un mini-formulario aparte con reglas distintas.
+  "add-pedido-linea-libre": function () {
     var fp = state.formPedido;
-    fp.stockConsumido = (fp.stockConsumido || []).concat([{
-      productoId: "", productoNombre: "", talla: "", cantidad: cantidad, subtotal: 0, textoDescripcion: descripcion
+    fp.lineas = (fp.lineas || []).concat([{
+      id: uid(), tipo: "libre",
+      productoId: "", productoNombre: "", imagenUrl: "",
+      talla: "", cantidad: 1, precioUnitario: 0, costoUnitario: 0,
+      observacion: "", campos: []
     }]);
+    notify();
+  },
+  "set-pedido-linea-campo": function (el) {
+    var lineaId = el.getAttribute("data-linea"), campo = el.getAttribute("data-campo");
+    var numerico = campo === "cantidad" || campo === "precioUnitario" || campo === "costoUnitario";
+    var valor = numerico ? num(el.value) : el.value;
+    var fp = state.formPedido;
+    var aviso = "";
+    fp.lineas = (fp.lineas || []).map(function (l) {
+      if (l.id !== lineaId) return l;
+      var patch = {}; patch[campo] = valor;
+      var nueva = Object.assign({}, l, patch);
+      // Una línea de catálogo nunca puede pedir más de lo que hay de esa
+      // talla, descontando lo que YA apartaron las otras líneas del mismo
+      // producto+talla en este mismo borrador (si no, dos líneas de "M" se
+      // validan cada una contra el stock completo y se termina pidiendo de
+      // más). Se revisa igual al cambiar la talla, no solo la cantidad.
+      if (nueva.tipo === "catalogo" && (campo === "cantidad" || campo === "talla")) {
+        var producto = productoById(nueva.productoId);
+        var otras = (fp.lineas || [])
+          .filter(function (o) { return o.id !== l.id && o.productoId === nueva.productoId && o.talla === nueva.talla; })
+          .reduce(function (a, o) { return a + num(o.cantidad); }, 0);
+        var disponible = (producto ? stockTalla(producto, nueva.talla) : 0) - otras;
+        if (num(nueva.cantidad) > disponible) {
+          aviso = "Solo hay " + Math.max(0, disponible) + " disponible(s) de " + nueva.productoNombre + " talla " + nueva.talla + ".";
+          nueva.cantidad = Math.max(0, disponible);
+        }
+      }
+      return nueva;
+    });
+    if (aviso) window.alert(aviso);
+    notify();
+  },
+  "add-pedido-linea-extra": function (el) {
+    var lineaId = el.getAttribute("data-linea");
+    var fp = state.formPedido;
+    fp.lineas = (fp.lineas || []).map(function (l) {
+      if (l.id !== lineaId) return l;
+      return Object.assign({}, l, { campos: (l.campos || []).concat([{ id: uid(), nombre: "", valor: "" }]) });
+    });
+    notify();
+  },
+  "set-pedido-linea-extra": function (el) {
+    var lineaId = el.getAttribute("data-linea"), extraId = el.getAttribute("data-extra"), campo = el.getAttribute("data-campo");
+    var fp = state.formPedido;
+    fp.lineas = (fp.lineas || []).map(function (l) {
+      if (l.id !== lineaId) return l;
+      return Object.assign({}, l, {
+        campos: (l.campos || []).map(function (c) {
+          if (c.id !== extraId) return c;
+          var patch = {}; patch[campo] = el.value;
+          return Object.assign({}, c, patch);
+        })
+      });
+    });
+    notify();
+  },
+  "quitar-pedido-linea-extra": function (el) {
+    var lineaId = el.getAttribute("data-linea"), extraId = el.getAttribute("data-extra");
+    var fp = state.formPedido;
+    fp.lineas = (fp.lineas || []).map(function (l) {
+      if (l.id !== lineaId) return l;
+      return Object.assign({}, l, { campos: (l.campos || []).filter(function (c) { return c.id !== extraId; }) });
+    });
+    notify();
+  },
+  // Foto de una línea escrita a mano — misma carpeta de Drive que las
+  // imágenes de referencia de Cotizaciones (ver core/drive.js).
+  "set-pedido-linea-imagen": async function (el) {
+    var lineaId = el.getAttribute("data-linea");
+    var file = el.files && el.files[0];
+    if (!file) return;
+    state.refImagenSubiendo = Object.assign({}, state.refImagenSubiendo, { [lineaId]: true });
+    notify();
+    try {
+      var url = await subirImagenReferencia(file);
+      state.formPedido.lineas = (state.formPedido.lineas || []).map(function (l) {
+        return l.id === lineaId ? Object.assign({}, l, { imagenUrl: url }) : l;
+      });
+    } catch (e) {
+      window.alert("No se pudo subir la imagen: " + (e && e.message ? e.message : e));
+    }
+    var pendientes = Object.assign({}, state.refImagenSubiendo);
+    delete pendientes[lineaId];
+    state.refImagenSubiendo = pendientes;
+    notify();
+  },
+  "quitar-pedido-linea-imagen": function (el) {
+    var lineaId = el.getAttribute("data-linea");
+    state.formPedido.lineas = (state.formPedido.lineas || []).map(function (l) {
+      return l.id === lineaId ? Object.assign({}, l, { imagenUrl: "" }) : l;
+    });
     notify();
   },
   "add-pedido": function () {
     var fp = state.formPedido;
-    var stockConsumido = fp.stockConsumido || [];
-    var resumen = resumenLineasPedido(stockConsumido);
-    if (!exigirCampos([
-      ["Cliente", fp.cliente],
-      ["Al menos una línea (producto del catálogo" + (fp.esConsignacion ? "" : " o descrita a mano") + ")", stockConsumido.length ? "x" : ""]
-    ])) return;
+    var lineas = fp.lineas || [];
+    var faltantes = faltantesPedido(fp);
+    if (faltantes.length) { window.alert("Para crear el pedido falta " + faltantes.join(", ") + "."); return; }
     var esConsignacion = fp.esConsignacion;
+    var totales = calcTotalesLineasPedido(lineas);
+    var resumen = resumenLineasPedido(lineas);
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
-    // Solo las líneas de CATÁLOGO (con productoId) mueven stock real — una
-    // línea de texto libre no tiene de dónde descontar. En consignación las
-    // líneas de catálogo TAMBIÉN salen del stock (se las lleva el punto),
-    // solo que no se registran como venta sino como la primera remisión.
-    var lineasProducto = stockConsumido.filter(function (l) { return l.productoId; });
+    // Solo las líneas de CATÁLOGO mueven stock real — una línea escrita a
+    // mano no tiene de dónde descontar. En consignación las de catálogo
+    // TAMBIÉN salen del stock (se las lleva el punto), solo que no se
+    // registran como venta sino como la primera remisión.
+    var lineasProducto = lineas.filter(function (l) { return l.productoId; });
     // Chequeo atómico justo antes de crear nada: si el stock cambió desde que
     // se armaron las líneas (ej. el borrador quedó abierto un rato y otra
     // venta se llevó ese stock mientras tanto), no se crea el pedido a medias
@@ -884,22 +1168,32 @@ export var actions = {
       }
     }
     var nuevoPedido = {
-      id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente, descripcion: resumen.descripcion,
-      cantidad: String(resumen.cantidad), total: esConsignacion ? 0 : num(fp.total), costo: esConsignacion ? 0 : num(fp.costo), abono: abonoInicial, abonos: [],
+      id: uid(), clienteId: fp.clienteId || "", cliente: fp.cliente, tipoCliente: fp.tipoCliente,
+      descripcion: resumen.descripcion, cantidad: String(resumen.cantidad),
+      // Total y costo son el RESULTADO de las líneas, no dos campos que
+      // alguien escribió: por construcción no pueden contradecir lo vendido.
+      total: esConsignacion ? 0 : totales.precioTotal,
+      costo: esConsignacion ? 0 : totales.costoTotal,
+      abono: abonoInicial, abonos: [],
       fechaEntrega: fp.fechaEntrega,
+      // Fecha de la venta: es lo que permite que un pedido aparezca en el
+      // reporte de productos vendidos de un rango (ver fechaPedido en
+      // core/calc.js, que la deduce para los pedidos anteriores a este campo).
+      fechaCreacion: todayStr(),
+      // Detalle completo de lo vendido, con el precio y el costo tal como
+      // fueron en ESTE pedido — el catálogo puede cambiar de precio después
+      // y el reporte tiene que seguir contando lo que en verdad pasó.
+      lineas: lineas.map(function (l) { return JSON.parse(JSON.stringify(l)); }),
       stockConsumido: [], // se completa abajo con lo que en verdad se descontó (ver ajustarStockProducto)
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
       // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
-      // "nuevo" (primer estado de ESTADOS_DEFAULT) — no "cotizacion", que no
-      // existe en la lista de estados y dejaba el badge y "Próximas
-      // entregas" mostrando el texto crudo en vez de una etapa real.
       estado: esConsignacion ? "entregado" : "nuevo",
       numeroOp: generarNumeroOp(todosNumerosOp()),
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
         puntoId: fp.clienteId || "", comisionTipo: fp.consignacionComisionTipo || "porcentaje", comisionValor: num(fp.consignacionComisionValor),
-        // Todo envío en consignación ahora viene de líneas de catálogo (con
+        // Todo envío en consignación viene de líneas de catálogo (con
         // desglose por talla en la remisión) — ya no hay un "envío a granel"
         // sin producto ni talla asociados.
         precioUnitario: num(fp.consignacionPrecioUnitario),
@@ -933,7 +1227,13 @@ export var actions = {
       // entregado se revierte por remisión, no por el pedido completo.
       if (stockConsumidoReal.length) {
         nuevoPedido.consignacion.remisiones.push({
-          id: uid(), fecha: todayStr(), codigoPublico: codigoPublico(), items: stockConsumidoReal, nota: ""
+          id: uid(), fecha: todayStr(), codigoPublico: codigoPublico(),
+          // precioUnitario viaja en cada ítem porque es de ahí que sale el
+          // monto al registrar una venta por talla (ver
+          // calcConsignacionDisponiblePorTalla) — sin él, la primera venta
+          // reportada se registraba en $0.
+          items: stockConsumidoReal.map(function (it) { return Object.assign({}, it, { precioUnitario: num(fp.consignacionPrecioUnitario) }); }),
+          nota: ""
         });
       }
     } else {
@@ -941,12 +1241,13 @@ export var actions = {
     }
     state.pedidos.unshift(nuevoPedido);
     state.formPedido = {
-      clienteId: "", cliente: "", tipoCliente: "propio", total: "", costo: "", abono: "", fechaEntrega: "",
+      clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
-      productoSel: "", stockConsumido: []
+      lineas: []
     };
     state.pedidoProductoBusqueda = "";
+    state.pedidoVendedorAbierto = false;
     // Salta directo al Historial para confirmar de una vez que el pedido
     // quedó creado (con su N.º de OP) — el formulario en blanco queda a un
     // clic de distancia en la otra pestaña.

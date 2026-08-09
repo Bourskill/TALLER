@@ -278,7 +278,11 @@ function negocioLinesFrom(cfg) {
 // Reporte financiero en PDF para un rango de fechas (fechas de corte, igual
 // que se piensa el periodo de pago de Nómina): lista los movimientos de ese
 // rango con sus totales por tipo, más el balance neto del periodo.
-export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo) {
+// `desgloses` trae {insumos, productos} ya calculados por quien pide el PDF
+// (ver modules/resumen.js) — el PDF no vuelve a decidir qué cuenta como
+// compra de insumo o como venta, para que la hoja y la pantalla no puedan
+// discrepar. Ambos son opcionales: sin ellos el reporte sale como siempre.
+export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, desgloses) {
   var jsPDFCtor = window.jspdf.jsPDF;
   var doc = new jsPDFCtor({ unit: "pt", format: "letter" });
   var docNum = String(await siguienteNumeroPdf()).padStart(4, "0");
@@ -327,6 +331,10 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo) 
       return [t.fecha || "—", tipoMostrado, t.concepto || "—", t.contraparte || "—", (t.tipo === "ingreso" ? "+" : "-") + money(t.monto)];
     });
 
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+  doc.text("Todos los movimientos del periodo", marginX, y);
+  y += 8;
+
   doc.autoTable({
     startY: y,
     margin: { left: marginX, right: marginX },
@@ -337,8 +345,159 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo) 
     columnStyles: { 4: { halign: "right" } },
     theme: "grid"
   });
+  y = doc.lastAutoTable.finalY + 24;
+
+  // Dos apartados propios que explican el porqué de los números de arriba,
+  // cada uno con las columnas que le sirven a él y no a los demás.
+  var d = desgloses || {};
+  y = seccionDesgloseInsumos(doc, y, marginX, pageW, d.insumos || []);
+  y = seccionDesgloseProductos(doc, y, marginX, pageW, d.productos || []);
 
   doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
+}
+
+// Encabezado de sección con salto de página si ya no cabe — así una tabla
+// nunca arranca pegada al borde inferior de la hoja.
+function tituloSeccionReporte(doc, y, marginX, texto, subtitulo) {
+  var pageH = doc.internal.pageSize.getHeight();
+  if (y > pageH - 120) { doc.addPage(); y = 54; }
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+  doc.text(texto, marginX, y);
+  if (subtitulo) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(130, 130, 130);
+    doc.text(subtitulo, marginX, y + 11);
+    y += 11;
+  }
+  return y + 8;
+}
+
+function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos) {
+  y = tituloSeccionReporte(doc, y, marginX, "Gasto en insumos", "Compras reales del periodo — no incluye nada cotizado ni estimado.");
+  var total = insumos.reduce(function (a, c) { return a + num(c.monto); }, 0);
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Fecha", "Concepto", "Cantidad", "Proveedor", "Monto"]],
+    body: insumos.length
+      ? insumos.map(function (c) {
+        return [c.fecha, c.concepto, c.cantidad ? (numFmt(c.cantidad) + (c.unidad ? " " + c.unidad : "")) : "—", c.proveedor || "—", money(c.monto)];
+      }).concat([["", "TOTAL", "", "", money(total)]])
+      : [["—", "Sin compras de insumo en este periodo", "—", "—", "—"]],
+    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+    headStyles: { fillColor: [70, 70, 70], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 2: { halign: "right" }, 4: { halign: "right" } },
+    theme: "grid"
+  });
+  return doc.lastAutoTable.finalY + 24;
+}
+
+function seccionDesgloseProductos(doc, y, marginX, pageW, productos) {
+  y = tituloSeccionReporte(doc, y, marginX, "Productos vendidos", "Ventas directas y ventas reportadas por puntos de consignación.");
+  var acc = productos.reduce(function (a, f) {
+    a.cantidad += num(f.cantidad); a.costo += num(f.costoTotal); a.precio += num(f.precioTotal); a.ganancia += num(f.ganancia);
+    return a;
+  }, { cantidad: 0, costo: 0, precio: 0, ganancia: 0 });
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Fecha", "Concepto", "Cant.", "Costo", "Precio", "Ganancia"]],
+    body: productos.length
+      ? productos.map(function (f) {
+        return [f.fecha, f.concepto + (f.talla && f.talla !== "—" ? " (" + f.talla + ")" : ""), numFmt(f.cantidad), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)];
+      }).concat([["", "TOTAL", numFmt(acc.cantidad), money(acc.costo), money(acc.precio), money(acc.ganancia)]])
+      : [["—", "Sin ventas de producto en este periodo", "—", "—", "—", "—"]],
+    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+    headStyles: { fillColor: [70, 70, 70], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    theme: "grid"
+  });
+  return doc.lastAutoTable.finalY + 24;
+}
+
+// Reporte solo de productos, con el detalle que en el financiero
+// sobrecargaría la hoja: talla, N.º de OP, cliente, vendedor y de qué tipo de
+// venta salió cada línea. Incluye además el consolidado por producto, para
+// ver de un vistazo cuál es el que de verdad mueve el negocio.
+export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
+  if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
+  var jsPDFCtor = window.jspdf.jsPDF;
+  var doc = new jsPDFCtor({ unit: "pt", format: "letter", orientation: "landscape" });
+  var docNum = String(await siguienteNumeroPdf()).padStart(4, "0");
+  var h = drawHeaderBasic(doc, "REPORTE DE PRODUCTOS", docNum);
+  var y = h.y, marginX = h.marginX, pageW = h.pageW;
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+  doc.text(state.config.nombre || "Mi Taller", marginX, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(110, 110, 110);
+  doc.text("Periodo: " + etiquetaPeriodo, pageW - marginX, y, { align: "right" });
+  y += 20;
+
+  var acc = filas.reduce(function (a, f) {
+    a.cantidad += num(f.cantidad); a.costo += num(f.costoTotal); a.precio += num(f.precioTotal); a.ganancia += num(f.ganancia);
+    return a;
+  }, { cantidad: 0, costo: 0, precio: 0, ganancia: 0 });
+  var margen = acc.precio > 0 ? (acc.ganancia / acc.precio * 100) : 0;
+
+  var tiles = [["Unidades vendidas", numFmt(acc.cantidad)], ["Costo total", money(acc.costo)], ["Vendido", money(acc.precio)], ["Ganancia", money(acc.ganancia)], ["Margen", margen.toFixed(1) + "%"]];
+  var colW = (pageW - marginX * 2) / tiles.length;
+  tiles.forEach(function (item, i) {
+    var x = marginX + colW * i;
+    doc.setTextColor(140, 140, 140); doc.setFontSize(7.5); doc.text(item[0].toUpperCase(), x, y);
+    doc.setTextColor(20, 20, 20); doc.setFontSize(11); doc.text(item[1], x, y + 15);
+  });
+  y += 34;
+  doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 20;
+
+  // --- Consolidado por producto ---
+  var porProducto = {};
+  filas.forEach(function (f) {
+    var key = (f.productoId || f.concepto).toLowerCase();
+    if (!porProducto[key]) porProducto[key] = { concepto: f.concepto, cantidad: 0, costo: 0, precio: 0, ganancia: 0 };
+    porProducto[key].cantidad += num(f.cantidad);
+    porProducto[key].costo += num(f.costoTotal);
+    porProducto[key].precio += num(f.precioTotal);
+    porProducto[key].ganancia += num(f.ganancia);
+  });
+  var consolidado = Object.keys(porProducto).map(function (k) { return porProducto[k]; })
+    .sort(function (a, b) { return b.ganancia - a.ganancia; });
+
+  y = tituloSeccionReporte(doc, y, marginX, "Consolidado por producto", "Ordenado por la ganancia que dejó cada uno.");
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Producto", "Unidades", "Costo", "Vendido", "Ganancia", "Margen"]],
+    body: consolidado.map(function (c) {
+      return [c.concepto, numFmt(c.cantidad), money(c.costo), money(c.precio), money(c.ganancia), (c.precio > 0 ? (c.ganancia / c.precio * 100).toFixed(1) : "0.0") + "%"];
+    }),
+    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    theme: "grid"
+  });
+  y = doc.lastAutoTable.finalY + 24;
+
+  // --- Detalle línea por línea ---
+  y = tituloSeccionReporte(doc, y, marginX, "Detalle de cada venta", "Una fila por línea vendida, con su talla, orden de producción y quién la vendió.");
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Fecha", "N.º OP", "Producto", "Talla", "Cliente", "Vendedor", "Venta", "Cant.", "Costo", "Precio", "Ganancia"]],
+    body: filas.map(function (f) {
+      return [
+        f.fecha, f.numeroOp, f.concepto, f.talla, f.cliente,
+        f.vendedor || "—", f.tipo === "consignacion" ? "Consignación" : "Directa",
+        numFmt(f.cantidad), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)
+      ];
+    }),
+    styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
+    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    columnStyles: { 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" }, 10: { halign: "right" } },
+    theme: "grid"
+  });
+
+  doc.save(docNum + "-reporte-productos-" + slugify(etiquetaPeriodo) + ".pdf");
 }
 
 
@@ -552,6 +711,26 @@ export async function generarPDFPedido(p) {
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8.5 },
+      margin: { left: marginX, right: marginX }
+    });
+    y = doc.lastAutoTable.finalY + 24;
+  } else if ((p.lineas || []).length) {
+    // Pedido rápido (sin cotización de origen): el detalle son sus propias
+    // líneas, con la observación y los campos propios que se les hayan puesto
+    // al armarlo — es lo que hay que leer en el taller para producirlo bien.
+    doc.autoTable({
+      startY: y,
+      head: [["#", "Qué es", "Talla", "Cant.", "Detalle"]],
+      body: p.lineas.map(function (l, i) {
+        var extras = (l.campos || [])
+          .filter(function (c) { return (c.nombre || "").trim() || (c.valor || "").trim(); })
+          .map(function (c) { return (c.nombre || "—") + ": " + (c.valor || "—"); });
+        var detalleTxt = [l.observacion || ""].concat(extras).filter(Boolean).join(" · ");
+        return [i + 1, l.productoNombre || "—", l.talla || "—", num(l.cantidad), detalleTxt || "—"];
+      }),
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
+      headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8.5 },
+      columnStyles: { 3: { halign: "right" } },
       margin: { left: marginX, right: marginX }
     });
     y = doc.lastAutoTable.finalY + 24;

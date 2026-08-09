@@ -125,7 +125,11 @@ export const state = {
   // historial de eventos.
   productosVista: "nueva", // "nueva" | "catalogo"
   productoEditando: "", // id del producto con el detalle completo abierto en la pestaña "nueva" (o "" = formulario en blanco)
-  formProducto: { nombre: "", categoria: "", referencia: "", precioVenta: "" },
+  // origen/proveedorId/costoCompra se eligen ya en el formulario de creación:
+  // un producto comprado a proveedor no se arma con insumos ni fases, así que
+  // saberlo de entrada es lo que decide qué campos se piden (ver
+  // renderFormNuevoProducto en modules/productos.js).
+  formProducto: { nombre: "", categoria: "", referencia: "", precioVenta: "", origen: "taller", proveedorId: "", costoCompra: "" },
   filtroProductosCategoria: "todos",
   // Picker de "Insumos predeterminados" al armar un producto del catálogo
   // (mismo patrón ventana-explorador que insumoPicker* de Cotizaciones).
@@ -135,6 +139,7 @@ export const state = {
   productoInsumoPickerSeleccion: [],
   pedidoProductoBusqueda: "", // texto de búsqueda del picker de producto en el formulario de pedido (nombre/referencia/categoría)
   pedidoProductoPickerAbierto: false, // ventana del picker de producto (formulario de pedido) abierta/cerrada — nunca se persiste
+  pedidoProductoCategoria: "todos", // "todos" | "sin" | nombre de categoría — panel izquierdo del picker de productos
   // Remisión de consignación en construcción (ver "Agregar remisión" en un
   // pedido de consignación, modules/pedidos.js): se acumulan líneas de
   // producto+talla+cantidad ANTES de confirmar, para que una entrega con
@@ -147,19 +152,19 @@ export const state = {
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
   formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" },
   formPedido: {
-    clienteId: "", cliente: "", tipoCliente: "propio", total: "", costo: "", abono: "", fechaEntrega: "",
+    clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
     // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
     esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
-    // Líneas del pedido (producto de catálogo o texto libre, ver
-    // resumenLineasPedido en modules/pedidos.js) — de acá se arman solas la
-    // descripción y cantidad del pedido, nunca se escriben sueltas a mano.
-    // productoSel es el producto elegido en el picker, antes de confirmar la
-    // línea con talla+cantidad; stockConsumido es lo ya agregado — se
-    // descuenta del stock al crear el pedido y se restituye si se elimina
-    // (ver core/stock.js).
-    productoSel: "", stockConsumido: []
+    // Líneas del pedido: cada una es { id, tipo:"catalogo"|"libre",
+    // productoId, productoNombre, imagenUrl, talla, cantidad,
+    // precioUnitario, costoUnitario, observacion, campos:[{id,nombre,valor}] }.
+    // Son la ÚNICA fuente del total, el costo, la cantidad y la descripción
+    // del pedido — por eso el formulario ya no tiene campos "total"/"costo"
+    // que pudieran contradecirlas (ver renderPrecioYPago en modules/pedidos.js).
+    lineas: []
   },
+  pedidoVendedorAbierto: false, // sección de comisión de vendedor desplegada en el formulario de pedido
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
     // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).

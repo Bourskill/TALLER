@@ -9,6 +9,31 @@
 .pedido-money .saldo.ok{color:var(--success-ink);}
 .pedido-money .saldo.neutral{color:var(--ink-soft);}
 
+/* Líneas del formulario de pedido: cada una es una tarjeta con su foto, sus
+   datos básicos editables y sus campos propios. En móvil los campos pasan a
+   dos columnas (no una tira horizontal que obligue a scroll lateral). */
+.pedido-linea{border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:10px;background:var(--surface-2);}
+.pedido-linea-top{display:flex;align-items:flex-start;gap:12px;}
+.pedido-linea-id{flex:1;min-width:0;}
+.pedido-linea-acciones{display:flex;gap:6px;align-items:center;flex-shrink:0;}
+.pedido-linea-campos{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:10px;}
+.pedido-linea-campos .field{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.pedido-linea-campos label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);}
+.pedido-linea-campos .mini-input{width:100%;}
+.pedido-linea-extras{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.pedido-linea-extra{display:flex;gap:5px;align-items:center;}
+.picker-item-thumb{flex:0 0 auto;width:34px;height:34px;border-radius:6px;overflow:hidden;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:14px;}
+.picker-item-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.picker-item.sin-stock{opacity:.55;}
+/* El explorador de insumos usa una casilla de 20px como primera columna; el
+   de productos usa la foto, que necesita más aire. */
+.picker-item.con-thumb{grid-template-columns:34px 1fr auto;}
+
+@media (max-width:760px){
+  .pedido-linea-campos{grid-template-columns:repeat(2,1fr);}
+  .pedido-linea-acciones{flex-direction:column;align-items:stretch;}
+}
+
 .tape-track{height:5px;background:var(--surface-3);border-radius:3px;position:relative;margin:14px 0 6px;overflow:hidden;}
 .tape-fill{height:100%;background:var(--accent);border-radius:3px;}
 .tape-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}

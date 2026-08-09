@@ -18,7 +18,7 @@ import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
-import { calcRefTotales, stockTotalProducto, proveedoresDeContactos } from "../core/calc.js";
+import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
 import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
 
@@ -101,19 +101,43 @@ function renderEditorProducto() {
 // Solo lo esencial para identificar y vender el producto — el costeo
 // (insumos, consumo, flujo) y las tallas/stock se completan después, ya en
 // el detalle completo, para no recibir un formulario largo de una vez.
+//
+// El ORIGEN se decide acá, de entrada, porque no es un campo más: define qué
+// clase de producto se está creando. Uno fabricado en el taller se costea con
+// insumos y pasa por fases de producción; uno comprado a proveedor solo
+// necesita saber a quién se le compra y a cuánto. Elegirlo al final (como
+// antes, ya dentro del detalle) obligaba a llenar campos que no aplicaban.
 function renderFormNuevoProducto() {
   var f = state.formProducto;
+  var esProveedor = f.origen === "proveedor";
   var plantillas = state.plantillasPrendas || [];
   var html = '<div class="card"><div class="section-title small">Nuevo producto' +
-    renderHelp("Prendas ya hechas o repetibles (no personalizadas — a lo mucho cambia la talla) que sí conviene tener en stock. Arranca con lo esencial; el costeo (insumos, consumo, flujo) y las tallas con su stock se completan después, ya con el producto creado.") +
-    '</div><div class="form-grid">' +
+    renderHelp("Prendas ya hechas o repetibles (no personalizadas — a lo mucho cambia la talla) que sí conviene tener en stock. Arranca con lo esencial; las tallas con su stock se completan después, ya con el producto creado.") +
+    "</div>";
+
+  html += '<div class="cot-col-title" style="margin-top:2px;">¿De dónde sale este producto?' +
+    renderHelp("Fabricado en el taller: lo armas tú, se costea con insumos y pasa por fases de producción. Comprado a proveedor: llega hecho, no tiene insumos ni fases — solo su costo de compra, que es de donde sale la ganancia.") +
+    "</div>" +
+    '<div class="segmented">' +
+    '<button class="segmented-opcion ' + (esProveedor ? "" : "active") + '" data-action="set-form-producto-origen" data-val="taller">🧵 Fabricado en el taller</button>' +
+    '<button class="segmented-opcion ' + (esProveedor ? "active" : "") + '" data-action="set-form-producto-origen" data-val="proveedor">📦 Comprado a proveedor</button>' +
+    "</div>";
+
+  html += '<div class="form-grid" style="margin-top:14px;">' +
     '<div class="field wide"><label>Nombre</label><input data-form="producto" data-field="nombre" value="' + esc(f.nombre) + '" placeholder="Ej. Camiseta básica algodón" /></div>' +
     '<div class="field"><label>Categoría</label><input data-form="producto" data-field="categoria" value="' + esc(f.categoria) + '" placeholder="Ej. Camisetas" /></div>' +
     '<div class="field"><label>Referencia / SKU</label><input data-form="producto" data-field="referencia" value="' + esc(f.referencia) + '" placeholder="Ej. CAM-001" /></div>' +
     '<div class="field"><label>Precio de venta</label><input type="number" data-form="producto" data-field="precioVenta" value="' + esc(f.precioVenta) + '" placeholder="0" /></div>' +
+    (esProveedor
+      ? ('<div class="field"><label>Costo de compra (por unidad)' + renderHelp("Lo que te cuesta a ti cada unidad. Con el precio de venta de al lado, la ganancia del producto se calcula sola.") + '</label><input type="number" data-form="producto" data-field="costoCompra" value="' + esc(f.costoCompra) + '" placeholder="0" /></div>' +
+        renderSelectorProveedorFormulario(f))
+      : "") +
     '<button class="btn" data-action="add-producto">Crear producto</button>' +
     "</div>";
-  if (plantillas.length) {
+
+  // Las plantillas copian insumos y flujo de producción: no tienen nada que
+  // aportarle a un producto que llega hecho del proveedor.
+  if (plantillas.length && !esProveedor) {
     html += '<div class="inline-form" style="margin-top:4px;">' +
       '<span class="mini-label">o arrancar copiando los insumos de una plantilla:</span>' +
       '<select class="mini-input" style="max-width:220px" data-action-change="add-producto-desde-plantilla">' +
@@ -123,6 +147,20 @@ function renderFormNuevoProducto() {
   }
   html += "</div>";
   return html;
+}
+
+// Selector de proveedor del formulario de creación (el del detalle ya
+// existente es renderSelectorProveedorProducto, que escribe sobre un producto
+// que ya existe — este escribe sobre el borrador).
+function renderSelectorProveedorFormulario(f) {
+  var proveedores = proveedoresDeContactos();
+  if (!proveedores.length) {
+    return '<div class="field"><label>Proveedor</label><div class="section-sub" style="margin:0;">Sin proveedores registrados — agrégalos en <b>Contactos</b>. Puedes crear el producto igual y asignarlo después.</div></div>';
+  }
+  return '<div class="field"><label>Proveedor</label><select data-form="producto" data-field="proveedorId">' +
+    '<option value="">Elegir proveedor…</option>' +
+    proveedores.map(function (pr) { return '<option value="' + pr.id + '" ' + (f.proveedorId === pr.id ? "selected" : "") + ">" + esc(pr.nombre) + "</option>"; }).join("") +
+    "</select></div>";
 }
 
 // ---------- "Catálogo": índice visual en cards (nunca el detalle completo) ----------
@@ -194,16 +232,10 @@ function renderProductoThumb(p) {
 function renderProductoCard(p) {
   var stockTotal = stockTotalProducto(p);
   var tallas = p.variantesTalla || [];
-  // Reusa el mismo cálculo de costo/ganancia que una referencia de cotización
-  // (calcRefTotales) tratando el producto como si fuera "una referencia de
-  // cantidad 1". Un producto de proveedor no tiene insumos que sumar — se le
-  // arma un "insumo" sintético de un solo ítem con el costo de compra
-  // directo, para reusar exactamente la misma fórmula de margen que el resto
-  // de la app en vez de duplicar el cálculo.
-  var insumosParaCalculo = p.origen === "proveedor"
-    ? [{ nombre: "Costo de compra", unidad: "UND", costo: num(p.costoCompra), tipo: "por_prenda", cantidad: 1 }]
-    : p.insumos;
-  var calc = calcRefTotales({ consumoAprox: p.consumoSugerido, cantidadPedida: 1, precioVenta: p.precioVenta, insumos: insumosParaCalculo });
+  // Costo/ganancia salen del mismo cálculo que usa toda la app (ver
+  // calcTotalesProducto en core/calc.js): un producto fabricado suma sus
+  // insumos, uno comprado usa su costo de compra — acá no se decide nada.
+  var calc = calcTotalesProducto(p);
 
   var html = '<div class="card" data-producto-id="' + p.id + '">' +
     '<div class="pedido-top" style="align-items:flex-start;">' + renderProductoThumb(p) +
@@ -456,13 +488,26 @@ export var actions = {
     state.filtroProductosCategoria = el.getAttribute("data-val");
     notify();
   },
+  // El origen decide qué clase de producto se crea, así que se elige antes
+  // que nada — cambiarlo reescribe los campos del formulario (ver
+  // renderFormNuevoProducto).
+  "set-form-producto-origen": function (el) {
+    state.formProducto.origen = el.getAttribute("data-val") === "proveedor" ? "proveedor" : "taller";
+    if (state.formProducto.origen === "taller") { state.formProducto.proveedorId = ""; state.formProducto.costoCompra = ""; }
+    notify();
+  },
   "add-producto": function () {
     var f = state.formProducto;
     if (!exigirCampos([["Nombre", f.nombre]])) return;
-    var nuevo = Object.assign(nuevoProducto(), { nombre: f.nombre, categoria: f.categoria, referencia: f.referencia, precioVenta: num(f.precioVenta) });
+    var nuevo = Object.assign(nuevoProducto(), {
+      nombre: f.nombre, categoria: f.categoria, referencia: f.referencia, precioVenta: num(f.precioVenta),
+      origen: f.origen === "proveedor" ? "proveedor" : "taller",
+      proveedorId: f.origen === "proveedor" ? (f.proveedorId || "") : "",
+      costoCompra: f.origen === "proveedor" ? num(f.costoCompra) : 0
+    });
     state.productos = (state.productos || []).concat([nuevo]);
     state.productoEditando = nuevo.id;
-    state.formProducto = { nombre: "", categoria: "", referencia: "", precioVenta: "" };
+    state.formProducto = { nombre: "", categoria: "", referencia: "", precioVenta: "", origen: "taller", proveedorId: "", costoCompra: "" };
     persist("productos"); notify();
   },
   "add-producto-desde-plantilla": function (el) {

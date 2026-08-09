@@ -857,7 +857,13 @@ export function calcCostoPrenda(insumo, ref) {
   }
   return costo * cantidad; // por_prenda
 }
+// Una referencia COMPRADA A PROVEEDOR no se arma con insumos: llega hecha, y
+// su costo por unidad ES lo que se paga por ella. Resolverlo acá (y no en
+// cada pantalla) es lo que hace que el margen de la referencia, los totales
+// de la cotización, el PDF y los reportes no puedan contradecirse — todos
+// entran por esta misma puerta. Ver ORIGEN_PRODUCCION en constants.js.
 export function calcCostoUnitarioRef(ref) {
+  if (ref && ref.origen === "proveedor") return num(ref.costoCompra);
   return (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);
 }
 export function calcRefTotales(ref) {
@@ -925,6 +931,22 @@ function agregarInsumosDeReferencias(referencias) {
   var mapa = {};
   (referencias || []).forEach(function (ref) {
     var cantidadPedida = num(ref.cantidadPedida) || 0;
+    // Referencia comprada a proveedor: lo que hay que comprar NO son insumos
+    // sueltos (no se corta ni se cose nada) sino la prenda entera, y su costo
+    // se define por referencia. Por eso emite UNA línea —la referencia misma—
+    // en vez de recorrer insumos que no tiene. Esa línea es también la que
+    // aparece como destino al registrar un costo real (ver renderTabProduccion
+    // en modules/cotizaciones.js), que es justo lo que se pidió: costo real
+    // por referencia, no por insumo individual.
+    if (ref.origen === "proveedor") {
+      var nombreRef = (ref.nombre || "Producto de proveedor").trim();
+      var keyRef = "producto|" + nombreRef.toLowerCase();
+      if (!mapa[keyRef]) mapa[keyRef] = { nombre: nombreRef, unidad: "UND", tipo: "producto_proveedor", esProducto: true, proveedorId: ref.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
+      mapa[keyRef].cantidadFisica += cantidadPedida;
+      mapa[keyRef].costoTotal += num(ref.costoCompra) * cantidadPedida;
+      if (!mapa[keyRef].proveedorId && ref.proveedorId) mapa[keyRef].proveedorId = ref.proveedorId;
+      return;
+    }
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();
       var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
@@ -944,4 +966,157 @@ function agregarInsumosDeReferencias(referencias) {
 export function calcListaCompras(cot) {
   var mapa = agregarInsumosDeReferencias(cot.referencias || []);
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
+}
+
+// ---------- costeo de productos del catálogo ----------
+// Un producto del catálogo se costea con la MISMA fórmula que una referencia
+// de cotización, tratándolo como "una referencia de cantidad 1": así un
+// producto fabricado suma sus insumos y uno comprado usa su costo de compra
+// (ver calcCostoUnitarioRef), sin que ninguna pantalla tenga que rearmar el
+// cálculo por su cuenta.
+export function calcTotalesProducto(p) {
+  if (!p) return calcRefTotales({ insumos: [], cantidadPedida: 1 });
+  return calcRefTotales({
+    origen: p.origen, costoCompra: p.costoCompra,
+    consumoAprox: p.consumoSugerido, cantidadPedida: 1,
+    precioVenta: p.precioVenta, insumos: p.insumos || []
+  });
+}
+export function calcCostoUnitarioProducto(p) {
+  return calcTotalesProducto(p).costoUnit;
+}
+
+// ---------- líneas de un pedido ----------
+// Toda línea de pedido (venga del catálogo o escrita a mano) guarda su propio
+// precio y costo UNITARIOS. De ahí salen el total y el costo del pedido: no
+// se escriben a mano en el formulario, se calculan — así es imposible que el
+// total diga una cosa y las líneas otra. Ver renderIndicadoresPedido en
+// modules/pedidos.js, que muestra justo estos números.
+export function calcTotalesLineasPedido(lineas) {
+  var unidades = 0, precioTotal = 0, costoTotal = 0;
+  (lineas || []).forEach(function (l) {
+    var cant = num(l.cantidad);
+    unidades += cant;
+    precioTotal += num(l.precioUnitario) * cant;
+    costoTotal += num(l.costoUnitario) * cant;
+  });
+  var gananciaTotal = precioTotal - costoTotal;
+  return {
+    unidades: unidades,
+    precioTotal: precioTotal,
+    costoTotal: costoTotal,
+    gananciaTotal: gananciaTotal,
+    margenPct: precioTotal > 0 ? (gananciaTotal / precioTotal * 100) : 0,
+    // Promedios por unidad: con líneas distintas (una camiseta y un bordado)
+    // el "x unidad" solo tiene sentido como promedio del pedido.
+    precioUnit: unidades > 0 ? precioTotal / unidades : 0,
+    costoUnit: unidades > 0 ? costoTotal / unidades : 0,
+    gananciaUnit: unidades > 0 ? gananciaTotal / unidades : 0
+  };
+}
+
+// Fecha en que se vendió un pedido. Los pedidos creados desde ahora guardan
+// `fechaCreacion`; los que ya existían no la tienen, así que se deduce de lo
+// que sí quedó fechado (el primer abono, o la fecha de entrega) para que un
+// reporte por rango no los deje afuera en silencio.
+export function fechaPedido(p) {
+  if (!p) return "";
+  if (p.fechaCreacion) return p.fechaCreacion;
+  var abonos = (p.abonos || []).slice().sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+  if (abonos.length && abonos[0].fecha) return abonos[0].fecha;
+  return p.fechaEntrega || "";
+}
+
+// ---------- reporte de productos vendidos ----------
+// Filas de "qué productos se vendieron" en un rango, con el detalle que hace
+// falta para entender el porqué de la plata: talla, N.º de OP, cliente,
+// vendedor, y costo/precio/ganancia unitarios tomados de la propia línea (no
+// del catálogo de hoy, que pudo cambiar de precio después de la venta).
+//
+// Dos fuentes, porque son dos hechos distintos:
+//   - venta directa: las líneas del pedido, que ya son la venta.
+//   - consignación: solo las ventas REPORTADAS por el punto — lo remitido
+//     está en el punto, todavía no vendido, y contarlo aquí inflaría el
+//     reporte con plata que nadie ha recibido.
+export function calcProductosVendidosRango(desde, hasta) {
+  var filas = [];
+  function enRango(f) { return f && (!desde || f >= desde) && (!hasta || f <= hasta); }
+
+  (state.pedidos || []).forEach(function (p) {
+    var vendedor = (p.vendedor && p.vendedor.nombre) || "";
+    if (p.consignacion) {
+      (p.consignacion.ventas || []).forEach(function (v) {
+        if (!enRango(v.fecha)) return;
+        var prod = v.productoId ? productoById(v.productoId) : null;
+        var cant = num(v.cantidad) || 0;
+        var precioUnit = cant > 0 ? num(v.montoTotal) / cant : 0;
+        var costoUnit = calcCostoUnitarioProducto(prod);
+        filas.push({
+          fecha: v.fecha, tipo: "consignacion",
+          productoId: v.productoId || "", concepto: (prod && prod.nombre) || p.descripcion || "—",
+          talla: v.talla || "—", cantidad: cant,
+          costoUnit: costoUnit, precioUnit: precioUnit,
+          costoTotal: costoUnit * cant, precioTotal: num(v.montoTotal),
+          ganancia: num(v.montoTotal) - costoUnit * cant - num(v.comisionMonto),
+          numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor
+        });
+      });
+      return;
+    }
+    var fecha = fechaPedido(p);
+    if (!enRango(fecha)) return;
+    // `lineas` es el detalle completo (precio y costo de cada línea tal como
+    // se vendió). Los pedidos anteriores a las líneas solo tienen
+    // `stockConsumido`, sin precio propio — se completa con el catálogo.
+    var lineas = (p.lineas && p.lineas.length) ? p.lineas : (p.stockConsumido || []);
+    lineas.forEach(function (l) {
+      var prod = l.productoId ? productoById(l.productoId) : null;
+      var cant = num(l.cantidad) || 0;
+      var precioUnit = l.precioUnitario !== undefined ? num(l.precioUnitario) : num(prod && prod.precioVenta);
+      var costoUnit = l.costoUnitario !== undefined ? num(l.costoUnitario) : calcCostoUnitarioProducto(prod);
+      filas.push({
+        fecha: fecha, tipo: "directa",
+        productoId: l.productoId || "",
+        concepto: l.productoNombre || l.textoDescripcion || (prod && prod.nombre) || "—",
+        talla: l.talla || "—", cantidad: cant,
+        costoUnit: costoUnit, precioUnit: precioUnit,
+        costoTotal: costoUnit * cant, precioTotal: precioUnit * cant,
+        ganancia: (precioUnit - costoUnit) * cant,
+        numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor,
+        observacion: l.observacion || "",
+        campos: l.campos || []
+      });
+    });
+  });
+
+  return filas.sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+}
+
+export function calcResumenProductosVendidos(filas) {
+  var acc = { unidades: 0, costoTotal: 0, precioTotal: 0, ganancia: 0 };
+  (filas || []).forEach(function (f) {
+    acc.unidades += num(f.cantidad); acc.costoTotal += num(f.costoTotal);
+    acc.precioTotal += num(f.precioTotal); acc.ganancia += num(f.ganancia);
+  });
+  acc.margenPct = acc.precioTotal > 0 ? (acc.ganancia / acc.precioTotal * 100) : 0;
+  return acc;
+}
+
+// Compras de insumo REALES de un rango (nunca estimaciones): son los
+// movimientos marcados `esInsumo`, ya sea desde "Registrar costo real" de una
+// cotización o desde el checkbox de Finanzas. `cantidad` y `unidad` son
+// opcionales — los movimientos viejos no las tienen y se muestran como "—".
+export function calcComprasInsumoRango(movimientos) {
+  return (movimientos || [])
+    .filter(function (t) { return t.esInsumo; })
+    .map(function (t) {
+      return {
+        fecha: t.fecha || "—", concepto: t.concepto || "—",
+        cantidad: t.cantidad !== undefined && t.cantidad !== "" ? num(t.cantidad) : null,
+        unidad: t.unidad || "",
+        proveedor: t.contraparte || "",
+        monto: num(t.monto)
+      };
+    })
+    .sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
 }

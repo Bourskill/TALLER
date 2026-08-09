@@ -58,6 +58,10 @@ function renderFormMovimiento() {
     '<option value="">Sin especificar</option>' +
     proveedoresDeContactos().map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
     "</select></div>" +
+    // Cuánto se compró, no solo cuánto costó: es la columna "Cantidad" del
+    // desglose de insumos del reporte (ver calcComprasInsumoRango).
+    '<div class="field"><label>Cantidad comprada (opcional)</label><input type="number" data-role="tx-cantidad" placeholder="Ej. 12" /></div>' +
+    '<div class="field"><label>Unidad (opcional)</label><input data-role="tx-unidad" placeholder="Ej. MT, UND" /></div>' +
     '<div class="field wide"><label>Cotización relacionada (opcional)</label><select data-form="tx" data-field="cotizacionId">' +
     '<option value="">Sin cotización</option>' +
     state.cotizaciones.map(function (c) { return '<option value="' + c.id + '" ' + (f.cotizacionId === c.id ? "selected" : "") + '>' + esc(c.descripcion) + " — " + esc(c.cliente) + "</option>"; }).join("") +
@@ -284,7 +288,8 @@ export var actions = {
     state.tx.unshift({
       id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha,
       pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "", esInsumo: esInsumo ? "1" : "",
-      insumoNombre: card ? val(card, "tx-insumo") : "", proveedorId: card ? val(card, "tx-proveedor") : ""
+      insumoNombre: card ? val(card, "tx-insumo") : "", proveedorId: card ? val(card, "tx-proveedor") : "",
+      cantidad: card ? val(card, "tx-cantidad") : "", unidad: card ? val(card, "tx-unidad") : ""
     });
     state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
