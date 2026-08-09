@@ -1184,6 +1184,12 @@ export var actions = {
         cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: cot.fechaEntrega || "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
         numeroOp: generarNumeroOp(todosNumerosOp()),
         iva: cot.iva || { activo: false, porcentaje: 19 },
+        // El pedido hereda el costo cotizado y el detalle línea por línea —
+        // sin esto la tarjeta no podía mostrar ganancia y el pedido no
+        // aparecía en el reporte de productos vendidos (ver lineasDeCotizacion).
+        costo: totales.costoTotal,
+        lineas: lineasDeCotizacion(cot),
+        fechaCreacion: todayStr(),
         abonos: [],
         estadosDef: agregado ? agregado.estadosDef : null,
         // La comisión de vendedor definida en la cotización se traslada al pedido
@@ -1432,6 +1438,12 @@ export var actions = {
       return Object.assign({}, p, {
         descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
         cantidad: String(cantidadTotal), total: totales.precioTotal,
+        // Mismo motivo que al convertir: el costo y las líneas cotizadas
+        // reemplazan a las del pedido rápido, que es justo lo que se pidió al
+        // escalarlo — y con eso el reporte de productos lo ve bien costeado.
+        costo: totales.costoTotal,
+        lineas: lineasDeCotizacion(cot),
+        fechaCreacion: p.fechaCreacion || todayStr(),
         iva: cot.iva || p.iva,
         estado: agregado ? agregado.estado : p.estado,
         estadosDef: agregado ? agregado.estadosDef : null,
@@ -1509,6 +1521,45 @@ export var actions = {
 // talla salieron. Sin filas de detalle no hay talla que agrupar, así que esa
 // referencia no cuenta (queda como límite conocido, ajustable a mano en
 // Productos). Función pura: no toca stock, solo arma la lista de líneas.
+// Convierte las referencias de una cotización en LÍNEAS DE PEDIDO (el mismo
+// formato que usa un pedido rápido, ver modules/pedidos.js). Es lo que hace
+// que un pedido nacido de una cotización cuente en el reporte de productos
+// vendidos con su costo y su ganancia reales: antes solo se le copiaba el
+// total, así que una referencia hecha a la medida (sin producto de catálogo
+// detrás) desaparecía del reporte, y una de catálogo salía costeada con el
+// precio de HOY en vez del que tuvo cuando se vendió.
+//
+// Si la referencia tiene filas de "Tallas y observaciones", se agrupan por
+// talla para que el reporte pueda decir cuántas de cada una se vendieron; lo
+// que quede sin talla se junta en una línea aparte.
+function lineasDeCotizacion(cot) {
+  var lineas = [];
+  (cot.referencias || []).forEach(function (ref) {
+    var t = calcRefTotales(ref);
+    function nuevaLinea(talla, cantidad) {
+      return {
+        id: uid(), tipo: ref.productoId ? "catalogo" : "libre",
+        productoId: ref.productoId || "", productoNombre: ref.nombre || cot.descripcion || "—",
+        imagenUrl: ref.imagenUrl || "", talla: talla, cantidad: cantidad,
+        precioUnitario: t.precioUnit, costoUnitario: t.costoUnit,
+        observacion: "", campos: []
+      };
+    }
+    var porTalla = {};
+    (ref.detalle || []).forEach(function (d) {
+      var talla = (d.talla || "").trim();
+      if (!talla) return;
+      porTalla[talla] = (porTalla[talla] || 0) + 1;
+    });
+    var tallas = Object.keys(porTalla);
+    var conTalla = tallas.reduce(function (a, k) { return a + porTalla[k]; }, 0);
+    tallas.forEach(function (talla) { lineas.push(nuevaLinea(talla, porTalla[talla])); });
+    var resto = num(ref.cantidadPedida) - conTalla;
+    if (resto > 0 || !tallas.length) lineas.push(nuevaLinea("", Math.max(0, resto)));
+  });
+  return lineas.filter(function (l) { return num(l.cantidad) > 0; });
+}
+
 function lineasStockDeCot(cot) {
   var lineas = [];
   (cot.referencias || []).forEach(function (ref) {

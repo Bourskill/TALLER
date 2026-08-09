@@ -365,8 +365,9 @@ function renderReportePeriodo() {
     "</div>";
 
   html += '<div class="section-sub" style="margin-top:10px;">' + movimientos.length + " movimiento(s) en este rango.</div>";
-  html += '<div class="pedido-actions" style="margin-top:6px;">' +
+  html += '<div class="pedido-actions" style="margin-top:6px;flex-wrap:wrap;">' +
     '<button class="btn" data-action="generar-reporte-pdf">Generar PDF del periodo</button>' +
+    '<button class="btn ghost small" data-action="generar-reporte-productos-pdf" title="Reporte aparte, solo de productos: talla, N.º de OP, cliente, vendedor y ganancia de cada venta.">Generar PDF de productos</button>' +
     '<button class="btn ghost small" data-action="export-csv">Descargar CSV de todos los movimientos</button>' +
     "</div>";
 
@@ -417,7 +418,7 @@ function renderDesgloseProductos(fr) {
     renderHelp("Cada línea vendida en este rango: de una venta directa, o de una venta que el punto de consignación haya reportado. Lo remitido a un punto NO cuenta hasta que se reporte vendido — todavía no es plata tuya.") +
     "</div>";
   if (!filas.length) {
-    return html + '<div class="empty" style="padding:8px 0;">Sin ventas de producto en este rango.</div>';
+    return html + '<div class="empty" style="padding:8px 0;">Sin ventas de producto en este rango — prueba con un rango más amplio (atajo "Este año").</div>';
   }
   html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Concepto</span><span>Cant.</span><span>Costo</span><span>Precio</span><span>Ganancia</span></div>';
   filas.forEach(function (f) {
@@ -433,9 +434,6 @@ function renderDesgloseProductos(fr) {
   });
   html += '<div class="section-sub" style="margin:6px 0 0;">' + resumen.unidades + " unidad(es) · " + fmt(resumen.precioTotal) +
     " vendidos · <b>" + fmt(resumen.ganancia) + "</b> de ganancia (" + resumen.margenPct.toFixed(1) + "% de margen).</div>";
-  html += '<div class="pedido-actions" style="margin-top:10px;">' +
-    '<button class="btn ghost small" data-action="generar-reporte-productos-pdf">Generar PDF detallado de productos</button>' +
-    "</div>";
   return html;
 }
 

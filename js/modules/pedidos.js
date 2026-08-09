@@ -1031,6 +1031,13 @@ export var actions = {
       costoUnitario: calcCostoUnitarioProducto(producto),
       observacion: "", campos: []
     }]);
+    // En consignación el precio al público lo pone cada punto (el mismo
+    // producto puede valer distinto en dos locales), así que sigue siendo un
+    // campo editable — pero se precarga con el precio del catálogo la primera
+    // vez, para no escribirlo desde cero cuando coincide.
+    if (fp.esConsignacion && !num(fp.consignacionPrecioUnitario)) {
+      fp.consignacionPrecioUnitario = String(num(producto.precioVenta));
+    }
     state.pedidoProductoPickerAbierto = false;
     state.pedidoProductoBusqueda = "";
     notify();
@@ -1454,7 +1461,21 @@ export var actions = {
     var nuevaCot = {
       id: cotId, clienteId: p.clienteId || "", cliente: p.cliente, descripcion: p.descripcion, fecha: todayStr(),
       estado: "borrador", pedidoOrigenId: p.id,
-      referencias: [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [] }],
+      // Una referencia por LÍNEA del pedido, no una sola con todo adentro: si
+      // el pedido llevaba una camiseta y un bordado, cotizarlos juntos como
+      // una sola referencia obligaba a rearmar a mano lo que ya estaba
+      // separado. Cada una nace con su cantidad y su precio, lista para
+      // detallarle insumos (o marcarla como comprada a proveedor).
+      referencias: (p.lineas && p.lineas.length)
+        ? p.lineas.map(function (l) {
+          return {
+            id: uid(), nombre: l.productoNombre || p.descripcion, imagenUrl: l.imagenUrl || "",
+            consumoAprox: 1, cantidadPedida: num(l.cantidad) || 1, precioVenta: num(l.precioUnitario) || 0,
+            insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "",
+            productoId: l.productoId || ""
+          };
+        })
+        : [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "" }],
       gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: p.vendedor ? Object.assign({}, p.vendedor) : null,
       codigoPublico: codigoPublico()
     };
