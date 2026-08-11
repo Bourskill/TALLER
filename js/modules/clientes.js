@@ -1,26 +1,42 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, uid, val, num, fmt, opt, norm, exigirCampos } from "../core/utils.js";
+import { esc, uid, val, num, fmt, opt, norm, todayStr, exigirCampos } from "../core/utils.js";
 import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
 import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
 import { renderHelp } from "../core/components.js";
 import { TIPOS_RELACION_CONTACTO } from "../core/constants.js";
 
-// Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo cliente" es solo el
-// formulario de alta, y "Historial" agrupa la búsqueda y la lista completa
-// (antes convivían siempre juntos en una sola pantalla larga).
+// Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo contacto" es solo el
+// formulario de alta. La lista se parte en DOS pestañas —quien te compra y
+// quien te vende— porque son dos trabajos distintos: se buscan en momentos
+// distintos, se ordenan distinto (un proveedor se busca por qué vende) y
+// mezclarlos obligaba a leer toda la lista para encontrar cualquiera de los
+// dos. Los puntos de consignación van con los contactos: también son gente a
+// la que le sale mercancía tuya, no gente a la que le compras.
 export function render() {
-  var vista = state.clientesVista || "nueva";
+  var vista = vistaClientes();
   var html = renderTabsClientes(vista);
-  html += vista === "historial" ? renderHistorialClientes() : renderFormNuevoCliente();
-  return html;
+  if (vista === "nueva") return html + renderFormNuevoCliente();
+  return html + renderListaContactos(vista);
+}
+
+// "historial" es el nombre viejo de la pestaña única: se mapea a "contactos"
+// para que una sesión guardada de antes no quede apuntando a una vista que ya
+// no existe.
+function vistaClientes() {
+  var v = state.clientesVista || "nueva";
+  if (v === "historial") return "contactos";
+  return v;
 }
 
 function renderTabsClientes(vista) {
-  var total = state.clientes.length;
+  var esProv = function (c) { return c.tipoRelacion === "proveedor"; };
+  var proveedores = state.clientes.filter(esProv).length;
+  var contactos = state.clientes.length - proveedores;
   return '<div class="gsheet-tabs">' +
     '<button class="gsheet-tab ' + (vista === "nueva" ? "active" : "") + '" data-action="cliente-vista" data-val="nueva">+ Nuevo contacto</button>' +
-    '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="cliente-vista" data-val="historial">Historial' + (total ? " (" + total + ")" : "") + "</button>" +
+    '<button class="gsheet-tab ' + (vista === "contactos" ? "active" : "") + '" data-action="cliente-vista" data-val="contactos">Contactos' + (contactos ? " (" + contactos + ")" : "") + "</button>" +
+    '<button class="gsheet-tab ' + (vista === "proveedores" ? "active" : "") + '" data-action="cliente-vista" data-val="proveedores">🧵 Proveedores' + (proveedores ? " (" + proveedores + ")" : "") + "</button>" +
     "</div>";
 }
 
@@ -95,19 +111,93 @@ function renderFormNuevoCliente() {
   return html;
 }
 
-function renderHistorialClientes() {
-  var totalClientes = state.clientes.length;
-  var html = '<div class="search-bar"><input id="inp-filtro-clientes" data-live-filter="filtroClientes" value="' + esc(state.filtroClientes) + '" placeholder="Buscar por nombre, cédula, ciudad o teléfono..." />' +
-    '<div class="client-count">' + totalClientes + " cliente" + (totalClientes === 1 ? "" : "s") + " registrado" + (totalClientes === 1 ? "" : "s") + "</div></div>";
+// Las dos pestañas de lista comparten todo salvo qué contactos muestran y
+// qué criterios de orden ofrecen — "por categoría" solo tiene sentido para
+// proveedores, que son los únicos que declaran qué insumos venden.
+function renderListaContactos(vista) {
+  var esProveedores = vista === "proveedores";
+  var lista = clientesFiltrados().filter(function (c) {
+    return esProveedores ? c.tipoRelacion === "proveedor" : c.tipoRelacion !== "proveedor";
+  });
+  var orden = ordenActivo(esProveedores);
 
-  var lista = clientesFiltrados();
+  var html = '<div class="search-bar"><input id="inp-filtro-clientes" data-live-filter="filtroClientes" value="' + esc(state.filtroClientes) + '" placeholder="' +
+    (esProveedores ? "Buscar proveedor por nombre, ciudad o teléfono..." : "Buscar por nombre, cédula, ciudad o teléfono...") + '" />' +
+    '<div class="client-count">' + lista.length + " " + (esProveedores ? "proveedor" : "contacto") + (lista.length === 1 ? "" : "es") + "</div></div>";
+
+  var criterios = [["abc", "A–Z"], ["recientes", "Recientes"]];
+  if (esProveedores) criterios.push(["categoria", "Por categoría"]);
+  html += '<div class="filters" style="margin-bottom:12px;"><span class="mini-label" style="align-self:center;margin-right:2px;">Ordenar:</span>' +
+    criterios.map(function (c) {
+      return '<button class="chip ' + (orden === c[0] ? "active" : "") + '" data-action="set-clientes-orden" data-val="' + c[0] + '">' + c[1] + "</button>";
+    }).join("") + "</div>";
+
   if (lista.length === 0) {
-    html += '<div class="empty">' + (state.filtroClientes ? "Sin resultados para tu búsqueda." : "Aún no tienes clientes registrados.") + "</div>";
+    html += '<div class="empty">' + (state.filtroClientes
+      ? "Sin resultados para tu búsqueda."
+      : (esProveedores ? 'Aún no tienes proveedores. Créalos en "+ Nuevo contacto" eligiendo el tipo <b>Proveedor</b>.' : "Aún no tienes contactos registrados.")) + "</div>";
     return html;
   }
 
-  lista.forEach(function (c) {
-    if (state.clienteEditando === c.id) { html += renderClienteEdit(c); return; }
+  if (orden === "categoria") return html + renderProveedoresPorCategoria(lista);
+  return html + ordenarContactos(lista, orden).map(renderClienteCard).join("");
+}
+
+function ordenActivo(esProveedores) {
+  var orden = state.clientesOrden || "abc";
+  // "categoría" no aplica a la pestaña de contactos: si quedó elegido desde
+  // Proveedores, se cae a A–Z en vez de mostrar una vista vacía.
+  if (orden === "categoria" && !esProveedores) return "abc";
+  return orden;
+}
+
+// "Recientes" usa la fecha de alta; los contactos creados antes de que se
+// guardara esa fecha no la tienen, así que se ordenan por su posición en la
+// lista (que ya refleja el orden en que se fueron agregando).
+function ordenarContactos(lista, orden) {
+  var indice = {};
+  state.clientes.forEach(function (c, i) { indice[c.id] = i; });
+  var copia = lista.slice();
+  if (orden === "recientes") {
+    return copia.sort(function (a, b) {
+      var fa = a.fechaCreacion || "", fb = b.fechaCreacion || "";
+      if (fa && fb && fa !== fb) return fb.localeCompare(fa);
+      if (fa && !fb) return -1;
+      if (!fa && fb) return 1;
+      return indice[b.id] - indice[a.id];
+    });
+  }
+  return copia.sort(function (a, b) { return norm(a.nombre).localeCompare(norm(b.nombre)); });
+}
+
+// Un proveedor que vende varias categorías aparece bajo cada una: la pregunta
+// que resuelve esta vista es "¿a quién le pido licra?", y esconderlo en una
+// sola categoría arbitraria la dejaría sin responder.
+function renderProveedoresPorCategoria(lista) {
+  var categorias = state.catalogoCategorias || [];
+  var html = "";
+  var usados = {};
+  categorias.forEach(function (cat) {
+    var enCat = lista.filter(function (c) { return (c.categoriasInsumo || []).indexOf(cat.id) !== -1; });
+    if (!enCat.length) return;
+    enCat.forEach(function (c) { usados[c.id] = true; });
+    html += '<div class="cot-col-title" style="margin-top:18px;">' + esc(cat.nombre) + " (" + enCat.length + ")</div>" +
+      ordenarContactos(enCat, "abc").map(renderClienteCard).join("");
+  });
+  var sinCategoria = lista.filter(function (c) { return !usados[c.id]; });
+  if (sinCategoria.length) {
+    html += '<div class="cot-col-title" style="margin-top:18px;">Sin categoría (' + sinCategoria.length + ")" +
+      renderHelp("Estos proveedores todavía no tienen marcado qué insumos venden. Edítalos y marca sus categorías para que aparezcan agrupados.") + "</div>" +
+      ordenarContactos(sinCategoria, "abc").map(renderClienteCard).join("");
+  }
+  if (!html) html += '<div class="empty">Ningún proveedor tiene categorías marcadas todavía.</div>';
+  return html;
+}
+
+function renderClienteCard(c) {
+  var html = "";
+  {
+    if (state.clienteEditando === c.id) { return renderClienteEdit(c); }
     var esPuntoC = c.tipoRelacion === "punto_consignacion";
     var esProveedorC = c.tipoRelacion === "proveedor";
     var roster = c.roster || [];
@@ -151,7 +241,7 @@ function renderHistorialClientes() {
       (rosterAbierto ? renderRoster(c, roster) : "") +
       (state.clientePreciosAbierto === c.id ? renderPreciosProveedor(c) : "") +
       "</div>";
-  });
+  }
   return html;
 }
 
@@ -324,6 +414,13 @@ function sincronizarClienteContacto(cliente) {
 export var actions = {
   "cliente-vista": function (el) {
     state.clientesVista = el.getAttribute("data-val");
+    // La búsqueda es de la lista que se está viendo: arrastrarla al cambiar
+    // de pestaña hacía parecer que la otra estaba vacía.
+    state.filtroClientes = "";
+    notify();
+  },
+  "set-clientes-orden": function (el) {
+    state.clientesOrden = el.getAttribute("data-val");
     notify();
   },
   "set-cliente-tipo-relacion": function (el) {
@@ -350,12 +447,15 @@ export var actions = {
       descripcion: esProveedor ? fcli.descripcion : "",
       puntuacion: esProveedor ? num(fcli.puntuacion) : 0,
       preciosPorInsumo: [],
+      // Fecha de alta: es lo que hace posible ordenar por "Recientes".
+      fechaCreacion: todayStr(),
       roster: []
     };
     state.clientes.unshift(nuevo);
     state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
-    // Salta al Historial para confirmar de una vez que quedó registrado.
-    state.clientesVista = "historial";
+    // Aterriza en la pestaña donde acaba de quedar registrado, no en una
+    // lista donde habría que buscarlo entre los de otro tipo.
+    state.clientesVista = esProveedor ? "proveedores" : "contactos";
     persist("clientes"); notify();
     sincronizarClienteContacto(nuevo);
   },

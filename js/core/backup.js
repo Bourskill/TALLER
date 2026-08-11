@@ -13,18 +13,17 @@
 // tiempo, fuera de este código.
 
 import { state, persist } from "./store.js";
-import { getAccessToken, getSession } from "./auth.js";
+import { getSession, fetchGoogleConReintento } from "./auth.js";
 import { SPREADSHEET_ID } from "./google-config.js";
 
 var FOLDER_NAME = "Panel del Taller — respaldos";
 var VEINTICUATRO_HORAS_MS = 24 * 60 * 60 * 1000;
 
 async function driveFetch(path, options) {
-  var res = await fetch("https://www.googleapis.com/drive/v3/" + path, Object.assign({}, options, {
-    headers: Object.assign({ Authorization: "Bearer " + getAccessToken() }, (options && options.headers) || {})
-  }));
+  var res = await fetchGoogleConReintento("https://www.googleapis.com/drive/v3/" + path, options);
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
     throw new Error("Google Drive API " + res.status + ": " + body);
   }
   return res.json();

@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, compraDeLinea } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -601,30 +601,53 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     y = doc.lastAutoTable.finalY + 20;
   }
 
+  // Lista de compras y costos reales van juntos en UNA tabla, igual que en
+  // pantalla: la lista de compras ya es el estimado desglosado, así que lo
+  // real son dos columnas más de la misma fila, no una tabla aparte donde
+  // haya que volver a buscar de qué insumo se estaba hablando.
   if (opts.compras) {
     var compras = calcListaCompras(cot);
     if (compras.length) {
-      if (y > 640) { doc.addPage(); y = 54; }
+      if (y > 620) { doc.addPage(); y = 54; }
       doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-      doc.text("Lista de compras", marginX, y); y += 8;
+      doc.text("Compras del pedido", marginX, y); y += 8;
       doc.autoTable({
         startY: y,
-        head: [["Insumo", "Cantidad a comprar", "Costo total"]],
-        body: compras.map(function (c) { return [c.nombre, c.tipo === "fijo_pedido" ? "servicio" : (numFmt(c.cantidadFisica) + " " + c.unidad), money(c.costoTotal)]; }),
-        styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
-        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8 },
+        head: [["Qué comprar", "Cant. est.", "Costo est.", "Cant. real", "Costo real", "Proveedor", "Observaciones"]],
+        body: compras.map(function (c) {
+          var compra = compraDeLinea(cot, c.clave) || {};
+          var prov = compra.proveedorId ? clienteById(compra.proveedorId) : (c.proveedorId ? clienteById(c.proveedorId) : null);
+          // Un servicio (diseño, confección, domicilio) no se compra por
+          // cantidad: decir "11 UND de confección" no le sirve a nadie.
+          var cantEst = c.esServicio ? "servicio" : (numFmt(c.cantidadFisica) + (c.unidad ? " " + c.unidad : ""));
+          var cantReal = c.esServicio ? "—" : (compra.cantidadReal !== undefined && compra.cantidadReal !== "" ? numFmt(compra.cantidadReal) : "—");
+          return [
+            (c.esGlobal ? "[Pedido] " : "") + c.nombre,
+            cantEst, money(c.costoTotal),
+            cantReal,
+            compra.comprado && num(compra.costoReal) ? money(compra.costoReal) : "—",
+            prov ? prov.nombre : "—",
+            compra.observaciones || ""
+          ];
+        }),
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 7.5 },
+        columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
         margin: { left: marginX, right: marginX }
       });
       y = doc.lastAutoTable.finalY + 20;
     }
   }
 
+  // Solo para cotizaciones que traen costos reales del modelo anterior (un
+  // registro suelto con su destino elegido en un desplegable). Las nuevas los
+  // llevan en la tabla de compras de arriba.
   if (opts.reales) {
     var gastos = cot.gastosReales || [];
     if (gastos.length) {
       if (y > 640) { doc.addPage(); y = 54; }
       doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-      doc.text("Costos reales registrados", marginX, y); y += 8;
+      doc.text("Costos reales registrados antes", marginX, y); y += 8;
       doc.autoTable({
         startY: y,
         head: [["Concepto", "Fecha", "Monto", "Variación"]],

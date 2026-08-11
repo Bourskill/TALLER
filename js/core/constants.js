@@ -120,9 +120,19 @@ export const DEFAULT_CONFIG = {
 
 // Formas de calcular el costo por prenda de un insumo dentro de una referencia.
 // "ayuda" se muestra tal cual en la pestaña Catálogo para que quede claro qué hace cada tipo.
+//
+// Ojo con `fijo_pedido`: su id quedó de cuando una cotización era una sola
+// referencia, pero lo que hace —y siempre hizo— es repartir el costo entre
+// las prendas de SU referencia, no de todo el pedido. Por eso hoy se llama
+// "Fijo por referencia". El costo verdaderamente global del pedido (domicilio,
+// diseño: lo que se paga una vez, sin importar cuántas referencias haya) no
+// es un tipo de costo de insumo sino una lista aparte a nivel de cotización
+// — ver `costosGlobales` en modules/cotizaciones.js. El id no se renombró a
+// propósito: hacerlo obligaría a migrar todas las cotizaciones, plantillas y
+// productos que ya lo tienen guardado.
 export const TIPOS_COSTO = {
   tela: { label: "Tela (según consumo)", ayuda: "costo = costo × consumo aprox. de la referencia × cantidad" },
-  fijo_pedido: { label: "Fijo por pedido", ayuda: "costo = costo total ÷ cantidad de prendas del pedido" },
+  fijo_pedido: { label: "Fijo por referencia", ayuda: "costo = costo total ÷ cantidad de prendas de esa referencia" },
   por_prenda: { label: "Fijo por prenda", ayuda: "costo = costo × cantidad indicada" }
 };
 

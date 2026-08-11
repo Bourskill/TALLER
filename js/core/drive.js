@@ -22,17 +22,16 @@
 // abrió con esta app.
 
 import { state, persist } from "./store.js";
-import { getAccessToken, getSession, listarEquipoEmail } from "./auth.js";
+import { getSession, listarEquipoEmail, fetchGoogleConReintento } from "./auth.js";
 import { SPREADSHEET_ID } from "./google-config.js";
 
 var FOLDER_NAME = "Panel del Taller — imágenes";
 
 async function driveFetch(path, options) {
-  var res = await fetch("https://www.googleapis.com/drive/v3/" + path, Object.assign({}, options, {
-    headers: Object.assign({ Authorization: "Bearer " + getAccessToken() }, (options && options.headers) || {})
-  }));
+  var res = await fetchGoogleConReintento("https://www.googleapis.com/drive/v3/" + path, options);
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
     throw new Error("Google Drive API " + res.status + ": " + body);
   }
   return res.json();
@@ -121,13 +120,14 @@ export async function subirImagenReferencia(file) {
     "\r\n--" + boundary + "--"
   ]);
 
-  var res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+  var res = await fetchGoogleConReintento("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
     method: "POST",
-    headers: { Authorization: "Bearer " + getAccessToken(), "Content-Type": "multipart/related; boundary=" + boundary },
+    headers: { "Content-Type": "multipart/related; boundary=" + boundary },
     body: body
   });
   if (!res.ok) {
     var errText = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció mientras subías la imagen. Recarga la página, inicia sesión de nuevo y vuelve a subirla.");
     throw new Error("Google Drive API " + res.status + ": " + errText);
   }
   var creado = await res.json();

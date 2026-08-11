@@ -877,12 +877,24 @@ export function calcRefTotales(ref) {
     costoTotal: costoUnit * cantidad, precioTotal: precioUnit * cantidad, gananciaTotal: gananciaUnit * cantidad
   };
 }
+// Costos que se pagan UNA vez por pedido, sin importar cuántas referencias
+// tenga ni cuántas prendas lleve cada una: domicilio, diseño, un envío a
+// sublimar. No son insumos de ninguna referencia en particular (repartirlos
+// entre ellas obligaría a inventar un criterio que nadie pidió), así que
+// viven en la cotización y se suman al final, ya sobre el total.
+export function calcCostosGlobales(cot) {
+  return ((cot && cot.costosGlobales) || []).reduce(function (a, c) { return a + num(c.costo); }, 0);
+}
 export function calcCotizacionTotales(cot) {
   var acc = { costoTotal: 0, precioTotal: 0, gananciaTotal: 0 };
   (cot.referencias || []).forEach(function (ref) {
     var t = calcRefTotales(ref);
     acc.costoTotal += t.costoTotal; acc.precioTotal += t.precioTotal; acc.gananciaTotal += t.gananciaTotal;
   });
+  var globales = calcCostosGlobales(cot);
+  acc.costosGlobales = globales;
+  acc.costoTotal += globales;
+  acc.gananciaTotal -= globales;
   acc.margenPct = acc.precioTotal > 0 ? (acc.gananciaTotal / acc.precioTotal * 100) : 0;
   return acc;
 }
@@ -902,12 +914,45 @@ export function calcCotGastoEstimadoBase(cot, gasto) {
 export function calcCotGastoVariacion(cot, gasto) {
   return num(gasto.monto) - calcCotGastoEstimadoBase(cot, gasto);
 }
-// Suma de variaciones (real vs. estimado) de todos los costos reales registrados.
-// Nota: si se registra más de un costo real para el mismo insumo/total, cada uno
-// se compara contra el mismo estimado base — para resultados exactos, registra
-// el costo real total de cada insumo en una sola línea.
+// La compra real registrada sobre UNA línea de la lista de compras (cantidad
+// y costo que en verdad se pagaron, más a quién y con qué observación). Vive
+// indexada por la `clave` de la línea, no por su posición, para que reordenar
+// la lista o agregar insumos nuevos no le cambie el dueño a un dato ya
+// registrado. Ver renderListaCompras en modules/cotizaciones.js.
+export function compraDeLinea(cot, clave) {
+  return ((cot && cot.compras) || []).filter(function (c) { return c.clave === clave; })[0] || null;
+}
+
+// Suma de variaciones (real vs. estimado) de lo que ya se compró.
+//
+// Dos fuentes que NO se pisan: `compras` es el modelo actual (una compra por
+// línea de la lista, editable en la misma tabla) y `gastosReales` es el
+// anterior (un registro suelto que elegía su destino en un desplegable). Una
+// cotización vieja solo tiene el segundo y sigue calculando igual que
+// siempre; las nuevas solo usan el primero.
 export function calcCotGastosReales(cot) {
-  return (cot.gastosReales || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
+  var compras = calcListaCompras(cot);
+  var deCompras = ((cot && cot.compras) || []).reduce(function (a, c) {
+    if (!c.comprado || !num(c.costoReal)) return a;
+    var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
+    return a + (num(c.costoReal) - (linea ? linea.costoTotal : 0));
+  }, 0);
+  var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
+  return deCompras + deGastos;
+}
+
+// Resumen de avance de compras: cuántas líneas ya se compraron y cuánto se
+// lleva gastado de verdad contra lo estimado.
+export function calcResumenCompras(cot) {
+  var lineas = calcListaCompras(cot);
+  var acc = { total: lineas.length, compradas: 0, estimado: 0, real: 0 };
+  lineas.forEach(function (l) {
+    acc.estimado += num(l.costoTotal);
+    var c = compraDeLinea(cot, l.clave);
+    if (c && c.comprado) { acc.compradas++; acc.real += num(c.costoReal); }
+  });
+  acc.pendientes = acc.total - acc.compradas;
+  return acc;
 }
 
 // Resultado REAL de la cotización: lo estimado ajustado por la diferencia entre
@@ -941,7 +986,7 @@ function agregarInsumosDeReferencias(referencias) {
     if (ref.origen === "proveedor") {
       var nombreRef = (ref.nombre || "Producto de proveedor").trim();
       var keyRef = "producto|" + nombreRef.toLowerCase();
-      if (!mapa[keyRef]) mapa[keyRef] = { nombre: nombreRef, unidad: "UND", tipo: "producto_proveedor", esProducto: true, proveedorId: ref.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
+      if (!mapa[keyRef]) mapa[keyRef] = { clave: keyRef, nombre: nombreRef, unidad: "UND", tipo: "producto_proveedor", esProducto: true, esServicio: false, proveedorId: ref.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       mapa[keyRef].cantidadFisica += cantidadPedida;
       mapa[keyRef].costoTotal += num(ref.costoCompra) * cantidadPedida;
       if (!mapa[keyRef].proveedorId && ref.proveedorId) mapa[keyRef].proveedorId = ref.proveedorId;
@@ -950,21 +995,40 @@ function agregarInsumosDeReferencias(referencias) {
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();
       var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
-      if (!mapa[key]) mapa[key] = { nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, cantidadFisica: 0, costoTotal: 0, refs: [] };
+      if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: !!ins.esServicio, proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
       if (ins.tipo === "tela") cantFisica = (num(ref.consumoAprox) || 0) * (num(ins.cantidad) || 1) * cantidadPedida;
       else if (ins.tipo === "por_prenda") cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;
+      if (ins.esServicio) mapa[key].esServicio = true;
+      if (!mapa[key].proveedorId && ins.proveedorId) mapa[key].proveedorId = ins.proveedorId;
       if (ref.nombre && mapa[key].refs.indexOf(ref.nombre) === -1) mapa[key].refs.push(ref.nombre);
     });
   });
   return mapa;
 }
-// Consolida los insumos de TODAS las referencias de una cotización en una sola
-// lista de compras: si dos referencias comparten una tela, aquí ya suman juntas.
+// Consolida en una sola lista TODO lo que hay que comprar para una cotización:
+// los insumos de sus referencias (si dos comparten una tela, acá ya suman
+// juntas), las prendas que se compran hechas a un proveedor, y los costos
+// globales del pedido. `clave` identifica cada línea de forma estable — es lo
+// que permite guardarle al lado su compra real (cantidad, costo, proveedor)
+// sin depender de la posición en la lista, que cambia al reordenar.
 export function calcListaCompras(cot) {
-  var mapa = agregarInsumosDeReferencias(cot.referencias || []);
+  var mapa = agregarInsumosDeReferencias((cot && cot.referencias) || []);
+  ((cot && cot.costosGlobales) || []).forEach(function (g) {
+    var nombre = (g.nombre || "Costo del pedido").trim();
+    var key = "global|" + g.id;
+    mapa[key] = {
+      clave: key, nombre: nombre, unidad: "", tipo: "global", esGlobal: true,
+      // Un costo global casi siempre es un servicio (domicilio, diseño): no
+      // se compra "N unidades" de él. Se puede desmarcar si de verdad es algo
+      // que se compra por cantidad.
+      esServicio: g.esServicio !== false,
+      proveedorId: g.proveedorId || "",
+      cantidadFisica: num(g.cantidad) || 0, costoTotal: num(g.costo), refs: []
+    };
+  });
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
 }
 

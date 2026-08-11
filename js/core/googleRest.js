@@ -3,14 +3,21 @@
 // sesión ni de storage: eso lo resuelven auth.js y sheetsStorage.js, que lo
 // importan (evita una dependencia circular entre ellos dos).
 
+// fetchGoogleConReintento vive en auth.js y no al revés porque es auth.js
+// quien sabe CÓMO renovar el token (tokenClient de Google Identity) — este
+// archivo solo arma URLs y cuerpos de Sheets. La importación cruzada
+// (auth.js también importa de acá, más abajo) es segura: ninguna de las dos
+// funciones se invoca mientras los módulos se están cargando, solo después,
+// cuando ya está todo resuelto.
+import { fetchGoogleConReintento } from "./auth.js";
+
 var BASE = "https://sheets.googleapis.com/v4/spreadsheets/";
 
 async function request(accessToken, path, options) {
-  var res = await fetch(BASE + path, Object.assign({}, options, {
-    headers: Object.assign({ Authorization: "Bearer " + accessToken }, (options && options.headers) || {})
-  }));
+  var res = await fetchGoogleConReintento(BASE + path, options, accessToken);
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
     throw new Error("Google Sheets API " + res.status + ": " + body);
   }
   return res.json();

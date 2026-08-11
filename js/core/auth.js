@@ -27,6 +27,7 @@ var MARGEN_EXPIRACION_MS = 2 * 60 * 1000;
 var session = null; // { email, rol: "admin"|"vendedor", vendedorNombre } | { email, rol: null } | null
 var accessToken = null;
 var tokenClient = null;
+var refrescoEnCurso = null; // promesa compartida mientras se renueva el token — evita pedir varios a la vez si varias llamadas fallan juntas
 
 export function getSession() { return session; }
 export function getAccessToken() { return accessToken; }
@@ -92,6 +93,59 @@ export function login() {
     };
     client.requestAccessToken({ prompt: "" });
   });
+}
+
+// Pide un token nuevo SIN mostrar ninguna pantalla: como el consentimiento ya
+// fue otorgado antes, Google lo renueva en silencio (no es el mismo popup de
+// login()). Se usa cuando una llamada a una API de Google responde 401
+// porque el token venció a mitad de sesión — dura ~1h, y la pestaña puede
+// quedar abierta mucho más que eso durante el día de trabajo. Si varias
+// llamadas fallan al mismo tiempo, comparten UNA sola renovación en vuelo en
+// vez de pedir un token por cada una.
+export function refrescarToken() {
+  if (refrescoEnCurso) return refrescoEnCurso;
+  refrescoEnCurso = new Promise(function (resolve, reject) {
+    var client;
+    try { client = ensureTokenClient(); } catch (e) { reject(e); return; }
+    client.callback = function (resp) {
+      if (resp.error) { reject(new Error(resp.error)); return; }
+      accessToken = resp.access_token;
+      guardarSesion(resp.expires_in);
+      resolve(accessToken);
+    };
+    client.requestAccessToken({ prompt: "" });
+  }).finally(function () { refrescoEnCurso = null; });
+  return refrescoEnCurso;
+}
+
+// Punto único por el que pasa TODA llamada de la app a una API de Google
+// (Sheets, Drive, Calendar, Gmail, Contactos — ver los `*Fetch()` de cada
+// módulo de core/). Si Google responde 401 (el caso típico: el token venció
+// mientras la pestaña seguía abierta), se pide uno nuevo en silencio y se
+// reintenta la MISMA llamada una sola vez con él — así una sesión de trabajo
+// larga no se corta con un error crudo cada hora. Si el refresco tampoco
+// resuelve, quien llama sigue viendo el 401 (res.status 401) y decide cómo
+// avisarlo — acá no se lanza el error, solo se resuelve la parte de
+// autenticación, para no imponer un formato de mensaje a cada API distinta.
+export async function fetchGoogleConReintento(url, options, tokenInicial) {
+  var token = tokenInicial || accessToken;
+  function intentar(t) {
+    return fetch(url, Object.assign({}, options, {
+      headers: Object.assign({ Authorization: "Bearer " + t }, (options && options.headers) || {})
+    }));
+  }
+  var res = await intentar(token);
+  if (res.status === 401) {
+    try {
+      token = await refrescarToken();
+      res = await intentar(token);
+    } catch (e) {
+      // El refresco en sí falló (consentimiento revocado, iframe de Google
+      // bloqueado, etc.) — se deja el 401 original para que cada API lo
+      // convierta en su propio mensaje "inicia sesión de nuevo".
+    }
+  }
+  return res;
 }
 
 export function logout() {

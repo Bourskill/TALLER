@@ -10,17 +10,16 @@
 // optimista) — por eso actualizar SIEMPRE pide primero el contacto actual
 // (para tener su etag fresco) antes de mandar el cambio.
 
-import { getAccessToken } from "./auth.js";
+import { fetchGoogleConReintento } from "./auth.js";
 
 var CAMPOS = "names,phoneNumbers,emailAddresses,addresses,biographies";
 
 async function peopleFetch(path, options) {
-  var res = await fetch("https://people.googleapis.com/v1/" + path, Object.assign({}, options, {
-    headers: Object.assign({ Authorization: "Bearer " + getAccessToken() }, (options && options.headers) || {})
-  }));
+  var res = await fetchGoogleConReintento("https://people.googleapis.com/v1/" + path, options);
   if (res.status === 404) return null; // el contacto ya no existe (lo borraron a mano, etc.)
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
     throw new Error("Google Contacts API " + res.status + ": " + body);
   }
   return res.status === 204 ? null : res.json();

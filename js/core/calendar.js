@@ -6,19 +6,18 @@
 // solo sabe crear, actualizar y borrar eventos de un día en el calendario
 // "primary" a partir del payload que le pasen.
 
-import { getAccessToken } from "./auth.js";
+import { fetchGoogleConReintento } from "./auth.js";
 import { fechaISOLocal } from "./utils.js";
 
 async function calendarFetch(path, options) {
-  var res = await fetch("https://www.googleapis.com/calendar/v3/" + path, Object.assign({}, options, {
-    headers: Object.assign({ Authorization: "Bearer " + getAccessToken() }, (options && options.headers) || {})
-  }));
+  var res = await fetchGoogleConReintento("https://www.googleapis.com/calendar/v3/" + path, options);
   // 404/410: el evento ya no existe (lo borraron a mano desde Calendar, o el
   // id quedó desactualizado) — se trata como "no hay nada que actualizar/
   // borrar", no como error.
   if (res.status === 404 || res.status === 410) return null;
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
     throw new Error("Google Calendar API " + res.status + ": " + body);
   }
   return res.status === 204 ? null : res.json();

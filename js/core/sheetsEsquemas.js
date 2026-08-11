@@ -51,7 +51,11 @@ export var tablaClientes = crearTablaSheet("Clientes", [
   { key: "categoriasInsumo", header: "categorias_insumo_json", json: true, jsonDefault: function () { return []; } },
   { key: "descripcion", header: "descripcion" },
   { key: "puntuacion", header: "puntuacion", numero: true },
-  { key: "preciosPorInsumo", header: "precios_por_insumo_json", json: true, jsonDefault: function () { return []; } }
+  { key: "preciosPorInsumo", header: "precios_por_insumo_json", json: true, jsonDefault: function () { return []; } },
+  // Fecha de alta — habilita el orden "Recientes" del directorio. Los
+  // contactos anteriores a esta columna la traen vacía y se ordenan por su
+  // posición en la lista (ver ordenarContactos en modules/clientes.js).
+  { key: "fechaCreacion", header: "fecha_creacion" }
 ], {
   // El estado usa comisionDefault:{tipo,valor}|null (solo aplica a puntos de
   // consignación) — se aplana a dos columnas planas para la Sheet y se

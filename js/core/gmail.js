@@ -3,7 +3,7 @@
 // sube a ningún lado: se arma en el momento con jsPDF (ver core/pdf.js,
 // opts.enviarPorCorreo) y se adjunta directo al mensaje.
 
-import { getAccessToken } from "./auth.js";
+import { fetchGoogleConReintento } from "./auth.js";
 import { esc } from "./utils.js";
 
 // Trucos estándar para meter texto UTF-8 (tildes/eñes) dentro de un mensaje
@@ -43,13 +43,14 @@ export async function enviarCorreoConAdjunto(opts) {
 
   var raw = btoa(mensaje).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-  var res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+  var res = await fetchGoogleConReintento("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
-    headers: { Authorization: "Bearer " + getAccessToken(), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ raw: raw })
   });
   if (!res.ok) {
     var errText = await res.text().catch(function () { return ""; });
+    if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página, inicia sesión de nuevo y vuelve a enviar el correo.");
     throw new Error("Gmail API " + res.status + ": " + errText);
   }
   return res.json();
