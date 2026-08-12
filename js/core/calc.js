@@ -825,9 +825,13 @@ export function clientesFiltrados() {
   var q = norm(state.filtroClientes).trim();
   var list = state.clientes.slice().sort(function (a, b) { return norm(a.nombre) < norm(b.nombre) ? -1 : 1; });
   if (!q) return list;
+  // La búsqueda ignora la arroba: escribir "@zulma" o "zulma" encuentra lo
+  // mismo, porque el usuario se guarda sin ella.
+  var qUsuario = q.replace(/^@+/, "");
   return list.filter(function (c) {
     return norm(c.nombre).indexOf(q) >= 0 || norm(c.cedula).indexOf(q) >= 0 ||
-      norm(c.ciudad).indexOf(q) >= 0 || norm(c.telefono).indexOf(q) >= 0;
+      norm(c.ciudad).indexOf(q) >= 0 || norm(c.telefono).indexOf(q) >= 0 ||
+      (!!c.usuarioWhatsapp && norm(c.usuarioWhatsapp).indexOf(qUsuario) >= 0);
   });
 }
 export function buscarClientesCombo(q) {
@@ -1057,18 +1061,26 @@ export function calcCostoUnitarioProducto(p) {
 // total diga una cosa y las líneas otra. Ver renderIndicadoresPedido en
 // modules/pedidos.js, que muestra justo estos números.
 export function calcTotalesLineasPedido(lineas) {
-  var unidades = 0, precioTotal = 0, costoTotal = 0;
+  var unidades = 0, precioTotal = 0, costoDirecto = 0, costoIndirecto = 0;
   (lineas || []).forEach(function (l) {
     var cant = num(l.cantidad);
     unidades += cant;
     precioTotal += num(l.precioUnitario) * cant;
-    costoTotal += num(l.costoUnitario) * cant;
+    costoDirecto += num(l.costoUnitario) * cant;
+    // Parte que le toca a esta línea de los costos globales del pedido
+    // (domicilio, diseño): se reparte al convertir la cotización, ver
+    // lineasDeCotizacion en modules/cotizaciones.js. Sin esto, el costo del
+    // pedido y la suma de sus líneas no daban lo mismo.
+    costoIndirecto += num(l.costoIndirectoUnitario) * cant;
   });
+  var costoTotal = costoDirecto + costoIndirecto;
   var gananciaTotal = precioTotal - costoTotal;
   return {
     unidades: unidades,
     precioTotal: precioTotal,
     costoTotal: costoTotal,
+    costoDirecto: costoDirecto,
+    costoIndirecto: costoIndirecto,
     gananciaTotal: gananciaTotal,
     margenPct: precioTotal > 0 ? (gananciaTotal / precioTotal * 100) : 0,
     // Promedios por unidad: con líneas distintas (una camiseta y un bordado)
@@ -1121,7 +1133,13 @@ export function calcProductosVendidosRango(desde, hasta) {
           talla: v.talla || "—", cantidad: cant,
           costoUnit: costoUnit, precioUnit: precioUnit,
           costoTotal: costoUnit * cant, precioTotal: num(v.montoTotal),
-          ganancia: num(v.montoTotal) - costoUnit * cant - num(v.comisionMonto),
+          // Ganancia BRUTA (precio - costo), igual que en una venta directa.
+          // La comisión del punto NO se resta acá aunque salga de esta venta:
+          // ya cuenta como gasto propio en Finanzas (tipo "comision"), y
+          // restarla también aquí la contaría dos veces contra el mismo peso.
+          // Se expone aparte por si algún reporte la quiere mostrar.
+          ganancia: num(v.montoTotal) - costoUnit * cant,
+          comision: num(v.comisionMonto),
           numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor
         });
       });
@@ -1137,15 +1155,21 @@ export function calcProductosVendidosRango(desde, hasta) {
       var prod = l.productoId ? productoById(l.productoId) : null;
       var cant = num(l.cantidad) || 0;
       var precioUnit = l.precioUnitario !== undefined ? num(l.precioUnitario) : num(prod && prod.precioVenta);
-      var costoUnit = l.costoUnitario !== undefined ? num(l.costoUnitario) : calcCostoUnitarioProducto(prod);
+      var costoDirectoUnit = l.costoUnitario !== undefined ? num(l.costoUnitario) : calcCostoUnitarioProducto(prod);
+      // El costo real de vender esta línea incluye la parte que le tocó de
+      // los costos globales del pedido (domicilio, diseño...). Sin sumarla, el
+      // reporte reportaba MENOS costo del que la cotización ya había contado,
+      // e inflaba la ganancia por esa misma diferencia.
+      var costoUnit = costoDirectoUnit + num(l.costoIndirectoUnitario);
       filas.push({
         fecha: fecha, tipo: "directa",
         productoId: l.productoId || "",
         concepto: l.productoNombre || l.textoDescripcion || (prod && prod.nombre) || "—",
         talla: l.talla || "—", cantidad: cant,
-        costoUnit: costoUnit, precioUnit: precioUnit,
+        costoUnit: costoUnit, costoDirectoUnit: costoDirectoUnit, precioUnit: precioUnit,
         costoTotal: costoUnit * cant, precioTotal: precioUnit * cant,
         ganancia: (precioUnit - costoUnit) * cant,
+        comision: 0,
         numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor,
         observacion: l.observacion || "",
         campos: l.campos || []
@@ -1154,6 +1178,60 @@ export function calcProductosVendidosRango(desde, hasta) {
   });
 
   return filas.sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+}
+
+// Pedidos cuya venta cae en el rango, con lo que hace falta para leerlos de
+// un vistazo: qué se vendió, por cuánto, cuánto se cobró y qué falta cobrar.
+// Usa la MISMA fecha que el reporte de productos (fechaPedido), para que un
+// pedido no pueda aparecer en un reporte y faltar en el otro.
+export function calcPedidosRango(desde, hasta) {
+  return (state.pedidos || [])
+    .filter(function (p) {
+      var f = fechaPedido(p);
+      return f && (!desde || f >= desde) && (!hasta || f <= hasta);
+    })
+    .map(function (p) {
+      var total = num(p.total), abonado = num(p.abono);
+      return {
+        id: p.id, fecha: fechaPedido(p), numeroOp: p.numeroOp || "—",
+        cliente: p.cliente || "—", descripcion: p.descripcion || "—",
+        cantidad: num(p.cantidad),
+        total: total, costo: num(p.costo), ganancia: total - num(p.costo),
+        abonado: abonado, saldo: total - abonado,
+        estado: estadoLabelDe(p),
+        tipo: p.consignacion ? "Consignación" : "Venta directa",
+        vendedor: (p.vendedor && p.vendedor.nombre) || ""
+      };
+    })
+    .sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+}
+
+export function calcResumenPedidos(filas) {
+  var acc = { pedidos: (filas || []).length, unidades: 0, total: 0, costo: 0, ganancia: 0, abonado: 0, saldo: 0 };
+  (filas || []).forEach(function (f) {
+    acc.unidades += num(f.cantidad); acc.total += num(f.total); acc.costo += num(f.costo);
+    acc.ganancia += num(f.ganancia); acc.abonado += num(f.abonado); acc.saldo += num(f.saldo);
+  });
+  return acc;
+}
+
+// Ventas por vendedor DENTRO del rango — distinto de calcVentasVendedor(),
+// que es el acumulado histórico de una persona para su propio panel. Acá
+// interesa el periodo del reporte.
+export function calcVentasPorVendedorRango(desde, hasta) {
+  var mapa = {};
+  calcPedidosRango(desde, hasta).forEach(function (f) {
+    var nombre = f.vendedor || "(sin vendedor)";
+    if (!mapa[nombre]) mapa[nombre] = { vendedor: nombre, pedidos: 0, unidades: 0, total: 0, ganancia: 0, comision: 0 };
+    mapa[nombre].pedidos++;
+    mapa[nombre].unidades += num(f.cantidad);
+    mapa[nombre].total += num(f.total);
+    mapa[nombre].ganancia += num(f.ganancia);
+    var ped = (state.pedidos || []).filter(function (p) { return p.id === f.id; })[0];
+    if (ped && ped.vendedor && ped.vendedor.nombre) mapa[nombre].comision += calcComisionValor(ped);
+  });
+  return Object.keys(mapa).map(function (k) { return mapa[k]; })
+    .sort(function (a, b) { return b.total - a.total; });
 }
 
 export function calcResumenProductosVendidos(filas) {

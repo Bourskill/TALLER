@@ -167,6 +167,9 @@ export const state = {
   pedidoVendedorAbierto: false, // sección de comisión de vendedor desplegada en el formulario de pedido
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
+    // Nombre de usuario de WhatsApp (el que empieza por @): se guarda sin la
+    // arroba y en minúsculas, ver normalizarUsuarioWhatsapp en modules/clientes.js.
+    usuarioWhatsapp: "",
     // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).
     // "proveedor": vende insumos — categoriasInsumo/descripcion/puntuacion son propias de este tipo.
     tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "",
@@ -175,6 +178,9 @@ export const state = {
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
+  // Qué apartados del reporte están desplegados. El resumen financiero no
+  // está acá porque va siempre visible: es el titular, no un detalle.
+  reporteSecciones: {},
   formEmp: { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [] },
   nominaPagoId: "", // id de la persona con el mini-formulario de "Pagar" abierto (o "")
   empEditando: "", // id de la persona en nómina actualmente en modo edición (o "")
@@ -238,6 +244,7 @@ export const state = {
   clientesOrden: "abc", // "abc" | "recientes" | "categoria" (categoría solo aplica a proveedores)
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
   clienteEditCategorias: [], // borrador reactivo de categoriasInsumo mientras se edita un proveedor (ver renderCamposProveedorEdit)
+  sincronizandoContactos: false, // true mientras se empujan todos los contactos a Google Contacts — nunca se persiste
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   clientePreciosAbierto: "", // id del proveedor con su panel de "Precios y compras" desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a

@@ -12,6 +12,36 @@ import { num, slugify, codigoPublico } from "./utils.js";
 function money(n) { return "$" + Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }); }
 function numFmt(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 }); }
 
+// ---------- Color del taller en los PDF ----------
+// El color de acento de Configuración deja de ser solo de los correos: los
+// encabezados de tabla y los títulos de los documentos lo usan también, para
+// que todo lo que sale del taller se vea de la misma marca en vez del gris y
+// negro genéricos de antes.
+function hexARgb(hex, fallback) {
+  var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return fallback;
+  var n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+// Color principal: el de Configuración. Si nunca se definió, el violeta por
+// defecto de DEFAULT_CONFIG.
+function colorAcento() {
+  return hexARgb(state.config && state.config.colorAcento, [106, 89, 240]);
+}
+// Variante oscurecida, para encabezados secundarios que deben leerse como
+// "del mismo color pero un escalón atrás" sin competir con el principal.
+function colorAcentoOscuro() {
+  return colorAcento().map(function (c) { return Math.round(c * 0.62); });
+}
+// Blanco o negro según qué se lea mejor encima del acento — un acento claro
+// (amarillo, lima) con texto blanco encima queda ilegible. Fórmula de
+// luminancia relativa estándar.
+function textoSobreAcento() {
+  var c = colorAcento();
+  var luminancia = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
+  return luminancia > 0.6 ? [20, 20, 20] : [255, 255, 255];
+}
+
 // Los PDF que le van al cliente (cotización, factura, recibo — no los
 // internos ni los reportes) terminan acá: por defecto se descargan como
 // siempre, pero con opts.enviarPorCorreo devuelven los bytes en vez de
@@ -140,8 +170,9 @@ export async function generarPDFCotizacion(cot, opts) {
     } catch (e) { /* si falla, se omite el logo sin bloquear el PDF */ }
   }
 
+  var acentoCot = colorAcento();
   doc.setFont("helvetica", "bold"); doc.setFontSize(21);
-  doc.setTextColor(20, 20, 20);
+  doc.setTextColor(acentoCot[0], acentoCot[1], acentoCot[2]);
   doc.text("COTIZACIÓN", tituloX, y);
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
@@ -150,7 +181,7 @@ export async function generarPDFCotizacion(cot, opts) {
   doc.text("Fecha  " + fecha, pageW - marginX, y, { align: "right" });
 
   y += 22;
-  doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
+  doc.setDrawColor(acentoCot[0], acentoCot[1], acentoCot[2]); doc.setLineWidth(1.6);
   doc.line(marginX, y, pageW - marginX, y);
   y += 24;
 
@@ -190,7 +221,7 @@ export async function generarPDFCotizacion(cot, opts) {
     head: [["", "CANTIDAD", "REFERENCIA", "PRECIO POR UNIDAD", "TOTAL DE LA LÍNEA"]],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7, minCellHeight: 32, valign: "middle" },
-    headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: "bold", fontSize: 9 },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
     alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
     columnStyles: { 0: { cellWidth: 34 }, 1: { halign: "center", cellWidth: 60 }, 3: { halign: "right" }, 4: { halign: "right" } },
@@ -243,14 +274,18 @@ function drawHeaderBasic(doc, titulo, docNum) {
   var pageW = doc.internal.pageSize.getWidth();
   var marginX = 42;
   var y = 54;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(21); doc.setTextColor(20, 20, 20);
+  var acento = colorAcento();
+  doc.setFont("helvetica", "bold"); doc.setFontSize(21);
+  doc.setTextColor(acento[0], acento[1], acento[2]);
   doc.text(titulo, marginX, y);
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
   doc.text("N.º " + docNum, pageW - marginX, y - 13, { align: "right" });
   var fecha = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
   doc.text("Fecha  " + fecha, pageW - marginX, y, { align: "right" });
   y += 22;
-  doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
+  // La línea bajo el encabezado toma el acento (más gruesa) en vez del gris
+  // suelto de antes: es lo que hace que la hoja se lea como del taller.
+  doc.setDrawColor(acento[0], acento[1], acento[2]); doc.setLineWidth(1.6);
   doc.line(marginX, y, pageW - marginX, y);
   y += 24;
   return { pageW: pageW, marginX: marginX, y: y };
@@ -335,25 +370,102 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
   doc.text("Todos los movimientos del periodo", marginX, y);
   y += 8;
 
+  var d = desgloses || {};
+
+  // La gráfica va primero: es el panorama, y lo que sigue es el detalle.
+  if (d.grafica && d.grafica.dataUrl) {
+    y = seccionGrafica(doc, y, marginX, pageW, d.grafica);
+  }
+
+  if (d.movimientos !== false) {
+    y = tituloSeccionReporte(doc, y, marginX, "Movimientos del periodo", "Cada ingreso y gasto registrado en el rango.");
+    doc.autoTable({
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [["Fecha", "Tipo", "Concepto", "Persona", "Monto"]],
+      body: body.length ? body : [["—", "—", "Sin movimientos en este periodo", "—", "—"]],
+      styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold" },
+      columnStyles: { 4: { halign: "right" } },
+      theme: "grid"
+    });
+    y = doc.lastAutoTable.finalY + 24;
+  }
+
+  // Cada apartado va solo si quien pidió el PDF lo marcó (null = no marcado).
+  // Sus columnas son propias: lo que le sirve a insumos no es lo que le sirve
+  // a productos ni a pedidos.
+  if (d.insumos) y = seccionDesgloseInsumos(doc, y, marginX, pageW, d.insumos);
+  if (d.productos) y = seccionDesgloseProductos(doc, y, marginX, pageW, d.productos);
+  if (d.pedidos) y = seccionDesglosePedidos(doc, y, marginX, pageW, d.pedidos);
+  if (d.vendedores) y = seccionDesgloseVendedores(doc, y, marginX, pageW, d.vendedores);
+
+  doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
+}
+
+// Gráfica de ingresos/gastos: se incrusta como imagen del canvas que ya está
+// dibujado en pantalla (ver imagenGraficaPeriodo en modules/resumen.js), así
+// el PDF muestra exactamente la misma gráfica que se vio, sin redibujarla.
+function seccionGrafica(doc, y, marginX, pageW, grafica) {
+  y = tituloSeccionReporte(doc, y, marginX, "Ingresos y gastos del periodo", "");
+  var ancho = pageW - marginX * 2;
+  var alto = grafica.alto && grafica.ancho ? ancho * (grafica.alto / grafica.ancho) : 200;
+  if (alto > 260) alto = 260;
+  var pageH = doc.internal.pageSize.getHeight();
+  if (y + alto > pageH - 40) { doc.addPage(); y = 54; }
+  try {
+    doc.addImage(grafica.dataUrl, "PNG", marginX, y, ancho, alto);
+    y += alto + 24;
+  } catch (e) {
+    // Si el canvas no se pudo convertir, el reporte sigue sin la gráfica.
+  }
+  return y;
+}
+
+function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos) {
+  y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado y lo que falta por cobrar de cada uno.");
+  var acc = pedidos.reduce(function (a, f) {
+    a.total += num(f.total); a.abonado += num(f.abonado); a.saldo += num(f.saldo); a.ganancia += num(f.ganancia);
+    return a;
+  }, { total: 0, abonado: 0, saldo: 0, ganancia: 0 });
   doc.autoTable({
     startY: y,
     margin: { left: marginX, right: marginX },
-    head: [["Fecha", "Tipo", "Concepto", "Persona", "Monto"]],
-    body: body.length ? body : [["—", "—", "Sin movimientos en este periodo", "—", "—"]],
-    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
-    columnStyles: { 4: { halign: "right" } },
+    head: [["Fecha", "N.º OP", "Cliente", "Tipo", "Cant.", "Total", "Abonado", "Saldo"]],
+    body: pedidos.length
+      ? pedidos.map(function (f) {
+        return [f.fecha, f.numeroOp, f.cliente, f.tipo, numFmt(f.cantidad), money(f.total), money(f.abonado), money(f.saldo)];
+      }).concat([["", "", "TOTAL", "", "", money(acc.total), money(acc.abonado), money(acc.saldo)]])
+      : [["—", "—", "Sin pedidos en este periodo", "—", "—", "—", "—", "—"]],
+    styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
+    headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
+    columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } },
     theme: "grid"
   });
-  y = doc.lastAutoTable.finalY + 24;
+  return doc.lastAutoTable.finalY + 24;
+}
 
-  // Dos apartados propios que explican el porqué de los números de arriba,
-  // cada uno con las columnas que le sirven a él y no a los demás.
-  var d = desgloses || {};
-  y = seccionDesgloseInsumos(doc, y, marginX, pageW, d.insumos || []);
-  y = seccionDesgloseProductos(doc, y, marginX, pageW, d.productos || []);
-
-  doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
+function seccionDesgloseVendedores(doc, y, marginX, pageW, vendedores) {
+  y = tituloSeccionReporte(doc, y, marginX, "Ventas por vendedor", "Cuánto vendió cada quien en el periodo y qué comisión generó.");
+  var acc = vendedores.reduce(function (a, v) {
+    a.total += num(v.total); a.ganancia += num(v.ganancia); a.comision += num(v.comision);
+    return a;
+  }, { total: 0, ganancia: 0, comision: 0 });
+  doc.autoTable({
+    startY: y,
+    margin: { left: marginX, right: marginX },
+    head: [["Vendedor", "Pedidos", "Unidades", "Vendido", "Ganancia", "Comisión"]],
+    body: vendedores.length
+      ? vendedores.map(function (v) {
+        return [v.vendedor, numFmt(v.pedidos), numFmt(v.unidades), money(v.total), money(v.ganancia), money(v.comision)];
+      }).concat([["TOTAL", "", "", money(acc.total), money(acc.ganancia), money(acc.comision)]])
+      : [["—", "—", "Sin ventas en este periodo", "—", "—", "—"]],
+    styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
+    headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
+    columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    theme: "grid"
+  });
+  return doc.lastAutoTable.finalY + 24;
 }
 
 // Encabezado de sección con salto de página si ya no cabe — así una tabla
@@ -384,7 +496,7 @@ function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos) {
       }).concat([["", "TOTAL", "", "", money(total)]])
       : [["—", "Sin compras de insumo en este periodo", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-    headStyles: { fillColor: [70, 70, 70], textColor: [255, 255, 255], fontStyle: "bold" },
+    headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 2: { halign: "right" }, 4: { halign: "right" } },
     theme: "grid"
   });
@@ -407,7 +519,7 @@ function seccionDesgloseProductos(doc, y, marginX, pageW, productos) {
       }).concat([["", "TOTAL", numFmt(acc.cantidad), money(acc.costo), money(acc.precio), money(acc.ganancia)]])
       : [["—", "Sin ventas de producto en este periodo", "—", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-    headStyles: { fillColor: [70, 70, 70], textColor: [255, 255, 255], fontStyle: "bold" },
+    headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
     theme: "grid"
   });
@@ -472,7 +584,7 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
       return [c.concepto, numFmt(c.cantidad), money(c.costo), money(c.precio), money(c.ganancia), (c.precio > 0 ? (c.ganancia / c.precio * 100).toFixed(1) : "0.0") + "%"];
     }),
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
     theme: "grid"
   });
@@ -492,7 +604,7 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
       ];
     }),
     styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
-    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" }, 10: { halign: "right" } },
     theme: "grid"
   });
@@ -539,7 +651,7 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
     head: [["Cliente", "Descripción", "Total", "Comisión", "Estado"]],
     body: body.length ? body : [["—", "Sin pedidos ni cotizaciones registrados", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
-    headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: "bold" },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
     theme: "grid"
   });
@@ -595,7 +707,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
       head: [["Referencia", "Cant.", "Costo x1", "Precio x1", "Margen", "Costo total", "Precio total"]],
       body: filasRef,
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
-      headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
       margin: { left: marginX, right: marginX }
     });
     y = doc.lastAutoTable.finalY + 20;
@@ -631,7 +743,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           ];
         }),
         styles: { font: "helvetica", fontSize: 8, cellPadding: 4 },
-        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 7.5 },
+        headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 7.5 },
         columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
         margin: { left: marginX, right: marginX }
       });
@@ -656,7 +768,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           return [g.concepto + (g.destino === "insumo" ? " — " + g.destinoNombre : " — total"), g.fecha, money(g.monto), (variacion >= 0 ? "+" : "-") + money(Math.abs(variacion))];
         }),
         styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
-        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8 },
+        headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
         margin: { left: marginX, right: marginX }
       });
       y = doc.lastAutoTable.finalY + 20;
@@ -733,7 +845,7 @@ export async function generarPDFPedido(p) {
           : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.observaciones || "—"];
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
-      headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8.5 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
       margin: { left: marginX, right: marginX }
     });
     y = doc.lastAutoTable.finalY + 24;
@@ -752,7 +864,7 @@ export async function generarPDFPedido(p) {
         return [i + 1, l.productoNombre || "—", l.talla || "—", num(l.cantidad), detalleTxt || "—"];
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
-      headStyles: { fillColor: [30, 30, 30], textColor: 255, fontSize: 8.5 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
       columnStyles: { 3: { halign: "right" } },
       margin: { left: marginX, right: marginX }
     });
@@ -884,7 +996,7 @@ export async function generarPDFFactura(p, opts) {
     head: [["CANTIDAD", "DESCRIPCIÓN", "VALOR UNITARIO", "TOTAL"]],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
-    headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: "bold", fontSize: 9 },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
     alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
     columnStyles: { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } }
@@ -962,7 +1074,7 @@ export async function generarPDFRemision(p, remision, opts) {
       return [it.productoNombre || "—", it.talla || "—", numFmt(it.cantidad), money(it.precioUnitario), money(num(it.cantidad) * num(it.precioUnitario))];
     }),
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
-    headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: "bold", fontSize: 9 },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
     alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
     columnStyles: { 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } }

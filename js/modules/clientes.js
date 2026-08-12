@@ -44,6 +44,19 @@ function renderTabsClientes(vista) {
 // "proveedor"/"punto" en vez de un genérico "contacto" sin contexto.
 var ETIQ_TIPO_BOTON = { cliente: "cliente", proveedor: "proveedor", punto_consignacion: "punto" };
 
+// ---------- Usuario de WhatsApp ----------
+// El nombre de usuario de WhatsApp (el que empieza por @) permite escribirle
+// a alguien sin tener su número. Se guarda SIN la arroba y en minúsculas —
+// una sola forma canónica, para que "@Zulma", "Zulma" y "@zulma" no queden
+// como tres contactos distintos al buscar. La arroba se pone al mostrarlo.
+function normalizarUsuarioWhatsapp(valor) {
+  return String(valor || "").trim().replace(/^@+/, "").toLowerCase();
+}
+function usuarioWhatsappTexto(c) {
+  var u = normalizarUsuarioWhatsapp(c && c.usuarioWhatsapp);
+  return u ? "@" + u : "";
+}
+
 function renderChipsCategoriaInsumo(seleccionadas, action) {
   var categorias = state.catalogoCategorias || [];
   if (!categorias.length) return '<div class="section-sub" style="margin:0;">Aún no tienes categorías de insumo — créalas en Catálogo.</div>';
@@ -92,6 +105,7 @@ function renderFormNuevoCliente() {
     "</select></div>" +
     '<div class="field"><label>Cédula / RUT / NIT</label><input data-form="cliente" data-field="cedula" value="' + esc(f.cedula) + '" placeholder="Documento" /></div>' +
     '<div class="field"><label>Teléfono</label><input data-form="cliente" data-field="telefono" value="' + esc(f.telefono) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Usuario de WhatsApp' + renderHelp("El nombre de usuario de WhatsApp, ese que empieza por @ y sirve para encontrar a alguien sin tener su número. Se guarda tal cual y viaja en las notas del contacto de Google, así lo tienes también en el celular.") + '</label><input data-form="cliente" data-field="usuarioWhatsapp" value="' + esc(f.usuarioWhatsapp || "") + '" placeholder="@usuario" /></div>' +
     '<div class="field"><label>Correo</label><input type="email" data-form="cliente" data-field="correo" value="' + esc(f.correo) + '" placeholder="Opcional" /></div>' +
     '<div class="field wide"><label>Dirección</label><input data-form="cliente" data-field="direccion" value="' + esc(f.direccion) + '" placeholder="Para envíos" /></div>' +
     '<div class="field"><label>Ciudad</label><input data-form="cliente" data-field="ciudad" value="' + esc(f.ciudad) + '" /></div>' +
@@ -125,6 +139,8 @@ function renderListaContactos(vista) {
     (esProveedores ? "Buscar proveedor por nombre, ciudad o teléfono..." : "Buscar por nombre, cédula, ciudad o teléfono...") + '" />' +
     '<div class="client-count">' + lista.length + " " + (esProveedores ? "proveedor" : "contacto") + (lista.length === 1 ? "" : "es") + "</div></div>";
 
+  html += renderSyncGoogle(lista);
+
   var criterios = [["abc", "A–Z"], ["recientes", "Recientes"]];
   if (esProveedores) criterios.push(["categoria", "Por categoría"]);
   html += '<div class="filters" style="margin-bottom:12px;"><span class="mini-label" style="align-self:center;margin-right:2px;">Ordenar:</span>' +
@@ -141,6 +157,40 @@ function renderListaContactos(vista) {
 
   if (orden === "categoria") return html + renderProveedoresPorCategoria(lista);
   return html + ordenarContactos(lista, orden).map(renderClienteCard).join("");
+}
+
+// El sync con Google Contacts es lo que hace que estos contactos terminen en
+// la agenda del celular y, de ahí, en WhatsApp. Hasta ahora solo ocurría al
+// crear o editar un contacto: los que ya existían —o los que registró otra
+// persona del taller— nunca llegaban a tu cuenta. Este botón los empuja
+// todos de una vez, a la cuenta con la que estés dentro ahora mismo.
+function renderSyncGoogle(lista) {
+  var session = getSession();
+  if (!session || !session.email) return "";
+  var email = session.email;
+  var pendientes = lista.filter(function (c) { return !resourceNameDe(c, email); }).length;
+  var sincronizando = !!state.sincronizandoContactos;
+  return '<div class="section-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;">' +
+    '<button class="btn ghost small" ' + (sincronizando ? "disabled" : "") + ' data-action="sincronizar-contactos-google">' +
+    (sincronizando ? "Sincronizando…" : "🔄 Enviar a mis Contactos de Google") + "</button>" +
+    "<span>" +
+    (pendientes
+      ? "<b>" + pendientes + "</b> de esta lista todavía no están en la agenda de " + esc(email) + "."
+      : "Todos los de esta lista ya están en la agenda de " + esc(email) + ".") +
+    " Una vez en Google, aparecen solos en el celular y en WhatsApp.</span>" +
+    "</div>";
+}
+
+// Atajo para escribirle sin pasar por la agenda: wa.me abre el chat directo,
+// exista o no el contacto guardado en el celular. Complementa al sync con
+// Google (que es lo que hace que aparezca con nombre en WhatsApp), no lo
+// reemplaza. Se asume Colombia (+57) cuando el número va sin indicativo,
+// que es como se escriben los teléfonos en el resto de la app.
+function renderBotonWhatsapp(c) {
+  var digitos = String(c.telefono || "").replace(/\D/g, "");
+  if (digitos.length < 7) return "";
+  var numero = digitos.length === 10 ? "57" + digitos : digitos;
+  return '<a class="btn ghost small" href="https://wa.me/' + numero + '" target="_blank" rel="noopener noreferrer" title="Abrir chat de WhatsApp con ' + esc(c.nombre) + '">💬</a>';
 }
 
 function ordenActivo(esProveedores) {
@@ -213,6 +263,7 @@ function renderClienteCard(c) {
       (esProveedorC
         ? '<button class="btn ghost small" data-action="toggle-cliente-precios" data-id="' + c.id + '">💲 Precios y compras' + ((c.preciosPorInsumo || []).length ? " (" + c.preciosPorInsumo.length + ")" : "") + "</button>"
         : '<button class="btn ghost small" data-action="toggle-cliente-roster" data-id="' + c.id + '">🎽 Roster' + (roster.length ? " (" + roster.length + ")" : "") + "</button>") +
+      renderBotonWhatsapp(c) +
       '<button class="btn ghost small" data-action="editar-cliente" data-id="' + c.id + '">Editar</button>' +
       '<button class="btn danger small" data-action="remove-cliente" data-id="' + c.id + '">Eliminar</button>' +
       "</span></div>" +
@@ -233,6 +284,7 @@ function renderClienteCard(c) {
       '<div class="cliente-grid">' +
       campoCliente("Cédula/RUT", c.cedula) +
       campoCliente("Teléfono", c.telefono) +
+      campoCliente("WhatsApp", usuarioWhatsappTexto(c)) +
       campoCliente("Correo", c.correo) +
       campoCliente("Dirección", c.direccion) +
       campoCliente("Ciudad / CP", c.ciudad ? (c.ciudad + (c.cp ? " / " + c.cp : "")) : "") +
@@ -373,6 +425,7 @@ function renderClienteEdit(c) {
     "</select></div>" +
     '<div class="field"><label>Cédula / RUT / NIT</label><input class="mini-input" data-role="edit-cedula" value="' + esc(c.cedula || "") + '" /></div>' +
     '<div class="field"><label>Teléfono</label><input class="mini-input" data-role="edit-telefono" value="' + esc(c.telefono || "") + '" /></div>' +
+    '<div class="field"><label>Usuario de WhatsApp</label><input class="mini-input" data-role="edit-usuario-whatsapp" value="' + esc(usuarioWhatsappTexto(c)) + '" placeholder="@usuario" /></div>' +
     '<div class="field"><label>Correo</label><input type="email" class="mini-input" data-role="edit-correo" value="' + esc(c.correo || "") + '" /></div>' +
     '<div class="field wide"><label>Dirección</label><input class="mini-input" data-role="edit-direccion" value="' + esc(c.direccion || "") + '" /></div>' +
     '<div class="field"><label>Ciudad</label><input class="mini-input" data-role="edit-ciudad" value="' + esc(c.ciudad || "") + '" /></div>' +
@@ -397,17 +450,41 @@ function renderClienteEdit(c) {
 // al agregar o editar, y se borra al eliminar el cliente. Los fallos (sin
 // conexión, scope todavía no otorgado, etc.) solo quedan en consola: nunca
 // deben bloquear el guardado real del cliente.
+// Un contacto de Google vive dentro de UNA cuenta: su identificador no
+// significa nada en la cuenta de otra persona del taller. Por eso cada
+// cliente guarda un identificador por correo (contactResourceNames), no uno
+// solo compartido — con el campo único, el sync de cada quien pisaba el del
+// anterior y, al no encontrar ese identificador en su propia agenda, creaba
+// un contacto nuevo: duplicados que se multiplicaban con cada edición.
+function resourceNameDe(cliente, email) {
+  var mapa = cliente.contactResourceNames || {};
+  if (mapa[email]) return mapa[email];
+  // Compatibilidad: los clientes de antes de este cambio tienen el campo
+  // viejo. Se toma como el de la cuenta actual (que es la que muy
+  // probablemente lo creó) y al primer sync queda guardado en el mapa.
+  return cliente.contactResourceName || "";
+}
+
+function guardarResourceName(clienteId, email, resourceName) {
+  state.clientes = state.clientes.map(function (c) {
+    if (c.id !== clienteId) return c;
+    var mapa = Object.assign({}, c.contactResourceNames || {});
+    mapa[email] = resourceName;
+    return Object.assign({}, c, { contactResourceNames: mapa, contactResourceName: resourceName });
+  });
+  persist("clientes");
+}
+
 function sincronizarClienteContacto(cliente) {
   var session = getSession();
   if (!session) { console.warn("[Contacts] Se omite el sync de \"" + cliente.nombre + "\": no hay sesión activa (getSession() devolvió null)."); return; }
-  console.info("[Contacts] Sincronizando \"" + cliente.nombre + "\" como " + session.email + "…");
-  sincronizarContacto(cliente).then(function (resourceName) {
+  var email = session.email || "";
+  console.info("[Contacts] Sincronizando \"" + cliente.nombre + "\" como " + email + "…");
+  sincronizarContacto(cliente, resourceNameDe(cliente, email)).then(function (resourceName) {
     console.info("[Contacts] Listo: \"" + cliente.nombre + "\" → " + (resourceName || "(sin resourceName, revisa la respuesta de Google)"));
-    if (!resourceName || cliente.contactResourceName === resourceName) return;
-    var idx = state.clientes.findIndex(function (c) { return c.id === cliente.id; });
-    if (idx === -1) return;
-    state.clientes = state.clientes.map(function (c) { return c.id === cliente.id ? Object.assign({}, c, { contactResourceName: resourceName }) : c; });
-    persist("clientes");
+    if (!resourceName || resourceNameDe(cliente, email) === resourceName) return;
+    if (!state.clientes.some(function (c) { return c.id === cliente.id; })) return;
+    guardarResourceName(cliente.id, email, resourceName);
   }).catch(function (e) { console.error("[Contacts] No se pudo sincronizar \"" + cliente.nombre + "\":", e); });
 }
 
@@ -422,6 +499,40 @@ export var actions = {
   "set-clientes-orden": function (el) {
     state.clientesOrden = el.getAttribute("data-val");
     notify();
+  },
+  // Empuja TODOS los contactos de la pestaña actual a la agenda de Google de
+  // quien esté dentro. Se hace de a uno y en serie (no en paralelo) para no
+  // pasarse de las cuotas de la People API con una lista larga, y cada
+  // resultado se guarda apenas llega: si algo falla a mitad de camino, lo ya
+  // sincronizado no se pierde ni se repite en el siguiente intento.
+  "sincronizar-contactos-google": async function () {
+    var session = getSession();
+    if (!session || !session.email) { window.alert("Inicia sesión con Google para poder sincronizar."); return; }
+    var email = session.email;
+    var esProveedores = vistaClientes() === "proveedores";
+    var lista = state.clientes.filter(function (c) {
+      return esProveedores ? c.tipoRelacion === "proveedor" : c.tipoRelacion !== "proveedor";
+    });
+    if (!lista.length) { window.alert("No hay contactos en esta pestaña."); return; }
+    if (!window.confirm("Se van a enviar " + lista.length + " contacto(s) a la agenda de Google de " + email + ".\n\nLos que ya estén se actualizan, no se duplican.\n\n¿Seguir?")) return;
+
+    state.sincronizandoContactos = true;
+    notify();
+    var okCount = 0, errores = [];
+    for (var i = 0; i < lista.length; i++) {
+      var c = lista[i];
+      try {
+        var resourceName = await sincronizarContacto(c, resourceNameDe(c, email));
+        if (resourceName) { guardarResourceName(c.id, email, resourceName); okCount++; }
+      } catch (e) {
+        errores.push(c.nombre + ": " + (e && e.message ? e.message : e));
+      }
+    }
+    state.sincronizandoContactos = false;
+    notify();
+    window.alert(okCount + " contacto(s) en la agenda de " + email + "." +
+      (errores.length ? "\n\nNo se pudieron sincronizar " + errores.length + ":\n" + errores.slice(0, 5).join("\n") : "") +
+      "\n\nEn el celular pueden tardar unos minutos en aparecer (Google los baja solo).");
   },
   "set-cliente-tipo-relacion": function (el) {
     state.formCliente.tipoRelacion = el.value;
@@ -440,7 +551,9 @@ export var actions = {
     var esPunto = tipo === "punto_consignacion";
     var esProveedor = tipo === "proveedor";
     var nuevo = {
-      id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo, contactResourceName: "",
+      id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo,
+      usuarioWhatsapp: normalizarUsuarioWhatsapp(fcli.usuarioWhatsapp),
+      contactResourceName: "", contactResourceNames: {},
       tipoRelacion: tipo,
       comisionDefault: esPunto ? { tipo: fcli.comisionDefaultTipo || "porcentaje", valor: num(fcli.comisionDefaultValor) } : null,
       categoriasInsumo: esProveedor ? (fcli.categoriasInsumo || []) : [],
@@ -452,7 +565,7 @@ export var actions = {
       roster: []
     };
     state.clientes.unshift(nuevo);
-    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
+    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", usuarioWhatsapp: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
     // Aterriza en la pestaña donde acaba de quedar registrado, no en una
     // lista donde habría que buscarlo entre los de otro tipo.
     state.clientesVista = esProveedor ? "proveedores" : "contactos";
@@ -502,6 +615,7 @@ export var actions = {
         nombre: nombre,
         cedula: val(fila, "edit-cedula"),
         telefono: val(fila, "edit-telefono"),
+        usuarioWhatsapp: normalizarUsuarioWhatsapp(val(fila, "edit-usuario-whatsapp")),
         correo: val(fila, "edit-correo"),
         direccion: val(fila, "edit-direccion"),
         ciudad: val(fila, "edit-ciudad"),

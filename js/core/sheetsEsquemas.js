@@ -43,7 +43,15 @@ export var tablaClientes = crearTablaSheet("Clientes", [
   { key: "entidad", header: "entidad_bancaria" },
   { key: "telefono", header: "telefono" },
   { key: "correo", header: "correo" },
+  // Nombre de usuario de WhatsApp, guardado sin la arroba (ver
+  // normalizarUsuarioWhatsapp en modules/clientes.js).
+  { key: "usuarioWhatsapp", header: "whatsapp_usuario" },
   { key: "contactResourceName", header: "google_contacts_id" },
+  // Identificador del contacto en Google POR CUENTA ({correo: resourceName}).
+  // Un resourceName solo existe dentro de la cuenta que lo creó, así que con
+  // un único campo compartido cada usuario del taller pisaba el del otro y
+  // terminaba creando duplicados en su propia agenda.
+  { key: "contactResourceNames", header: "google_contacts_ids_json", json: true, jsonDefault: function () { return {}; } },
   { key: "tipoRelacion", header: "tipo_relacion" },
   { key: "comisionDefaultTipo", header: "comision_tipo" },
   { key: "comisionDefaultValor", header: "comision_valor", numero: true },

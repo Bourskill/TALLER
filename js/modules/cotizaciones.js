@@ -1766,6 +1766,7 @@ function lineasDeCotizacion(cot) {
         productoId: ref.productoId || "", productoNombre: ref.nombre || cot.descripcion || "—",
         imagenUrl: ref.imagenUrl || "", talla: talla, cantidad: cantidad,
         precioUnitario: t.precioUnit, costoUnitario: t.costoUnit,
+        costoIndirectoUnitario: 0, // se reparte abajo, una vez se sabe el total de unidades
         observacion: "", campos: []
       };
     }
@@ -1781,7 +1782,39 @@ function lineasDeCotizacion(cot) {
     var resto = num(ref.cantidadPedida) - conTalla;
     if (resto > 0 || !tallas.length) lineas.push(nuevaLinea("", Math.max(0, resto)));
   });
-  return lineas.filter(function (l) { return num(l.cantidad) > 0; });
+  lineas = lineas.filter(function (l) { return num(l.cantidad) > 0; });
+  repartirCostosGlobales(cot, lineas);
+  return lineas;
+}
+
+// Reparte los costos globales del pedido (domicilio, diseño: lo que se paga
+// una vez, ver renderCostosGlobales) entre todas las unidades vendidas, para
+// que el costo del pedido y la suma de sus líneas den EXACTAMENTE lo mismo.
+// Sin esto, la cotización contaba el domicilio y el reporte de productos
+// vendidos no, así que el mismo pedido mostraba dos ganancias distintas.
+//
+// Se reparte por unidad (no por valor): es como lo diría cualquiera en el
+// taller — "el domicilio son $30.000 entre las 15 prendas". El residuo de la
+// división se le carga a la última línea, así la suma cierra al peso exacto y
+// no queda un centavo perdido por redondeo.
+function repartirCostosGlobales(cot, lineas) {
+  var globales = calcCostosGlobales(cot);
+  if (!globales || !lineas.length) return;
+  var unidades = lineas.reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+  if (unidades <= 0) return;
+
+  var porUnidad = globales / unidades;
+  var acumulado = 0;
+  lineas.forEach(function (l, i) {
+    if (i === lineas.length - 1) {
+      // Última línea: se lleva lo que falte para llegar al total exacto.
+      l.costoIndirectoUnitario = num(l.cantidad) > 0 ? (globales - acumulado) / num(l.cantidad) : 0;
+      return;
+    }
+    var deLaLinea = porUnidad * num(l.cantidad);
+    l.costoIndirectoUnitario = porUnidad;
+    acumulado += deLaLinea;
+  });
 }
 
 function lineasStockDeCot(cot) {

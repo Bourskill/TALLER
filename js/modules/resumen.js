@@ -7,7 +7,8 @@ import { esc, fmt, todayStr, num } from "../core/utils.js";
 import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
-  calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos
+  calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
+  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango
 } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
@@ -258,6 +259,61 @@ export function afterRender() {
   if (typeof window.Chart === "undefined") return;
   dibujarChartIngresosGastos();
   dibujarChartPrendasDia();
+  dibujarChartReportePeriodo();
+}
+
+var chartReportePeriodo = null;
+
+// Gráfica del rango elegido en el reporte (distinta de la de arriba, que son
+// siempre los últimos 30 días). Se dibuja solo si su apartado está abierto —
+// si el canvas no está en el DOM, no hay nada que hacer.
+function dibujarChartReportePeriodo() {
+  if (chartReportePeriodo) { chartReportePeriodo.destroy(); chartReportePeriodo = null; }
+  var canvas = document.getElementById("chart-reporte-periodo");
+  if (!canvas) return;
+  var fr = state.formReporte;
+  var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
+  if (!movimientos.length) return;
+  var serie = calcSerieMovimientos(movimientos, fr.desde, fr.hasta);
+  if (!serie.puntos.length) return;
+  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft");
+  chartReportePeriodo = new window.Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: serie.puntos.map(function (p) { return etiquetaPuntoGrafica(p.clave, serie.granularidad); }),
+      datasets: [
+        { label: "Ingresos", data: serie.puntos.map(function (p) { return p.ingresos; }), backgroundColor: cssVar("--success"), borderRadius: 4, maxBarThickness: 22 },
+        { label: "Gastos", data: serie.puntos.map(function (p) { return p.gastos; }), backgroundColor: cssVar("--danger"), borderRadius: 4, maxBarThickness: 22 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      // Sin animación: el PDF toma la imagen del canvas apenas se pide, y con
+      // animación podría capturarlo a medio dibujar.
+      animation: false,
+      plugins: {
+        legend: { labels: { color: ink, boxWidth: 10, boxHeight: 10 } },
+        tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmt(ctx.parsed.y); } } }
+      },
+      scales: {
+        x: { ticks: { color: ink }, grid: { display: false } },
+        y: { ticks: { color: ink, callback: function (v) { return fmtCorto(v); } }, grid: { color: grid }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+// Imagen de la gráfica para incrustarla en el PDF. Devuelve null si el
+// apartado está cerrado (no hay canvas) o si Chart.js no cargó — el PDF se
+// genera igual, solo sin la gráfica.
+function imagenGraficaPeriodo() {
+  var canvas = document.getElementById("chart-reporte-periodo");
+  if (!canvas || !chartReportePeriodo) return null;
+  try {
+    return { dataUrl: canvas.toDataURL("image/png", 1), ancho: canvas.width, alto: canvas.height };
+  } catch (e) {
+    return null;
+  }
 }
 
 function dibujarChartIngresosGastos() {
@@ -328,20 +384,37 @@ function fmtCorto(n) {
   return fmt(n);
 }
 
-// Único panel de reporte financiero. El mismo rango alimenta los números en
-// vivo, el PDF y el CSV — nunca puede pasar que digan cosas distintas entre
-// sí, porque los tres usan calcResumenMovimientos() sobre los mismos
-// `movimientos`. Solo se reportan movimientos REALES (state.tx) — no hay
-// ningún número de estimaciones/cotizaciones acá ni en el PDF: lo cotizado
-// no es gasto hasta que se registra como costo real o como compra de insumo.
+// Panel de reporte. Lo PRINCIPAL es el resumen financiero: es el número que
+// se viene a buscar, así que va siempre desplegado y sin un clic de por
+// medio. Todo lo demás (insumos, productos, pedidos, vendedores) es detalle
+// que explica ese resumen, y vive recogido hasta que se pida.
+//
+// El mismo rango alimenta lo de pantalla, el PDF y el CSV, y todos entran por
+// las mismas funciones de core/calc.js — nunca puede pasar que digan cosas
+// distintas entre sí. Solo se reportan movimientos y ventas REALES: lo
+// cotizado no es gasto hasta que se registra como compra.
+var SECCIONES_REPORTE = [
+  { id: "movimientos", label: "Movimientos", ayuda: "Todos los ingresos y gastos del rango, uno por línea." },
+  { id: "insumos", label: "Gasto en insumos", ayuda: "Compras de insumo ya pagadas, con cuánto se compró de cada cosa." },
+  { id: "productos", label: "Productos vendidos", ayuda: "Qué se vendió, a qué costo y cuánta ganancia dejó cada línea." },
+  { id: "pedidos", label: "Pedidos", ayuda: "Los pedidos del rango con su total, lo abonado y lo que falta cobrar." },
+  { id: "vendedores", label: "Ventas por vendedor", ayuda: "Cuánto vendió cada quien y qué comisión generó." },
+  { id: "grafica", label: "Gráfica de ingresos y gastos", ayuda: "La evolución del rango, en barras." }
+];
+
+function seccionAbierta(id) {
+  return !!(state.reporteSecciones || {})[id];
+}
+
 function renderReportePeriodo() {
   var fr = state.formReporte;
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
   var resumen = calcResumenMovimientos(movimientos);
-  var comprasInsumo = calcComprasInsumoRango(movimientos);
-  var html = '<div class="card"><div class="section-title small">Reporte financiero' +
-    renderHelp("Elige un rango de fechas (o usa los atajos) — los números, el PDF y el CSV de abajo son siempre del mismo rango, para que nunca digan cosas distintas entre sí. La gráfica de ingresos/gastos de los últimos 30 días está arriba, sin selector de fechas.") +
+
+  var html = '<div class="card"><div class="section-title small">Reporte' +
+    renderHelp("Elige un rango de fechas (o usa los atajos): los números de pantalla, el PDF y el CSV son siempre del mismo rango. Arriba va el resumen financiero, que es lo principal; abajo, cada apartado que lo explica se abre cuando lo necesites. Lo que entra al PDF se elige aparte, con las casillas del final.") +
     "</div>";
+
   html += '<div class="filters" style="margin-bottom:10px;">' +
     ["hoy", "semana", "mes", "año"].map(function (k) {
       var label = { hoy: "Hoy", semana: "Esta semana", mes: "Este mes", "año": "Este año" }[k];
@@ -353,28 +426,139 @@ function renderReportePeriodo() {
     '<div class="field"><label>Hasta</label><input type="date" data-form="reporte" data-field="hasta" value="' + esc(fr.hasta) + '" /></div>' +
     "</div>";
 
-  // Grid fijo de 3 columnas (antes auto-fit dejaba 5 tiles arriba y 1 solo
-  // abajo según el ancho) — 6 tiles parejos, 2 filas de 3.
+  // ---- Resumen financiero: siempre visible, es el titular del reporte ----
   html += '<div class="report-grid report-grid-financiero">' +
     '<div class="report-item"><div class="rl">Ingresos</div><div class="rv" style="color:var(--success-ink);">' + fmt(resumen.ingresos) + "</div></div>" +
     '<div class="report-item"><div class="rl">Gastos</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.gastos) + "</div></div>" +
-    '<div class="report-item"><div class="rl">Insumos' + renderHelp("Compras de insumo YA REALES, parte de \"Gastos\" — registradas como costo real en una cotización, o marcadas \"Es compra de insumo\" al registrar un movimiento en Finanzas.") + '</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.insumosReales) + "</div></div>" +
+    '<div class="report-item"><div class="rl">Insumos' + renderHelp("Compras de insumo YA REALES, parte de \"Gastos\" — registradas en la tabla de compras de una cotización, o marcadas \"Es compra de insumo\" al registrar un movimiento en Finanzas.") + '</div><div class="rv" style="color:var(--danger-ink);">' + fmt(resumen.insumosReales) + "</div></div>" +
     '<div class="report-item"><div class="rl">Nómina</div><div class="rv" style="color:var(--warning-ink);">' + fmt(resumen.nomina) + "</div></div>" +
     '<div class="report-item"><div class="rl">Comisiones</div><div class="rv" style="color:var(--info-ink);">' + fmt(resumen.comisiones) + "</div></div>" +
     '<div class="report-item"><div class="rl">Balance neto</div><div class="rv">' + fmt(resumen.balance) + "</div></div>" +
     "</div>";
-
   html += '<div class="section-sub" style="margin-top:10px;">' + movimientos.length + " movimiento(s) en este rango.</div>";
-  html += '<div class="pedido-actions" style="margin-top:6px;flex-wrap:wrap;">' +
+
+  // ---- El detalle, recogido ----
+  html += '<hr class="stitch" style="margin:16px 0;" />';
+  html += renderSeccionReporte("grafica", function () { return renderGraficaPeriodo(fr); });
+  html += renderSeccionReporte("movimientos", function () { return renderDetalleMovimientos(movimientos); });
+  html += renderSeccionReporte("insumos", function () { return renderDesgloseInsumos(calcComprasInsumoRango(movimientos)); });
+  html += renderSeccionReporte("productos", function () { return renderDesgloseProductos(fr); });
+  html += renderSeccionReporte("pedidos", function () { return renderDesglosePedidos(fr); });
+  html += renderSeccionReporte("vendedores", function () { return renderDesgloseVendedores(fr); });
+
+  // ---- Qué llevar al PDF ----
+  html += '<hr class="stitch" style="margin:18px 0 14px;" />';
+  html += '<div class="cot-col-title">Qué incluir en el PDF' +
+    renderHelp("Marca los apartados que quieres en el documento. El resumen financiero de arriba va siempre — es el encabezado del reporte.") +
+    "</div>";
+  html += '<div class="row-actions" style="flex-wrap:wrap;gap:10px;margin-bottom:12px;">' +
+    SECCIONES_REPORTE.map(function (s) {
+      // Por defecto van marcadas las que tengan datos: generar el PDF sin
+      // pensarlo trae lo que hay, no hojas vacías.
+      return checkboxReporte("rep-" + s.id, s.label, seccionTieneDatos(s.id, fr, movimientos));
+    }).join("") +
+    "</div>";
+  html += '<div class="pedido-actions" style="flex-wrap:wrap;">' +
     '<button class="btn" data-action="generar-reporte-pdf">Generar PDF del periodo</button>' +
-    '<button class="btn ghost small" data-action="generar-reporte-productos-pdf" title="Reporte aparte, solo de productos: talla, N.º de OP, cliente, vendedor y ganancia de cada venta.">Generar PDF de productos</button>' +
+    '<button class="btn ghost small" data-action="generar-reporte-productos-pdf" title="Reporte aparte, solo de productos: talla, N.º de OP, cliente, vendedor y ganancia de cada venta.">PDF detallado de productos</button>' +
     '<button class="btn ghost small" data-action="export-csv">Descargar CSV de todos los movimientos</button>' +
     "</div>";
 
-  html += renderDesgloseInsumos(comprasInsumo);
-  html += renderDesgloseProductos(fr);
-
   html += "</div>";
+  return html;
+}
+
+function checkboxReporte(role, label, checked) {
+  return '<label class="mini-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;">' +
+    '<input type="checkbox" data-role="' + role + '" ' + (checked ? "checked" : "") + " /> " + esc(label) +
+    "</label>";
+}
+
+// Si un apartado no tiene nada que mostrar, su casilla del PDF nace
+// desmarcada: así "generar" nunca produce una sección vacía por descuido.
+function seccionTieneDatos(id, fr, movimientos) {
+  if (id === "movimientos" || id === "grafica") return movimientos.length > 0;
+  if (id === "insumos") return calcComprasInsumoRango(movimientos).length > 0;
+  if (id === "productos") return calcProductosVendidosRango(fr.desde, fr.hasta).length > 0;
+  if (id === "pedidos") return calcPedidosRango(fr.desde, fr.hasta).length > 0;
+  if (id === "vendedores") return calcVentasPorVendedorRango(fr.desde, fr.hasta).length > 0;
+  return false;
+}
+
+// Cada apartado es un título plegable: cerrado no cuesta nada de pantalla, y
+// abierto renderiza su contenido recién ahí (no se calcula lo que no se ve).
+function renderSeccionReporte(id, contenido) {
+  var def = SECCIONES_REPORTE.filter(function (s) { return s.id === id; })[0] || { label: id, ayuda: "" };
+  var abierta = seccionAbierta(id);
+  var html = '<div class="cot-col-title" style="cursor:pointer;margin-top:10px;" data-action="toggle-reporte-seccion" data-val="' + id + '">' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + esc(def.label) +
+    (def.ayuda ? renderHelp(def.ayuda) : "") +
+    "</div>";
+  if (abierta) html += contenido();
+  return html;
+}
+
+function renderGraficaPeriodo(fr) {
+  var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
+  if (!movimientos.length) return '<div class="empty" style="padding:8px 0;">Sin movimientos en este rango.</div>';
+  return '<div style="position:relative;height:230px;margin-top:8px;"><canvas id="chart-reporte-periodo"></canvas></div>';
+}
+
+function renderDetalleMovimientos(movimientos) {
+  if (!movimientos.length) return '<div class="empty" style="padding:8px 0;">Sin movimientos en este rango.</div>';
+  var COLS = "85px 95px 1fr 130px 110px";
+  var ordenados = movimientos.slice().sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Tipo</span><span>Concepto</span><span>Persona</span><span>Monto</span></div>';
+  ordenados.forEach(function (t) {
+    var esIngreso = t.tipo === "ingreso";
+    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">Fecha</span><span>' + esc(t.fecha) + "</span>" +
+      '<span class="mobile-th">Tipo</span><span class="tag ' + (esIngreso ? "" : "gasto") + '">' + esc(t.esInsumo ? "insumos" : t.tipo) + "</span>" +
+      '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto || "—") + "</span>" +
+      '<span class="mobile-th">Persona</span><span>' + esc(t.contraparte || "—") + "</span>" +
+      '<span class="mobile-th">Monto</span><span class="amount ' + (esIngreso ? "" : "neg") + '">' + (esIngreso ? "+" : "-") + fmt(t.monto) + "</span>" +
+      "</div>";
+  });
+  return html;
+}
+
+function renderDesglosePedidos(fr) {
+  var filas = calcPedidosRango(fr.desde, fr.hasta);
+  if (!filas.length) return '<div class="empty" style="padding:8px 0;">Sin pedidos en este rango.</div>';
+  var r = calcResumenPedidos(filas);
+  var COLS = "85px 90px 1fr 70px 105px 105px 105px";
+  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>N.º OP</span><span>Cliente</span><span>Cant.</span><span>Total</span><span>Abonado</span><span>Saldo</span></div>';
+  filas.forEach(function (f) {
+    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">Fecha</span><span>' + esc(f.fecha) + "</span>" +
+      '<span class="mobile-th">N.º OP</span><span style="font-family:\'IBM Plex Mono\',monospace;">' + esc(f.numeroOp) + "</span>" +
+      '<span class="mobile-th">Cliente</span><span>' + esc(f.cliente) + '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) + "</div></span>" +
+      '<span class="mobile-th">Cant.</span><span class="amount">' + f.cantidad + "</span>" +
+      '<span class="mobile-th">Total</span><span class="amount">' + fmt(f.total) + "</span>" +
+      '<span class="mobile-th">Abonado</span><span class="amount">' + fmt(f.abonado) + "</span>" +
+      '<span class="mobile-th">Saldo</span><span class="amount" style="color:' + (f.saldo > 0 ? "var(--danger-ink)" : "var(--success-ink)") + ';">' + fmt(f.saldo) + "</span>" +
+      "</div>";
+  });
+  html += '<div class="section-sub" style="margin:6px 0 0;">' + r.pedidos + " pedido(s) · " + fmt(r.total) + " vendido · " +
+    fmt(r.abonado) + " cobrado · <b>" + fmt(r.saldo) + "</b> por cobrar.</div>";
+  return html;
+}
+
+function renderDesgloseVendedores(fr) {
+  var filas = calcVentasPorVendedorRango(fr.desde, fr.hasta);
+  if (!filas.length) return '<div class="empty" style="padding:8px 0;">Sin ventas en este rango.</div>';
+  var COLS = "1fr 80px 80px 120px 120px 120px";
+  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Vendedor</span><span>Pedidos</span><span>Unid.</span><span>Vendido</span><span>Ganancia</span><span>Comisión</span></div>';
+  filas.forEach(function (f) {
+    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">Vendedor</span><span>' + esc(f.vendedor) + "</span>" +
+      '<span class="mobile-th">Pedidos</span><span class="amount">' + f.pedidos + "</span>" +
+      '<span class="mobile-th">Unid.</span><span class="amount">' + f.unidades + "</span>" +
+      '<span class="mobile-th">Vendido</span><span class="amount">' + fmt(f.total) + "</span>" +
+      '<span class="mobile-th">Ganancia</span><span class="amount">' + fmt(f.ganancia) + "</span>" +
+      '<span class="mobile-th">Comisión</span><span class="amount">' + fmt(f.comision) + "</span>" +
+      "</div>";
+  });
   return html;
 }
 
@@ -384,12 +568,11 @@ function renderReportePeriodo() {
 function renderDesgloseInsumos(compras) {
   var COLS = "85px 1fr 110px 130px 110px";
   var total = compras.reduce(function (a, c) { return a + c.monto; }, 0);
-  var html = '<hr class="stitch" style="margin:16px 0;" />';
-  html += '<div class="cot-col-title">Gasto en insumos' +
-    renderHelp("Compras de insumo ya pagadas: las que registraste como costo real en una cotización, o marcaste como \"Es compra de insumo\" en Finanzas. Nunca aparece acá nada cotizado o estimado.") +
-    "</div>";
+  // El título y la ayuda los pone renderSeccionReporte (es un apartado
+  // plegable), así que acá solo va la tabla.
+  var html = "";
   if (!compras.length) {
-    return html + '<div class="empty" style="padding:8px 0;">Sin compras de insumo en este rango.</div>';
+    return '<div class="empty" style="padding:8px 0;">Sin compras de insumo en este rango.</div>';
   }
   html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Concepto</span><span>Cantidad</span><span>Proveedor</span><span>Monto</span></div>';
   compras.forEach(function (c) {
@@ -413,12 +596,10 @@ function renderDesgloseProductos(fr) {
   var filas = calcProductosVendidosRango(fr.desde, fr.hasta);
   var resumen = calcResumenProductosVendidos(filas);
   var COLS = "85px 1fr 80px 110px 110px 110px";
-  var html = '<hr class="stitch" style="margin:16px 0;" />';
-  html += '<div class="cot-col-title">Productos vendidos' +
-    renderHelp("Cada línea vendida en este rango: de una venta directa, o de una venta que el punto de consignación haya reportado. Lo remitido a un punto NO cuenta hasta que se reporte vendido — todavía no es plata tuya.") +
-    "</div>";
+  // El título y la ayuda los pone renderSeccionReporte.
+  var html = "";
   if (!filas.length) {
-    return html + '<div class="empty" style="padding:8px 0;">Sin ventas de producto en este rango — prueba con un rango más amplio (atajo "Este año").</div>';
+    return '<div class="empty" style="padding:8px 0;">Sin ventas de producto en este rango — prueba con un rango más amplio (atajo "Este año").</div>';
   }
   html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Concepto</span><span>Cant.</span><span>Costo</span><span>Precio</span><span>Ganancia</span></div>';
   filas.forEach(function (f) {
@@ -455,6 +636,13 @@ export var actions = {
       card.classList.add("destello");
     }, 60);
   },
+  "toggle-reporte-seccion": function (el) {
+    var id = el.getAttribute("data-val");
+    var abiertas = Object.assign({}, state.reporteSecciones || {});
+    if (abiertas[id]) delete abiertas[id]; else abiertas[id] = true;
+    state.reporteSecciones = abiertas;
+    notify();
+  },
   "set-reporte-atajo": function (el) {
     var hoy = new Date();
     var desde, hasta = todayStr();
@@ -474,14 +662,29 @@ export var actions = {
     state.formReporte = { desde: desde, hasta: hasta };
     notify();
   },
-  "generar-reporte-pdf": async function () {
+  // El PDF lleva exactamente lo que esté marcado en las casillas de "Qué
+  // incluir en el PDF" — mismo patrón que el PDF interno de una cotización.
+  // Los datos salen de las MISMAS funciones que alimentan la pantalla, así
+  // que el documento nunca puede decir algo distinto de lo que se vio.
+  "generar-reporte-pdf": async function (el) {
     var fr = state.formReporte;
     if (!fr.desde || !fr.hasta) { window.alert("Elige una fecha de inicio y una de corte."); return; }
+    var card = el.closest(".card");
+    function marcado(id) {
+      var chk = card ? card.querySelector('[data-role="rep-' + id + '"]') : null;
+      return !!(chk && chk.checked);
+    }
     var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
     var etiqueta = fr.desde === fr.hasta ? fr.desde : (fr.desde + " a " + fr.hasta);
     await generarPDFReporteFinanciero(movimientos, etiqueta, {
-      insumos: calcComprasInsumoRango(movimientos),
-      productos: calcProductosVendidosRango(fr.desde, fr.hasta)
+      movimientos: marcado("movimientos"),
+      insumos: marcado("insumos") ? calcComprasInsumoRango(movimientos) : null,
+      productos: marcado("productos") ? calcProductosVendidosRango(fr.desde, fr.hasta) : null,
+      pedidos: marcado("pedidos") ? calcPedidosRango(fr.desde, fr.hasta) : null,
+      vendedores: marcado("vendedores") ? calcVentasPorVendedorRango(fr.desde, fr.hasta) : null,
+      // La gráfica solo puede ir si su apartado está abierto: la imagen se
+      // toma del canvas que está en pantalla.
+      grafica: marcado("grafica") ? imagenGraficaPeriodo() : null
     });
   },
   // Reporte aparte, solo de productos: el financiero da el panorama general

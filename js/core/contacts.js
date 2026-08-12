@@ -32,7 +32,12 @@ function personaDesdeCliente(cliente) {
   if (cliente.direccion || cliente.ciudad) {
     persona.addresses = [{ streetAddress: cliente.direccion || "", city: cliente.ciudad || "", postalCode: cliente.cp || "", type: "home" }];
   }
+  // El usuario de WhatsApp va en las notas porque Google Contacts no tiene un
+  // campo propio para él. Así igual llega al celular y queda a mano en la
+  // ficha del contacto, que es donde se busca a la hora de escribirle.
+  var usuarioWpp = String(cliente.usuarioWhatsapp || "").trim().replace(/^@+/, "");
   var nota = [
+    usuarioWpp ? "WhatsApp: @" + usuarioWpp : "",
     cliente.cedula ? "Cédula/RUT: " + cliente.cedula : "",
     (cliente.cuenta || cliente.entidad) ? "Cuenta: " + (cliente.cuenta || "—") + (cliente.entidad ? " (" + cliente.entidad + ")" : "") : ""
   ].filter(Boolean).join("\n");
@@ -41,17 +46,27 @@ function personaDesdeCliente(cliente) {
 }
 
 // Crea (o actualiza, si el cliente ya tenía un resourceName guardado) el
-// contacto correspondiente. Devuelve { resourceName } para guardar en el
+// contacto correspondiente. Devuelve el resourceName para guardarlo en el
 // propio cliente y poder actualizarlo/borrarlo la próxima vez.
-export async function sincronizarContacto(cliente) {
+//
+// `resourceNamePrevio` es el identificador que ESTA cuenta tenía guardado
+// para este cliente, no el de otra. Un resourceName de la People API solo
+// existe dentro de la cuenta que lo creó: cuando había un único campo
+// compartido entre todos los usuarios del taller, el de cada quien pisaba al
+// del anterior y, al no encontrarlo, se creaba un contacto nuevo — así que
+// cada persona terminaba acumulando duplicados en su agenda. Por eso quien
+// llama guarda un identificador POR CUENTA (ver contactResourceNames en
+// modules/clientes.js) y pasa acá el que corresponde.
+export async function sincronizarContacto(cliente, resourceNamePrevio) {
   var persona = personaDesdeCliente(cliente);
-  if (cliente.contactResourceName) {
+  var previo = resourceNamePrevio || "";
+  if (previo) {
     // Se pide el contacto actual para tener su etag vigente — la People API
     // rechaza el update si el etag no coincide con el que tiene guardado.
-    var actual = await peopleFetch(cliente.contactResourceName + "?personFields=" + CAMPOS, { method: "GET" });
+    var actual = await peopleFetch(previo + "?personFields=" + CAMPOS, { method: "GET" });
     if (actual) {
       persona.etag = actual.etag;
-      var actualizado = await peopleFetch(cliente.contactResourceName + ":updateContact?updatePersonFields=" + CAMPOS, {
+      var actualizado = await peopleFetch(previo + ":updateContact?updatePersonFields=" + CAMPOS, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(persona)

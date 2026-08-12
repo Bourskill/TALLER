@@ -38,7 +38,7 @@ export function render() {
     '</div><div class="form-grid">' +
     '<div class="field"><label>Imagen del pie de página (PDF)</label>' + renderPiePaginaImg(cfg) + "</div>" +
     '<div class="field wide"><label>Texto del pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
-    '<div class="field"><label>Color de acento (correos)</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
+    '<div class="field"><label>Color del taller' + renderHelp("El color de tu marca: se usa en el encabezado de los correos que le llegan al cliente y también en los títulos y encabezados de tabla de todos los PDF (cotización, factura, recibo, remisión, reportes). Si eliges un color muy claro, el texto encima se pone oscuro solo para que siga leyéndose.") + '</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
     "</div></div>";
 
   html += '<div class="card"><div class="section-title small">Equipo' +
