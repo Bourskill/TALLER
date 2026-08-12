@@ -233,6 +233,9 @@ export const state = {
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.
   compraDetalleAbierto: {},
+  // id de la cotización cuyo listado de tallas está en modo "repartir entre
+  // referencias" (ver renderRepartoReferencias en modules/cotizaciones.js), o "".
+  detalleModoRefs: "",
   refActiva: {}, // { [cotId]: refId } — qué referencia está activa en la vista de pestañas de cada cotización
   cotTabActiva: {}, // { [cotId]: "referencias"|"produccion" } — pestaña interna activa dentro del detalle de una cotización
   cotVendedorEditando: "", // id de la cotización con el formulario de vendedor/comisión desplegado, o "" (por defecto solo se ve un resumen de una línea)

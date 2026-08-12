@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -638,7 +638,11 @@ function renderRefProveedorResumen(ref, calc) {
     (ref.fechaEntregaProveedor ? " · llega el " + esc(ref.fechaEntregaProveedor) : "") +
     " — sin insumos ni fases de producción. El progreso se sigue como pendiente/recibido.</div>";
   html += '<div class="ref-summary">' +
-    '<div class="rs-item"><div class="rl">Costo x prenda</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Costo x prenda' +
+    (calc.costoGlobalUnit
+      ? renderHelp("Incluye " + fmt(calc.costoDirectoUnit) + " de los insumos de esta referencia, más " + fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente). Es el mismo costo con el que cuentan el total de la cotización y el reporte de productos vendidos.")
+      : "") +
+    '</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (calc.margenPct >= 0 ? "pos" : "neg") + '">' + calc.margenPct.toFixed(1) + "%</span></div></div>" +
     '<div class="rs-item"><div class="rl">Costo total (' + esc(ref.cantidadPedida) + ')</div><div class="rv">' + fmt(calc.costoTotal) + "</div></div>" +
@@ -664,7 +668,14 @@ function renderFilasGlobales(cotId, ref) {
   var globales = (cot && cot.costosGlobales) || [];
   if (!globales.length) return "";
   var unidades = calcUnidadesCotizacion(cot);
-  var html = '<div class="ins-row-separador" title="De aquí para abajo, costos que se pagan una vez por todo el pedido — no son de esta referencia"></div>';
+  // El detalle del reparto vive en el "?" y no como una línea de texto bajo la
+  // tabla: es información de consulta, no algo que haga falta leer siempre.
+  var html = '<div class="ins-row-separador">' +
+    '<span class="ins-row-separador-nota">Costos de todo el pedido' +
+    renderHelp("Se pagan una vez por el pedido completo, no por esta referencia: por eso aparecen igual en todas. Suman " + fmt(calcCostosGlobales(cot)) +
+      (unidades > 0 ? ", que repartidos entre las " + unidades + " prenda(s) del pedido son " + fmt(calcCostosGlobales(cot) / unidades) + " por prenda." : ".") +
+      " Ese valor por prenda ya está incluido en el \"Costo x prenda\" de cada referencia.") +
+    "</span></div>";
   globales.forEach(function (g) {
     var attrs = ' data-action-change="set-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '"';
     html += '<div class="ins-row global" style="grid-template-columns:' + INS_COLS_REF + ';">' +
@@ -678,8 +689,6 @@ function renderFilasGlobales(cotId, ref) {
       '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '">✕</button>' +
       "</div>";
   });
-  html += '<div class="section-sub" style="margin:4px 0 0;">Costos de todo el pedido: <b>' + fmt(calcCostosGlobales(cot)) + "</b>" +
-    (unidades > 0 ? " · " + fmt(calcCostosGlobales(cot) / unidades) + " por prenda (entre las " + unidades + " del pedido)" : "") + "</div>";
   return html;
 }
 
@@ -691,7 +700,12 @@ function renderFilasGlobales(cotId, ref) {
 // control segmentado arriba de todo, y no como un <select> perdido entre los
 // demás campos: cambiarlo reescribe la referencia entera.
 function renderRefCard(cotId, ref) {
-  var calc = calcRefTotales(ref);
+  var cotRef = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  // Costo CARGADO: el directo de la referencia más la parte que le toca de
+  // los costos globales del pedido. Es el mismo número que usan el total de
+  // la cotización y el reporte de productos vendidos — antes la referencia
+  // mostraba solo el directo y parecía que las cuentas no cuadraban.
+  var calc = calcRefTotalesConGlobales(cotRef, ref);
   var esProveedor = ref.origen === "proveedor";
   var attrs = ' data-cot="' + cotId + '" data-ref="' + ref.id + '"';
   var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
@@ -762,7 +776,11 @@ function renderRefCard(cotId, ref) {
     "</div>";
 
   html += '<div class="ref-summary">' +
-    '<div class="rs-item"><div class="rl">Costo x prenda</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Costo x prenda' +
+    (calc.costoGlobalUnit
+      ? renderHelp("Incluye " + fmt(calc.costoDirectoUnit) + " de los insumos de esta referencia, más " + fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente). Es el mismo costo con el que cuentan el total de la cotización y el reporte de productos vendidos.")
+      : "") +
+    '</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (calc.margenPct >= 0 ? "pos" : "neg") + '">' + calc.margenPct.toFixed(1) + "%</span></div></div>" +
     '<div class="rs-item"><div class="rl">Costo total (' + esc(ref.cantidadPedida) + ')</div><div class="rv">' + fmt(calc.costoTotal) + "</div></div>" +
@@ -786,8 +804,13 @@ function renderDetalleReferencia(cotId, ref) {
   var tieneEstadosPersonalizados = !!(ref.estadosDef && ref.estadosDef.length);
   // Colapsada por defecto hasta que tenga datos — en cuanto se usa (o una
   // plantilla le asigna un flujo propio), queda abierta sola de ahí en
-  // adelante; se puede colapsar/expandir a mano.
-  var abierta = ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : (detalle.length > 0 || tieneEstadosPersonalizados);
+  // adelante; se puede colapsar/expandir a mano. Mientras se están repartiendo
+  // integrantes entre referencias se fuerza abierta: si no, mover la última
+  // fila fuera de esta referencia cerraba de golpe el panel donde se estaba
+  // trabajando.
+  var abierta = state.detalleModoRefs === cotId
+    ? true
+    : (ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : (detalle.length > 0 || tieneEstadosPersonalizados));
   var titulo = "Opciones adicionales" + (detalle.length ? " · tallas (" + detalle.length + ")" : "");
   var html = '<div class="cot-col-title" style="margin-top:14px;cursor:pointer;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
@@ -804,10 +827,19 @@ function renderDetalleReferencia(cotId, ref) {
     "</div>";
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
   var clienteRoster = cot && cot.clienteId ? clienteById(cot.clienteId) : null;
-  if (clienteRoster && (clienteRoster.roster || []).length) {
-    html += '<div class="section-sub" style="margin:0 0 8px;">' +
-      '<button class="btn ghost small" data-action="cargar-roster-cliente" data-cot="' + cotId + '" data-ref="' + ref.id + '">🎽 Cargar roster de ' + esc(clienteRoster.nombre) + " (" + clienteRoster.roster.length + ")</button></div>";
-  }
+  var repartiendo = state.detalleModoRefs === cotId;
+  var variasRefs = ((cot && cot.referencias) || []).length > 1;
+  html += '<div class="row-actions" style="margin:0 0 8px;flex-wrap:wrap;">' +
+    (clienteRoster && (clienteRoster.roster || []).length
+      ? '<button class="btn ghost small" data-action="cargar-roster-cliente" data-cot="' + cotId + '" data-ref="' + ref.id + '">🎽 Cargar roster de ' + esc(clienteRoster.nombre) + " (" + clienteRoster.roster.length + ")</button>"
+      : "") +
+    (variasRefs
+      ? '<button class="btn ' + (repartiendo ? "" : "ghost ") + 'small" data-action="toggle-reparto-referencias" data-cot="' + cotId + '">' +
+        (repartiendo ? "✓ Listo" : "✎ Repartir entre referencias") + "</button>" +
+        renderHelp("Sube la lista de nombres UNA sola vez en cualquier referencia y desde acá reparte a cada integrante a la suya, sin tener que borrarla y volver a importarla. Mientras repartes, la columna de observaciones se cambia por la de referencia y se ven las filas de todas las referencias juntas.")
+      : "") +
+    "</div>";
+  if (repartiendo) return html + renderRepartoReferencias(cotId);
   if (detalle.length > 0) {
     html += '<div class="detalle-table">' +
       '<div class="det-row head"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Tipo</span><span>Observaciones</span><span></span></div>';
@@ -838,6 +870,57 @@ function renderDetalleReferencia(cotId, ref) {
     '<label class="btn ghost small" style="cursor:pointer;">📥 Importar Excel<input type="file" accept=".xlsx,.xls,.csv" data-action-change="import-ref-detalle-csv" data-cot="' + cotId + '" data-ref="' + ref.id + '" style="display:none" /></label>' +
     '<button class="btn ghost small" data-action="descargar-plantilla-csv">Descargar plantilla Excel</button>' +
     renderHelp("El archivo debe tener columnas: nombre, talla, numero, tipo, observaciones (en cualquier orden). Descarga la plantilla para verlo con un ejemplo — es un .xlsx normal, se abre bien tanto en Excel como en Sheets. También aceptamos CSV si lo prefieres.") +
+    "</div>";
+  return html;
+}
+
+// Modo "repartir": en vez de las filas de UNA referencia, se ven las de
+// TODAS juntas y la columna de observaciones se cambia por un selector de
+// referencia. Así la lista de nombres se sube una sola vez (importando el
+// Excel en cualquier referencia) y desde acá se manda a cada quien a la suya
+// — antes tocaba borrar filas de una y volver a escribirlas en la otra.
+function renderRepartoReferencias(cotId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  if (!cot) return "";
+  var refs = cot.referencias || [];
+  var filas = [];
+  refs.forEach(function (r) {
+    (r.detalle || []).forEach(function (d) { filas.push({ ref: r, item: d }); });
+  });
+  if (!filas.length) {
+    return '<div class="empty" style="padding:8px 0;">No hay filas que repartir todavía — importa la lista en cualquier referencia y vuelve acá.</div>';
+  }
+
+  var COLS = "34px 1.4fr 70px 70px 1fr 34px";
+  var html = '<div class="detalle-table">' +
+    '<div class="det-row head" style="grid-template-columns:' + COLS + ';"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Referencia</span><span></span></div>';
+  filas.forEach(function (f, i) {
+    var attrs = ' data-cot="' + cotId + '" data-ref="' + f.ref.id + '" data-item="' + f.item.id + '"';
+    html += '<div class="det-row" style="grid-template-columns:' + COLS + ';">' +
+      '<span class="mobile-th">#</span><span>' + (i + 1) + "</span>" +
+      '<span class="mobile-th">Nombre</span><input class="mini-input" value="' + esc(f.item.nombre || "") + '" data-action-change="set-ref-detalle-campo"' + attrs + ' data-campo="nombre" />' +
+      '<span class="mobile-th">Talla</span><input class="mini-input" value="' + esc(f.item.talla || "") + '" data-action-change="set-ref-detalle-campo"' + attrs + ' data-campo="talla" />' +
+      '<span class="mobile-th">Número</span><input class="mini-input" value="' + esc(f.item.numero || "") + '" data-action-change="set-ref-detalle-campo"' + attrs + ' data-campo="numero" />' +
+      '<span class="mobile-th">Referencia</span><select class="mini-input" data-action-change="mover-detalle-a-ref"' + attrs + ">" +
+      refs.map(function (r) {
+        return '<option value="' + r.id + '" ' + (r.id === f.ref.id ? "selected" : "") + ">" + esc(r.nombre || "Sin nombre") + "</option>";
+      }).join("") +
+      "</select>" +
+      '<button class="btn danger small" data-action="remove-ref-detalle"' + attrs + ">✕</button>" +
+      "</div>";
+  });
+  html += "</div>";
+
+  // Cuántos quedaron en cada referencia vs. su cantidad cotizada: es lo que se
+  // está revisando mientras se reparte.
+  html += '<div class="section-sub" style="margin:8px 0 0;">' +
+    refs.map(function (r) {
+      var n = (r.detalle || []).length;
+      var pedida = num(r.cantidadPedida) || 0;
+      var cuadra = n === pedida;
+      return '<span class="badge" style="margin-right:6px;' + (cuadra ? "" : "background:var(--warning-soft);color:var(--warning-ink);") + '">' +
+        esc(r.nombre || "Sin nombre") + ": " + n + " de " + pedida + "</span>";
+    }).join("") +
     "</div>";
   return html;
 }
@@ -1014,6 +1097,40 @@ export var actions = {
   // que vuelve al taller deja de tener costo de compra y proveedor. También
   // se reinicia el flujo de etapas, porque los dos casos usan defaults
   // distintos (ver estadosDefDeRef en core/calc.js).
+  "toggle-reparto-referencias": function (el) {
+    var cotId = el.getAttribute("data-cot");
+    state.detalleModoRefs = state.detalleModoRefs === cotId ? "" : cotId;
+    notify();
+  },
+  // Mueve una fila de "Tallas y observaciones" de una referencia a otra,
+  // conservándola tal cual (nombre, talla, número, tipo, observaciones). Es lo
+  // que evita tener que borrarla de una lista y volver a escribirla en la otra.
+  "mover-detalle-a-ref": function (el) {
+    var cotId = el.getAttribute("data-cot"), origenId = el.getAttribute("data-ref"), itemId = el.getAttribute("data-item");
+    var destinoId = el.value;
+    if (!destinoId || destinoId === origenId) return;
+    conRef(cotId, function (c) {
+      var origen = (c.referencias || []).filter(function (r) { return r.id === origenId; })[0];
+      var item = origen && (origen.detalle || []).filter(function (d) { return d.id === itemId; })[0];
+      if (!item) return c;
+      return Object.assign({}, c, {
+        referencias: (c.referencias || []).map(function (r) {
+          if (r.id === origenId) {
+            // Sacarla NO baja la cantidad cotizada: cuántas prendas se venden
+            // es una decisión aparte de cuántas filas de detalle hay cargadas.
+            return Object.assign({}, r, { detalle: (r.detalle || []).filter(function (d) { return d.id !== itemId; }) });
+          }
+          if (r.id === destinoId) {
+            // Al recibirla sí puede subir la cantidad, con el mismo criterio
+            // que al agregar una fila a mano (ver conDetalleAgregado): el
+            // listado nunca puede ser más largo que lo cotizado.
+            return conDetalleAgregado(r, [item]);
+          }
+          return r;
+        })
+      });
+    });
+  },
   "set-ref-origen": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     var origen = el.getAttribute("data-val") === "proveedor" ? "proveedor" : "taller";

@@ -890,6 +890,43 @@ export function calcCostoPrendaGlobal(cot, global) {
   return unidades > 0 ? num(global.costo) / unidades : num(global.costo);
 }
 
+// Lo que le toca a CADA prenda del pedido de TODOS los costos globales juntos.
+export function calcCostoGlobalPorPrenda(cot) {
+  var unidades = calcUnidadesCotizacion(cot);
+  return unidades > 0 ? calcCostosGlobales(cot) / unidades : 0;
+}
+
+// Totales de una referencia CON la parte que le toca de los costos globales
+// — el costo "cargado", que es el que de verdad tiene esa prenda.
+//
+// Existe aparte de calcRefTotales (que solo ve la referencia, sin saber de la
+// cotización) porque es lo que hay que MOSTRAR: si el domicilio del pedido
+// encarece cada prenda, el margen de la referencia tiene que reflejarlo. Antes
+// la referencia mostraba solo su costo directo mientras el total del pedido y
+// el reporte de productos ya contaban el global — y los tres números no
+// coincidían aunque todos estuvieran "bien" por separado.
+//
+// No hay doble conteo: sumar esto sobre todas las referencias da exactamente
+// costo directo + globales, que es lo mismo que calcula calcCotizacionTotales.
+export function calcRefTotalesConGlobales(cot, ref) {
+  var base = calcRefTotales(ref);
+  var globalUnit = calcCostoGlobalPorPrenda(cot);
+  var cantidad = num(ref.cantidadPedida) || 0;
+  var costoUnit = base.costoUnit + globalUnit;
+  var gananciaUnit = base.precioUnit - costoUnit;
+  return {
+    costoDirectoUnit: base.costoUnit,
+    costoGlobalUnit: globalUnit,
+    costoUnit: costoUnit,
+    precioUnit: base.precioUnit,
+    gananciaUnit: gananciaUnit,
+    margenPct: base.precioUnit > 0 ? (gananciaUnit / base.precioUnit * 100) : 0,
+    costoTotal: costoUnit * cantidad,
+    precioTotal: base.precioTotal,
+    gananciaTotal: gananciaUnit * cantidad
+  };
+}
+
 export function calcCostoUnitarioRef(ref) {
   if (ref && ref.origen === "proveedor") return num(ref.costoCompra);
   return (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);

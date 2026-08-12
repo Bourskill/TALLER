@@ -512,7 +512,7 @@ function seccionDesgloseProductos(doc, y, marginX, pageW, productos) {
   doc.autoTable({
     startY: y,
     margin: { left: marginX, right: marginX },
-    head: [["Fecha", "Concepto", "Cant.", "Costo", "Precio", "Ganancia"]],
+    head: [["Fecha", "Concepto", "Cant.", "Costo total", "Precio total", "Ganancia"]],
     body: productos.length
       ? productos.map(function (f) {
         return [f.fecha, f.concepto + (f.talla && f.talla !== "—" ? " (" + f.talla + ")" : ""), numFmt(f.cantidad), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)];
@@ -595,17 +595,20 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
   doc.autoTable({
     startY: y,
     margin: { left: marginX, right: marginX },
-    head: [["Fecha", "N.º OP", "Producto", "Talla", "Cliente", "Vendedor", "Venta", "Cant.", "Costo", "Precio", "Ganancia"]],
+    head: [["Fecha", "N.º OP", "Producto", "Talla", "Cliente", "Vendedor", "Venta", "Cant.", "Costo x und", "Costo total", "Precio total", "Ganancia"]],
     body: filas.map(function (f) {
       return [
         f.fecha, f.numeroOp, f.concepto, f.talla, f.cliente,
         f.vendedor || "—", f.tipo === "consignacion" ? "Consignación" : "Directa",
-        numFmt(f.cantidad), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)
+        // Costo por unidad Y total: el por unidad es el que se compara contra
+        // el "Costo x prenda" de la cotización; el total es ese por la
+        // cantidad de la fila. Tenerlos separados evita leer uno por el otro.
+        numFmt(f.cantidad), money(f.costoUnit), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)
       ];
     }),
     styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold" },
-    columnStyles: { 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" }, 10: { halign: "right" } },
+    columnStyles: { 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" }, 10: { halign: "right" }, 11: { halign: "right" } },
     theme: "grid"
   });
 

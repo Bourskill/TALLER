@@ -601,7 +601,7 @@ function renderDesgloseProductos(fr) {
   if (!filas.length) {
     return '<div class="empty" style="padding:8px 0;">Sin ventas de producto en este rango — prueba con un rango más amplio (atajo "Este año").</div>';
   }
-  html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Concepto</span><span>Cant.</span><span>Costo</span><span>Precio</span><span>Ganancia</span></div>';
+  html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Concepto</span><span>Cant.</span><span>Costo total</span><span>Precio total</span><span>Ganancia</span></div>';
   filas.forEach(function (f) {
     html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
       '<span class="mobile-th">Fecha</span><span>' + esc(f.fecha) + "</span>" +

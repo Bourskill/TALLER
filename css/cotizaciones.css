@@ -211,6 +211,8 @@
 /* Separador de los costos globales dentro de la tabla de insumos: una línea
    intermitente que dice "de aquí para abajo esto no es de esta referencia,
    es de todo el pedido" sin necesidad de un panel aparte. */
-.ins-row-separador{border-top:1px dashed var(--border);margin:8px 0 6px;}
 .ins-row.global{opacity:.92;}
-.ins-row.global .amount{font-style:italic;}
+/* La nota del separador va discreta y a la derecha: un rótulo corto con su
+   "?" en vez de una línea de texto bajo la tabla. */
+.ins-row-separador{border-top:1px dashed var(--border);margin:8px 0 6px;display:flex;justify-content:flex-end;}
+.ins-row-separador-nota{font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;padding-top:4px;}
