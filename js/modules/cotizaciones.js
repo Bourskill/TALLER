@@ -184,6 +184,7 @@ function renderEditor() {
   var html = '<div class="pedido-actions" style="margin-bottom:10px;">' +
     '<button class="btn ghost small" data-action="cerrar-cotizacion-editor">← Nueva cotización en blanco</button>' +
     "</div>";
+  html += renderAvisoPedidoDesfasado(cot);
   html += renderBarraGuardado(cot);
   html += renderCotCard(cot);
   return html;
@@ -193,6 +194,27 @@ function renderEditor() {
 // cotización. Es sticky para que no se pierda de vista al bajar por una
 // cotización larga y quede claro que lo que se ve en pantalla todavía no es
 // lo que está guardado.
+// Aviso de que el pedido ya creado quedó diciendo otra cosa. Pasa con los
+// pedidos convertidos ANTES de que guardar propagara los cambios: se editó la
+// cotización y el pedido —y con él los reportes, que leen de él— se quedó con
+// los números viejos. Se ofrece el botón para ponerlos al día en un clic.
+function renderAvisoPedidoDesfasado(cot) {
+  var d = calcDesfaseCotizacionPedido(cot);
+  if (!d) return "";
+  var partes = [];
+  if (d.difCantidad) partes.push("cantidad: el pedido dice " + d.cantidadPedido + " y la cotización " + d.cantidadCot);
+  if (d.difTotal) partes.push("precio: el pedido dice " + fmt(d.totalPedido) + " y la cotización " + fmt(d.totalCot));
+  if (d.difCosto) partes.push("costo: diferencia de " + fmt(Math.abs(d.difCosto)));
+  return '<div class="save-bar" style="background:var(--danger-soft);border-color:var(--danger);">' +
+    '<span class="save-bar-msg" style="color:var(--danger-ink);">⚠ El pedido ' + esc(d.pedido.numeroOp || "") + " quedó desactualizado" +
+    renderHelp("Este pedido se creó con una versión anterior de la cotización y no se enteró de los cambios que hiciste después. Como los reportes leen del pedido, hasta que no lo actualices seguirán mostrando los números viejos. Actualizar NO toca los abonos ya cobrados, el N.º de OP ni la etapa de producción — solo qué se vende, cuánto y a qué precio.") +
+    "</span>" +
+    '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+    '<span class="section-sub" style="margin:0;">' + esc(partes.join(" · ")) + "</span>" +
+    '<button class="btn" data-action="sincronizar-pedido-cotizacion" data-id="' + cot.id + '">Actualizar el pedido</button>' +
+    "</span></div>";
+}
+
 function renderBarraGuardado(cot) {
   if (state.cotSucia !== cot.id) return "";
   return '<div class="save-bar">' +
@@ -1097,6 +1119,23 @@ export var actions = {
   // que vuelve al taller deja de tener costo de compra y proveedor. También
   // se reinicia el flujo de etapas, porque los dos casos usan defaults
   // distintos (ver estadosDefDeRef en core/calc.js).
+  // Pone al día un pedido que se había quedado con números viejos. Guardar la
+  // cotización ya lo hace solo; este botón es para los pedidos convertidos
+  // antes de que eso existiera, que arrastran la desincronización.
+  "sincronizar-pedido-cotizacion": function (el) {
+    var id = el.getAttribute("data-id");
+    var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+    if (!cot) return;
+    var d = calcDesfaseCotizacionPedido(cot);
+    if (!d) { mostrarToast("El pedido ya está al día."); return; }
+    if (!window.confirm("El pedido " + (d.pedido.numeroOp || "") + " pasa a decir lo mismo que esta cotización:\n\n" +
+      "• Cantidad: " + d.cantidadPedido + " → " + d.cantidadCot + "\n" +
+      "• Total: " + fmt(d.totalPedido) + " → " + fmt(d.totalCot) + "\n\n" +
+      "No se tocan los abonos ya cobrados, el N.º de OP ni la etapa de producción.\n\n¿Actualizar?")) return;
+    sincronizarPedidoDeCotizacion(cot);
+    notify();
+    mostrarToast("✓ Pedido " + (d.pedido.numeroOp || "") + " actualizado: " + d.cantidadCot + " unidad(es) por " + fmt(d.totalCot) + ".");
+  },
   "toggle-reparto-referencias": function (el) {
     var cotId = el.getAttribute("data-cot");
     state.detalleModoRefs = state.detalleModoRefs === cotId ? "" : cotId;
@@ -1508,28 +1547,20 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (cot) {
-      var totales = calcCotizacionTotales(cot);
-      var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
-      var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
+      var heredado = datosPedidoDesdeCot(cot);
       // El pedido guarda un estado/flujo "agregado" (el de su referencia menos
       // avanzada) solo para que el filtro por etapa, el KPI y el PDF sigan
       // funcionando sin cambios — el progreso real, referencia por
       // referencia, se edita y se lee siempre desde la cotización (ver
       // pedidos.js: "advance-ref"/"retreat-ref").
       var agregado = estadoAgregadoDeCot(cot);
-      var nuevoP = {
-        id: uid(), clienteId: cot.clienteId || "", cliente: cot.cliente, tipoCliente: "propio", descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
+      var nuevoP = Object.assign({
+        id: uid(), clienteId: cot.clienteId || "", cliente: cot.cliente, tipoCliente: "propio",
         // La fecha de entrega se hereda de la cotización (antes nacía siempre
         // vacía y no había forma de definirla al cotizar, así que TODO pedido
         // convertido quedaba fuera de "Próximas entregas" del Resumen).
-        cantidad: String(cantidadTotal), total: totales.precioTotal, abono: 0, fechaEntrega: cot.fechaEntrega || "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
+        abono: 0, fechaEntrega: cot.fechaEntrega || "", estado: agregado ? agregado.estado : "nuevo", cotizacionId: cot.id,
         numeroOp: generarNumeroOp(todosNumerosOp()),
-        iva: cot.iva || { activo: false, porcentaje: 19 },
-        // El pedido hereda el costo cotizado y el detalle línea por línea —
-        // sin esto la tarjeta no podía mostrar ganancia y el pedido no
-        // aparecía en el reporte de productos vendidos (ver lineasDeCotizacion).
-        costo: totales.costoTotal,
-        lineas: lineasDeCotizacion(cot),
         fechaCreacion: todayStr(),
         abonos: [],
         estadosDef: agregado ? agregado.estadosDef : null,
@@ -1538,7 +1569,7 @@ export var actions = {
         vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : null,
         codigoPublico: codigoPublico(), calendarEventId: "",
         stockConsumido: [] // se completa abajo con lo que en verdad se descontó, para poder revertirlo si el pedido se elimina
-      };
+      }, heredado);
       state.pedidos.unshift(nuevoP);
       state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
       nuevoP.stockConsumido = descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
@@ -1934,6 +1965,64 @@ function repartirCostosGlobales(cot, lineas) {
   });
 }
 
+// ---------- El pedido como espejo de su cotización ----------
+// Todo lo que un pedido HEREDA de su cotización sale de acá y de ningún otro
+// lado: lo usa "convertir-cotizacion" al crearlo y la resincronización cada
+// vez que la cotización se guarda. Tenerlo en una sola función es lo que
+// impide que las dos formas de escribir esos números se separen con el
+// tiempo.
+function datosPedidoDesdeCot(cot) {
+  var totales = calcCotizacionTotales(cot);
+  var cantidadTotal = (cot.referencias || []).reduce(function (a, r) { return a + num(r.cantidadPedida); }, 0) || 1;
+  var descripcionRefs = (cot.referencias || []).map(function (r) { return r.nombre + " x" + r.cantidadPedida; }).join(", ") || cot.descripcion;
+  return {
+    descripcion: cot.descripcion + (descripcionRefs ? " (" + descripcionRefs + ")" : ""),
+    cantidad: String(cantidadTotal),
+    total: totales.precioTotal,
+    costo: totales.costoTotal,
+    // Detalle línea por línea, con el precio y el costo (ya con su parte de
+    // los costos globales) de cada una — es lo que leen los reportes.
+    lineas: lineasDeCotizacion(cot),
+    iva: cot.iva || { activo: false, porcentaje: 19 }
+  };
+}
+
+// ¿El pedido quedó diciendo algo distinto de lo que hoy dice su cotización?
+// Pasa apenas se edita una cantidad, un precio o se agrega una referencia
+// después de haber convertido: el pedido era una foto del momento de
+// convertir y nadie la volvía a tomar. Devuelve null si están sincronizados.
+export function calcDesfaseCotizacionPedido(cot) {
+  var pedidoId = (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
+  if (!pedidoId) return null;
+  var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+  if (!ped) return null;
+  var datos = datosPedidoDesdeCot(cot);
+  var difTotal = num(datos.total) - num(ped.total);
+  var difCosto = num(datos.costo) - num(ped.costo);
+  var difCantidad = num(datos.cantidad) - num(ped.cantidad);
+  if (!difTotal && !difCosto && !difCantidad) return null;
+  return {
+    pedido: ped, datos: datos,
+    difTotal: difTotal, difCosto: difCosto, difCantidad: difCantidad,
+    totalPedido: num(ped.total), totalCot: num(datos.total),
+    cantidadPedido: num(ped.cantidad), cantidadCot: num(datos.cantidad)
+  };
+}
+
+// Vuelca sobre el pedido los números actuales de su cotización. Toca SOLO lo
+// que la cotización manda (qué se vende, cuánto y a qué precio) — nunca los
+// abonos ya cobrados, el N.º de OP, la etapa de producción ni el stock ya
+// descontado, que son hechos del pedido y no de la cotización.
+function sincronizarPedidoDeCotizacion(cot) {
+  var desfase = calcDesfaseCotizacionPedido(cot);
+  if (!desfase) return null;
+  state.pedidos = state.pedidos.map(function (p) {
+    return p.id === desfase.pedido.id ? Object.assign({}, p, desfase.datos) : p;
+  });
+  persist("pedidos");
+  return desfase;
+}
+
 function lineasStockDeCot(cot) {
   var lineas = [];
   (cot.referencias || []).forEach(function (ref) {
@@ -2011,6 +2100,20 @@ function guardarCotizaciones() {
   persist("cotizaciones");
   state.cotSucia = "";
   tomarSnapshotCotizacion(); // el nuevo punto de retorno es lo recién guardado
+  // Si esta cotización ya es un pedido, sus números bajan al pedido en el
+  // mismo acto de guardar. Antes el pedido era una foto del momento de
+  // convertir: cambiar una cantidad o agregar una referencia después dejaba al
+  // pedido —y a todos los reportes, que leen de él— contando lo viejo, sin
+  // ningún aviso. Guardar es el momento deliberado para propagarlo (editar no
+  // escribe nada hasta que se confirma, ver marcarSucia).
+  var id = state.cotizacionEditando;
+  var cot = id ? state.cotizaciones.filter(function (c) { return c.id === id; })[0] : null;
+  if (!cot) return;
+  var aplicado = sincronizarPedidoDeCotizacion(cot);
+  if (aplicado) {
+    mostrarToast("✓ El pedido " + (aplicado.pedido.numeroOp || "") + " se actualizó con estos cambios: " +
+      aplicado.cantidadCot + " unidad(es) por " + fmt(aplicado.totalCot) + ".");
+  }
 }
 // Baja la fecha de entrega de una cotización a su pedido vinculado (si ya
 // existe). Vive fuera de la acción de guardado porque también corre al
