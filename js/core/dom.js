@@ -10,6 +10,7 @@
 // si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
+import { UNIDADES_SUGERIDAS } from "./constants.js";
 import { state, persist, notify } from "./store.js";
 import { esc } from "./utils.js";
 import { clienteById } from "./calc.js";
@@ -220,7 +221,8 @@ export function render() {
       '<main class="main"><div class="main-inner">' + mainInner + "</div></main>" +
       "</div>" +
       renderImagenPreview() +
-      renderToast();
+      renderToast() +
+      renderDatalists();
 
     // Blindaje contra un quirk de Chrome: si el elemento con foco (ej. un
     // <select> cuyo desplegable nativo seguía abierto) sigue activo justo
@@ -354,6 +356,17 @@ function renderTopbar() {
 // Overlay a pantalla completa para ver en grande cualquier foto de la app
 // (referencia de cotización, plantilla de prenda, pie de página del PDF).
 // Vive fuera de ".shell" para no depender de qué pestaña esté activa.
+// Sugerencias compartidas por todos los campos "Unidad" de la app (catálogo
+// de insumos, referencias de cotización, plantillas, productos). Va una sola
+// vez al final del documento: un <datalist> se referencia por id desde
+// cualquier input, no hace falta repetirlo en cada tabla. Incluye "servicio",
+// que es cómo se marca lo que se paga pero no se compra en ningún lado.
+function renderDatalists() {
+  return '<datalist id="dl-unidades">' +
+    UNIDADES_SUGERIDAS.map(function (u) { return '<option value="' + esc(u) + '">'; }).join("") +
+    "</datalist>";
+}
+
 function renderImagenPreview() {
   if (!state.imagenPreview) return "";
   return '<div class="imgprev-overlay" data-action="cerrar-imagen-preview">' +

@@ -6,7 +6,7 @@ import { renderHelp } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { proveedoresDeContactos } from "../core/calc.js";
 
-var COLS = "1fr 125px 80px 100px 160px 90px 170px 40px";
+var COLS = "1fr 125px 95px 100px 175px 170px 40px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
 
 function renderPropuestasPendientes(session) {
@@ -78,7 +78,7 @@ export function render() {
     if (!g.items.length && categoriaActiva === "todos") return; // no mostrar grupos vacíos en la vista "Todas"
     huboAlgo = true;
     html += '<div class="section-sub" style="margin-top:16px;">' + esc(g.nombre) + " (" + g.items.length + ")</div>";
-    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Categoría</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Servicio</span><span>Proveedor</span><span></span></div>';
+    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Insumo</span><span>Categoría</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Proveedor</span><span></span></div>';
     if (!g.items.length) { html += '<div class="empty" style="padding:8px 0;">Sin insumos en esta categoría todavía.</div>'; }
     g.items.forEach(function (c) { html += renderFilaInsumo(c, categorias); });
   });
@@ -96,13 +96,11 @@ function renderFilaInsumo(c, categorias) {
     '<option value="">Sin categoría</option>' +
     categorias.map(function (cat) { return '<option value="' + cat.id + '" ' + (c.categoriaId === cat.id ? "selected" : "") + ">" + esc(cat.nombre) + "</option>"; }).join("") +
     "</select>" +
-    '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(c.unidad) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="unidad" />' +
+    // La unidad es también lo que marca un intangible: si dice "servicio", la
+    // lista de compras deja de pedir N unidades de algo que no se compra.
+    '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)." data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="unidad" />' +
     '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(c.costo) + '" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="costo" />' +
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
-    // Un servicio (diseño, confección, sublimado) se paga pero no se compra
-    // por cantidad: marcarlo evita que la lista de compras termine pidiendo
-    // "11 UND de confección", que no significa nada para quien sale a comprar.
-    '<span class="mobile-th">Servicio</span><label class="mini-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;" title="Marca si es un servicio (diseño, confección, sublimado): se paga, pero no se compra por cantidad."><input type="checkbox" ' + (c.esServicio ? "checked" : "") + ' data-action-change="set-cat-campo" data-id="' + c.id + '" data-campo="esServicio" /> Sí</label>' +
     '<span class="mobile-th">Proveedor</span>' + renderSelectorProveedorInsumo(c) +
     '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '">✕</button>' +
     "</div>";
@@ -126,7 +124,7 @@ function renderSelectorProveedorInsumo(c) {
 export var actions = {
   "add-cat-item": function () {
     var catActiva = state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "";
-    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, proveedorId: "", esServicio: false }]);
+    state.catalogoInsumos = (state.catalogoInsumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, proveedorId: "" }]);
     persist("catalogoInsumos"); notify();
   },
   "remove-cat-item": function (el) {
@@ -139,7 +137,7 @@ export var actions = {
   },
   "set-cat-campo": function (el) {
     var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
-    var valor = campo === "costo" ? num(el.value) : (campo === "esServicio" ? !!el.checked : el.value);
+    var valor = campo === "costo" ? num(el.value) : el.value;
     state.catalogoInsumos = (state.catalogoInsumos || []).map(function (c) {
       if (c.id !== id) return c;
       var patch = {}; patch[campo] = valor;

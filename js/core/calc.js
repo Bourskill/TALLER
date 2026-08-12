@@ -5,7 +5,7 @@
 
 import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe } from "./utils.js";
-import { ESTADOS_DEFAULT } from "./constants.js";
+import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
 // Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
 // producción propias en el taller) — a diferencia de ESTADOS_DEFAULT (5
@@ -866,6 +866,30 @@ export function calcCostoPrenda(insumo, ref) {
 // cada pantalla) es lo que hace que el margen de la referencia, los totales
 // de la cotización, el PDF y los reportes no puedan contradecirse — todos
 // entran por esta misma puerta. Ver ORIGEN_PRODUCCION en constants.js.
+// Un "servicio" se reconoce por su UNIDAD, no por una casilla aparte: si lo
+// que compras se mide en "servicio", es que no se compra en ningún lado (no
+// es tangible). Se sigue aceptando la casilla vieja `esServicio` para los
+// insumos que se guardaron antes de este cambio.
+export function esInsumoServicio(ins) {
+  if (!ins) return false;
+  if (norm(ins.unidad || "") === UNIDAD_SERVICIO) return true;
+  return !!ins.esServicio;
+}
+
+// Total de prendas del pedido, sumando todas las referencias. Es el divisor
+// de un costo global: se reparte parejo entre todo lo que se produce.
+export function calcUnidadesCotizacion(cot) {
+  return ((cot && cot.referencias) || []).reduce(function (a, r) { return a + (num(r.cantidadPedida) || 0); }, 0);
+}
+
+// Cuánto le toca por prenda a un costo global — el promedio sobre todas las
+// prendas del pedido. Con 0 prendas devuelve el costo completo (aún no hay
+// entre qué repartirlo) en vez de dividir por cero.
+export function calcCostoPrendaGlobal(cot, global) {
+  var unidades = calcUnidadesCotizacion(cot);
+  return unidades > 0 ? num(global.costo) / unidades : num(global.costo);
+}
+
 export function calcCostoUnitarioRef(ref) {
   if (ref && ref.origen === "proveedor") return num(ref.costoCompra);
   return (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);
@@ -999,13 +1023,13 @@ function agregarInsumosDeReferencias(referencias) {
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();
       var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
-      if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: !!ins.esServicio, proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
+      if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
       if (ins.tipo === "tela") cantFisica = (num(ref.consumoAprox) || 0) * (num(ins.cantidad) || 1) * cantidadPedida;
       else if (ins.tipo === "por_prenda") cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;
-      if (ins.esServicio) mapa[key].esServicio = true;
+      if (esInsumoServicio(ins)) mapa[key].esServicio = true;
       if (!mapa[key].proveedorId && ins.proveedorId) mapa[key].proveedorId = ins.proveedorId;
       if (ref.nombre && mapa[key].refs.indexOf(ref.nombre) === -1) mapa[key].refs.push(ref.nombre);
     });
@@ -1025,10 +1049,8 @@ export function calcListaCompras(cot) {
     var key = "global|" + g.id;
     mapa[key] = {
       clave: key, nombre: nombre, unidad: "", tipo: "global", esGlobal: true,
-      // Un costo global casi siempre es un servicio (domicilio, diseño): no
-      // se compra "N unidades" de él. Se puede desmarcar si de verdad es algo
-      // que se compra por cantidad.
-      esServicio: g.esServicio !== false,
+      // Igual que cualquier insumo: es servicio si su unidad lo dice.
+      esServicio: esInsumoServicio(g),
       proveedorId: g.proveedorId || "",
       cantidadFisica: num(g.cantidad) || 0, costoTotal: num(g.costo), refs: []
     };

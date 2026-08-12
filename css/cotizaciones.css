@@ -207,3 +207,10 @@
   .cot-compara-grid{grid-template-columns:1fr;}
   .cot-docs-grid{grid-template-columns:1fr;}
 }
+
+/* Separador de los costos globales dentro de la tabla de insumos: una línea
+   intermitente que dice "de aquí para abajo esto no es de esta referencia,
+   es de todo el pedido" sin necesidad de un panel aparte. */
+.ins-row-separador{border-top:1px dashed var(--border);margin:8px 0 6px;}
+.ins-row.global{opacity:.92;}
+.ins-row.global .amount{font-style:italic;}

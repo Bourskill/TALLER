@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea } from "../core/calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -378,53 +378,9 @@ function renderCotTabsStrip(c, tab) {
 function renderTabReferencias(c) {
   var html = renderReferenciasTabs(c);
   html += '<div class="pedido-actions" style="margin-top:4px;"><button class="btn ghost small" data-action="add-referencia" data-id="' + c.id + '">+ Agregar referencia</button></div>';
-  html += '<hr class="stitch cot-section-divider" />';
-  html += renderCostosGlobales(c);
   return html;
 }
 
-// Costos que se pagan UNA vez por pedido, pase lo que pase con las
-// referencias: el domicilio que siempre se cuenta por si toca mandar la tela
-// a sublimar, el diseño, un envío. No son insumos de ninguna referencia en
-// particular —meterlos en una obligaría a elegir cuál y a repartirlos entre
-// sus prendas—, así que viven acá y suman al costo total al final. Entran
-// igual a la lista de compras, para poder registrar lo que en verdad costaron.
-function renderCostosGlobales(c) {
-  var globales = c.costosGlobales || [];
-  var COLS = "1.6fr 120px 1fr 110px 40px";
-  var total = calcCostosGlobales(c);
-  var html = '<div class="cot-col-title">Costos globales del pedido' +
-    renderHelp("Lo que se paga una sola vez por el pedido completo, sin importar cuántas referencias tenga ni cuántas prendas lleve cada una: domicilio, diseño, un envío a sublimar. Se suman al costo total (bajan la ganancia) y aparecen en la lista de compras como una línea más. Para un costo que sí depende de una referencia puntual, usa un insumo con tipo \"Fijo por referencia\".") +
-    "</div>";
-
-  if (globales.length) {
-    html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Concepto</span><span>Costo</span><span>Proveedor</span><span>Es servicio</span><span></span></div>';
-    globales.forEach(function (g) {
-      var attrs = ' data-action-change="set-costo-global" data-cot="' + c.id + '" data-global="' + g.id + '"';
-      html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
-        '<span class="mobile-th">Concepto</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
-        '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" placeholder="0" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
-        '<span class="mobile-th">Proveedor</span>' + renderSelectProveedorGlobal(g, attrs) +
-        '<span class="mobile-th">Es servicio</span><label class="mini-label" style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ' + (g.esServicio !== false ? "checked" : "") + attrs + ' data-campo="esServicio" /> Sí</label>' +
-        '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + c.id + '" data-global="' + g.id + '">✕</button>' +
-        "</div>";
-    });
-    html += '<div class="section-sub" style="margin:6px 0 0;">Suman <b>' + fmt(total) + "</b> al costo del pedido.</div>";
-  } else {
-    html += '<div class="empty" style="padding:8px 0;">Sin costos globales. Agrega acá lo que siempre cuentas por pedido (domicilio, diseño…) en vez de repartirlo a mano entre las referencias.</div>';
-  }
-  html += '<div class="pedido-actions" style="margin-top:10px;"><button class="btn ghost small" data-action="add-costo-global" data-id="' + c.id + '">+ Agregar costo global</button></div>';
-  return html;
-}
-
-function renderSelectProveedorGlobal(g, attrs) {
-  var proveedores = proveedoresDeContactos();
-  if (!proveedores.length) return '<span class="section-sub" style="margin:0;">—</span>';
-  return '<select class="mini-input" style="width:100%"' + attrs + ' data-campo="proveedorId">' +
-    '<option value="">Sin especificar</option>' +
-    proveedores.map(function (p) { return '<option value="' + p.id + '" ' + (g.proveedorId === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
-    "</select>";
-}
 
 // Pestaña "Producción": todo lo que solo importa una vez se empieza a
 // producir — comparación estimado vs. real lado a lado, qué falta comprar,
@@ -692,6 +648,41 @@ function renderRefProveedorResumen(ref, calc) {
   return html;
 }
 
+var INS_COLS_REF = "1fr 90px 90px 165px 70px 90px 30px";
+
+// Los costos globales del pedido (domicilio, diseño, un envío a sublimar) se
+// ven al final de la tabla de insumos de TODAS las referencias, separados por
+// una línea intermitente: no pertenecen a ninguna en particular, aplican a
+// todo el pedido. Se convierte un insumo normal en global eligiéndole el tipo
+// de costo "Costo global del pedido" — ahí deja la referencia donde estaba y
+// pasa a esta lista, sin un panel aparte que sature la pantalla.
+//
+// Su costo por prenda es el promedio: el costo total dividido entre la suma
+// de prendas de todas las referencias.
+function renderFilasGlobales(cotId, ref) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var globales = (cot && cot.costosGlobales) || [];
+  if (!globales.length) return "";
+  var unidades = calcUnidadesCotizacion(cot);
+  var html = '<div class="ins-row-separador" title="De aquí para abajo, costos que se pagan una vez por todo el pedido — no son de esta referencia"></div>';
+  globales.forEach(function (g) {
+    var attrs = ' data-action-change="set-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '"';
+    html += '<div class="ins-row global" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global") + "</select>" +
+      // La cantidad no aplica: se paga una vez, no por prenda.
+      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="1" disabled />' +
+      '<span class="mobile-th">Costo x prenda</span><span class="amount" title="' + fmt(g.costo) + " entre " + unidades + ' prenda(s) del pedido">' + fmt(calcCostoPrendaGlobal(cot, g)) + "</span>" +
+      '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '">✕</button>' +
+      "</div>";
+  });
+  html += '<div class="section-sub" style="margin:4px 0 0;">Costos de todo el pedido: <b>' + fmt(calcCostosGlobales(cot)) + "</b>" +
+    (unidades > 0 ? " · " + fmt(calcCostosGlobales(cot) / unidades) + " por prenda (entre las " + unidades + " del pedido)" : "") + "</div>";
+  return html;
+}
+
 // El ORIGEN de la referencia no es un campo más: es lo que decide qué
 // formulario se muestra. Una referencia fabricada en el taller se costea con
 // insumos y consumo de tela; una comprada a proveedor llega hecha, así que no
@@ -737,23 +728,20 @@ function renderRefCard(cotId, ref) {
   }
 
   html += '<div class="ins-table">' +
-    '<div class="ins-row head" style="grid-template-columns:1fr 60px 90px 150px 70px 75px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Servicio</span><span>Costo x prenda</span><span></span></div>';
+    '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
-    html += '<div class="ins-row" style="grid-template-columns:1fr 60px 90px 150px 70px 75px 90px 30px;">' +
+    html += '<div class="ins-row" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
-      // Un servicio se paga pero no se compra por cantidad: marcarlo hace que
-      // la lista de compras diga "servicio" en vez de pedir N unidades de algo
-      // que no se mide (el caso de "11 UND de confección").
-      '<span class="mobile-th">Servicio</span><label class="mini-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Es un servicio (diseño, confección, sublimado): no se compra por cantidad."><input type="checkbox" ' + (i.esServicio ? "checked" : "") + ' data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="esServicio" /> Sí</label>' +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";
   });
   if ((ref.insumos || []).length === 0) { html += '<div class="empty" style="padding:8px 0;">Sin insumos aún.</div>'; }
+  html += renderFilasGlobales(cotId, ref);
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
@@ -1144,8 +1132,14 @@ export var actions = {
   },
   "set-ins-campo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins"), campo = el.getAttribute("data-campo");
-    var valor = (campo === "costo" || campo === "cantidad") ? num(el.value)
-      : (campo === "esServicio" ? !!el.checked : el.value);
+    var valor = (campo === "costo" || campo === "cantidad") ? num(el.value) : el.value;
+    // Elegir "Costo global del pedido" saca el insumo de esta referencia y lo
+    // manda a la lista global de la cotización: deja de ser de una prenda y
+    // pasa a verse al final de TODAS las referencias (ver renderFilasGlobales).
+    if (campo === "tipo" && valor === "global") {
+      moverInsumoAGlobal(cotId, refId, insId);
+      return;
+    }
     mapRef(cotId, refId, function (r) {
       var insumos = (r.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
@@ -1345,7 +1339,13 @@ export var actions = {
   },
   "set-costo-global": function (el) {
     var cotId = el.getAttribute("data-cot"), gId = el.getAttribute("data-global"), campo = el.getAttribute("data-campo");
-    var valor = campo === "costo" ? num(el.value) : (campo === "esServicio" ? !!el.checked : el.value);
+    var valor = campo === "costo" ? num(el.value) : el.value;
+    // Devolverle un tipo normal lo saca de la lista global y lo baja a la
+    // referencia que se esté viendo: vuelve a ser un insumo de esa prenda.
+    if (campo === "tipo" && valor !== "global") {
+      moverGlobalAInsumo(cotId, gId, valor);
+      return;
+    }
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       return Object.assign({}, c, {
@@ -1929,6 +1929,63 @@ function confirmarSalidaSiSucia() {
 
 // Aplica una función de transformación a una cotización completa y la marca
 // como pendiente de guardar (no persiste — ver marcarSucia arriba).
+// Mueve un insumo de una referencia a la lista global de la cotización. Se
+// conserva el mismo objeto (nombre, unidad, costo) para no perder lo que ya
+// estaba escrito; solo cambia de dueño. `cantidad` se descarta: un costo
+// global se paga una vez, no por prenda.
+function moverInsumoAGlobal(cotId, refId, insId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  if (!cot) return;
+  var ref = (cot.referencias || []).filter(function (r) { return r.id === refId; })[0];
+  var insumo = ref && (ref.insumos || []).filter(function (i) { return i.id === insId; })[0];
+  if (!insumo) return;
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, {
+      referencias: (c.referencias || []).map(function (r) {
+        if (r.id !== refId) return r;
+        return Object.assign({}, r, { insumos: (r.insumos || []).filter(function (i) { return i.id !== insId; }) });
+      }),
+      costosGlobales: (c.costosGlobales || []).concat([{
+        id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
+        costo: num(insumo.costo), proveedorId: insumo.proveedorId || ""
+      }])
+    });
+  });
+  mostrarToast('"' + (insumo.nombre || "El costo") + '" pasó a ser global: ahora aparece al final de todas las referencias y se reparte entre todas las prendas del pedido.');
+  marcarSucia(cotId);
+}
+
+// El camino de vuelta: un costo global recupera un tipo normal y baja a la
+// referencia que se esté viendo en ese momento.
+function moverGlobalAInsumo(cotId, gId, tipo) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  if (!cot) return;
+  var global = (cot.costosGlobales || []).filter(function (g) { return g.id === gId; })[0];
+  if (!global) return;
+  var refs = cot.referencias || [];
+  if (!refs.length) { window.alert("No hay ninguna referencia a la que devolverlo. Crea una primero."); return; }
+  var activaId = state.refActiva[cotId];
+  var destino = refs.filter(function (r) { return r.id === activaId; })[0] || refs[0];
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, {
+      costosGlobales: (c.costosGlobales || []).filter(function (g) { return g.id !== gId; }),
+      referencias: (c.referencias || []).map(function (r) {
+        if (r.id !== destino.id) return r;
+        return Object.assign({}, r, {
+          insumos: (r.insumos || []).concat([{
+            id: global.id, nombre: global.nombre, unidad: global.unidad || "UND",
+            costo: num(global.costo), tipo: tipo, cantidad: 1, proveedorId: global.proveedorId || ""
+          }])
+        });
+      })
+    });
+  });
+  mostrarToast('"' + (global.nombre || "El costo") + '" volvió a ser un insumo de "' + (destino.nombre || "la referencia") + '".');
+  marcarSucia(cotId);
+}
+
 function conRef(cotId, transform) {
   state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? transform(c) : c; });
   marcarSucia(cotId);

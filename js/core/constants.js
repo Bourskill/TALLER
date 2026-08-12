@@ -133,8 +133,22 @@ export const DEFAULT_CONFIG = {
 export const TIPOS_COSTO = {
   tela: { label: "Tela (según consumo)", ayuda: "costo = costo × consumo aprox. de la referencia × cantidad" },
   fijo_pedido: { label: "Fijo por referencia", ayuda: "costo = costo total ÷ cantidad de prendas de esa referencia" },
-  por_prenda: { label: "Fijo por prenda", ayuda: "costo = costo × cantidad indicada" }
+  por_prenda: { label: "Fijo por prenda", ayuda: "costo = costo × cantidad indicada" },
+  // Se paga UNA vez por el pedido entero (domicilio, diseño, un envío a
+  // sublimar), sin importar cuántas referencias tenga. Al marcarlo, el insumo
+  // deja de pertenecer a una referencia y pasa a la lista global de la
+  // cotización: aparece al final de TODAS ellas, y su costo por prenda es el
+  // promedio sobre la suma de prendas de todo el pedido.
+  global: { label: "Costo global del pedido", ayuda: "costo = costo total ÷ todas las prendas del pedido (de todas las referencias)" }
 };
+
+// Unidad reservada para lo que se paga pero no se compra en ningún lado:
+// diseño, confección, sublimado. Un insumo con esta unidad no aparece con
+// "N unidades" en la lista de compras — no es algo tangible que se pida.
+export const UNIDAD_SERVICIO = "servicio";
+
+// Sugerencias del campo "Unidad" (datalist): se puede escribir cualquier otra.
+export const UNIDADES_SUGERIDAS = ["UND", "MT", "CM", "KG", "GR", "LT", "DOC", "PAR", UNIDAD_SERVICIO];
 
 // De dónde sale un insumo o producto: fabricado dentro del taller (pasa por
 // fases de producción propias) o comprado ya hecho a un proveedor externo
