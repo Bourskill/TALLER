@@ -990,6 +990,16 @@ export async function generarPDFFactura(p, opts) {
       var c = calcRefTotales(ref);
       return [numFmt(ref.cantidadPedida), ref.nombre || "Referencia", money(c.precioUnit), money(c.precioTotal)];
     });
+  } else if ((p.lineas || []).length) {
+    // Venta directa: cada línea del pedido es una línea de la factura, con su
+    // precio propio. Antes se imprimía UNA sola fila con toda la descripción
+    // amontonada y un "valor unitario" que era el total dividido entre las
+    // unidades — un promedio que no le habían cobrado a nadie, y que en un
+    // pedido de dos cosas distintas mostraba un precio que no existía.
+    filas = p.lineas.map(function (l) {
+      var descripcion = (l.productoNombre || l.textoDescripcion || "—") + (l.talla ? " (" + l.talla + ")" : "");
+      return [numFmt(l.cantidad), descripcion, money(l.precioUnitario), money(num(l.precioUnitario) * num(l.cantidad))];
+    });
   } else {
     filas = [[String(p.cantidad || 1), p.descripcion || "Pedido", money(num(p.total) / (num(p.cantidad) || 1)), money(p.total)]];
   }

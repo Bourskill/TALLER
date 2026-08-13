@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto } from "../core/calc.js";
+import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
@@ -10,6 +10,26 @@ import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar
 import { getSession } from "../core/auth.js";
 import { ajustarStockProducto } from "../core/stock.js";
 import { subirImagenReferencia } from "../core/drive.js";
+
+// Nuevo total abonado de un pedido después de agregar, editar o eliminar una
+// fila de su lista de abonos. Todo lo que toque esa lista pasa por acá, así
+// `p.abono` (de donde sale el saldo por cobrar de toda la app) nunca puede
+// separarse de las filas que lo sustentan.
+//
+// Dos sutilezas que ya costaron plata:
+//  - Los reembolsos viven en la misma lista pero RESTAN (ver
+//    calcAbonadoDeLista en core/calc.js). Sumarlos como abonos hacía
+//    desaparecer un saldo por cobrar real al editar cualquier abono de un
+//    pedido que ya tuviera un reembolso.
+//  - Los pedidos anteriores a que existiera la lista guardan el total abonado
+//    sin ninguna fila detrás. Recalcular solo desde la lista los dejaría en
+//    cero; por eso lo que ya estaba abonado y no está representado en ninguna
+//    fila se conserva como base. Con datos normales esa base es 0 y el
+//    resultado es exactamente la suma de la lista.
+function recalcularAbonoPedido(pedido, nuevaLista) {
+  var baseSinRespaldo = num(pedido.abono) - calcAbonadoDeLista(pedido.abonos);
+  return Math.max(0, baseSinRespaldo) + calcAbonadoDeLista(nuevaLista);
+}
 
 // Todos los números de OP usados, activos Y en la papelera — para que un
 // pedido restaurado o uno nuevo nunca choque con uno que ya existió.
@@ -491,8 +511,14 @@ function renderHistorialPedidos() {
     // ritmo) — si no, se usa el "tape" único de siempre (pedidos rápidos,
     // sin cotización de origen).
     var refsProduccion = (cotRelacionada && cotRelacionada.referencias && cotRelacionada.referencias.length) ? cotRelacionada.referencias : null;
+    // Ojo con el pedido de costo > 0 y total 0 (pasa apenas se cotiza el costo
+    // de una prenda antes de ponerle precio de venta): la ganancia existe —es
+    // toda pérdida— pero el porcentaje no, porque no hay sobre qué calcularlo.
+    // Cuando el porcentaje se dejaba en null y la ganancia no, el .toFixed() de
+    // más abajo reventaba y TUMBABA el render de toda la pestaña Pedidos.
     var ganancia = num(p.costo) > 0 ? num(p.total) - num(p.costo) : null;
     var gananciaPct = (ganancia != null && num(p.total) > 0) ? (ganancia / num(p.total) * 100) : null;
+    var gananciaTxt = ganancia == null ? "" : (fmt(ganancia) + (gananciaPct != null ? " (" + gananciaPct.toFixed(1) + "%)" : " · sin precio de venta asignado"));
 
     html += '<div class="pedido-card" data-pedido-id="' + p.id + '">' +
       '<div class="pedido-top"><div>' +
@@ -501,7 +527,7 @@ function renderHistorialPedidos() {
       '<span class="pedido-tipo">' + (p.tipoCliente === "propio" ? "Propio" : "Tercero") + "</span>" +
       '<div class="pedido-meta">' + esc(p.descripcion) + " · cantidad " + esc(p.cantidad) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + "</div>" +
       (cliente ? '<div class="pedido-meta">📦 ' + esc(cliente.direccion || "—") + ", " + esc(cliente.ciudad || "—") + (cliente.cp ? " (CP " + esc(cliente.cp) + ")" : "") + "</div>" : "") +
-      (ganancia != null ? '<div class="pedido-meta">Costo ' + fmt(p.costo) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + fmt(ganancia) + " (" + gananciaPct.toFixed(1) + "%)</b></div>" : "") +
+      (ganancia != null ? '<div class="pedido-meta">Costo ' + fmt(p.costo) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
       "</div><div class=\"pedido-money\"><div class=\"total\">" + fmt(p.total) + "</div>" +
       '<div class="saldo ' + (saldo > 0 ? "" : (num(p.total) > 0 ? "ok" : "neutral")) + '">' + (saldo > 0 ? "saldo " + fmt(saldo) : (num(p.total) > 0 ? "cobrado completo" : "sin valor asignado")) + "</div>" +
       "</div></div>" +
@@ -529,7 +555,11 @@ function renderProgresoTape(p) {
   var estadoIds = estadosDef.map(function (e) { return e.id; });
   var idx = estadoIds.indexOf(p.estado);
   if (idx < 0) idx = 0; // por seguridad, si el estado guardado ya no existe en la lista
-  return '<div class="tape-track"><div class="tape-fill" style="width:' + (idx / (estadosDef.length - 1) * 100) + '%;"></div></div>' +
+  // Un flujo de UNA sola etapa (posible con un flujo personalizado de
+  // Plantillas) dividía por cero y dejaba la barra con un ancho inválido:
+  // estando en la única etapa, el avance es del 100%.
+  var pct = estadosDef.length > 1 ? (idx / (estadosDef.length - 1) * 100) : 100;
+  return '<div class="tape-track"><div class="tape-fill" style="width:' + pct + '%;"></div></div>' +
     '<div class="tape-labels">' + estadosDef.map(function (e, i) { return '<span class="' + (i <= idx ? "current" : "") + '">' + esc(e.label) + "</span>"; }).join("") + "</div>" +
     '<div class="pedido-actions" style="margin-top:6px;">' +
     '<span class="accion-grupo">' +
@@ -605,16 +635,18 @@ function renderPedidoConsignacion(p) {
   if (ventas.length) {
     html += '<hr class="stitch" />';
     html += '<div class="cot-col-title">Ventas reportadas</div>';
-    html += '<div class="tx-row head" style="grid-template-columns:90px 70px 100px 100px 110px;"><span>Fecha</span><span>Cant.</span><span>Monto</span><span>Comisión</span><span></span></div>';
+    var VENTA_COLS = "90px 70px 100px 100px 200px";
+    html += '<div class="tx-row head" style="grid-template-columns:' + VENTA_COLS + ';"><span>Fecha</span><span>Cant.</span><span>Monto</span><span>Comisión</span><span></span></div>';
     ventas.forEach(function (v) {
-      html += '<div class="tx-row" style="grid-template-columns:90px 70px 100px 100px 110px;">' +
+      html += '<div class="tx-row" style="grid-template-columns:' + VENTA_COLS + ';">' +
         '<span class="mobile-th">Fecha</span><span>' + esc(v.fecha || "—") + "</span>" +
         '<span class="mobile-th">Cant.</span><span>' + esc(v.cantidad) + "</span>" +
         '<span class="mobile-th">Monto</span><span class="amount">' + fmt(v.montoTotal) + "</span>" +
         '<span class="mobile-th">Comisión</span><span class="amount">' + fmt(v.comisionMonto) + "</span>" +
-        "<span>" + (v.comisionPagada
+        '<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' + (v.comisionPagada
           ? '<span class="status-pill pagado">pagada</span>'
           : '<button class="btn ghost small" data-action="pagar-comision-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '">Pagar comisión</button>') +
+        '<button class="btn danger small" data-action="eliminar-venta-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '" title="Anular esta venta (retira su ingreso de Finanzas y devuelve las unidades al punto)">✕</button>' +
         "</span></div>";
     });
   }
@@ -872,19 +904,20 @@ function renderAbonosPedido(p) {
   var abonos = p.abonos || [];
   if (!abonos.length) return "";
   var html = '<div class="section-sub" style="margin-top:8px;">Abonos registrados</div>' +
-    '<div class="tx-row head" style="grid-template-columns:100px 90px 110px 1fr 100px;"><span>Fecha</span><span>Monto</span><span>Método</span><span>Comprobante</span><span></span></div>';
+    '<div class="tx-row head" style="grid-template-columns:100px 90px 110px 1fr 190px;"><span>Fecha</span><span>Monto</span><span>Método</span><span>Comprobante</span><span></span></div>';
   abonos.forEach(function (a) {
     if (a.tipo === "reembolso") {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;">' +
+      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;">' +
         '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
         '<span class="mobile-th">Monto</span><span class="amount neg">-' + fmt(a.monto) + "</span>" +
         '<span class="mobile-th">Método</span><span style="color:var(--danger);font-weight:700;">↩ Reembolso</span>' +
         '<span class="mobile-th">Comprobante</span><span class="muted">' + esc(a.motivo || "—") + "</span>" +
-        "<span></span></div>";
+        '<span><button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este reembolso (también retira su movimiento de Finanzas)">Eliminar</button></span>' +
+        "</div>";
       return;
     }
     if (state.abonoEditando === a.id) {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;" data-abono-edit-row="' + a.id + '">' +
+      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;" data-abono-edit-row="' + a.id + '">' +
         '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" style="width:100%" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
         '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" style="width:100%" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
         '<span class="mobile-th">Método</span><span><select class="mini-input" style="width:100%" data-role="edit-abono-metodo">' +
@@ -896,7 +929,7 @@ function renderAbonosPedido(p) {
         '<button class="btn ghost small" data-action="cancelar-edicion-abono">✕</button>' +
         "</span></div>";
     } else {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 100px;">' +
+      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;">' +
         '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
         '<span class="mobile-th">Monto</span><span class="amount">' + fmt(a.monto) + "</span>" +
         '<span class="mobile-th">Método</span><span>' + esc(a.metodoPago || "—") + "</span>" +
@@ -905,6 +938,11 @@ function renderAbonosPedido(p) {
         '<button class="btn ghost small" data-action="editar-abono" data-id="' + a.id + '">Editar</button>' +
         '<button class="btn ghost small" data-action="generar-pdf-recibo" data-id="' + p.id + '" data-abono="' + a.id + '">Recibo</button>' +
         '<button class="btn ghost small" data-action="enviar-recibo-correo" data-id="' + p.id + '" data-abono="' + a.id + '" title="Envía el recibo al correo del cliente">✉</button>' +
+        // Anular un abono mal cargado es el ÚNICO camino correcto para
+        // deshacerlo: revierte los dos lados a la vez (el abonado del pedido y
+        // el movimiento de Finanzas). Antes solo se podía editar el monto, y
+        // borrar el movimiento en Finanzas dejaba al pedido cobrado igual.
+        '<button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este abono (también retira su movimiento de Finanzas)">Eliminar</button>' +
         "</span></div>";
     }
   });
@@ -1013,16 +1051,32 @@ export var actions = {
   "select-producto-pedido-picker": function (el) {
     var producto = productoById(el.getAttribute("data-id"));
     if (!producto) return;
+    var fp = state.formPedido;
+    // La talla que se elige sola tiene que ser una que TODAVÍA quede
+    // disponible descontando lo que las otras líneas de este mismo borrador ya
+    // apartaron. Sin esto, el explorador dejaba agregar una segunda línea de
+    // una talla con 1 sola unidad: el borrador quedaba pidiendo 2, y recién al
+    // pulsar "Crear pedido" se caía con un error — sin pista de por qué.
+    function apartadoEnBorrador(talla) {
+      return (fp.lineas || [])
+        .filter(function (o) { return o.productoId === producto.id && o.talla === talla; })
+        .reduce(function (a, o) { return a + num(o.cantidad); }, 0);
+    }
     var conStock = (producto.variantesTalla || []).filter(function (t) { return num(t.stock) > 0; });
     if (!conStock.length) {
       window.alert('"' + producto.nombre + '" no tiene stock en ninguna talla.\n\nRegistra una entrada en Catálogo → ' + producto.nombre + " antes de venderlo.");
       return;
     }
-    var fp = state.formPedido;
+    var disponibles = conStock.filter(function (t) { return num(t.stock) - apartadoEnBorrador(t.talla) > 0; });
+    if (!disponibles.length) {
+      window.alert('Ya apartaste todo el stock disponible de "' + producto.nombre + '" en este mismo pedido.\n\n' +
+        "Si necesitas más, sube la cantidad en la línea que ya tienes (hasta donde alcance) o repón el stock en Catálogo.");
+      return;
+    }
     fp.lineas = (fp.lineas || []).concat([{
       id: uid(), tipo: "catalogo",
       productoId: producto.id, productoNombre: producto.nombre, imagenUrl: producto.imagenUrl || "",
-      talla: conStock[0].talla, cantidad: 1,
+      talla: disponibles[0].talla, cantidad: 1,
       precioUnitario: num(producto.precioVenta),
       // El costo llega calculado con la misma fórmula del catálogo (insumos,
       // o costo de compra si el producto es de proveedor) — ver
@@ -1295,7 +1349,10 @@ export var actions = {
     var montoTotal = cantidad * precioUnitario;
     var comisionMonto = calcConsignacionComision(ped.consignacion, cantidad, montoTotal);
     var ventaId = uid();
-    state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Venta consignación — " + ped.descripcion, monto: montoTotal, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id });
+    // origenVentaConsignacionId: marca de origen del sistema — es lo que
+    // permite encontrar (y bloquear el borrado suelto de) este movimiento si
+    // la venta se elimina o se corrige. Ver origenSistemaDeTx en core/calc.js.
+    state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Venta consignación — " + ped.descripcion, monto: montoTotal, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenVentaConsignacionId: ventaId });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
       var ventas = (p.consignacion.ventas || []).concat([{ id: ventaId, cantidad: cantidad, fecha: fecha, montoTotal: montoTotal, comisionMonto: comisionMonto, comisionPagada: false, productoId: productoId, talla: talla }]);
@@ -1439,7 +1496,7 @@ export var actions = {
     if (!ped || !ped.consignacion) return;
     var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
     if (!venta || venta.comisionPagada) return;
-    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Comisión consignación — " + ped.cliente, monto: venta.comisionMonto, contraparte: ped.cliente, fecha: todayStr(), pedidoId: ped.id });
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Comisión consignación — " + ped.cliente, monto: venta.comisionMonto, contraparte: ped.cliente, fecha: todayStr(), pedidoId: ped.id, origenComisionConsignacionId: ventaId });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
       var ventas = p.consignacion.ventas.map(function (v) { return v.id === ventaId ? Object.assign({}, v, { comisionPagada: true }) : v; });
@@ -1544,7 +1601,10 @@ export var actions = {
         state.pedidos = state.pedidos.map(function (p) {
           if (p.id !== id) return p;
           var abonos = (p.abonos || []).concat([{ id: abonoId, monto: saldo, fecha: todayStr(), metodoPago: "otro", comprobanteUrl: "" }]);
-          return Object.assign({}, p, { abono: p.total, abonos: abonos });
+          // Da exactamente p.total (el saldo es total - abonado), pero pasa
+          // por la misma puerta que el resto para que la lista y el total
+          // abonado no puedan separarse nunca.
+          return Object.assign({}, p, { abono: recalcularAbonoPedido(p, abonos), abonos: abonos });
         });
         // Si el filtro "Con saldo pendiente" está activo, el pedido recién
         // saldado desaparecería de la vista (aunque sigue existiendo) — se
@@ -1573,11 +1633,11 @@ export var actions = {
     if (!window.confirm('¿Registrar un reembolso de ' + fmt(monto) + ' a "' + ped.cliente + '"?\n\nEsto crea un movimiento de gasto en Finanzas y reduce el abono registrado de este pedido.')) return;
     var reembolsoId = uid();
     var fecha = fr.fecha || todayStr();
-    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Reembolso — " + ped.descripcion + (fr.motivo ? " (" + fr.motivo + ")" : ""), monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id });
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Reembolso — " + ped.descripcion + (fr.motivo ? " (" + fr.motivo + ")" : ""), monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenReembolsoId: reembolsoId });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
       var abonos = (p.abonos || []).concat([{ id: reembolsoId, monto: monto, fecha: fecha, tipo: "reembolso", motivo: fr.motivo || "", comprobanteUrl: "" }]);
-      return Object.assign({}, p, { abonos: abonos, abono: Math.max(0, num(p.abono) - monto) });
+      return Object.assign({}, p, { abonos: abonos, abono: recalcularAbonoPedido(p, abonos) });
     });
     state.reembolsoAbierto = "";
     state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
@@ -1600,13 +1660,24 @@ export var actions = {
       var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
       if (!ped) return;
       var saldoDisponible = num(ped.total) - num(ped.abono);
-      var abonoAplicado = Math.min(monto, Math.max(saldoDisponible, 0)) || monto;
+      // Antes, un abono mayor al saldo se RECORTABA en silencio hasta el
+      // saldo: quien escribía 150.000 sobre un saldo de 100.000 veía
+      // registrados 100.000 y no se enteraba de que le faltaban 50.000 por
+      // registrar en algún lado. Ahora se pregunta y se registra lo que el
+      // usuario decida — el monto que se guarda es siempre el que él vio.
+      if (monto > saldoDisponible) {
+        var aviso = saldoDisponible > 0
+          ? "Este abono (" + fmt(monto) + ") es mayor que el saldo pendiente del pedido (" + fmt(saldoDisponible) + ")."
+          : "Este pedido ya no tiene saldo pendiente (" + (saldoDisponible < 0 ? "hay " + fmt(-saldoDisponible) + " cobrados de más" : "está cobrado completo") + ").";
+        if (!window.confirm(aviso + "\n\n¿Registrar igual el abono completo de " + fmt(monto) + "?\n\n" +
+          "Se registra tal cual (queda como saldo a favor del cliente). Si fue un error de digitación, cancela y corrige el monto.")) return;
+      }
       var abonoId = uid();
-      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono — " + ped.descripcion, monto: abonoAplicado, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenAbonoId: abonoId });
+      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono — " + ped.descripcion, monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenAbonoId: abonoId });
       state.pedidos = state.pedidos.map(function (p) {
         if (p.id !== id) return p;
-        var abonos = (p.abonos || []).concat([{ id: abonoId, monto: abonoAplicado, fecha: fecha, metodoPago: metodo, comprobanteUrl: comprobanteUrl || "" }]);
-        return Object.assign({}, p, { abono: num(p.abono) + abonoAplicado, abonos: abonos });
+        var abonos = (p.abonos || []).concat([{ id: abonoId, monto: monto, fecha: fecha, metodoPago: metodo, comprobanteUrl: comprobanteUrl || "" }]);
+        return Object.assign({}, p, { abono: recalcularAbonoPedido(p, abonos), abonos: abonos });
       });
       persist("tx"); persist("pedidos"); notify();
     }
@@ -1646,13 +1717,55 @@ export var actions = {
       var abonos = (p.abonos || []).map(function (a) {
         return a.id === abonoId ? Object.assign({}, a, { monto: nuevoMonto, fecha: nuevaFecha, metodoPago: nuevoMetodo }) : a;
       });
-      var totalAbonado = abonos.reduce(function (a, x) { return a + num(x.monto); }, 0);
-      return Object.assign({}, p, { abonos: abonos, abono: totalAbonado });
+      return Object.assign({}, p, { abonos: abonos, abono: recalcularAbonoPedido(p, abonos) });
     });
     state.tx = state.tx.map(function (t) {
       return t.origenAbonoId === abonoId ? Object.assign({}, t, { monto: nuevoMonto, fecha: nuevaFecha }) : t;
     });
     state.abonoEditando = "";
+    persist("pedidos"); persist("tx"); notify();
+  },
+  // Anular un abono (o un reembolso) mal cargado. Es la contraparte del
+  // bloqueo de borrado en Finanzas: acá se revierten LOS DOS lados en el
+  // mismo acto — se saca de la lista del pedido, se recalcula el abonado con
+  // la única fórmula que existe para eso (calcAbonadoDeLista, que resta los
+  // reembolsos) y se retira el movimiento que había generado en Finanzas.
+  // Nunca puede quedar plata en la caja sin su abono, ni al revés.
+  "eliminar-abono": function (el) {
+    var pedidoId = el.getAttribute("data-id"), abonoId = el.getAttribute("data-abono");
+    var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+    if (!ped) return;
+    var abono = (ped.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
+    if (!abono) return;
+    var esReembolso = abono.tipo === "reembolso";
+    if (!window.confirm("¿Anular " + (esReembolso ? "el reembolso" : "el abono") + " de " + fmt(abono.monto) + (abono.fecha ? " del " + abono.fecha : "") + "?\n\n" +
+      "Se borra de este pedido y también se retira su movimiento de Finanzas, así la caja y el saldo del pedido siguen cuadrando.\n\nNo se puede deshacer.")) return;
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== pedidoId) return p;
+      var abonos = (p.abonos || []).filter(function (a) { return a.id !== abonoId; });
+      return Object.assign({}, p, { abonos: abonos, abono: recalcularAbonoPedido(p, abonos) });
+    });
+    state.tx = state.tx.filter(function (t) { return t.origenAbonoId !== abonoId && t.origenReembolsoId !== abonoId; });
+    state.abonoEditando = "";
+    persist("pedidos"); persist("tx"); notify();
+  },
+  // Misma idea para una venta de consignación mal reportada: hasta ahora no
+  // había forma de corregirla (ni la venta ni su ingreso), así que un error de
+  // digitación quedaba para siempre en la caja y en el seguimiento por talla.
+  "eliminar-venta-consignacion": function (el) {
+    var pedidoId = el.getAttribute("data-id"), ventaId = el.getAttribute("data-venta");
+    var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+    if (!ped || !ped.consignacion) return;
+    var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
+    if (!venta) return;
+    if (!window.confirm("¿Anular esta venta reportada (" + num(venta.cantidad) + " unidad(es) por " + fmt(venta.montoTotal) + ")?\n\n" +
+      "Se retira su ingreso de Finanzas" + (venta.comisionPagada ? " y también el gasto de la comisión que ya se le pagó al punto" : "") + ", y las unidades vuelven a contar como disponibles en el punto.\n\nNo se puede deshacer.")) return;
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== pedidoId) return p;
+      var ventas = (p.consignacion.ventas || []).filter(function (v) { return v.id !== ventaId; });
+      return Object.assign({}, p, { consignacion: Object.assign({}, p.consignacion, { ventas: ventas }) });
+    });
+    state.tx = state.tx.filter(function (t) { return t.origenVentaConsignacionId !== ventaId && t.origenComisionConsignacionId !== ventaId; });
     persist("pedidos"); persist("tx"); notify();
   },
   "ver-papelera-pedidos": function () {
@@ -1675,7 +1788,16 @@ export var actions = {
     if (pedido.vendedor && pedido.vendedor.estado === "pagado") dineroVinculado += calcComisionValor(pedido);
     if (pedido.consignacion) dineroVinculado += (pedido.consignacion.ventas || []).reduce(function (a, v) { return a + num(v.montoTotal); }, 0);
     var avisoDinero = dineroVinculado > 0 ? ("\n\nOjo: este pedido ya tiene " + fmt(dineroVinculado) + " en movimientos de Finanzas (abonos/comisión/ventas) — esos movimientos NO se eliminan ni se revierten solos.") : "";
-    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero)) return;
+    // En consignación el stock salió del taller vía remisiones, no vía
+    // `stockConsumido` del pedido: eliminarlo NO lo devuelve al Catálogo (la
+    // mercancía sigue físicamente en el punto). Decirlo antes de confirmar,
+    // porque el caso normal —venta directa— sí restituye y da a entender lo
+    // contrario.
+    var enElPunto = pedido.consignacion ? calcConsignacionDisponible(pedido) : 0;
+    var avisoStock = enElPunto > 0
+      ? ("\n\nOjo: quedan " + enElPunto + " unidad(es) entregadas a este punto. Eliminar el pedido NO las devuelve al stock del Catálogo (siguen físicamente allá) — si te las regresaron, registra primero un retiro.")
+      : "";
+    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero + avisoStock)) return;
     state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
     persist("pedidos"); persist("pedidosPapelera"); notify();

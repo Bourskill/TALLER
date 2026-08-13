@@ -664,10 +664,30 @@ export var actions = {
     if (t && num(t.stock) > 0 && !window.confirm('La talla "' + t.talla + '" todavía tiene ' + t.stock + ' en stock. ¿Eliminarla igual?')) return;
     mapPro(id, function (p) { return Object.assign({}, p, { variantesTalla: (p.variantesTalla || []).filter(function (t) { return t.id !== tallaId; }) }); });
   },
+  // Renombrar una talla no es un cambio cosmético: los pedidos, remisiones y
+  // consignaciones guardan la talla por su NOMBRE, y por ahí es que se
+  // devuelve el stock si un pedido se elimina o se restaura. Con el nombre
+  // cambiado esa devolución no encuentra a dónde volver y se pierde en
+  // silencio. Se avisa cuando ya hay historial detrás de esa talla; con una
+  // talla recién creada (sin stock ni movimientos) no molesta.
   "set-pro-talla-campo": function (el) {
     var id = el.getAttribute("data-pro"), tallaId = el.getAttribute("data-talla");
+    var producto = (state.productos || []).filter(function (p) { return p.id === id; })[0];
+    var variante = producto ? (producto.variantesTalla || []).filter(function (t) { return t.id === tallaId; })[0] : null;
+    if (!variante) return;
+    var nombreNuevo = el.value;
+    var tieneHistorial = num(variante.stock) > 0 ||
+      (producto.movimientosStock || []).some(function (m) { return m.talla === variante.talla; });
+    if (tieneHistorial && nombreNuevo !== variante.talla) {
+      if (!window.confirm('¿Renombrar la talla "' + variante.talla + '" a "' + nombreNuevo + '"?\n\n' +
+        "Los pedidos y remisiones que ya salieron con la talla \"" + variante.talla + "\" la tienen guardada con ese nombre: si alguno se elimina o se restaura, su stock ya no va a saber a qué talla volver.\n\n" +
+        "Si lo que quieres es una talla distinta, es más seguro crearla aparte.")) {
+        notify(); // repinta para que el input vuelva a mostrar el nombre real
+        return;
+      }
+    }
     mapPro(id, function (p) {
-      var variantes = (p.variantesTalla || []).map(function (t) { return t.id === tallaId ? Object.assign({}, t, { talla: el.value }) : t; });
+      var variantes = (p.variantesTalla || []).map(function (t) { return t.id === tallaId ? Object.assign({}, t, { talla: nombreNuevo }) : t; });
       return Object.assign({}, p, { variantesTalla: variantes });
     });
   },

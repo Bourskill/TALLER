@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, val, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, proveedoresDeContactos } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, proveedoresDeContactos } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
@@ -180,6 +180,13 @@ function renderTablaTx(lista) {
 
 function renderFila(t) {
   var origen = origenDeTx(t);
+  // Movimiento generado por la app: el botón de borrar queda igual de visible
+  // (nada se esconde) pero se anuncia desde el título que hay que deshacerlo
+  // en su origen — al pulsarlo se explica dónde (ver "remove-tx").
+  var sistema = origenSistemaDeTx(t);
+  var tituloBorrar = sistema
+    ? "Este movimiento lo generó la app (" + sistema.que + ") — se deshace en su origen, no acá"
+    : "Se mueve a la papelera, no se borra para siempre";
   return '<div class="tx-row">' +
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
@@ -189,7 +196,7 @@ function renderFila(t) {
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
     (origen ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
     '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
-    '<button class="btn danger small" data-action="remove-tx" data-id="' + t.id + '" title="Se mueve a la papelera, no se borra para siempre">🗑</button>' +
+    '<button class="btn ' + (sistema ? "ghost" : "danger") + ' small" data-action="remove-tx" data-id="' + t.id + '" title="' + esc(tituloBorrar) + '">' + (sistema ? "🔒" : "🗑") + "</button>" +
     "</span>" +
     "</div>";
 }
@@ -381,10 +388,26 @@ export var actions = {
   },
   // "Eliminar" ya no borra para siempre: mueve el movimiento a la papelera,
   // de donde se puede restaurar si fue un error.
+  //
+  // Los movimientos que GENERÓ la app (un abono, una comisión, una cuota de
+  // deuda, un gasto fijo, una venta de consignación, una compra) no se pueden
+  // borrar desde acá: son el reflejo de un hecho que vive en otra pantalla, y
+  // borrar solo este lado dejaba al pedido diciendo que ya cobró mientras la
+  // plata desaparecía de la caja. Por el mismo motivo su tipo y monto ya eran
+  // de solo lectura al editar (ver renderFilaEdicion) — esto cierra el mismo
+  // hueco por el lado del borrado, y dice exactamente dónde revertirlo bien.
   "remove-tx": function (el) {
     var id = el.getAttribute("data-id");
     var item = state.tx.filter(function (t) { return t.id === id; })[0];
     if (!item) return;
+    var sistema = origenSistemaDeTx(item);
+    if (sistema) {
+      window.alert("Este movimiento no se borra desde Finanzas: es " + sistema.que + ".\n\n" +
+        "Si lo borraras solo acá, la plata saldría de la caja pero el registro de origen seguiría diciendo que se pagó (o se cobró) — y las dos pantallas quedarían diciendo cosas distintas.\n\n" +
+        "Para deshacerlo de verdad:\n" + sistema.donde + "\n\n" +
+        "Al hacerlo, este movimiento se retira solo.");
+      return;
+    }
     state.tx = state.tx.filter(function (t) { return t.id !== id; });
     state.txPapelera.unshift(Object.assign({}, item, { eliminadoEl: todayStr() }));
     persist("tx"); persist("txPapelera"); notify();

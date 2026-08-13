@@ -514,7 +514,8 @@ function renderTablaCompras(c, compras, hayProveedor) {
   html += '<div class="row-actions" style="margin-top:12px;flex-wrap:wrap;">' +
     '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra marcada, y borra el de las que se hayan desmarcado. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
     (c.estado === "convertida"
-      ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como un solo movimiento en Finanzas, para llevar el registro completo por pedido.">Registrar estimado completo como movimiento</button>'
+      ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como UN solo movimiento en Finanzas. Es una alternativa a llevar las compras reales una por una: registrar los dos contaría el mismo costo dos veces.">' +
+        (c.estimadoTxId ? "Actualizar el estimado ya registrado" : "Registrar estimado completo como movimiento") + "</button>"
       : '<span class="tag" style="background:var(--surface-3);" title="Disponible una vez esta cotización ya sea un pedido — es una medida de seguridad para no registrar gastos sin que exista un pedido con abono real.">🔒 Estimado completo (disponible al convertir en pedido)</span>') +
     "</div>";
   return html;
@@ -1417,6 +1418,14 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cot) return;
+    // El otro camino (registrar el costo estimado completo como un solo
+    // movimiento) ya metió ese costo en la caja. Llevar además las compras
+    // reales contaría el mismo pedido dos veces — se avisa antes, no después.
+    if (cot.estimadoTxId && state.tx.some(function (t) { return t.id === cot.estimadoTxId; })) {
+      if (!window.confirm("Este pedido ya tiene su costo ESTIMADO completo registrado como un movimiento en Finanzas.\n\n" +
+        "Si además llevas las compras reales, el costo de este pedido va a contarse DOS veces.\n\n" +
+        "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
+    }
     var lineas = calcListaCompras(cot);
     var creados = 0, actualizados = 0, borrados = 0;
 
@@ -1661,17 +1670,41 @@ export var actions = {
   // movimiento en Finanzas (a diferencia de "Registrar costo real", que
   // registra costos reales puntuales). Sirve para llevar el registro de
   // movimientos agrupado y categorizado por pedido desde el principio.
+  // Idempotente y con aviso de doble conteo. Antes cada clic creaba un gasto
+  // NUEVO por el mismo costo estimado: tres clics eran tres veces el costo del
+  // pedido restándose de la caja. Y como la tabla de compras lleva a Finanzas
+  // los costos REALES, tener los dos a la vez cuenta el mismo pedido dos
+  // veces. Ahora se guarda el id del movimiento que generó (estimadoTxId) para
+  // actualizar ese mismo, y se avisa del solapamiento antes de crearlo.
   "add-cot-estimado-movimiento": function (el) {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cot) return;
     var totales = calcCotizacionTotales(cot);
+    var existente = cot.estimadoTxId ? state.tx.filter(function (t) { return t.id === cot.estimadoTxId; })[0] : null;
+    var yaHayCompras = (cot.compras || []).some(function (c) { return c.txId; });
+
+    if (existente) {
+      if (!window.confirm("Este pedido ya tiene su costo estimado registrado en Finanzas por " + fmt(existente.monto) + ".\n\n¿Actualizarlo a " + fmt(totales.costoTotal) + "?\n\nSe modifica ese mismo movimiento, no se crea uno nuevo.")) return;
+      state.tx = state.tx.map(function (t) {
+        return t.id === existente.id ? Object.assign({}, t, { monto: totales.costoTotal, concepto: "Estimado completo del pedido — " + cot.descripcion }) : t;
+      });
+      persist("tx"); notify();
+      mostrarToast("✓ Estimado actualizado a " + fmt(totales.costoTotal) + ".");
+      return;
+    }
+
+    if (!window.confirm("Se registra en Finanzas un gasto de " + fmt(totales.costoTotal) + " (el costo ESTIMADO de todo el pedido)." +
+      (yaHayCompras ? "\n\n⚠ Ojo: este pedido ya tiene compras reales llevadas a Finanzas. Si registras también el estimado, el costo de este pedido va a contarse DOS veces en la caja y en el reporte." : "") +
+      "\n\n¿Continuar?")) return;
+    var txId = uid();
     state.tx.unshift({
-      id: uid(), tipo: "gasto", concepto: "Estimado completo del pedido — " + cot.descripcion,
-      monto: totales.costoTotal, contraparte: cot.cliente, estado: "pendiente", fecha: todayStr(),
+      id: txId, tipo: "gasto", concepto: "Estimado completo del pedido — " + cot.descripcion,
+      monto: totales.costoTotal, contraparte: cot.cliente, fecha: todayStr(),
       pedidoId: cot.pedidoId || "", cotizacionId: cot.id
     });
-    persist("tx"); notify();
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estimadoTxId: txId }) : c; });
+    guardarCotizaciones(); persist("tx"); notify();
   },
   "generar-pdf-interno": function (el) {
     var id = el.getAttribute("data-id");
@@ -1991,8 +2024,17 @@ function datosPedidoDesdeCot(cot) {
 // Pasa apenas se edita una cantidad, un precio o se agrega una referencia
 // después de haber convertido: el pedido era una foto del momento de
 // convertir y nadie la volvía a tomar. Devuelve null si están sincronizados.
+//
+// Solo mira `pedidoId` (la cotización YA es ese pedido), nunca
+// `pedidoOrigenId`. La diferencia importa: una cotización "escalada" desde un
+// pedido rápido arranca apuntando al pedido original con `pedidoOrigenId`,
+// pero todavía es un BORRADOR — sus números no mandan hasta que se pulse
+// "Aplicar a pedido". Cuando se los tomaba también de ahí, guardar el borrador
+// (o simplemente abrirlo) reescribía en silencio el total, el costo y las
+// líneas de un pedido real, y el botón de aplicar —con su confirmación— dejaba
+// de significar nada.
 export function calcDesfaseCotizacionPedido(cot) {
-  var pedidoId = (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
+  var pedidoId = (cot && cot.pedidoId) || "";
   if (!pedidoId) return null;
   var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
   if (!ped) return null;
@@ -2119,7 +2161,10 @@ function guardarCotizaciones() {
 // existe). Vive fuera de la acción de guardado porque también corre al
 // convertir/aplicar, donde el pedido nace o se actualiza en el mismo paso.
 function propagarFechaEntrega(cot) {
-  var pedidoId = cot.pedidoId || cot.pedidoOrigenId;
+  // Mismo criterio que calcDesfaseCotizacionPedido: solo baja al pedido si
+  // esta cotización YA es ese pedido. Un borrador escalado (pedidoOrigenId)
+  // todavía no manda sobre él.
+  var pedidoId = cot.pedidoId;
   if (!pedidoId || !cot.fechaEntrega) return;
   var yaIgual = state.pedidos.some(function (p) { return p.id === pedidoId && p.fechaEntrega === cot.fechaEntrega; });
   if (yaIgual) return;

@@ -167,11 +167,59 @@ export function origenDeTx(t) {
   }
   return null;
 }
+
+// Un movimiento GENERADO por una acción de la app (registrar un abono, pagar
+// una comisión, marcar un gasto fijo, pagar una cuota, reportar una venta de
+// consignación, sincronizar una compra) es el reflejo en Finanzas de un hecho
+// que vive en otro lado. Borrarlo desde Finanzas dejaba al pedido diciendo
+// que ya cobró, al gasto fijo diciendo que ya lo pagó y a la deuda con una
+// cuota menos, mientras la plata desaparecía de la caja: exactamente el
+// descuadre que la app existe para evitar.
+//
+// A diferencia de origenDeTx() —que solo mira si el movimiento APUNTA a algún
+// registro, y por eso también da positivo con un movimiento cargado a mano al
+// que alguien le eligió un pedido en el desplegable— acá se buscan las marcas
+// que la propia app escribe al generarlo. Un movimiento manual nunca las
+// tiene, así que se sigue pudiendo borrar como siempre.
+//
+// Devuelve null si es manual, o { que, donde } describiendo qué representa y
+// dónde se revierte de verdad.
+var MARCAS_ORIGEN_SISTEMA = [
+  { campo: "origenAbonoId", que: "un abono cobrado de un pedido", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar" },
+  { campo: "origenReembolsoId", que: "un reembolso hecho a un cliente", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar" },
+  { campo: "origenComisionPedidoId", que: "la comisión de un vendedor", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → botón \"pagada\" del vendedor (vuelve a dejarla pendiente)" },
+  { campo: "origenComisionCotId", que: "la comisión de un vendedor", donde: "Cotizaciones → la cotización → Vendedor → botón \"pagada\" (vuelve a dejarla pendiente)" },
+  { campo: "origenVentaConsignacionId", que: "una venta reportada por un punto de consignación", donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar" },
+  { campo: "origenComisionConsignacionId", que: "la comisión de un punto de consignación", donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar (borra la venta y su comisión)" },
+  { campo: "origenGastoFijoPeriodo", que: "el pago de un gasto fijo", donde: "Pendientes → Gastos fijos → botón \"pagado\" (vuelve a dejarlo pendiente)" },
+  { campo: "origenCompraClave", que: "una compra de la lista de una cotización", donde: "Cotizaciones → la cotización → Producción → desmarca \"Comprado\" y pulsa \"Actualizar movimientos financieros\"" },
+  { campo: "deudaId", que: "el pago de una cuota de una deuda", donde: "Pendientes → Deudas (el pago queda en su historial; para deshacerlo hay que editar la deuda)" }
+];
+export function origenSistemaDeTx(t) {
+  if (!t) return null;
+  var marca = MARCAS_ORIGEN_SISTEMA.filter(function (m) { return t[m.campo]; })[0];
+  return marca ? { que: marca.que, donde: marca.donde } : null;
+}
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que
 // aún no se recibió no es un movimiento de Finanzas, es saldo de un pedido.
 export function calcSaldoPedido(p) {
   return num(p.total) - num(p.abono);
+}
+// Total realmente abonado de un pedido a partir de su lista de abonos. Los
+// reembolsos viven en esa misma lista (para que el historial sea uno solo y
+// cronológico) pero con `tipo: "reembolso"`, y RESTAN: son plata que se le
+// devolvió al cliente. Sumarlos como si fueran abonos —que es lo que pasaba
+// al editar un abono en un pedido que ya tenía un reembolso— inflaba el
+// abonado y hacía desaparecer un saldo por cobrar que sí existía.
+//
+// Es la única fórmula del "abonado": cualquier acción que agregue, edite o
+// elimine un abono entra por acá, así p.abono nunca puede separarse de la
+// lista que lo sustenta.
+export function calcAbonadoDeLista(abonos) {
+  return (abonos || []).reduce(function (a, x) {
+    return x.tipo === "reembolso" ? a - num(x.monto) : a + num(x.monto);
+  }, 0);
 }
 export function calcPorCobrarPedidos() {
   return state.pedidos.reduce(function (a, p) {

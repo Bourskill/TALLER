@@ -25,6 +25,81 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Registro de cambios — agosto 2026 (revisión previa a empezar a usarla)
+
+Repaso completo buscando lo que pudiera romperse, confundir o descuadrar las
+cuentas. Lo que se encontró y se corrigió:
+
+**Plata (lo grave):**
+
+- **Una cotización escalada ya no pisa el pedido original sin permiso.** Al
+  "escalar" un pedido rápido, la cotización nace apuntando a ese pedido
+  (`pedidoOrigenId`), pero todavía es un borrador. La sincronización
+  automática lo tomaba como si ya fuera ese pedido: **guardar el borrador
+  reescribía en silencio el total, el costo y las líneas de un pedido real**, y
+  el botón "Aplicar a pedido" —con su confirmación— dejaba de significar nada.
+  Ahora la propagación mira solo `pedidoId` (la cotización que YA es ese
+  pedido). Ver `calcDesfaseCotizacionPedido` y `propagarFechaEntrega`.
+- **Los reembolsos ya no suman al abonado.** Un reembolso vive en la lista de
+  abonos del pedido pero con signo negativo. Al editar cualquier abono, el
+  total abonado se recalculaba sumando TODAS las filas: el reembolso se
+  contaba como si fuera un abono más, inflaba lo cobrado y **borraba saldo por
+  cobrar que sí existía**. La suma ahora vive en un solo lugar
+  (`calcAbonadoDeLista` en `core/calc.js`, con `recalcularAbonoPedido` en
+  `modules/pedidos.js` para respetar los pedidos viejos sin lista de abonos).
+- **No se pueden borrar sueltos los movimientos que generó la app.** Borrar en
+  Finanzas el movimiento de un abono, una comisión, una cuota de deuda o un
+  gasto fijo sacaba la plata de la caja pero dejaba al pedido diciendo que ya
+  cobró y a la obligación diciendo que ya se pagó. Ahora esos movimientos
+  están marcados en su origen (`origenSistemaDeTx`) y, al intentar borrarlos,
+  la app dice exactamente en qué pantalla se revierten de verdad. Es el mismo
+  criterio que ya bloqueaba editarles el tipo y el monto.
+- **Se agregaron los caminos de vuelta que faltaban**: "Eliminar" en cada
+  abono/reembolso de un pedido y en cada venta reportada de una consignación.
+  Los dos revierten los dos lados a la vez (el registro y su movimiento en
+  Finanzas). Una venta de consignación mal digitada antes no se podía corregir
+  de ninguna forma.
+- **Un abono mayor al saldo ya no se recorta en silencio.** Escribir 150.000
+  sobre un saldo de 100.000 registraba 100.000 sin avisar. Ahora se pregunta y
+  se registra el monto que el usuario vio.
+- **"Registrar estimado completo" dejó de duplicar el gasto.** Cada clic creaba
+  un movimiento nuevo por el mismo costo (tres clics, tres veces el costo del
+  pedido en la caja). Ahora actualiza el que ya creó, y avisa del doble conteo
+  si ese pedido también lleva sus compras reales a Finanzas (y al revés).
+
+**Se rompía:**
+
+- **La pestaña Pedidos se caía entera** con un pedido que tuviera costo pero
+  todavía sin precio de venta (algo normal: se costea la prenda antes de
+  ponerle precio). El porcentaje de ganancia no existe sin precio, y al
+  formatearlo reventaba el render de toda la pestaña.
+- **Barra de progreso con un flujo de una sola etapa**: dividía por cero.
+
+**Confundía:**
+
+- El explorador de productos dejaba agregar una línea que el borrador ya no
+  podía cubrir; el error salía recién al pulsar "Crear pedido". Ahora se avisa
+  al momento de elegirlo.
+- El reporte con el rango de fechas al revés mostraba ceros en todo, que se
+  leía como "este periodo no tuvo movimientos". Ahora lo dice.
+- Eliminar una consignación no devolvía al Catálogo lo entregado al punto (la
+  mercancía sigue físicamente allá) — pero tampoco lo decía, y en venta directa
+  sí se restituye. Ahora se advierte antes de confirmar.
+- Renombrar una talla del Catálogo rompía la devolución de stock de los pedidos
+  que ya habían salido con ese nombre. Ahora se advierte cuando esa talla ya
+  tiene stock o movimientos.
+- La factura de una venta directa imprimía UNA sola línea con toda la
+  descripción amontonada y un "valor unitario" que era el total dividido entre
+  las unidades — un precio promedio que no se le cobró a nadie. Ahora imprime
+  una línea por cada línea del pedido, con su precio real.
+
+**Prueba de humo** (`test/smoke.mjs`): estaba desactualizada y no llegaba ni a
+la mitad (esperaba campos de "total" en el formulario de pedido y un buscador
+de productos que ya no existen). Se puso al día con la app actual y se le
+agregaron los checks de las correcciones de arriba — incluida la igualdad
+exacta entre lo que dice el pedido y lo que dice Finanzas. Son 173 checks y
+ahora termina sola en vez de quedarse colgada.
+
 ## Registro de cambios — julio 2026
 
 Ronda de correcciones reportadas por el usuario:

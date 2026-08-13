@@ -426,6 +426,19 @@ function renderReportePeriodo() {
     '<div class="field"><label>Hasta</label><input type="date" data-form="reporte" data-field="hasta" value="' + esc(fr.hasta) + '" /></div>' +
     "</div>";
 
+  // Un rango al revés (o incompleto) no filtra nada y devuelve cero en todo.
+  // Sin este aviso se leía como "este periodo no tuvo movimientos", que es una
+  // conclusión muy distinta de "el rango está mal escrito".
+  if (!fr.desde || !fr.hasta) {
+    html += '<div class="empty" style="margin:10px 0;">Completa las dos fechas para ver el reporte.</div></div>';
+    return html;
+  }
+  if (fr.desde > fr.hasta) {
+    html += '<div class="empty" style="margin:10px 0;color:var(--danger-ink);"><b>El rango está al revés:</b> la fecha "Desde" (' + esc(fr.desde) +
+      ') es posterior a la de "Hasta" (' + esc(fr.hasta) + '), así que no puede haber nada dentro. Corrígelas o usa uno de los atajos de arriba.</div></div>';
+    return html;
+  }
+
   // ---- Resumen financiero: siempre visible, es el titular del reporte ----
   html += '<div class="report-grid report-grid-financiero">' +
     '<div class="report-item"><div class="rl">Ingresos</div><div class="rv" style="color:var(--success-ink);">' + fmt(resumen.ingresos) + "</div></div>" +

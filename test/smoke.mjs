@@ -46,6 +46,18 @@ function setInput(selector, value) {
   el.value = value;
   el.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 }
+// Los campos que alimentan un cálculo en pantalla no usan data-form (que
+// escribe en el borrador sin repintar) sino data-action-change, que dispara
+// una acción en "change" — ver bindEvents en core/dom.js.
+function setChange(selector, value) {
+  const el = document.querySelector(selector);
+  if (!el) throw new Error("No se encontró campo: " + selector);
+  el.value = value;
+  el.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+}
+function setLinea(lineaId, campo, value) {
+  setChange('[data-action-change="set-pedido-linea-campo"][data-linea="' + lineaId + '"][data-campo="' + campo + '"]', value);
+}
 function assert(cond, msg) {
   if (!cond) throw new Error("FALLÓ: " + msg);
   console.log("OK: " + msg);
@@ -74,31 +86,44 @@ setInput('[data-form="tx"][data-field="monto"]', "50000");
 click('[data-action="add-tx"]');
 assert(state.tx.length === 1 && state.tx[0].concepto === "Venta de prueba", "agrega transacción");
 
-// --- clientes: pestañas "+ Nuevo cliente" / "Historial" (mismo patrón que
-// Cotizaciones) — se entra viendo el formulario, y tras crear salta al
-// historial para confirmar que quedó registrado. ---
+// --- clientes: pestañas "+ Nuevo contacto" / "Contactos" (mismo patrón que
+// Cotizaciones) — se entra viendo el formulario, y tras crear salta a la
+// lista para confirmar que quedó registrado. ---
 click('[data-action="tab"][data-tab="clientes"]');
-assert(state.clientesVista === "nueva" && !!document.querySelector('[data-form="cliente"][data-field="nombre"]'), "Clientes entra mostrando el formulario en blanco");
+assert(state.clientesVista === "nueva" && !!document.querySelector('[data-form="cliente"][data-field="nombre"]'), "Contactos entra mostrando el formulario en blanco");
 setInput('[data-form="cliente"][data-field="nombre"]', "Cliente Prueba");
 click('[data-action="add-cliente"]');
 assert(state.clientes.length === 1, "agrega cliente");
-assert(state.clientesVista === "historial", "tras crear el cliente salta al Historial");
-assert(!!document.querySelector(".cliente-card"), "el cliente recién creado aparece en el Historial");
+assert(state.clientesVista === "contactos", "tras crear el cliente salta a la lista de Contactos");
+assert(!!document.querySelector(".cliente-card"), "el cliente recién creado aparece en la lista");
 
 // --- pedidos: pestañas "+ Nuevo pedido" / "Historial" — mismo patrón ---
 click('[data-action="tab"][data-tab="pedidos"]');
 assert(state.pedidosVista === "nueva" && !!document.querySelector('[data-form="pedido"][data-field="cliente"]'), "Pedidos entra mostrando el formulario en blanco");
 
 // --- pedidos: crear pedido vinculado al cliente + abono inicial ---
+// El total y el costo del pedido ya NO son campos que se escriban: salen de
+// las líneas (ver renderPrecioYPago en modules/pedidos.js), así que crear un
+// pedido pasa por agregar al menos una línea con su cantidad y su precio.
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
 assert(document.querySelector(".combo-item"), "sugiere el cliente en el combobox");
 click('.combo-item[data-action="select-cliente"]');
 assert(state.formPedido.clienteId === state.clientes[0].id, "vincula clienteId en el combobox");
-setInput('[data-form="pedido"][data-field="descripcion"]', "40 camisetas");
-setInput('[data-form="pedido"][data-field="total"]', "400000");
-setInput('[data-form="pedido"][data-field="abono"]', "100000");
+click('[data-action="add-pedido-linea-libre"]');
+assert(state.formPedido.lineas.length === 1, "agrega una línea escrita a mano al pedido");
+const lineaLibreId = state.formPedido.lineas[0].id;
+setLinea(lineaLibreId, "productoNombre", "Camisetas");
+setLinea(lineaLibreId, "cantidad", "40");
+setLinea(lineaLibreId, "precioUnitario", "10000");
+setLinea(lineaLibreId, "costoUnitario", "6000");
+assert(state.formPedido.lineas[0].cantidad === 40 && state.formPedido.lineas[0].precioUnitario === 10000, "la línea guarda cantidad y precio unitario");
+setChange('[data-action-change="set-form-pedido-campo"][data-campo="abono"]', "100000");
 click('[data-action="add-pedido"]');
 assert(state.pedidos.length === 1, "crea pedido");
+// Total y costo son el RESULTADO de las líneas, nunca un campo suelto.
+assert(state.pedidos[0].total === 400000, "el total del pedido sale de las líneas (40 x $10.000)");
+assert(state.pedidos[0].costo === 240000, "el costo del pedido sale de las líneas (40 x $6.000)");
+assert(state.pedidos[0].abono === 100000, "registra el abono inicial en el pedido");
 assert(state.tx.some(t => t.concepto.indexOf("Abono inicial") === 0), "registra abono inicial en finanzas");
 assert(state.pedidosVista === "historial", "tras crear el pedido salta al Historial (donde vive la tarjeta recién creada)");
 
@@ -351,13 +376,19 @@ assert(state.cotizaciones.find(c => c.id === cotConvertida.id).cliente === "Clie
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-setInput('[data-form="pedido"][data-field="descripcion"]', "Pedido con vendedor");
-setInput('[data-form="pedido"][data-field="total"]', "200000");
+click('[data-action="add-pedido-linea-libre"]');
+const lineaVendedorId = state.formPedido.lineas[0].id;
+setLinea(lineaVendedorId, "productoNombre", "Pedido con vendedor");
+setLinea(lineaVendedorId, "cantidad", "1");
+setLinea(lineaVendedorId, "precioUnitario", "200000");
+// La sección de vendedor nace recogida (no todo pedido tiene comisión).
+click('[data-action="toggle-pedido-vendedor"]');
 setInput('[data-form="pedido"][data-field="vendedorNombre"]', "Ana Vendedora");
-setInput('[data-form="pedido"][data-field="vendedorValor"]', "10");
+setChange('[data-action-change="set-form-pedido-campo"][data-campo="vendedorValor"]', "10");
 click('[data-action="add-pedido"]');
 const pedidoConVendedor = state.pedidos.find(p => p.vendedor && p.vendedor.nombre === "Ana Vendedora");
 assert(!!pedidoConVendedor, "crea pedido con vendedor/comisión");
+assert(pedidoConVendedor.total === 200000, "el total del pedido con vendedor sale de su línea");
 assert(pedidoConVendedor.vendedor.estado === "pendiente", "la comisión nace pendiente");
 click('[data-action="toggle-pedido-panel"][data-id="' + pedidoConVendedor.id + '"]');
 const txAntes = state.tx.length;
@@ -389,10 +420,11 @@ let producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 20, "registra entrada de stock (20 unidades talla M)");
 assert(producto.movimientosStock.length === 1, "el movimiento de stock queda en la bitácora");
 
-// insumos: colapsado por defecto (sección "Costeo y producción") hasta que se usa
-assert(!document.querySelector('select[data-action-change="add-pro-insumo-catalogo"][data-pro="' + productoId + '"]'), "la sección de insumos nace colapsada");
+// insumos: colapsado por defecto (sección "Costeo y producción") hasta que se
+// usa. El acceso al catálogo de insumos es el explorador modal, no un <select>.
+assert(!document.querySelector('[data-action="abrir-insumo-picker-producto"][data-pro="' + productoId + '"]'), "la sección de insumos nace colapsada");
 click('[data-action="toggle-producto-costeo"][data-id="' + productoId + '"]');
-assert(!!document.querySelector('select[data-action-change="add-pro-insumo-catalogo"][data-pro="' + productoId + '"]'), "se puede desplegar la sección de insumos");
+assert(!!document.querySelector('[data-action="abrir-insumo-picker-producto"][data-pro="' + productoId + '"]'), "se puede desplegar la sección de insumos");
 
 // pestaña "Catálogo": índice visual en cards — clic en una abre su detalle completo
 click('[data-action="cerrar-producto-editor"]');
@@ -401,24 +433,29 @@ assert(!!document.querySelector('.producto-card-mini[data-id="' + productoId + '
 click('[data-action="abrir-producto-editor"][data-id="' + productoId + '"]');
 assert(state.productoEditando === productoId && state.productosVista === "nueva", "la card abre el detalle completo en la otra pestaña");
 
-// --- pedidos: buscador de producto (por nombre/referencia/categoría) con
-// miniatura, venta directa descuenta stock, y se restituye si se elimina ---
+// --- pedidos: explorador de productos del catálogo (busca por nombre,
+// referencia o categoría), venta directa descuenta stock, y se restituye si el
+// pedido se elimina. Elegir un producto lo agrega DIRECTO como línea: ya no
+// queda "seleccionado" en un segundo mini-formulario aparte. ---
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-setInput('#inp-buscar-producto-pedido', "CAM-001");
+click('[data-action="abrir-producto-picker-pedido"]');
+assert(state.pedidoProductoPickerAbierto === true, "abre el explorador de productos del catálogo");
+setInput('#inp-producto-picker-pedido-buscar', "CAM-001");
 render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
-assert(!!document.querySelector('.producto-combo-item[data-id="' + productoId + '"]'), "el buscador sugiere el producto por referencia (no solo por nombre)");
-click('.producto-combo-item[data-id="' + productoId + '"]');
-assert(state.formPedido.productoSel === productoId, "selecciona el producto desde el buscador");
+assert(!!document.querySelector('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]'), "el explorador encuentra el producto por referencia (no solo por nombre)");
+click('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]');
+assert(state.formPedido.lineas.length === 1 && state.formPedido.lineas[0].productoId === productoId, "elegir el producto lo agrega de una vez como línea del pedido");
+assert(state.formPedido.lineas[0].precioUnitario === 40000, "la línea llega con el precio del catálogo");
 assert(!!document.querySelector('[data-action="ver-producto-en-catalogo"][data-id="' + productoId + '"]'), "muestra un enlace para verificar el producto en el Catálogo");
-document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
-document.querySelector('[data-role="pedido-producto-cantidad"]').value = "3";
-click('[data-action="add-pedido-producto-linea"][data-id="' + productoId + '"]');
-assert(state.formPedido.stockConsumido.length === 1, "agrega la línea del producto al pedido en construcción");
+const lineaCatalogoId = state.formPedido.lineas[0].id;
+setLinea(lineaCatalogoId, "cantidad", "3");
+assert(state.formPedido.lineas[0].cantidad === 3, "se puede ajustar la cantidad en la propia línea");
 click('[data-action="add-pedido"]');
 const pedidoVentaDirecta = state.pedidos.find(p => (p.stockConsumido || []).length > 0);
 assert(!!pedidoVentaDirecta, "crea el pedido de venta directa con el producto");
+assert(pedidoVentaDirecta.total === 120000, "el total sale de la línea de catálogo (3 x $40.000)");
 producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 17, "el stock baja al crear el pedido (20 - 3 = 17)");
 click('[data-action="toggle-pedido-panel"][data-id="' + pedidoVentaDirecta.id + '"]');
@@ -427,11 +464,10 @@ producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 20, "el stock se restituye al eliminar el pedido");
 
 // --- BUG REPORTADO: pedir un producto dos veces cuando solo hay 1 en stock
-// no debe alcanzar a "pasar" (antes cada línea se validaba contra el stock
-// SIN restar lo que la otra línea del mismo borrador ya había apartado), y
-// cancelar el pedido debe devolver EXACTAMENTE lo que se descontó — nunca de
-// más (antes el pedido guardaba lo PEDIDO, no lo aplicado, y al cancelar se
-// restituía de más). ---
+// no debe alcanzar a "pasar" (cada línea se valida contra el stock RESTANDO lo
+// que las otras líneas del mismo borrador ya apartaron), y cancelar el pedido
+// debe devolver EXACTAMENTE lo que se descontó — nunca de más (antes el pedido
+// guardaba lo PEDIDO, no lo aplicado, y al cancelar se restituía de más). ---
 click('[data-action="tab"][data-tab="productos"]');
 click('[data-action="producto-vista"][data-val="nueva"]');
 click('[data-action="cerrar-producto-editor"]');
@@ -447,17 +483,20 @@ assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock =
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-setInput('#inp-buscar-producto-pedido', "Camiseta unica");
+click('[data-action="abrir-producto-picker-pedido"]');
+setInput('#inp-producto-picker-pedido-buscar', "Camiseta unica");
 render();
-click('.producto-combo-item[data-id="' + prodUnicoId + '"]');
-document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
-document.querySelector('[data-role="pedido-producto-cantidad"]').value = "1";
-click('[data-action="add-pedido-producto-linea"][data-id="' + prodUnicoId + '"]');
-assert(state.formPedido.stockConsumido.length === 1, "primera línea de 1 unidad se agrega (había 1 en stock)");
-document.querySelector('[data-role="pedido-producto-talla"]').value = "M";
-document.querySelector('[data-role="pedido-producto-cantidad"]').value = "1";
-click('[data-action="add-pedido-producto-linea"][data-id="' + prodUnicoId + '"]');
-assert(state.formPedido.stockConsumido.length === 1, "segunda línea de la MISMA talla se rechaza (ya no queda disponible dentro de este mismo borrador)");
+click('[data-action="select-producto-pedido-picker"][data-id="' + prodUnicoId + '"]');
+assert(state.formPedido.lineas.length === 1, "primera línea de 1 unidad se agrega (había 1 en stock)");
+// Segunda línea del MISMO producto: el borrador ya apartó la única unidad que
+// había, así que el explorador la rechaza en vez de dejar armar un pedido que
+// después no se va a poder crear.
+click('[data-action="abrir-producto-picker-pedido"]');
+click('[data-action="select-producto-pedido-picker"][data-id="' + prodUnicoId + '"]');
+assert(state.formPedido.lineas.length === 1, "no deja agregar una segunda línea si el borrador ya apartó todo el stock");
+// Subir la cantidad de la línea que sí existe también se topa en lo que hay.
+setLinea(state.formPedido.lineas[0].id, "cantidad", "5");
+assert(state.formPedido.lineas[0].cantidad === 1, "la cantidad de la línea se topa en el stock real (1)");
 
 click('[data-action="add-pedido"]');
 const pedidoUnico = state.pedidos.find(p => (p.stockConsumido || []).some(l => l.productoId === prodUnicoId));
@@ -493,15 +532,25 @@ producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descuenta 2 unidades de stock (20 - 2 = 18) según las filas de talla M");
 
 // --- pedidos: consignación con remisión (envío con soporte en PDF),
-// seguimiento por talla y venta reportada contra una línea puntual ---
+// seguimiento por talla y venta reportada contra una línea puntual.
+// Una consignación se crea con lo que se le deja al punto (líneas de
+// catálogo, que salen del stock del taller como su primera remisión) y el
+// precio al público acordado con él. ---
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-setInput('[data-form="pedido"][data-field="descripcion"]', "Consignación tienda");
 click('[data-action="set-tipo-pedido"][data-val="consignacion"]');
+click('[data-action="abrir-producto-picker-pedido"]');
+click('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]');
+assert(state.formPedido.lineas.length === 1, "agrega al punto un producto del catálogo");
+assert(Number(state.formPedido.consignacionPrecioUnitario) === 40000, "precarga el precio al público con el del catálogo");
+setChange('[data-action-change="set-form-pedido-campo"][data-campo="consignacionComisionValor"]', "20");
 click('[data-action="add-pedido"]');
 const pedidoConsig = state.pedidos.find(p => p.consignacion);
 assert(!!pedidoConsig, "crea pedido de consignación");
+assert(pedidoConsig.consignacion.remisiones.length === 1, "lo entregado queda como la primera remisión, con su PDF");
+producto = state.productos.find(p => p.id === productoId);
+assert(producto.variantesTalla[0].stock === 17, "lo entregado al punto sale del stock del taller (18 - 1 = 17)");
 click('[data-action="iniciar-remision"][data-id="' + pedidoConsig.id + '"]');
 const remisionProductoSelect = document.querySelector('select[data-action-change="set-remision-producto-sel"]');
 remisionProductoSelect.value = productoId;
@@ -511,9 +560,9 @@ click('[data-action="add-remision-linea"][data-id="' + pedidoConsig.id + '"]');
 assert(state.remisionBuilder.items.length === 1, "agrega una línea a la remisión en construcción");
 click('[data-action="confirmar-remision"][data-id="' + pedidoConsig.id + '"]');
 let pedidoConsigActualizado = state.pedidos.find(p => p.id === pedidoConsig.id);
-assert(pedidoConsigActualizado.consignacion.remisiones.length === 1, "confirma la remisión");
+assert(pedidoConsigActualizado.consignacion.remisiones.length === 2, "confirma la remisión (la del envío inicial más esta)");
 producto = state.productos.find(p => p.id === productoId);
-assert(producto.variantesTalla[0].stock === 13, "la remisión descuenta el stock del taller (18 - 5 = 13)");
+assert(producto.variantesTalla[0].stock === 12, "la remisión descuenta el stock del taller (17 - 5 = 12)");
 click('[data-action="generar-pdf-remision"][data-id="' + pedidoConsig.id + '"][data-remision="' + pedidoConsigActualizado.consignacion.remisiones[0].id + '"]');
 assert(!state.lastError, "generar el PDF de la remisión no rompe el render aunque jsPDF no esté cargado");
 
@@ -529,7 +578,8 @@ assert(pedidoConsigActualizado.consignacion.ventas[0].montoTotal === 80000, "cal
 
 const { calcConsignacionDisponiblePorTalla } = await import("../js/core/calc.js");
 const seguimiento = calcConsignacionDisponiblePorTalla(pedidoConsigActualizado);
-assert(seguimiento[0].disponible === 3, "el seguimiento por talla refleja lo vendido (5 enviadas - 2 vendidas = 3 disponibles)");
+assert(seguimiento[0].enviado === 6, "el seguimiento por talla suma las dos remisiones (1 + 5 = 6 enviadas)");
+assert(seguimiento[0].disponible === 4, "el seguimiento por talla refleja lo vendido (6 enviadas - 2 vendidas = 4 disponibles)");
 
 // --- comisión de vendedor: desmarcar "pagada" debe revertir el movimiento
 // de verdad (no solo la etiqueta) — si no, volver a marcarla pagada crea un
@@ -540,6 +590,69 @@ assert(state.pedidos.find(p => p.id === pedidoConVendedor.id).vendedor.estado ==
 assert(state.tx.length === txAntesToggle - 1, "desmarcarla revierte (borra) el movimiento que se había creado, no lo deja huérfano");
 click('[data-action="toggle-comision"][data-id="' + pedidoConVendedor.id + '"]');
 assert(state.tx.length === txAntesToggle, "volver a marcarla pagada crea un solo movimiento (no quedan dos por la misma comisión)");
+
+// --- DINERO: los dos lados de un abono nunca pueden separarse ---
+// El pedido dice cuánto se le abonó; Finanzas dice cuánta plata entró. Si uno
+// se puede tocar sin el otro, la app miente en alguna de las dos pantallas.
+const { calcAbonadoDeLista, calcSaldoPedido } = await import("../js/core/calc.js");
+// `pedidoId` es el primer pedido creado más arriba: 40 camisetas por $400.000
+// con un abono inicial de $100.000.
+let pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(!!pedDinero && pedDinero.abono === 100000, "hay un pedido con abonos para probar la sincronía del dinero");
+assert(pedDinero.abono === calcAbonadoDeLista(pedDinero.abonos), "el abonado del pedido es exactamente la suma de sus abonos");
+
+// un reembolso RESTA del abonado (vive en la misma lista pero con signo)
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="historial"]');
+if (!state.pedidoPanelAbierto[pedidoId]) click('[data-action="toggle-pedido-panel"][data-id="' + pedidoId + '"]');
+// toggle-reembolso-form limpia el borrador al abrirse: hay que llenarlo después.
+click('[data-action="toggle-reembolso-form"][data-id="' + pedidoId + '"]');
+state.formReembolso = { monto: "30000", fecha: "2026-01-15", motivo: "prueba" };
+click('[data-action="add-reembolso"][data-id="' + pedidoId + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 70000, "el reembolso baja el abonado del pedido (100.000 - 30.000)");
+assert(pedDinero.abono === calcAbonadoDeLista(pedDinero.abonos), "tras el reembolso el abonado sigue cuadrando con la lista");
+
+// editar un abono en un pedido QUE YA TIENE UN REEMBOLSO no puede volver a
+// sumar ese reembolso (antes se recalculaba sumando todas las filas, y el
+// reembolso —que debe restar— inflaba el abonado y borraba saldo por cobrar real)
+const abonoEditableId = pedDinero.abonos.find(a => a.tipo !== "reembolso").id;
+click('[data-action="editar-abono"][data-id="' + abonoEditableId + '"]');
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "120000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 90000, "editar un abono con un reembolso de por medio da 120.000 - 30.000 = 90.000 (el reembolso resta, no suma)");
+assert(calcSaldoPedido(pedDinero) === 310000, "el saldo por cobrar refleja ese abonado (400.000 - 90.000)");
+
+// borrar en Finanzas el movimiento de un abono NO puede dejar al pedido cobrado
+const txDelAbono = state.tx.find(t => t.origenAbonoId === abonoEditableId);
+assert(!!txDelAbono, "el abono tiene su movimiento en Finanzas");
+click('[data-action="tab"][data-tab="finanzas"]');
+click('[data-action="finanzas-vista"][data-val="historial"]');
+click('[data-action="remove-tx"][data-id="' + txDelAbono.id + '"]');
+assert(state.tx.some(t => t.id === txDelAbono.id), "Finanzas no deja borrar suelto el movimiento de un abono (dejaría al pedido cobrado sin plata en caja)");
+
+// el camino correcto SÍ revierte los dos lados a la vez
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="historial"]');
+click('[data-action="eliminar-abono"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(!state.tx.some(t => t.id === txDelAbono.id), "anular el abono desde el pedido retira su movimiento de Finanzas");
+assert(pedDinero.abono === calcAbonadoDeLista(pedDinero.abonos), "tras anularlo, el abonado del pedido sigue cuadrando con su lista");
+
+// --- un pedido con costo pero sin precio de venta no puede tumbar la pestaña ---
+// (el porcentaje de ganancia no existe sin precio: antes se intentaba
+// formatear un null y se caía el render de Pedidos entero)
+state.pedidos.unshift({
+  id: "ped-sin-precio", cliente: "Cliente Prueba", tipoCliente: "propio",
+  descripcion: "Costeado sin precio", cantidad: "5", total: 0, costo: 90000,
+  abono: 0, abonos: [], estado: "nuevo", numeroOp: "OP-0000", lineas: [], stockConsumido: []
+});
+state.tab = "pedidos"; state.pedidosVista = "historial"; state.lastError = null;
+render();
+assert(!state.lastError, "un pedido con costo y sin precio de venta no rompe el render de Pedidos");
+assert(document.body.textContent.includes("sin precio de venta asignado"), "y se explica por qué no hay porcentaje de ganancia");
+state.pedidos = state.pedidos.filter(p => p.id !== "ped-sin-precio");
 
 // --- permisos: un vendedor no puede cambiar el precio de un producto ni
 // registrar un movimiento de stock directo — queda pendiente de aprobación
@@ -583,3 +696,10 @@ assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock =
 assert(!state.productoPropuestas.some(p => p.productoId === prodUnicoId), "no quedan propuestas pendientes de este producto");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
+// Salida explícita: la parte de permisos simula una sesión de Google (ver
+// loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
+// reintentos de red colgando. Sin esto el proceso quedaba vivo varios minutos
+// después de haber pasado todos los checks, como si la prueba se hubiera
+// trabado. Los errores de red que aparecen en consola son de ese mismo
+// escenario simulado, no de la app.
+process.exit(0);
