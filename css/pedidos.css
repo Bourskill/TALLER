@@ -1,4 +1,4 @@
-.pedido-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:20px 22px;margin-bottom:16px;}
+.pedido-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:var(--sp-4) 26px;margin-bottom:var(--sp-3);}
 .pedido-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;}
 .pedido-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
 .pedido-meta{font-size:12px;color:var(--ink-soft);margin-top:5px;line-height:1.5;}
@@ -12,11 +12,11 @@
 /* Líneas del formulario de pedido: cada una es una tarjeta con su foto, sus
    datos básicos editables y sus campos propios. En móvil los campos pasan a
    dos columnas (no una tira horizontal que obligue a scroll lateral). */
-.pedido-linea{border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:10px;background:var(--surface-2);}
+.pedido-linea{border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:var(--sp-3) 17px;margin-bottom:var(--sp-2);background:var(--surface-2);}
 .pedido-linea-top{display:flex;align-items:flex-start;gap:12px;}
 .pedido-linea-id{flex:1;min-width:0;}
 .pedido-linea-acciones{display:flex;gap:6px;align-items:center;flex-shrink:0;}
-.pedido-linea-campos{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:10px;}
+.pedido-linea-campos{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:var(--sp-3);}
 .pedido-linea-campos .field{display:flex;flex-direction:column;gap:3px;min-width:0;}
 .pedido-linea-campos label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);}
 .pedido-linea-campos .mini-input{width:100%;}
@@ -51,7 +51,7 @@
 .pedido-ref-btns{display:flex;gap:4px;}
 .pedido-ref-btns .btn{padding:4px 9px;}
 
-.pedido-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;}
+.pedido-actions{display:flex;gap:var(--sp-2);margin-top:var(--sp-3);flex-wrap:wrap;align-items:center;}
 .pedido-actions .accion-grupo{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .pedido-actions .accion-docs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-left:10px;border-left:1px solid var(--border-soft);}
 .pedido-actions .accion-peligro{margin-left:auto;padding-left:10px;border-left:1px solid var(--border-soft);}

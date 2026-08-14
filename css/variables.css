@@ -40,6 +40,19 @@
   --info-soft:#152640;
   --info-ink:#94c0ff;
 
+  /* Escala de espaciado. Antes cada componente elegía sus propios números
+     (10, 11, 12, 14, 16, 18, 20, 22, 26...) y el resultado era que dos
+     bloques con la misma jerarquía respiraban distinto según en qué archivo
+     se hubieran escrito. Estos seis pasos cubren todo: si algo necesita un
+     valor intermedio, casi siempre es señal de que su jerarquía no está
+     clara, no de que falte un paso. */
+  --sp-1:6px;    /* dentro de un mismo dato (etiqueta ↔ valor) */
+  --sp-2:10px;   /* entre datos hermanos */
+  --sp-3:16px;   /* entre campos / filas */
+  --sp-4:22px;   /* dentro de una tarjeta, entre bloques */
+  --sp-5:30px;   /* entre secciones */
+  --sp-6:44px;   /* entre grandes zonas de la pantalla */
+
   --radius:12px;
   --radius-sm:8px;
   --radius-lg:16px;

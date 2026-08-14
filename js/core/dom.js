@@ -11,11 +11,12 @@
 // Nada más necesita cambiar.
 
 import { UNIDADES_SUGERIDAS } from "./constants.js";
-import { state, persist, notify } from "./store.js";
+import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion } from "./store.js";
 import { esc } from "./utils.js";
-import { clienteById } from "./calc.js";
+import { clienteById, calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
+import { estadoGuardado, reintentarPendientes } from "./guardado.js";
 
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
@@ -168,9 +169,53 @@ var coreActions = {
     notify();
   },
   "logout": function () {
-    if (!window.confirm("¿Cerrar sesión?")) return;
+    // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
+    // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.
+    if (estadoGuardado().cantidad) {
+      if (!window.confirm("Todavía hay cambios que no se pudieron guardar en la hoja de datos.\n\nSi cierras sesión ahora, quedarán en este navegador esperando a que vuelvas a entrar (se te va a ofrecer recuperarlos).\n\n¿Cerrar sesión igual?")) return;
+    } else if (!window.confirm("¿Cerrar sesión?")) return;
     logout();
     window.location.reload();
+  },
+  "reintentar-guardado": function () {
+    reintentarPendientes().then(function (quedan) {
+      if (!quedan) return;
+      window.alert("Todavía no se pudo guardar.\n\nRevisa tu conexión. Si el problema sigue, recarga la página e inicia sesión de nuevo — al volver se te va a ofrecer recuperar lo que quedó pendiente.");
+    });
+  },
+  "recuperar-espejo": function () {
+    recuperarDelEspejo();
+  },
+  "descartar-recuperacion": function () {
+    if (!window.confirm("¿Descartar la copia local de esos cambios?\n\nLa app se queda con lo que está guardado en la hoja de datos. No se puede deshacer.")) return;
+    descartarRecuperacion();
+  },
+  "toggle-notificaciones": function () {
+    state.notificacionesAbiertas = !state.notificacionesAbiertas;
+    notify();
+  },
+  "cerrar-notificaciones": function () {
+    state.notificacionesAbiertas = false;
+    notify();
+  },
+  // Cada aviso lleva a donde se resuelve. Las entregas, además, hacen scroll
+  // hasta la tarjeta del pedido y la hacen destellar — mismo patrón que
+  // "↗ Origen" en Finanzas.
+  "ir-a-notificacion": function (el) {
+    var tab = el.getAttribute("data-tab");
+    var pedidoId = el.getAttribute("data-pedido");
+    state.tab = tab;
+    state.notificacionesAbiertas = false;
+    state.sidebarMobileOpen = false;
+    if (tab === "pedidos") { state.pedidosVista = "historial"; state.filtroPedidosVista = "activos"; }
+    notify();
+    if (!pedidoId) return;
+    setTimeout(function () {
+      var card = document.querySelector('[data-pedido-id="' + pedidoId + '"]');
+      if (!card) return;
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      card.classList.add("destello");
+    }, 60);
   }
 };
 
@@ -212,6 +257,8 @@ export function render() {
       mainInner += '<div class="error-box">Ocurrió un error inesperado y se muestra aquí para poder corregirlo:\n' + esc(state.lastError) + "</div>";
     }
     mainInner += renderTopbar();
+    mainInner += renderAvisoRecuperacion();
+    mainInner += renderAvisoSinGuardar();
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
@@ -347,10 +394,101 @@ function renderTopbar() {
     '<button class="sidebar-mobile-toggle" data-action="toggle-sidebar-mobile" aria-label="Abrir menú">' + menuIcon() + "</button>" +
     '<div class="topbar-title">' + esc(titulo) + "</div>" +
     '<div class="topbar-date">' + esc(fecha) + "</div>" +
+    renderIndicadorGuardado() +
+    renderCampanita() +
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
     '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
     '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
     "</div>";
+}
+
+// ---------- estado del guardado ----------
+// Un punto siempre visible que contesta la única pregunta que importa: "lo que
+// acabo de hacer, ¿quedó guardado?". Antes no había forma de saberlo — un
+// fallo de red o de sesión solo dejaba rastro en la consola del navegador.
+function renderIndicadorGuardado() {
+  var g = estadoGuardado();
+  if (g.cantidad) {
+    return '<button class="guardado-chip malo" data-action="reintentar-guardado" title="' +
+      esc(g.ultimoError || "No se pudo guardar en la hoja de datos.") + ' — clic para reintentar ahora">' +
+      "● Sin guardar (" + g.cantidad + ")</button>";
+  }
+  if (g.guardando) return '<span class="guardado-chip guardando">● Guardando…</span>';
+  if (!g.ultimoOkEl) return ""; // todavía no se ha guardado nada en esta sesión: no hay nada que afirmar
+  return '<span class="guardado-chip ok" title="Todos los cambios están en la hoja de datos">● Guardado</span>';
+}
+
+// Barra fija mientras algo no se pueda guardar. El chip de arriba es discreto
+// a propósito; esto no: si la plata que se acaba de registrar no está a salvo,
+// tiene que estorbar hasta resolverse.
+function renderAvisoSinGuardar() {
+  var g = estadoGuardado();
+  if (!g.cantidad) return "";
+  return '<div class="aviso-barra malo">' +
+    '<div><b>No se pudieron guardar ' + g.cantidad + (g.cantidad === 1 ? " cambio" : " cambios") + " en la hoja de datos.</b>" +
+    '<div class="aviso-barra-sub">Lo que hiciste NO se perdió: quedó copiado en este navegador y se reintenta solo. ' +
+    "Mientras tanto no cierres la pestaña. " + (g.ultimoError ? "(" + esc(g.ultimoError) + ")" : "") + "</div></div>" +
+    '<button class="btn" data-action="reintentar-guardado">Reintentar ahora</button>' +
+    "</div>";
+}
+
+// Al arrancar: la sesión anterior se cerró con cambios que nunca llegaron a la
+// hoja, pero el espejo local sí los tiene. Se pregunta en vez de restaurar
+// solo, porque el espejo es de ESTE navegador (ver core/guardado.js).
+function renderAvisoRecuperacion() {
+  var r = state.recuperacion;
+  if (!r) return "";
+  return '<div class="aviso-barra recuperar">' +
+    "<div><b>Quedaron cambios sin guardar de la última vez que usaste la app.</b>" +
+    '<div class="aviso-barra-sub">Este navegador tiene una copia de: ' + esc(r.etiquetas.join(", ")) + ". " +
+    "Si fuiste tú y no los guardaste, restaurálos. Si mientras tanto trabajaste desde otro dispositivo, descartálos para no pisar lo de allá.</div></div>" +
+    '<span style="display:flex;gap:8px;flex-wrap:wrap;">' +
+    '<button class="btn ghost small" data-action="descartar-recuperacion">Descartar</button>' +
+    '<button class="btn" data-action="recuperar-espejo">Restaurar</button>' +
+    "</span></div>";
+}
+
+// ---------- campanita ----------
+function renderCampanita() {
+  var session = getSession();
+  var esAdmin = !session || session.rol !== "vendedor";
+  var items = calcNotificaciones(esAdmin);
+  var urgentes = items.filter(function (i) { return i.urgente; }).length;
+  var abierto = !!state.notificacionesAbiertas;
+
+  var html = '<div class="campanita-wrap">' +
+    '<button class="theme-toggle-btn campanita-btn' + (abierto ? " activa" : "") + '" data-action="toggle-notificaciones" title="Avisos del día" aria-label="Avisos del día">' +
+    campanaIcon() +
+    (items.length ? '<span class="campanita-badge' + (urgentes ? " urgente" : "") + '">' + (items.length > 9 ? "9+" : items.length) + "</span>" : "") +
+    "</button>";
+
+  if (abierto) {
+    // Capa transparente detrás del panel: cerrar tocando fuera es lo que
+    // espera cualquiera de una campanita, y sin ella el panel se quedaba
+    // abierto tapando contenido hasta volver a pulsar el ícono.
+    html += '<div class="campanita-overlay" data-action="cerrar-notificaciones"></div>';
+    html += '<div class="campanita-panel">' +
+      '<div class="campanita-head">Avisos del día' +
+      (items.length ? '<span class="campanita-head-n">' + items.length + "</span>" : "") + "</div>";
+    if (!items.length) {
+      html += '<div class="empty" style="padding:22px 14px;">Nada pendiente por hoy. 🎉</div>';
+    } else {
+      items.forEach(function (it) {
+        html += '<button class="campanita-item' + (it.urgente ? " urgente" : "") + '" data-action="ir-a-notificacion" data-tab="' + it.tab + '"' +
+          (it.pedidoId ? ' data-pedido="' + it.pedidoId + '"' : "") + ">" +
+          '<span class="campanita-item-icono">' + it.icono + "</span>" +
+          '<span class="campanita-item-texto"><b>' + esc(it.titulo) + "</b><small>" + esc(it.detalle) + "</small></span>" +
+          "</button>";
+      });
+    }
+    html += "</div>";
+  }
+  html += "</div>";
+  return html;
+}
+
+function campanaIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 }
 
 // Overlay a pantalla completa para ver en grande cualquier foto de la app

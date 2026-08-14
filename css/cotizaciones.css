@@ -10,7 +10,7 @@
 .ref-tab-meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:500;color:var(--ink-faint);}
 .ref-tab.active .ref-tab-meta{color:var(--accent-ink);opacity:.85;}
 
-.cot-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;}
+.cot-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:var(--sp-4) 26px;margin-bottom:var(--sp-3);}
 .cot-card.colapsada{padding:12px 20px;}
 .cot-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
 .cot-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
@@ -26,17 +26,25 @@
 .cot-line{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--border-soft);gap:8px;}
 .cot-line .concept{color:var(--ink-soft);flex:1;}
 .cot-total-row{display:flex;justify-content:space-between;font-size:13.5px;font-weight:700;padding-top:8px;}
-.variacion{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:13px;padding:8px 10px;border-radius:var(--radius-sm);margin-top:10px;text-align:center;}
-.variacion.ok{background:var(--success-soft);color:var(--success-ink);}
-.variacion.mala{background:var(--danger-soft);color:var(--danger-ink);}
-.variacion.neutra{background:var(--surface-3);color:var(--ink-soft);}
+/* Aviso de sobrecosto/ahorro (Producción). Era una línea centrada apretada
+   contra la comparación de arriba; ahora tiene su propio bloque, con la cifra
+   como protagonista y una segunda línea que dice contra qué se compara. */
+.variacion{display:flex;align-items:flex-start;gap:13px;padding:15px 17px;border-radius:var(--radius-sm);
+  margin-top:var(--sp-4);border:1px solid;font-family:'Inter',sans-serif;}
+.variacion-icono{font-size:14px;line-height:1.45;flex-shrink:0;}
+.variacion-texto{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.variacion-texto b{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15.5px;letter-spacing:-0.01em;}
+.variacion-texto small{font-size:11.5px;opacity:.85;line-height:1.5;}
+.variacion.ok{background:var(--success-soft);border-color:var(--success);color:var(--success-ink);}
+.variacion.mala{background:var(--danger-soft);border-color:var(--danger);color:var(--danger-ink);}
+.variacion.neutra{background:var(--surface-3);border-color:var(--border);color:var(--ink-soft);}
 
 /* Forma/tamaño base de .badge vive en tables.css (compartida con .tag y
    .status-pill) — acá solo los colores propios de un estado de cotización. */
 .badge.borrador{background:var(--surface-3);color:var(--ink-soft);}
 .badge.convertida{background:var(--info-soft);color:var(--info-ink);}
 
-.ref-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 15px;margin-bottom:12px;}
+.ref-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--sp-4) 20px;margin-bottom:var(--sp-3);}
 /* La imagen tiene el protagonismo: va grande a la izquierda; nombre y campos
    se apilan a la derecha en vez de ir todos en una sola fila apretada. */
 .ref-top{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;}
@@ -128,13 +136,13 @@
   .picker-cat{flex:0 0 auto;}
 }
 .ins-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
-.ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px;padding:14px 0 2px;border-top:1px dashed var(--border);}
+.ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--sp-3);margin-top:var(--sp-5);padding:var(--sp-4) 0 2px;border-top:1px dashed var(--border);}
 .ref-summary .rs-item .rl{font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}
 .ref-summary .rs-item .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:17px;margin-top:4px;}
 .margen-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;}
 .margen-badge.pos{background:var(--success-soft);color:var(--success-ink);}
 .margen-badge.neg{background:var(--danger-soft);color:var(--danger-ink);}
-.cot-resumen-total{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0;padding:12px;background:var(--surface-3);border-radius:var(--radius-sm);}
+.cot-resumen-total{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:var(--sp-2) 0;padding:15px;background:var(--surface-3);border-radius:var(--radius-sm);}
 .cot-resumen-total .rl{font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}
 .cot-resumen-total .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:16px;margin-top:3px;}
 
@@ -162,8 +170,8 @@
 
 /* Cifras grandes tipo dashboard financiero: lo primero que se lee de una
    cotización, en vez de una fila de texto chico. */
-.cot-hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0 10px;}
-.cot-hero-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:12px 14px;}
+.cot-hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:var(--sp-4) 0 var(--sp-3);}
+.cot-hero-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:15px 17px;}
 .cot-hero-stat .rl{font-size:11.5px;color:var(--ink-faint);}
 .cot-hero-stat .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:21px;margin-top:3px;}
 .cot-iva-inline{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);}
@@ -178,11 +186,11 @@
 .cot-tab-btn{flex:1;text-align:center;font-size:12.5px;font-weight:600;padding:7px 0;border-radius:7px;background:none;border:none;color:var(--ink-faint);cursor:pointer;font-family:'Inter',sans-serif;}
 .cot-tab-btn.active{background:var(--surface);color:var(--ink);}
 .cot-tab-btn:hover:not(.active){color:var(--ink-soft);}
-.cot-tab-body{margin-top:20px;}
+.cot-tab-body{margin-top:var(--sp-5);}
 
 /* Producción → "Estimado vs. real": dos columnas lado a lado para comparar
    de un vistazo (antes solo se veía "Real", sin nada al lado con qué compararlo). */
-.cot-compara-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cot-compara-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4);}
 .cot-compara-titulo{font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:6px;}
 .cot-compara-grid .cot-resumen-total{margin:0;height:100%;}
 

@@ -1,10 +1,6 @@
 // Funciones puras y reutilizables. No tocan estado ni el DOM (salvo `val`,
 // que lee un input dentro de un contenedor ya renderizado).
 
-export function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 // Convierte un Date a "YYYY-MM-DD" en hora LOCAL (a diferencia de
 // Date#toISOString, que usa UTC y puede correr la fecha un día según la
 // zona horaria del navegador). Se usa para mandar fechas de un solo día a
@@ -14,6 +10,23 @@ export function todayStr() {
 export function fechaISOLocal(fecha) {
   var y = fecha.getFullYear(), m = String(fecha.getMonth() + 1).padStart(2, "0"), d = String(fecha.getDate()).padStart(2, "0");
   return y + "-" + m + "-" + d;
+}
+
+// La fecha de HOY según el reloj del usuario. Es la fecha por defecto de todo
+// lo que se registra: abonos, movimientos de Finanzas, pagos de nómina,
+// cuotas de deuda, la fecha de creación de un pedido.
+//
+// Antes esto era `new Date().toISOString().slice(0,10)`, que da la fecha en
+// UTC. En Colombia (UTC-5) eso significa que a partir de las 7 de la noche la
+// app ya cree que es el día siguiente: un abono recibido a las 8pm quedaba
+// fechado mañana, no aparecía en el reporte de "Hoy", y —peor— el último día
+// del mes el corte de periodo (periodoKey, del que dependen la nómina y los
+// gastos fijos) saltaba al mes siguiente, dejando el pago registrado en el
+// periodo equivocado y el gasto otra vez como pendiente. En un taller que
+// cierra de noche eso es todos los días. Usa la MISMA función local que ya
+// se usaba para Calendar, que nació justo por este motivo.
+export function todayStr() {
+  return fechaISOLocal(new Date());
 }
 
 export function uid() {

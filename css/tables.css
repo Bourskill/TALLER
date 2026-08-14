@@ -1,4 +1,4 @@
-.tx-row{display:grid;grid-template-columns:90px 1fr 110px 100px 100px 130px;gap:10px;align-items:center;padding:11px 8px;border-bottom:1px solid var(--border-soft);font-size:13px;border-radius:8px;}
+.tx-row{display:grid;grid-template-columns:90px 1fr 110px 100px 100px 130px;gap:14px;align-items:center;padding:13px 10px;border-bottom:1px solid var(--border-soft);font-size:13px;border-radius:8px;}
 .tx-row:not(.head):hover{background:var(--surface-2);}
 
 /* Una celda de grid trae `min-width:auto` por defecto, o sea que se NIEGA a
@@ -17,7 +17,7 @@
    y de insumos en pantallas medianas. */
 .tx-row input, .ins-row input, .det-row input, .emp-row input,
 .tx-row select, .ins-row select, .det-row select, .emp-row select{min-width:0;max-width:100%;}
-.tx-row.head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);padding:0 8px 8px;}
+.tx-row.head{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;border-bottom:1px solid var(--border);padding:0 10px 10px;margin-bottom:2px;}
 /* Receta visual compartida por CUALQUIER indicador chico de estado en la
    app — badge, tag, status-pill nacieron por separado (cada uno con su
    propio tamaño/radio, sutilmente distintos) y visualmente deberían leerse

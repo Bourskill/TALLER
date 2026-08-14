@@ -12,6 +12,7 @@ import { todayStr, uid } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
+import { configurarGuardado, guardarClave, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
 // pestaña con columnas reales (ver core/sheetsTabular.js) — Fase 1 de la
@@ -83,6 +84,12 @@ export const state = {
   // Aviso flotante temporal (toast): { msg } o null. Puramente visual, nunca
   // se persiste — ver mostrarToast() más abajo.
   toast: null,
+  // { claves: [...], etiquetas: [...] } si la sesión anterior se cerró con
+  // cambios que nunca llegaron a la Sheet y el espejo local sí los tiene
+  // (ver detectarRecuperacion). null el resto del tiempo.
+  recuperacion: null,
+  // Panel de la campanita desplegado o no — estado de UI, nunca se persiste.
+  notificacionesAbiertas: false,
   tx: [],
   txPapelera: [], // movimientos eliminados (papelera): se pueden restaurar o borrar definitivo
   pedidos: [],
@@ -380,10 +387,82 @@ export async function loadAll() {
       });
       if (huboMigracion) { persist("cotizaciones"); persist("pedidos"); }
     }
+
+    detectarRecuperacion();
   } catch (e) {
     console.error("Error cargando datos", e);
   }
 }
+
+// Nombre legible de cada área de datos, para poder decirle al usuario QUÉ
+// quedó sin guardar en vez de mostrarle la clave interna.
+export var ETIQUETA_CLAVE = {
+  tx: "movimientos de Finanzas", pedidos: "pedidos", clientes: "contactos",
+  cotizaciones: "cotizaciones", productos: "catálogo de productos",
+  catalogoInsumos: "catálogo de insumos", catalogoCategorias: "categorías de insumos",
+  plantillasPrendas: "plantillas de prendas", plantillasEstados: "flujos de producción",
+  pendientes: "notas", deudas: "deudas", deudasHistorial: "historial de deudas",
+  config: "configuración del taller", ui: "preferencias de interfaz",
+  txPapelera: "papelera de movimientos", pedidosPapelera: "papelera de pedidos",
+  catalogoPropuestas: "cambios propuestos del catálogo", productoPropuestas: "cambios propuestos de productos"
+};
+
+// ¿La sesión anterior se cerró con cambios que nunca llegaron a la Sheet?
+// El espejo local los tiene; se comparan contra lo que sí está guardado y, si
+// difieren, se ofrece recuperarlos. NUNCA se restaura solo: el espejo es de
+// ESTE navegador, y restaurarlo a ciegas podría pisar algo hecho después
+// desde otro dispositivo (ver la nota final de core/guardado.js).
+function detectarRecuperacion() {
+  var claves = pendientesDeSesionAnterior();
+  if (!claves.length) return;
+  var recuperables = claves.filter(function (clave) {
+    if (!(clave in state)) return false;
+    var espejo = leerEspejo(clave);
+    if (!espejo) return false;
+    try { return espejo !== JSON.stringify(state[clave]); } catch (e) { return false; }
+  });
+  if (!recuperables.length) { olvidarPendientesDeSesionAnterior(); return; }
+  state.recuperacion = {
+    claves: recuperables,
+    etiquetas: recuperables.map(function (c) { return ETIQUETA_CLAVE[c] || c; })
+  };
+}
+
+// Vuelca el espejo local sobre el estado y lo manda a guardar de nuevo.
+export async function recuperarDelEspejo() {
+  var pendiente = state.recuperacion;
+  if (!pendiente) return;
+  pendiente.claves.forEach(function (clave) {
+    var espejo = leerEspejo(clave);
+    if (!espejo) return;
+    try { state[clave] = JSON.parse(espejo); } catch (e) { /* espejo corrupto: se ignora esa clave */ }
+  });
+  state.recuperacion = null;
+  olvidarPendientesDeSesionAnterior();
+  notify();
+  for (var i = 0; i < pendiente.claves.length; i++) await persist(pendiente.claves[i]);
+}
+
+export function descartarRecuperacion() {
+  state.recuperacion = null;
+  olvidarPendientesDeSesionAnterior();
+  notify();
+}
+
+// La escritura de verdad de UNA clave. Se pasa a core/guardado.js, que se
+// encarga de encolarla y reintentarla si falla — acá solo vive el "cómo se
+// escribe", no el "qué pasa si no se pudo".
+//
+// Lee `state[key]` en el momento de escribir (no recibe una copia): eso es lo
+// que hace que un reintento mande siempre lo último, incluido todo lo que el
+// usuario haya hecho mientras la conexión estaba caída.
+async function escribirClave(key) {
+  if (TABLAS_SHEET[key]) { await TABLAS_SHEET[key].escribir(state[key]); }
+  else { await window.storage.set(KEYS[key], JSON.stringify(state[key]), false); }
+  if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
+}
+
+configurarGuardado({ escribir: escribirClave, alCambiar: notify });
 
 // key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...).
 export async function persist(key) {
@@ -397,13 +476,10 @@ export async function persist(key) {
   if (session && session.rol === "vendedor" && APPROVAL_REQUIRED_KEYS.indexOf(key) !== -1) {
     return proponerCambio(key, session);
   }
-  try {
-    if (TABLAS_SHEET[key]) { await TABLAS_SHEET[key].escribir(state[key]); }
-    else { await window.storage.set(KEYS[key], JSON.stringify(state[key]), false); }
-    if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
-  } catch (e) {
-    console.error("No se pudo guardar", key, e);
-  }
+  // Antes esto era un try/catch que solo hacía console.error: si fallaba, el
+  // usuario no se enteraba y el cambio se perdía al cerrar la pestaña. Ahora
+  // pasa por la red de seguridad (espejo local + cola de reintento).
+  await guardarClave(key, JSON.stringify(state[key]));
 }
 
 // Un vendedor solo puede tener UNA propuesta pendiente por clave a la vez:

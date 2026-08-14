@@ -772,6 +772,89 @@ export function calcSaldosConsignacion() {
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
 
+// ---------- campanita de notificaciones ----------
+// Lo que hay que mirar HOY, en una sola lista. Son cosas de naturaleza muy
+// distinta (una nota, una autorización, una entrega) pero comparten lo único
+// que importa acá: si nadie las ve hoy, algo se atrasa o queda sin aplicar.
+//
+// Función pura y en calc.js (no en el render de la campanita) para que el
+// contador del badge y el contenido del panel salgan del MISMO cálculo — un
+// "3" en la campanita y dos ítems en la lista sería el clásico número que no
+// se puede explicar.
+//
+// `esAdmin` decide si entran las autorizaciones pendientes: un vendedor no
+// aprueba nada, así que verlas ahí solo sería ruido (él ya ve el estado de lo
+// suyo dentro de cada pestaña).
+export function calcNotificaciones(esAdmin) {
+  var hoy = todayStr();
+  var items = [];
+
+  // 1. Notas con fecha para hoy (o ya vencidas) que siguen sin marcarse hechas.
+  (state.pendientes || []).forEach(function (n) {
+    if (n.hecho || !n.fecha || n.fecha > hoy) return;
+    var vencida = n.fecha < hoy;
+    items.push({
+      id: "nota:" + n.id,
+      tipo: "nota",
+      icono: vencida ? "⏰" : "📝",
+      titulo: n.texto || "Nota sin texto",
+      detalle: vencida ? ("Era para el " + n.fecha) : ("Para hoy" + (n.hora ? " · " + n.hora : "")),
+      urgente: vencida || n.prioridad === "alta",
+      tab: "notas"
+    });
+  });
+
+  // 2. Cambios que un vendedor propuso y no se aplican hasta que el admin los
+  //    apruebe: precios/categorías del catálogo de insumos, y precio o
+  //    movimiento manual de stock de un producto. Mientras no se aprueben, lo
+  //    que el vendedor ve y lo que ve el taller no coinciden.
+  if (esAdmin) {
+    (state.catalogoPropuestas || []).forEach(function (p) {
+      items.push({
+        id: "propuesta-cat:" + p.id,
+        tipo: "autorizacion",
+        icono: "🔐",
+        titulo: (p.autor || "Un vendedor") + " propuso cambios en el catálogo de insumos",
+        detalle: "Necesita tu autorización para quedar guardado",
+        urgente: true,
+        tab: "catalogo"
+      });
+    });
+    (state.productoPropuestas || []).forEach(function (p) {
+      var que = p.tipo === "movimiento" ? "un movimiento de stock" : "un cambio de precio";
+      items.push({
+        id: "propuesta-pro:" + p.id,
+        tipo: "autorizacion",
+        icono: "🔐",
+        titulo: (p.autor || "Un vendedor") + " propuso " + que + " en " + (p.productoNombre || "un producto"),
+        detalle: "Necesita tu autorización para aplicarse",
+        urgente: true,
+        tab: "productos"
+      });
+    });
+  }
+
+  // 3. Entregas de hoy o ya vencidas, de pedidos que siguen activos.
+  (state.pedidos || []).forEach(function (p) {
+    if (p.estado === "entregado" || !p.fechaEntrega || p.fechaEntrega > hoy) return;
+    var vencida = p.fechaEntrega < hoy;
+    items.push({
+      id: "entrega:" + p.id,
+      tipo: "entrega",
+      icono: vencida ? "🚨" : "📦",
+      titulo: (p.numeroOp ? p.numeroOp + " — " : "") + (p.cliente || "Pedido"),
+      detalle: (vencida ? "Entrega vencida el " + p.fechaEntrega : "Se entrega hoy") + " · " + (p.descripcion || ""),
+      urgente: vencida,
+      tab: "pedidos",
+      pedidoId: p.id
+    });
+  });
+
+  // Lo urgente primero; dentro de cada grupo, el orden en que se armó (notas,
+  // autorizaciones, entregas), que es el que tiene sentido leer de arriba abajo.
+  return items.sort(function (a, b) { return (b.urgente ? 1 : 0) - (a.urgente ? 1 : 0); });
+}
+
 // ---------- cliente 360° ----------
 // Resumen de relación con UN cliente puntual, para mostrar en su ficha
 // (ver modules/clientes.js) sin tener que ir a buscarlo pedido por pedido

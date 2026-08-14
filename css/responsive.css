@@ -12,10 +12,27 @@
    botón ☰ en la topbar para abrirlo y un overlay para cerrarlo al tocar fuera.
    ========================================================================== */
 @media (max-width: 880px){
-  .main-inner{padding:16px 16px 80px;}
-  .topbar{margin-bottom:16px;}
+  .main-inner{padding:var(--sp-4) var(--sp-3) 80px;}
+  .topbar{margin-bottom:var(--sp-4);padding-bottom:var(--sp-3);gap:8px;}
   .topbar-title{font-size:18px;}
   .topbar-date{display:none;}
+  /* El correo de la sesión es lo primero que sobra cuando el ancho aprieta:
+     la campanita y el estado del guardado sí tienen que caber siempre. */
+  .topbar-user{display:none;}
+  /* El chip de guardado se queda solo con el punto de color cuando todo va
+     bien (el texto "Guardado" no aporta nada en un teléfono); si algo falló,
+     conserva el número, que sí importa. */
+  .guardado-chip.ok{font-size:0;padding:5px;gap:0;}
+  .guardado-chip.ok::before{content:"●";font-size:11px;}
+  .guardado-chip.guardando{font-size:0;padding:5px;gap:0;}
+  .guardado-chip.guardando::before{content:"●";font-size:11px;}
+
+  .aviso-barra{flex-direction:column;align-items:stretch;padding:var(--sp-3);}
+  .aviso-barra .btn{width:100%;}
+
+  /* El panel de la campanita se ancla al borde derecho de la pantalla, no al
+     del botón, para no quedar cortado. */
+  .campanita-panel{position:fixed;top:calc(var(--topbar-h) + 12px);left:12px;right:12px;width:auto;max-height:70vh;}
   .sidebar-mobile-toggle{
     display:flex;align-items:center;justify-content:center;
     width:34px;height:34px;border-radius:9px;flex:0 0 34px;
@@ -62,19 +79,81 @@
      ...px..." inline por fila (para poder variar el layout entre pantallas),
      y un estilo inline sin !important le gana a cualquier regla externa —
      por eso un intento anterior de apilar sin !important quedaba inerte y la
-     tabla seguía desbordando con scroll horizontal. */
-  .tx-row, .ins-row, .det-row, .emp-row{grid-template-columns:1fr !important;gap:3px;padding:12px 4px;}
+     tabla seguía desbordando con scroll horizontal.
+
+     CADA FILA ES SU PROPIA TARJETA. Antes se apilaban una tras otra separadas
+     solo por una línea de 1px: cinco movimientos seguidos se leían como un
+     único bloque de texto corrido donde no se veía dónde terminaba uno y
+     empezaba el siguiente (y en un teléfono, que es donde más se consulta,
+     eso es justo lo que uno necesita distinguir). Con fondo, borde y
+     separación propios, cada fila vuelve a ser una unidad.
+
+     ETIQUETA A LA IZQUIERDA, VALOR A LA DERECHA, en dos columnas. Apilar
+     etiqueta sobre valor dejaba una fila de Finanzas (6 datos) en 282px: casi
+     media pantalla para UN movimiento. Pareados se leen como una ficha, que es
+     como se consulta un dato en un teléfono.
+
+     El reparto es EXPLÍCITO (la etiqueta a la columna 1, todo lo demás a la 2)
+     y no por orden de aparición: así una celda que no traiga etiqueta delante
+     —la tira de botones del final, por ejemplo— cae igual en la columna del
+     valor, en vez de correr una posición y descolocar el resto de la fila.
+     Eso es lo que hace que funcione con tablas cuyo marcado no es uniforme. */
+  .tx-row, .ins-row, .det-row, .emp-row{
+    grid-template-columns:minmax(74px,31%) 1fr !important;
+    gap:8px 12px;
+    align-items:baseline;
+    padding:13px 14px;
+    margin-bottom:var(--sp-2);
+    background:var(--surface-2);
+    border:1px solid var(--border-soft);
+    border-radius:var(--radius-sm);
+    font-size:13.5px;
+    line-height:1.4;
+  }
+  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{grid-column:2;}
+  .tx-row > .mobile-th, .ins-row > .mobile-th,
+  .det-row > .mobile-th, .emp-row > .mobile-th{grid-column:1;}
+  /* El encabezado de columnas no tiene sentido cuando no hay columnas: cada
+     valor ya lleva su propia etiqueta (.mobile-th). */
   .tx-row.head, .ins-row.head, .det-row.head, .emp-row.head{display:none;}
   .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;}
 
-  .mobile-th{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;margin-top:9px;}
-  .mobile-th:first-child{margin-top:0;}
+  .mobile-th{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:700;line-height:1.5;}
+  /* La tira de acciones ocupa las dos columnas y sus botones se reparten el
+     ancho: son los que se van a tocar con el pulgar. */
+  .tx-row > span:has(.btn), .det-row > span:has(.btn), .emp-row > span:has(.btn){
+    grid-column:1/-1;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
+  .tx-row > span:has(.btn) .btn, .emp-row > span:has(.btn) .btn{flex:1 1 auto;}
 
-  /* Las tarjetas comían ~48px de ancho útil (24px por lado) justo donde menos
-     sobra; con el padding reducido, una fila apilada gana casi media palabra
-     más por línea. */
-  .card{padding:16px 14px;}
-  .cliente-card{padding:14px;}
+  /* Las tarjetas comían ~52px de ancho útil justo donde menos sobra; con el
+     padding reducido, una fila apilada gana casi media palabra más por línea. */
+  .card{padding:var(--sp-3) var(--sp-3);}
+  .cliente-card{padding:var(--sp-3);}
+  .pedido-card{padding:var(--sp-3) var(--sp-3);}
+  .cot-card{padding:var(--sp-3) var(--sp-3);}
+  .ref-card{padding:var(--sp-3) var(--sp-3);}
+
+  /* En una pantalla angosta, dos columnas de campos dejan a cada uno con ~150px:
+     no cabe una fecha, un correo ni un select con texto real. */
+  .form-grid{grid-template-columns:1fr;gap:var(--sp-3);}
+  .field.wide{grid-column:span 1;}
+
+  /* Las etiquetas de los campos de una referencia reservaban 128px fijos a la
+     izquierda, dejando el input contra el borde derecho. Apiladas se lee mejor. */
+  .ref-fields span{flex-direction:column;align-items:stretch;gap:4px;}
+  .ref-fields label{flex:none;}
+
+  /* El resumen de cifras de una referencia/cotización: dos por fila en vez de
+     una tira de seis que obliga a scrollear. */
+  .ref-summary, .cot-resumen-total, .cot-hero-stats{grid-template-columns:1fr 1fr;gap:var(--sp-2);}
+  .ref-summary .rs-item .rv{font-size:15px;}
+  .cot-hero-stat .rv{font-size:18px;}
+
+  /* La barra de guardado de una cotización es sticky: en móvil compite con la
+     topbar, así que se compacta y sus botones ocupan el ancho completo. */
+  .save-bar{padding:var(--sp-2) var(--sp-3);}
+  .save-bar > span{width:100%;}
+  .save-bar > span .btn{flex:1;}
 
   /* Con varias pestañas ("+ Nuevo pedido", "Historial (24)") la fila se salía
      de la pantalla y la segunda quedaba inalcanzable: ahora la barra scrollea
@@ -96,7 +175,20 @@
 
 @media (max-width: 480px){
   .kpis{grid-template-columns:1fr 1fr;}
-  .main-inner{padding:14px 12px 76px;}
+  .main-inner{padding:var(--sp-3) 12px 76px;}
+  /* Con 6 cifras y ~350px útiles, dos columnas dejan cada número en 2 líneas.
+     Una sola columna por fila se lee de un vistazo. */
+  .ref-summary, .cot-resumen-total{grid-template-columns:1fr;}
+  /* Los campos de una línea de pedido (talla, cantidad, precio, costo,
+     subtotal) en 2 columnas dejaban los números pegados; a esta altura cada
+     uno se lee mejor completo. */
+  .pedido-linea-campos{grid-template-columns:1fr 1fr;gap:var(--sp-2);}
+  .pedido-linea{padding:var(--sp-3) 13px;}
+  /* Los botones de acción de una tarjeta de pedido, apilados y a lo ancho:
+     alcanzables con el pulgar en vez de una tira de botones diminutos. */
+  .pedido-actions{gap:var(--sp-1);}
+  .pedido-actions .accion-peligro{margin-left:0;padding-left:0;border-left:none;width:100%;}
+  .pedido-actions .accion-peligro .btn{width:100%;}
 }
 
 /* Backstop global (cualquier ancho): ningún dato de texto libre —un correo,

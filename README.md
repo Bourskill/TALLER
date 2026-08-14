@@ -25,6 +25,67 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Registro de cambios — agosto 2026 (segunda ronda: guardado, avisos y aire)
+
+**El guardado ya no puede perder un día de trabajo.** Era el único fallo que
+quedaba bloqueante: `persist()` atrapaba los errores y solo los escribía en la
+consola, así que si el token de Google no se podía renovar (pasa con cookies de
+terceros restringidas: Brave, Safari, incógnito), se seguía trabajando toda la
+tarde viendo todo bien en pantalla y al cerrar la pestaña se perdía. Se atacó
+de raíz, no con un aviso, en `js/core/guardado.js`:
+
+1. **Espejo local** en `localStorage` (no `sessionStorage`: tiene que
+   sobrevivir a cerrar el navegador). El disco del usuario es una segunda copia
+   real, así que "no se pudo guardar" deja de significar "se perdió".
+2. **Cola con reintento automático**: lo que falló se reintenta solo al volver
+   la conexión, al volver a la pestaña y cada 15s. Es seguro porque cada
+   escritura manda el blob COMPLETO de esa clave — una escritura exitosa repara
+   todas las que fallaron antes, sin necesidad de ningún merge.
+3. **Visibilidad**: un chip en la barra superior (Guardado / Guardando… /
+   Sin guardar (N)), una barra roja que estorba mientras algo no esté a salvo,
+   y el navegador pregunta antes de cerrar. Al volver a entrar, si quedó algo
+   pendiente, se ofrece **recuperarlo** — nunca se restaura solo, porque el
+   espejo es de ese navegador y podría pisar algo hecho desde otro dispositivo.
+
+**Bug de fechas encontrado al correr la app de verdad en el navegador.**
+`todayStr()` usaba `toISOString()`, que da la fecha en **UTC**: en Colombia
+(UTC-5), a partir de las 7 de la noche la app ya creía que era el día
+siguiente. Un abono recibido a las 8pm quedaba fechado mañana y no salía en el
+reporte de "Hoy"; peor, el último día del mes el corte de periodo (del que
+dependen la nómina y los gastos fijos) saltaba al mes siguiente, dejando el
+pago en el periodo equivocado y el gasto otra vez como pendiente. En un taller
+que cierra de noche, eso pasaba todos los días. Ahora usa la fecha local, con
+la misma función que ya existía para Calendar.
+
+**Campanita de avisos** (barra superior, con contador): reúne lo que hay que
+mirar hoy — las notas con fecha de hoy o vencidas, los cambios que un vendedor
+propuso y siguen sin autorizar (precio de insumo, precio de producto,
+movimiento manual de stock) y las entregas de hoy o vencidas. Cada aviso lleva
+a donde se resuelve. El cálculo vive en `calcNotificaciones` (core/calc.js)
+para que el número del contador y la lista salgan del mismo lado. Un vendedor
+no ve las autorizaciones: no aprueba nada.
+
+**Aire y jerarquía**: escala de espaciado en `variables.css` (`--sp-1`…`--sp-6`)
+en vez de que cada archivo eligiera sus propios números, aplicada a tarjetas,
+secciones, filas y sub-títulos. El aviso de **sobrecosto** de Cotizaciones →
+Producción, que quedaba como un pie de foto pegado a la tabla, ahora es un
+bloque propio con la cifra grande y una segunda línea que dice contra qué se
+compara (medido: de 33px a 76px de alto, con 22px de aire arriba en vez de 10).
+
+**Móvil**: las filas de tabla ahora son **etiqueta a la izquierda, valor a la
+derecha**, cada fila con su propia tarjeta. Antes se apilaban etiqueta sobre
+valor separadas por 1px y varias filas seguidas se leían como un bloque de
+texto corrido. Medido en Finanzas: **de 327px a 199px por fila** (-39%), sin
+desborde horizontal en ninguna pestaña. El reparto de columnas es explícito
+(etiqueta a la 1, todo lo demás a la 2), no por orden de aparición: así las
+celdas sin etiqueta —la tira de botones del final— no descolocan la fila.
+También: formularios a una columna, campos de referencia apilados, panel de la
+campanita anclado a la pantalla y el correo de la sesión oculto para que quepan
+la campanita y el estado del guardado.
+
+> Para revisar la interfaz sin tocar datos reales hay una configuración de
+> servidor local en `.claude/launch.json` (`npx http-server . -p 4173`).
+
 ## Registro de cambios — agosto 2026 (revisión previa a empezar a usarla)
 
 Repaso completo buscando lo que pudiera romperse, confundir o descuadrar las

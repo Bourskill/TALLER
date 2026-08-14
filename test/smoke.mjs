@@ -654,6 +654,28 @@ assert(!state.lastError, "un pedido con costo y sin precio de venta no rompe el 
 assert(document.body.textContent.includes("sin precio de venta asignado"), "y se explica por qué no hay porcentaje de ganancia");
 state.pedidos = state.pedidos.filter(p => p.id !== "ped-sin-precio");
 
+// --- la fecha de "hoy" es la del reloj del usuario, no la de UTC ---
+// En Colombia (UTC-5), a partir de las 7pm `toISOString()` ya devuelve el día
+// siguiente: todo lo registrado en la tarde-noche quedaba fechado mañana, y el
+// último día del mes el corte de periodo saltaba al mes siguiente.
+const { todayStr: hoyStr } = await import("../js/core/utils.js");
+const ahora = new Date();
+const fechaLocalEsperada = ahora.getFullYear() + "-" +
+  String(ahora.getMonth() + 1).padStart(2, "0") + "-" + String(ahora.getDate()).padStart(2, "0");
+assert(hoyStr() === fechaLocalEsperada, "todayStr() devuelve la fecha local (" + fechaLocalEsperada + "), no la de UTC");
+
+// --- la campanita avisa lo del día: notas, autorizaciones y entregas ---
+const { calcNotificaciones } = await import("../js/core/calc.js");
+state.pendientes.push({ id: "n-hoy", texto: "Nota de hoy", categoria: "tarea", prioridad: "alta", fecha: hoyStr(), hecho: false });
+const avisos = calcNotificaciones(true);
+assert(avisos.some(a => a.tipo === "nota" && a.titulo === "Nota de hoy"), "la campanita incluye la nota del día");
+assert(!calcNotificaciones(true).some(a => a.tipo === "autorizacion"), "sin propuestas pendientes no hay avisos de autorización");
+state.productoPropuestas = [{ id: "prop-x", tipo: "campo", productoId: productoId, productoNombre: "Camiseta", autor: "Ana", fecha: new Date().toISOString(), payload: {} }];
+assert(calcNotificaciones(true).some(a => a.tipo === "autorizacion"), "un cambio propuesto por un vendedor aparece como aviso para el admin");
+assert(!calcNotificaciones(false).some(a => a.tipo === "autorizacion"), "un vendedor no ve los avisos de autorización (no aprueba nada)");
+state.productoPropuestas = [];
+state.pendientes = state.pendientes.filter(n => n.id !== "n-hoy");
+
 // --- permisos: un vendedor no puede cambiar el precio de un producto ni
 // registrar un movimiento de stock directo — queda pendiente de aprobación
 // del admin, y las bajas de stock por una venta/remisión real (ya probadas

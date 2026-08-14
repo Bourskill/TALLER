@@ -434,11 +434,22 @@ function renderTabProduccion(c, totales, real) {
     "</div>";
 
   if (sobrecosto !== 0) {
+    // Antes esto era una sola línea de texto centrada, pegada a la comparación
+    // de arriba: la cifra que más importa de toda la pestaña competía por
+    // espacio con la tabla y se leía como un pie de foto. Ahora es un aviso
+    // con su propio bloque — ícono, cifra grande y una segunda línea que
+    // explica contra qué se está comparando.
     var variacionPct = totales.costoTotal > 0 ? (sobrecosto / totales.costoTotal * 100) : 0;
+    var esSobrecosto = sobrecosto > 0;
     html += '<div class="variacion ' + vClass + '">' +
-      (sobrecosto > 0 ? "Sobrecosto de " : "Ahorro de ") +
-      fmt(Math.abs(sobrecosto)) + (totales.costoTotal > 0 ? " (" + (sobrecosto >= 0 ? "+" : "") + variacionPct.toFixed(1) + "% vs. lo cotizado)" : "") +
-      "</div>";
+      '<span class="variacion-icono">' + (esSobrecosto ? "▲" : "▼") + "</span>" +
+      '<span class="variacion-texto">' +
+      "<b>" + (esSobrecosto ? "Sobrecosto de " : "Ahorro de ") + fmt(Math.abs(sobrecosto)) + "</b>" +
+      "<small>" +
+      (totales.costoTotal > 0
+        ? ((esSobrecosto ? "+" : "−") + Math.abs(variacionPct).toFixed(1) + "% sobre el costo que se había cotizado (" + fmt(totales.costoTotal) + ")")
+        : "Todavía no hay un costo cotizado con qué compararlo") +
+      "</small></span></div>";
   }
 
   var compras = calcListaCompras(c);

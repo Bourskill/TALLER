@@ -15,6 +15,7 @@
 import { state, persist } from "./store.js";
 import { getSession, fetchGoogleConReintento } from "./auth.js";
 import { SPREADSHEET_ID } from "./google-config.js";
+import { todayStr } from "./utils.js";
 
 var FOLDER_NAME = "Panel del Taller — respaldos";
 var VEINTICUATRO_HORAS_MS = 24 * 60 * 60 * 1000;
@@ -59,7 +60,9 @@ export async function respaldarSiCorresponde(forzar) {
   if (!forzar && ultimo && (Date.now() - new Date(ultimo).getTime()) < VEINTICUATRO_HORAS_MS) return;
   try {
     var folderId = await obtenerCarpetaRespaldos();
-    var fecha = new Date().toISOString().slice(0, 10);
+    // Fecha local (todayStr), no UTC: el nombre del respaldo tiene que decir
+    // el día que el usuario vio en pantalla, no el del meridiano de Greenwich.
+    var fecha = todayStr();
     await driveFetch("files/" + SPREADSHEET_ID + "/copy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
