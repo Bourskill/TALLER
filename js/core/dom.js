@@ -17,6 +17,7 @@ import { clienteById, calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
+import { subirImagenReferencia } from "./drive.js";
 
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
@@ -147,13 +148,35 @@ var coreActions = {
     }
     notify();
   },
+  // El ícono del taller se SUBE, igual que cualquier otra imagen de la app
+  // (referencia de cotización, foto de plantilla, pie de página del PDF): se
+  // elige un archivo del dispositivo y se guarda en la misma carpeta
+  // compartida de Drive. Antes esto pedía por `prompt` que uno pegara el LINK
+  // de una imagen ya alojada en otro lado — quedó de una época en la que no
+  // existía la subida a Drive, y era el único punto de la app que seguía
+  // funcionando así. Para usar un emoji en vez de una imagen está el campo de
+  // Configuración → Marca (ver renderIconoTaller en modules/config.js).
   "edit-logo": function () {
-    var actual = state.config.logoUrl || "";
-    var nuevo = window.prompt("Ícono del taller: pega un emoji corto (ej. 🧵) o el link a una imagen.\nDéjalo vacío para volver a las iniciales.", actual);
-    if (nuevo === null) return;
-    state.config.logoUrl = nuevo.trim();
-    persist("config");
-    notify();
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", async function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      state.configLogoSubiendo = true;
+      notify();
+      try {
+        var url = await subirImagenReferencia(file);
+        state.config.logoUrl = url;
+        state.configLogoSubiendo = false;
+        persist("config");
+      } catch (e) {
+        state.configLogoSubiendo = false;
+        window.alert("No se pudo subir el ícono a Drive: " + (e && e.message ? e.message : e));
+      }
+      notify();
+    });
+    input.click();
   },
   // Cualquier foto de la app (referencia, plantilla de prenda, pie de página
   // del PDF) se puede abrir en grande con esto — ver el overlay al final de
@@ -191,7 +214,12 @@ var coreActions = {
     descartarRecuperacion();
   },
   "toggle-notificaciones": function () {
-    state.notificacionesAbiertas = !state.notificacionesAbiertas;
+    var abriendo = !state.notificacionesAbiertas;
+    state.notificacionesAbiertas = abriendo;
+    if (abriendo) {
+      var session = getSession();
+      marcarAvisosComoVistos(calcNotificaciones(!session || session.rol !== "vendedor"));
+    }
     notify();
   },
   "cerrar-notificaciones": function () {
@@ -320,8 +348,9 @@ function renderSidebar() {
   // trata como admin, igual que el resto del filtrado por rol de este archivo.
   var session = getSession();
   var puedeEditarMarca = !session || session.rol !== "vendedor";
+  if (state.configLogoSubiendo) logoInner = '<span style="font-size:11px;">···</span>';
   var logoHtml = puedeEditarMarca
-    ? '<button class="sidebar-logo" data-action="edit-logo" title="Cambiar ícono del taller">' + logoInner + "</button>"
+    ? '<button class="sidebar-logo" data-action="edit-logo" title="' + (state.configLogoSubiendo ? "Subiendo a Drive…" : "Subir una imagen para el ícono del taller") + '">' + logoInner + "</button>"
     : '<div class="sidebar-logo" style="cursor:default;" title="' + esc(state.config.nombre) + '">' + logoInner + "</div>";
   var nombreHtml = puedeEditarMarca
     ? '<input class="sidebar-brand" id="inp-nombre" value="' + esc(state.config.nombre) + '" />'
@@ -449,17 +478,46 @@ function renderAvisoRecuperacion() {
 }
 
 // ---------- campanita ----------
+// Avisos que el usuario todavía NO ha mirado. El punto rojo cuenta estos, no
+// el total: si contara el total, seguiría encendido después de abrir el panel
+// y leerlo entero — que es exactamente lo que pasaba. El panel sí muestra
+// todo, visto o no; lo que se apaga es la alerta, no la información.
+function avisosNoVistos(items) {
+  var vistos = (state.ui && state.ui.avisosVistos) || [];
+  return items.filter(function (i) { return vistos.indexOf(i.id) === -1; });
+}
+
+// Al abrir el panel se dan por vistos los avisos que hay EN ESE MOMENTO. Uno
+// nuevo que aparezca después vuelve a encender el punto, que es lo que se
+// espera de una campanita.
+//
+// La lista se poda a lo que sigue existiendo: los ids llevan dentro el id del
+// registro (nota, propuesta, pedido), así que sin podar crecería para siempre
+// con avisos de cosas ya resueltas.
+function marcarAvisosComoVistos(items) {
+  var idsActuales = items.map(function (i) { return i.id; });
+  var vistosPrevios = (state.ui.avisosVistos || []).filter(function (id) { return idsActuales.indexOf(id) !== -1; });
+  var nuevos = idsActuales.filter(function (id) { return vistosPrevios.indexOf(id) === -1; });
+  if (!nuevos.length && vistosPrevios.length === (state.ui.avisosVistos || []).length) return false;
+  state.ui.avisosVistos = vistosPrevios.concat(nuevos);
+  persist("ui");
+  return true;
+}
+
 function renderCampanita() {
   var session = getSession();
   var esAdmin = !session || session.rol !== "vendedor";
   var items = calcNotificaciones(esAdmin);
-  var urgentes = items.filter(function (i) { return i.urgente; }).length;
+  var sinVer = avisosNoVistos(items);
+  var urgentesSinVer = sinVer.filter(function (i) { return i.urgente; }).length;
   var abierto = !!state.notificacionesAbiertas;
 
   var html = '<div class="campanita-wrap">' +
-    '<button class="theme-toggle-btn campanita-btn' + (abierto ? " activa" : "") + '" data-action="toggle-notificaciones" title="Avisos del día" aria-label="Avisos del día">' +
+    '<button class="theme-toggle-btn campanita-btn' + (abierto ? " activa" : "") + '" data-action="toggle-notificaciones" title="' +
+    (sinVer.length ? sinVer.length + " aviso(s) sin ver" : (items.length ? "Avisos del día (ya los viste)" : "Sin avisos por hoy")) +
+    '" aria-label="Avisos del día">' +
     campanaIcon() +
-    (items.length ? '<span class="campanita-badge' + (urgentes ? " urgente" : "") + '">' + (items.length > 9 ? "9+" : items.length) + "</span>" : "") +
+    (sinVer.length ? '<span class="campanita-badge' + (urgentesSinVer ? " urgente" : "") + '">' + (sinVer.length > 9 ? "9+" : sinVer.length) + "</span>" : "") +
     "</button>";
 
   if (abierto) {

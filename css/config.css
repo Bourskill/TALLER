@@ -13,3 +13,14 @@
 @media (max-width: 700px){
   .emp-row{grid-template-columns:1fr 1fr;}
 }
+
+/* Marca del taller: la miniatura del ícono a la izquierda con protagonismo, y
+   el nombre + el emoji alternativo apilados a su derecha. Antes el ícono era
+   un campo de texto más dentro de una grilla de campos iguales, así que no se
+   veía que era una imagen ni que se podía subir. */
+.marca-grid{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-4);align-items:start;}
+.marca-campos{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;}
+.marca-grid .ref-thumb{width:76px;height:76px;border-radius:var(--radius-sm);}
+@media (max-width:600px){
+  .marca-grid{grid-template-columns:1fr;gap:var(--sp-3);}
+}

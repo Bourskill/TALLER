@@ -157,7 +157,11 @@ export const state = {
 
   // Borradores de formularios. Viven en el estado (no en el DOM) para sobrevivir
   // re-renders y para que cualquier módulo pueda leerlos/limpiarlos.
-  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" },
+  // Los campos de compra de insumo (esInsumo/insumoNombre/proveedorId/cantidad/
+  // unidad) viven en el borrador y no se leen del DOM al enviar: de eso depende
+  // que el formulario pueda MOSTRARLOS solo cuando aplican, en vez de tener
+  // cuatro campos vacíos ahí siempre.
+  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "" },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -260,6 +264,9 @@ export const state = {
   // true mientras la imagen del pie de página (Configuración) se sube a
   // Drive — nunca se persiste, es puramente visual (igual que refImagenSubiendo).
   configPiePaginaSubiendo: false,
+  // true mientras el ícono del taller se sube a Drive — mismo patrón que
+  // configPiePaginaSubiendo; nunca se persiste.
+  configLogoSubiendo: false,
   filtroClientes: "",
   filtroCatalogoCategoria: "todos",
   buscarPedidos: "",

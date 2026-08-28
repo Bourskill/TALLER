@@ -1,10 +1,15 @@
 import { state, persist, notify } from "../core/store.js";
-import { esc, opt, num, uid, todayStr, fmt, norm, val, exigirCampos } from "../core/utils.js";
+import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
 import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, proveedoresDeContactos } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
+// Los tres tipos que se pueden CREAR a mano. "comision" no está: esas las
+// genera la app al marcar pagada la comisión de un vendedor, y crearlas
+// sueltas duplicaría el pago (ver origenSistemaDeTx en core/calc.js).
+var TIPOS_NUEVO_TX = [["ingreso", "↓ Ingreso"], ["gasto", "↑ Gasto"], ["nomina", "👤 Nómina"]];
+var TIPO_SUSTANTIVO = { ingreso: "ingreso", gasto: "gasto", nomina: "pago de nómina" };
 
 // Dos pestañas (mismo patrón "gsheet-tabs" que Cotizaciones/Pedidos/
 // Clientes/Deudas): "Registrar movimiento" es solo el formulario de alta, y
@@ -29,45 +34,90 @@ function renderTabsFinanzas(vista) {
     "</div>";
 }
 
+// El formulario de un movimiento, en TRES bloques con jerarquía propia en vez
+// de una grilla plana de diez campos iguales. Antes todos pesaban lo mismo —el
+// monto y "unidad (opcional)" se veían idénticos— y los cuatro campos de
+// compra de insumo estaban siempre ahí aunque casi nunca aplicaran, que era la
+// mitad del ruido.
+//
+//  1. QUÉ PASÓ: el tipo como control segmentado (se ven las tres opciones de
+//     una, como el tipo de pedido) + concepto, monto y fecha. El monto es el
+//     campo grande: es el dato del que se trata todo esto.
+//  2. CON QUIÉN Y POR QUÉ: contraparte y a qué pedido/cotización se asocia.
+//  3. COMPRA DE INSUMO: recogido detrás de una casilla. Solo al marcarla
+//     aparecen insumo, proveedor, cantidad y unidad.
 function renderFormMovimiento() {
   var f = state.formTx;
   var datalist = '<datalist id="dl-personas">' +
     (state.config.nomina || []).map(function (e) { return '<option value="' + esc(e.nombre) + '">'; }).join("") +
     "</datalist>";
 
-  return datalist + '<div class="card"><div class="section-title small">Registrar movimiento</div><div class="form-grid">' +
-    '<div class="field"><label>Tipo</label><select data-form="tx" data-field="tipo">' +
-    opt("ingreso", "Ingreso", f.tipo) + opt("gasto", "Gasto", f.tipo) + opt("nomina", "Nómina", f.tipo) +
-    "</select></div>" +
-    '<div class="field"><label>Concepto</label><input data-form="tx" data-field="concepto" value="' + esc(f.concepto) + '" placeholder="Ej. Tela, corte, cliente X" /></div>' +
-    '<div class="field"><label>Monto</label><input type="number" data-form="tx" data-field="monto" value="' + esc(f.monto) + '" placeholder="0" /></div>' +
-    '<div class="field"><label>Persona / contraparte' + renderHelp("Quién está del otro lado del movimiento — no siempre es un cliente: puede ser un vendedor (comisión), un proveedor, un empleado (nómina) o quien sea que recibió/entregó ese dinero.") + '</label><input list="dl-personas" data-form="tx" data-field="contraparte" value="' + esc(f.contraparte) + '" placeholder="Opcional" /></div>' +
+  var html = datalist + '<div class="card tx-form">';
+
+  // ---- 1. Qué pasó ----
+  html += '<div class="section-title small" style="margin-top:0;">Registrar movimiento' +
+    renderHelp("Un movimiento registrado acá es dinero que YA se movió. Lo que todavía no se ha pagado vive en Pendientes; lo que falta por cobrar, en el saldo del pedido.") +
+    "</div>";
+
+  html += '<div class="tx-form-tipo">' +
+    TIPOS_NUEVO_TX.map(function (t) {
+      return '<button class="segmented-opcion ' + (f.tipo === t[0] ? "active" : "") + '" data-action="set-tx-tipo" data-val="' + t[0] + '">' + t[1] + "</button>";
+    }).join("") +
+    "</div>";
+
+  html += '<div class="tx-form-principal">' +
+    '<div class="field tx-form-monto"><label>Monto</label>' +
+    '<input type="number" inputmode="numeric" data-form="tx" data-field="monto" value="' + esc(f.monto) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Concepto</label>' +
+    '<input data-form="tx" data-field="concepto" value="' + esc(f.concepto) + '" placeholder="Ej. Tela para el pedido de San Jorge" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="tx" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
-    '<div class="field wide"><label>Pedido relacionado (categoriza y agrupa el movimiento)' + renderHelp("Vincula este movimiento a un pedido para poder agruparlo y encontrarlo luego buscando por N.º de OP, cédula, nombre de la producción o fecha.") + '</label><select data-form="tx" data-field="pedidoId">' +
+    "</div>";
+
+  // ---- 2. Con quién y a qué se asocia ----
+  html += '<hr class="stitch" />';
+  html += '<div class="cot-col-title" style="margin-top:0;">Con quién y a qué se asocia</div>';
+  html += '<div class="form-grid">' +
+    '<div class="field"><label>Persona / contraparte' +
+    renderHelp("Quién está del otro lado del movimiento — no siempre es un cliente: puede ser un vendedor (comisión), un proveedor, un empleado (nómina) o quien sea que recibió/entregó ese dinero.") +
+    '</label><input list="dl-personas" data-form="tx" data-field="contraparte" value="' + esc(f.contraparte) + '" placeholder="Opcional" /></div>' +
+    '<div class="field"><label>Pedido relacionado' +
+    renderHelp("Vincula este movimiento a un pedido para agruparlo y encontrarlo luego buscando por N.º de OP, cédula, cliente o fecha.") +
+    '</label><select data-form="tx" data-field="pedidoId">' +
     '<option value="">Sin pedido (movimiento suelto)</option>' +
-    state.pedidos.map(function (p) { return '<option value="' + p.id + '" ' + (f.pedidoId === p.id ? "selected" : "") + '>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente) + " — " + esc(p.descripcion) + "</option>"; }).join("") +
+    state.pedidos.map(function (p) { return '<option value="' + p.id + '" ' + (f.pedidoId === p.id ? "selected" : "") + ">" + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente) + "</option>"; }).join("") +
     "</select></div>" +
-    '<div class="field wide"><label class="mini-label" style="display:flex;align-items:center;gap:6px;font-weight:600;"><input type="checkbox" data-role="tx-es-insumo" /> 📦 Es compra de insumo' +
-    renderHelp("Márcalo si este gasto es una compra REAL de insumo (tela, hilo, etc.) — así cuenta en \"de los cuales, insumos\" del reporte financiero de Resumen, aparte de los demás gastos. Es el segundo camino (junto con \"Registrar costo real\" en una cotización) para que un gasto de insumos deje de ser solo una estimación.") +
-    "</label></div>" +
-    '<div class="field"><label>Insumo (opcional)</label><select data-role="tx-insumo">' +
-    '<option value="">Sin especificar</option>' +
-    (state.catalogoInsumos || []).map(function (i) { return '<option value="' + esc(i.nombre) + '">' + esc(i.nombre) + "</option>"; }).join("") +
-    "</select></div>" +
-    '<div class="field"><label>Proveedor (opcional)</label><select data-role="tx-proveedor">' +
-    '<option value="">Sin especificar</option>' +
-    proveedoresDeContactos().map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
-    "</select></div>" +
-    // Cuánto se compró, no solo cuánto costó: es la columna "Cantidad" del
-    // desglose de insumos del reporte (ver calcComprasInsumoRango).
-    '<div class="field"><label>Cantidad comprada (opcional)</label><input type="number" data-role="tx-cantidad" placeholder="Ej. 12" /></div>' +
-    '<div class="field"><label>Unidad (opcional)</label><input data-role="tx-unidad" placeholder="Ej. MT, UND" /></div>' +
-    '<div class="field wide"><label>Cotización relacionada (opcional)</label><select data-form="tx" data-field="cotizacionId">' +
+    '<div class="field"><label>Cotización relacionada</label><select data-form="tx" data-field="cotizacionId">' +
     '<option value="">Sin cotización</option>' +
-    state.cotizaciones.map(function (c) { return '<option value="' + c.id + '" ' + (f.cotizacionId === c.id ? "selected" : "") + '>' + esc(c.descripcion) + " — " + esc(c.cliente) + "</option>"; }).join("") +
+    state.cotizaciones.map(function (c) { return '<option value="' + c.id + '" ' + (f.cotizacionId === c.id ? "selected" : "") + ">" + esc(c.descripcion) + " — " + esc(c.cliente) + "</option>"; }).join("") +
     "</select></div>" +
-    '<button class="btn" data-action="add-tx">Agregar</button>' +
-    "</div></div>";
+    "</div>";
+
+  // ---- 3. Compra de insumo (recogido) ----
+  html += '<hr class="stitch" />';
+  html += '<label class="tx-form-insumo-toggle">' +
+    '<input type="checkbox" ' + (f.esInsumo ? "checked" : "") + ' data-action-change="toggle-tx-insumo" /> ' +
+    "<span><b>📦 Es una compra de insumo</b>" +
+    '<small>Márcalo si este gasto es material real (tela, hilo, botones). Así cuenta aparte en "Gasto en insumos" del reporte.</small></span>' +
+    "</label>";
+  if (f.esInsumo) {
+    html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
+      '<div class="field"><label>Insumo</label><select data-form="tx" data-field="insumoNombre">' +
+      '<option value="">Sin especificar</option>' +
+      (state.catalogoInsumos || []).map(function (i) { return '<option value="' + esc(i.nombre) + '" ' + (f.insumoNombre === i.nombre ? "selected" : "") + ">" + esc(i.nombre) + "</option>"; }).join("") +
+      "</select></div>" +
+      '<div class="field"><label>Proveedor</label><select data-form="tx" data-field="proveedorId">' +
+      '<option value="">Sin especificar</option>' +
+      proveedoresDeContactos().map(function (p) { return '<option value="' + p.id + '" ' + (f.proveedorId === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
+      "</select></div>" +
+      '<div class="field"><label>Cantidad comprada</label><input type="number" data-form="tx" data-field="cantidad" value="' + esc(f.cantidad) + '" placeholder="Ej. 12" /></div>' +
+      '<div class="field"><label>Unidad</label><input list="dl-unidades" data-form="tx" data-field="unidad" value="' + esc(f.unidad) + '" placeholder="MT, UND…" /></div>' +
+      "</div>";
+  }
+
+  html += '<div class="pedido-actions" style="margin-top:var(--sp-4);">' +
+    '<button class="btn" data-action="add-tx">Registrar ' + (TIPO_SUSTANTIVO[f.tipo] || "movimiento") + "</button></div>";
+  html += "</div>";
+  return html;
 }
 
 function renderHistorial() {
@@ -286,19 +336,32 @@ export var actions = {
     state.finanzasVista = el.getAttribute("data-val");
     notify();
   },
-  "add-tx": function (el) {
+  // El tipo redibuja el formulario (cambia el texto del botón y el sentido de
+  // lo que se está registrando), por eso es una acción y no un data-form.
+  "set-tx-tipo": function (el) {
+    state.formTx.tipo = el.getAttribute("data-val");
+    notify();
+  },
+  "toggle-tx-insumo": function (el) {
+    state.formTx.esInsumo = !!el.checked;
+    notify();
+  },
+  "add-tx": function () {
     var f = state.formTx;
     if (!exigirCampos([["Concepto", f.concepto], ["Monto", f.monto]])) return;
-    var card = el.closest(".card");
-    var chkInsumo = card ? card.querySelector('[data-role="tx-es-insumo"]') : null;
-    var esInsumo = !!(chkInsumo && chkInsumo.checked);
+    // Todo sale del borrador (state.formTx), no de leer el DOM: es lo que
+    // permite que los campos de insumo existan solo cuando la casilla está
+    // marcada sin que el guardado dependa de que estén en pantalla.
     state.tx.unshift({
       id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha,
-      pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "", esInsumo: esInsumo ? "1" : "",
-      insumoNombre: card ? val(card, "tx-insumo") : "", proveedorId: card ? val(card, "tx-proveedor") : "",
-      cantidad: card ? val(card, "tx-cantidad") : "", unidad: card ? val(card, "tx-unidad") : ""
+      pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "",
+      esInsumo: f.esInsumo ? "1" : "",
+      insumoNombre: f.esInsumo ? (f.insumoNombre || "") : "",
+      proveedorId: f.esInsumo ? (f.proveedorId || "") : "",
+      cantidad: f.esInsumo ? (f.cantidad || "") : "",
+      unidad: f.esInsumo ? (f.unidad || "") : ""
     });
-    state.formTx = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "" };
+    state.formTx = { tipo: f.tipo, concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "" };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
     persist("tx"); notify();
   },

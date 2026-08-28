@@ -39,13 +39,55 @@ var ESPEJO_PREFIX = "taller_espejo_v1:";
 var PENDIENTES_KEY = "taller_pendientes_v1";
 var REINTENTO_MS = 15000;
 
-var pendientes = {};   // { [clave]: true } — lo que todavía no llegó a la Sheet
+// DOS LISTAS, no una. Al principio había una sola y la clave se marcaba como
+// pendiente ANTES de intentar escribir: como cada guardado normal tarda
+// milisegundos, en pantalla eso significaba que el chip rojo "Sin guardar" y
+// la barra de error aparecían y desaparecían con cada tecla y cada clic. Un
+// aviso de emergencia parpadeando todo el tiempo deja de leerse como una
+// emergencia, que es justo lo contrario de lo que tiene que pasar.
+//
+//  - `enCola`: hay una escritura en curso (o falló). Se anota en disco de
+//    inmediato para poder recuperar si la pestaña muere a mitad de camino.
+//    NO se muestra: que algo esté escribiéndose ahora mismo no es noticia.
+//  - `pendientes`: la escritura YA FALLÓ. Esto sí se muestra y sí se reintenta.
+var pendientes = {};   // { [clave]: true } — falló y espera reintento (lo visible)
+var enCola = {};       // { [clave]: true } — escribiéndose ahora o pendiente (para recuperación)
 var enVuelo = 0;       // escrituras en curso ahora mismo
 var ultimoError = "";
 var ultimoOkEl = 0;
 var escritor = null;   // async (clave) => void — lo inyecta store.js
 var notificar = function () {};
 var temporizador = null;
+
+// "Guardando…" solo se anuncia si el guardado se está DEMORANDO. Casi todo lo
+// que se hace en la app dispara un guardado, y esos guardados tardan
+// milisegundos: mostrar el aviso en cada uno hacía que algo apareciera y
+// desapareciera en la esquina con cada tecla y cada clic. Molesta y, peor,
+// vuelve invisible el aviso que sí importa (el de "no se pudo guardar"), que
+// termina leyéndose como un parpadeo más.
+//
+// Con este umbral, un guardado normal no produce NINGÚN cambio en pantalla: el
+// chip se queda quieto en "Guardado". Solo si algo tarda más de lo esperable
+// —conexión lenta, token renovándose— aparece el aviso, que es justo cuando
+// enterarse aporta algo.
+var MS_PARA_ANUNCIAR_LENTITUD = 900;
+var guardadoLento = false;
+var temporizadorLentitud = null;
+
+function marcarPosibleLentitud() {
+  if (temporizadorLentitud) return;
+  temporizadorLentitud = setTimeout(function () {
+    temporizadorLentitud = null;
+    if (enVuelo > 0) { guardadoLento = true; notificar(); }
+  }, MS_PARA_ANUNCIAR_LENTITUD);
+}
+
+function limpiarLentitudSiTerminó() {
+  if (enVuelo > 0) return;
+  clearTimeout(temporizadorLentitud);
+  temporizadorLentitud = null;
+  guardadoLento = false;
+}
 
 function almacen() {
   try { return window.localStorage; } catch (e) { return null; }
@@ -65,11 +107,11 @@ export function leerEspejo(clave) {
   try { return ls.getItem(ESPEJO_PREFIX + clave); } catch (e) { return null; }
 }
 
-function anotarPendientes() {
+function anotarEnDisco() {
   var ls = almacen();
   if (!ls) return;
   try {
-    var claves = Object.keys(pendientes);
+    var claves = Object.keys(enCola);
     if (claves.length) ls.setItem(PENDIENTES_KEY, JSON.stringify(claves));
     else ls.removeItem(PENDIENTES_KEY);
   } catch (e) { /* cuota llena */ }
@@ -99,7 +141,7 @@ export function estadoGuardado() {
   return {
     pendientes: claves,
     cantidad: claves.length,
-    guardando: enVuelo > 0,
+    guardando: guardadoLento,
     ultimoError: ultimoError,
     ultimoOkEl: ultimoOkEl
   };
@@ -144,22 +186,27 @@ function programarReintento() {
 // el espejo: el reintento posterior vuelve a leer el estado actual.
 export async function guardarClave(clave, json) {
   espejar(clave, json);
-  pendientes[clave] = true;
-  anotarPendientes();
+  enCola[clave] = true;
+  anotarEnDisco();
   enVuelo++;
-  notificar();
+  marcarPosibleLentitud();
+  // Sin notificar() acá: un guardado que va bien no debe producir NINGÚN
+  // cambio en pantalla. El único aviso sale al final, y solo si algo falló.
   try {
     await escritor(clave);
+    delete enCola[clave];
     delete pendientes[clave];
-    anotarPendientes();
+    anotarEnDisco();
     ultimoError = "";
     ultimoOkEl = Date.now();
   } catch (e) {
+    pendientes[clave] = true; // recién ahora es noticia
     ultimoError = (e && e.message) ? e.message : String(e);
     console.error("No se pudo guardar", clave, e);
     programarReintento();
   } finally {
     enVuelo--;
+    limpiarLentitudSiTerminó();
     notificar();
   }
 }
@@ -170,12 +217,13 @@ export async function reintentarPendientes() {
   var claves = Object.keys(pendientes);
   if (!claves.length || !escritor) return 0;
   enVuelo += claves.length;
-  notificar();
+  marcarPosibleLentitud();
   await Promise.all(claves.map(function (clave) {
     return Promise.resolve()
       .then(function () { return escritor(clave); })
       .then(function () {
         delete pendientes[clave];
+        delete enCola[clave];
         ultimoOkEl = Date.now();
       })
       .catch(function (e) {
@@ -183,8 +231,9 @@ export async function reintentarPendientes() {
       })
       .finally(function () { enVuelo--; });
   }));
+  limpiarLentitudSiTerminó();
   if (!hayPendientes()) ultimoError = "";
-  anotarPendientes();
+  anotarEnDisco();
   notificar();
   programarReintento();
   return Object.keys(pendientes).length;

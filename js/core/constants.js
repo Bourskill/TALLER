@@ -65,7 +65,14 @@ export const APPROVAL_REQUIRED_KEYS = ["catalogoInsumos", "catalogoCategorias"];
 export const DEFAULT_UI = {
   sidebarCollapsed: false,
   tema: "oscuro", // "oscuro" | "claro"
-  navGroups: { general: true, ventas: true, produccion: true, gestion: true, sistema: true }
+  navGroups: { general: true, ventas: true, produccion: true, gestion: true, sistema: true },
+  // Ids de los avisos de la campanita que el usuario ya miró (ver
+  // calcNotificaciones en core/calc.js). Es lo que apaga el punto rojo al
+  // abrir el panel: sin esto el contador seguía ahí aunque ya lo hubieras
+  // visto, y un aviso que no se puede "dar por leído" deja de avisar nada.
+  // Se persiste para que abrir el panel hoy no vuelva a alertar mañana por lo
+  // mismo, y se poda solo (ver marcarAvisosComoVistos en core/dom.js).
+  avisosVistos: []
 };
 
 export const DEFAULT_CONFIG = {

@@ -28,3 +28,41 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-u
    solo — no requiere que el usuario lo cierre a mano. */
 @keyframes toast-in{from{opacity:0;transform:translate(-50%,8px);}to{opacity:1;transform:translate(-50%,0);}}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:300;background:var(--surface-3);color:var(--ink);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:11px 18px;font-size:13px;font-weight:600;max-width:min(420px,90vw);text-align:center;animation:toast-in .2s ease-out;}
+
+/* ---------- formulario de un movimiento (Finanzas) ----------
+   El problema no era que faltaran campos sino que TODOS pesaban lo mismo: el
+   monto se veía igual que "unidad (opcional)". Acá la jerarquía es explícita —
+   el tipo primero (a lo ancho), el monto como campo grande, y lo accesorio
+   detrás de un separador o de una casilla. */
+.tx-form-tipo{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:4px;margin:var(--sp-3) 0 var(--sp-4);}
+.tx-form-tipo .segmented-opcion{padding:10px 8px;text-align:center;}
+
+/* El monto ocupa toda la primera línea y se escribe en grande: es el dato del
+   que trata el formulario, no un campo más de la grilla. */
+.tx-form-principal{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3);align-items:end;}
+.tx-form-monto{grid-column:1/-1;}
+/* Doble clase a propósito: `.field input` (forms.css) tiene la misma
+   especificidad y se carga DESPUÉS que este archivo, así que con un solo
+   selector ganaba ella y el monto seguía viéndose igual de chico que los
+   demás campos — que es justo lo que se quería arreglar. */
+.tx-form .tx-form-monto input{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:700;
+  padding:12px 14px;letter-spacing:-0.01em;}
+
+/* La casilla de compra de insumo es una fila propia con su explicación, no una
+   etiqueta suelta perdida entre campos. */
+.tx-form-insumo-toggle{display:flex;align-items:flex-start;gap:11px;cursor:pointer;
+  padding:13px 15px;border:1px solid var(--border-soft);border-radius:var(--radius-sm);
+  background:var(--surface-2);}
+.tx-form-insumo-toggle:hover{border-color:var(--border-strong);}
+.tx-form-insumo-toggle input{margin-top:2px;flex-shrink:0;}
+.tx-form-insumo-toggle span{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.tx-form-insumo-toggle b{font-size:13px;font-weight:600;color:var(--ink);}
+.tx-form-insumo-toggle small{font-size:11.5px;color:var(--ink-faint);line-height:1.5;}
+
+@media (max-width:600px){
+  .tx-form-principal{grid-template-columns:1fr;}
+  .tx-form .tx-form-monto input{font-size:22px;}
+  .tx-form-tipo{grid-template-columns:1fr;gap:3px;}
+}

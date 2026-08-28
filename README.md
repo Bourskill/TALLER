@@ -25,6 +25,44 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Registro de cambios — agosto 2026 (tercera ronda: detalles reportados)
+
+- **El aviso de guardado ya no parpadea en cada cambio.** La causa no era el
+  tiempo que duraba: la clave se marcaba como "pendiente" ANTES de intentar
+  escribir, así que en cada tecla y cada clic el chip rojo *"Sin guardar"* y la
+  barra de error aparecían y desaparecían en milisegundos. Un aviso de
+  emergencia parpadeando todo el tiempo deja de leerse como una emergencia.
+  Ahora hay **dos listas** en `core/guardado.js`: `enCola` (se anota en disco
+  de inmediato, para poder recuperar si la pestaña muere a mitad, pero NO se
+  muestra) y `pendientes` (ya falló: eso sí se muestra y se reintenta). Además,
+  *"Guardando…"* solo aparece si el guardado pasa de 900ms. Medido: 6 guardados
+  seguidos → 0 avisos en pantalla; forzando un fallo real → el chip rojo, la
+  barra y el espejo local siguen funcionando igual.
+- **El ícono del taller ya se sube como cualquier otra imagen.** Era el único
+  punto de la app que seguía pidiendo por `prompt` que pegaras el LINK de una
+  imagen alojada en otro lado — quedó de antes de que existiera la subida a
+  Drive. Ahora, tanto desde el logo del panel como desde Configuración → Marca,
+  se elige un archivo y se sube a la misma carpeta de Drive que las fotos de
+  referencia, con su miniatura, su "ver en grande" y su ✕ para quitarlo. El
+  emoji sigue disponible como alternativa, ahora en su propio campo: antes un
+  solo campo servía para las dos cosas, así que guardar con el campo vacío te
+  borraba el ícono sin haberlo pedido.
+- **El formulario de Finanzas tenía diez campos con el mismo peso visual.** El
+  monto se veía igual que "unidad (opcional)". Ahora son tres bloques con
+  jerarquía propia: *qué pasó* (el tipo como control segmentado con las tres
+  opciones a la vista, y el monto como campo grande en mono de 26px), *con
+  quién y a qué se asocia*, y *compra de insumo* recogida detrás de una casilla
+  — sus cuatro campos solo aparecen al marcarla. Al entrar se ven 7 campos en
+  vez de 11, y el botón dice qué vas a registrar ("Registrar pago de nómina").
+  Los campos de insumo pasaron a vivir en el borrador (`state.formTx`) en vez
+  de leerse del DOM, que es lo que permite ocultarlos sin romper el guardado.
+- **La campanita se apaga al mirarla.** El punto rojo contaba el total de
+  avisos, así que seguía encendido después de abrir el panel y leerlo entero.
+  Ahora cuenta solo los NO vistos (`state.ui.avisosVistos`, persistido y podado
+  a lo que sigue existiendo): abrir el panel apaga el punto, y un aviso nuevo
+  vuelve a encenderlo. El panel sigue mostrando todo, visto o no — lo que se
+  apaga es la alerta, no la información.
+
 ## Registro de cambios — agosto 2026 (segunda ronda: guardado, avisos y aire)
 
 **El guardado ya no puede perder un día de trabajo.** Era el único fallo que

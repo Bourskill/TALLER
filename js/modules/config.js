@@ -17,12 +17,17 @@ export function render() {
   var cfg = state.config;
 
   var html = '<div class="card"><div class="section-title small">Marca del taller' +
-    renderHelp("El nombre se edita también desde el encabezado del panel. El ícono puede ser un emoji corto (ej. \uD83E\uDDF5) o el link a una imagen — ambos se reflejan en el PDF de cotización.") +
-    '</div><div class="form-grid">' +
-    '<div class="field"><label>Ícono</label><input id="inp-config-logo" value="' + esc(cfg.logoUrl) + '" placeholder="Emoji o link a imagen" /></div>' +
-    '<div class="field wide"><label>Nombre del taller</label><input id="inp-config-nombre" value="' + esc(cfg.nombre) + '" /></div>' +
+    renderHelp("El nombre y el icono se reflejan en el panel y en el PDF de cotizacion. El icono puede ser una imagen (se sube a tu Drive, igual que las fotos de referencia) o, si prefieres algo mas simple, un emoji.") +
     "</div>" +
-    '<div class="pedido-actions"><button class="btn small" data-action="save-marca">Guardar marca</button></div></div>';
+    '<div class="marca-grid">' +
+    '<div class="field"><label>Icono del taller</label>' + renderIconoTaller(cfg) + "</div>" +
+    '<div class="marca-campos">' +
+    '<div class="field"><label>Nombre del taller</label><input id="inp-config-nombre" value="' + esc(cfg.nombre) + '" /></div>' +
+    '<div class="field"><label>...o usa un emoji en vez de imagen' +
+    renderHelp("Alternativa a la imagen: un emoji corto. Si escribes uno aca, reemplaza a la imagen que hayas subido.") +
+    '</label><input id="inp-config-logo" value="' + esc(esEmoji(cfg.logoUrl) ? cfg.logoUrl : "") + '" placeholder="Emoji" maxlength="4" /></div>' +
+    "</div></div>" +
+    '<div class="pedido-actions"><button class="btn small" data-action="save-marca">Guardar nombre y emoji</button></div></div>';
 
   html += '<div class="card"><div class="section-title small">Datos del negocio para el PDF' +
     renderHelp("Aparecen como remitente (\"DE\") en las cotizaciones, recibos y facturas que generas en PDF para tus clientes. No aparecen en la orden de producción.") +
@@ -75,6 +80,39 @@ export function render() {
 // Igual patrón que la miniatura de imagen de referencia en Cotizaciones
 // (renderThumb en cotizaciones.js): sube a la misma carpeta compartida de
 // Drive del admin, con un estado "Subiendo…" mientras tanto.
+// `logoUrl` guarda dos cosas distintas segun lo que el usuario haya elegido:
+// una URL de imagen (lo normal desde que se sube a Drive) o un emoji corto.
+// Distinguirlas es lo que permite mostrar cada una con el control que le
+// corresponde, en vez de un unico campo de texto que servia para las dos a
+// medias (y en el que un descuido borraba el icono sin querer).
+function esEmoji(valor) {
+  var v = (valor || "").trim();
+  return !!v && !/^(https?:|data:)/.test(v);
+}
+
+// Icono del taller: la misma miniatura con subida a Drive que ya usan el pie
+// de pagina del PDF y las fotos de referencia. Si lo configurado es un emoji,
+// se muestra tal cual y se puede reemplazar subiendo una imagen.
+function renderIconoTaller(cfg) {
+  if (state.configLogoSubiendo) {
+    return '<div class="ref-thumb ref-thumb-empty" title="Subiendo a Drive...">Subiendo...</div>';
+  }
+  if (esEmoji(cfg.logoUrl)) {
+    return '<div class="ref-thumb" data-action="edit-logo" style="font-size:26px;" title="Clic para subir una imagen en vez del emoji">' +
+      esc(cfg.logoUrl) +
+      '<button class="ref-thumb-remove" data-action="quitar-logo" title="Quitar el emoji">&#10005;</button>' +
+      "</div>";
+  }
+  if (cfg.logoUrl) {
+    return '<div class="ref-thumb" data-action="edit-logo" title="Clic para subir otra imagen desde tu dispositivo">' +
+      '<img src="' + esc(cfg.logoUrl) + '" alt="" onerror="this.style.opacity=0.15" />' +
+      '<button class="ref-thumb-zoom" data-action="abrir-imagen-preview" data-url="' + esc(cfg.logoUrl) + '" title="Ver en grande">&#128269;</button>' +
+      '<button class="ref-thumb-remove" data-action="quitar-logo" title="Quitar imagen">&#10005;</button>' +
+      "</div>";
+  }
+  return '<div class="ref-thumb ref-thumb-empty" data-action="edit-logo" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</div>';
+}
+
 function renderPiePaginaImg(cfg) {
   if (state.configPiePaginaSubiendo) {
     return '<div class="ref-thumb ref-thumb-empty" title="Subiendo a Drive…">Subiendo…</div>';
@@ -94,11 +132,20 @@ export var actions = {
     state.config[el.getAttribute("data-campo")] = el.value;
     persist("config"); notify();
   },
+  // El campo de emoji solo manda si tiene algo escrito: dejarlo vacio NO borra
+  // la imagen subida. Antes un solo campo servia para las dos cosas, asi que
+  // guardar con el campo en blanco te dejaba sin icono sin haberlo pedido.
+  // Para quitarlo esta la X de la miniatura.
   "save-marca": function () {
     var logoEl = document.getElementById("inp-config-logo");
     var nombreEl = document.getElementById("inp-config-nombre");
-    state.config.logoUrl = logoEl ? logoEl.value.trim() : state.config.logoUrl;
+    var emoji = logoEl ? logoEl.value.trim() : "";
+    if (emoji) state.config.logoUrl = emoji;
     state.config.nombre = (nombreEl && nombreEl.value.trim()) || "Mi Taller";
+    persist("config"); notify();
+  },
+  "quitar-logo": function () {
+    state.config.logoUrl = "";
     persist("config"); notify();
   },
   "respaldar-ahora": async function () {
