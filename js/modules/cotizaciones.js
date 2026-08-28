@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -1101,10 +1101,40 @@ export var actions = {
   },
   // Eliminar SÍ guarda de una: no tendría sentido dejar "pendiente de
   // guardar" algo que ya no existe en pantalla.
+  // Eliminar una cotización es definitivo (no hay papelera de cotizaciones),
+  // así que ahora pregunta antes — no lo hacía, y era un botón de un solo clic
+  // al lado del de convertir.
+  //
+  // Y se lleva consigo los movimientos que ella generó (la comisión de su
+  // vendedor, las compras que llevó a Finanzas, el estimado completo). Sin
+  // esto quedaban sueltos apuntando a una cotización inexistente: no salían
+  // en ningún lado, no se podían deshacer desde su origen porque el origen ya
+  // no estaba, y seguían sumando o restando en la caja. Van a la papelera de
+  // movimientos, no se borran de una: si alguno correspondía a un gasto real
+  // que sí ocurrió, se restaura desde ahí.
   "remove-cotizacion": function (el) {
     var id = el.getAttribute("data-id");
+    var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+    if (!cot) return;
+    var movimientos = movimientosGeneradosPorCotizacion(cot);
+    var neto = movimientos.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
+    var aviso = movimientos.length
+      ? ("\n\nSe van con ella " + movimientos.length + " movimiento(s) de Finanzas que generó (comisión, compras, estimado)" +
+         (neto ? ", con un efecto neto de " + fmt(Math.abs(neto)) + " en la caja" : "") +
+         ". Quedan en la papelera de movimientos por si alguno correspondía a un gasto que sí ocurrió.")
+      : "";
+    if (!window.confirm('¿Eliminar la cotización "' + (cot.descripcion || cot.cliente) + '"?\n\nNo hay papelera de cotizaciones: esto no se puede deshacer.' + aviso)) return;
     state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== id; });
+    if (movimientos.length) {
+      var ids = movimientos.map(function (t) { return t.id; });
+      state.tx = state.tx.filter(function (t) { return ids.indexOf(t.id) === -1; });
+      movimientos.forEach(function (t) {
+        state.txPapelera.unshift(Object.assign({}, t, { eliminadoEl: todayStr(), eliminadoConCotizacion: id }));
+      });
+      persist("tx"); persist("txPapelera");
+    }
     if (state.cotSucia === id) { state.cotSucia = ""; state.cotSnapshot = null; }
+    if (state.cotizacionEditando === id) state.cotizacionEditando = "";
     persist("cotizaciones"); notify();
   },
   "add-referencia": function (el) {

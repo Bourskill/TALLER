@@ -1,6 +1,6 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, proveedoresDeContactos } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
@@ -127,6 +127,15 @@ function renderHistorial() {
   [["todos", "Todos"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["nomina", "Nómina"], ["comision", "Comisiones"]].forEach(function (c) {
     html += '<button class="chip ' + (state.filtroTx === c[0] ? "active" : "") + '" data-action="filtro-tx" data-val="' + c[0] + '">' + c[1] + "</button>";
   });
+  // Atajo para encontrar los movimientos que quedaron sueltos porque se borró
+  // el pedido o la cotización que los generó. Solo aparece si hay alguno: no
+  // tiene sentido ofrecer un filtro que siempre daría vacío.
+  var sueltos = state.tx.filter(function (t) { return !!origenSistemaHuerfano(t); }).length;
+  if (sueltos) {
+    html += '<button class="chip ' + (state.filtroTx === "huerfanos" ? "active" : "") + '" data-action="filtro-tx" data-val="huerfanos" ' +
+      'title="Movimientos que generó un pedido o una cotización que ya se eliminó. Quedaron sueltos: revísalos y borra los que no correspondan.">' +
+      "⚠ Sueltos (" + sueltos + ")</button>";
+  }
   html += '<select class="mini-input" style="width:auto;" data-action-change="set-tx-periodo">' +
     Object.keys(PERIODOS_TX).map(function (k) { return '<option value="' + k + '" ' + (state.filtroTxPeriodo === k ? "selected" : "") + '>' + PERIODOS_TX[k] + "</option>"; }).join("") +
     "</select>" +
@@ -198,7 +207,9 @@ function compararTxRecienteFirst(a, b) {
 }
 
 function filtrarTx() {
-  var list = state.filtroTx === "todos" ? state.tx : state.tx.filter(function (t) { return t.tipo === state.filtroTx; });
+  var list = state.filtroTx === "todos" ? state.tx
+    : state.filtroTx === "huerfanos" ? state.tx.filter(function (t) { return !!origenSistemaHuerfano(t); })
+      : state.tx.filter(function (t) { return t.tipo === state.filtroTx; });
 
   var periodo = state.filtroTxPeriodo || "todos";
   if (periodo !== "todos") {
@@ -234,12 +245,20 @@ function renderFila(t) {
   // (nada se esconde) pero se anuncia desde el título que hay que deshacerlo
   // en su origen — al pulsarlo se explica dónde (ver "remove-tx").
   var sistema = origenSistemaDeTx(t);
+  // Generado por la app pero su origen ya no existe (se borró el pedido o la
+  // cotización). Se puede borrar —no hay nada con qué descuadrar— y se avisa
+  // por qué quedó suelto, para que no parezca basura inexplicable.
+  var huerfano = sistema ? null : origenSistemaHuerfano(t);
   var tituloBorrar = sistema
     ? "Este movimiento lo generó la app (" + sistema.que + ") — se deshace en su origen, no acá"
-    : "Se mueve a la papelera, no se borra para siempre";
+    : (huerfano
+      ? "El registro que lo generó (" + huerfano.que + ") ya no existe: este movimiento quedó suelto y sí se puede borrar"
+      : "Se mueve a la papelera, no se borra para siempre");
   return '<div class="tx-row">' +
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
-    '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) + "</span>" +
+    '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) +
+    (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde.">origen eliminado</span>' : "") +
+    "</span>" +
     '<span class="mobile-th">Persona</span><span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
     '<span class="mobile-th">Tipo</span><span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
     '<span class="mobile-th">Monto</span><span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
@@ -465,7 +484,7 @@ export var actions = {
     if (!item) return;
     var sistema = origenSistemaDeTx(item);
     if (sistema) {
-      window.alert("Este movimiento no se borra desde Finanzas: es " + sistema.que + ".\n\n" +
+      window.alert("Este movimiento no se borra desde Finanzas: es " + sistema.que + ", y ese registro todavía existe.\n\n" +
         "Si lo borraras solo acá, la plata saldría de la caja pero el registro de origen seguiría diciendo que se pagó (o se cobró) — y las dos pantallas quedarían diciendo cosas distintas.\n\n" +
         "Para deshacerlo de verdad:\n" + sistema.donde + "\n\n" +
         "Al hacerlo, este movimiento se retira solo.");
@@ -482,6 +501,10 @@ export var actions = {
     state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
     var restaurado = Object.assign({}, item);
     delete restaurado.eliminadoEl;
+    // Estas marcas solo sirven para devolverlo junto al pedido/cotización que
+    // se lo llevó; restaurado a mano, ya no aplican.
+    delete restaurado.eliminadoConPedido;
+    delete restaurado.eliminadoConCotizacion;
     state.tx.unshift(restaurado);
     persist("tx"); persist("txPapelera"); notify();
   },

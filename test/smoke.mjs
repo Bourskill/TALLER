@@ -727,6 +727,60 @@ state.tx.unshift({ id: "manual-suelto", tipo: "gasto", concepto: "Tela comprada 
 assert(!movimientosGeneradosPorPedido(pedCancel.id).some(t => t.id === "manual-suelto"), "un gasto propio asociado al pedido no cuenta como generado por él (no se borraría con él)");
 state.tx = state.tx.filter(t => t.id !== "manual-suelto");
 
+// --- MOVIMIENTOS HUÉRFANOS: si el origen ya no existe, se pueden borrar ---
+// El bloqueo de borrado en Finanzas existe para no descuadrar la caja contra
+// el registro que generó el movimiento. Pero si ese registro YA NO EXISTE, no
+// hay nada que descuadrar y el movimiento tiene que poder borrarse: si no,
+// queda atrapado para siempre (no se puede desde la app, y editar la Sheet a
+// mano tampoco sirve porque se reescribe desde memoria al guardar).
+const { origenSistemaDeTx, origenSistemaHuerfano, movimientosGeneradosPorCotizacion } = await import("../js/core/calc.js");
+const _h = new Date();
+const fechaDePrueba = _h.getFullYear() + "-" + String(_h.getMonth() + 1).padStart(2, "0") + "-" + String(_h.getDate()).padStart(2, "0");
+
+// un movimiento con marca de origen cuyo pedido ya no existe
+state.tx.unshift({ id: "tx-huerfano", tipo: "ingreso", concepto: "Abono de un pedido que ya se borró",
+  monto: 90000, fecha: fechaDePrueba, pedidoId: "pedido-que-no-existe", origenAbonoId: "abono-fantasma" });
+const txHuerfano = state.tx.find(t => t.id === "tx-huerfano");
+assert(origenSistemaDeTx(txHuerfano) === null, "un movimiento cuyo origen ya no existe deja de estar protegido");
+assert(!!origenSistemaHuerfano(txHuerfano), "y se reconoce como huérfano, para poder avisarlo en pantalla");
+
+click('[data-action="tab"][data-tab="finanzas"]');
+click('[data-action="finanzas-vista"][data-val="historial"]');
+assert(!!document.querySelector('[data-action="filtro-tx"][data-val="huerfanos"]'), "aparece el filtro para encontrar los movimientos sueltos");
+click('[data-action="remove-tx"][data-id="tx-huerfano"]');
+assert(!state.tx.some(t => t.id === "tx-huerfano"), "un movimiento huérfano SÍ se puede borrar desde Finanzas");
+assert(state.txPapelera.some(t => t.id === "tx-huerfano"), "y va a la papelera como cualquier otro");
+state.txPapelera = state.txPapelera.filter(t => t.id !== "tx-huerfano");
+
+// el mismo movimiento, pero con su pedido vivo, sigue protegido
+const pedVivo = state.pedidos.find(p => (p.abonos || []).length > 0);
+assert(!!pedVivo, "hay un pedido con abonos para comprobar el caso contrario");
+const abonoVivo = pedVivo.abonos.find(a => a.tipo !== "reembolso");
+state.tx.unshift({ id: "tx-protegido", tipo: "ingreso", concepto: "Abono con pedido vivo",
+  monto: 1000, fecha: fechaDePrueba, pedidoId: pedVivo.id, origenAbonoId: abonoVivo.id });
+assert(!!origenSistemaDeTx(state.tx.find(t => t.id === "tx-protegido")), "con su pedido vivo, el movimiento sigue protegido");
+render(); // el movimiento se insertó directo en el estado: hay que repintar para poder clicarlo
+click('[data-action="remove-tx"][data-id="tx-protegido"]');
+assert(state.tx.some(t => t.id === "tx-protegido"), "y Finanzas se niega a borrarlo suelto");
+state.tx = state.tx.filter(t => t.id !== "tx-protegido");
+
+// --- eliminar una cotización se lleva los movimientos que generó ---
+click('[data-action="tab"][data-tab="cotizaciones"]');
+const cotParaBorrar = state.cotizaciones[0];
+state.tx.unshift({ id: "tx-comision-cot", tipo: "comision", concepto: "Comisión de la cotización",
+  monto: 15000, fecha: fechaDePrueba, cotizacionId: cotParaBorrar.id, origenComisionCotId: cotParaBorrar.id });
+assert(movimientosGeneradosPorCotizacion(cotParaBorrar).some(t => t.id === "tx-comision-cot"), "se reconocen los movimientos que generó una cotización");
+render();
+const txAntesCot = state.tx.length;
+// El botón de eliminar vive en la cabecera del detalle, no en el historial.
+click('[data-action="cot-vista"][data-val="historial"]');
+click('[data-action="abrir-cotizacion-editor"][data-id="' + cotParaBorrar.id + '"]');
+click('[data-action="remove-cotizacion"][data-id="' + cotParaBorrar.id + '"]');
+assert(!state.cotizaciones.some(c => c.id === cotParaBorrar.id), "elimina la cotización");
+assert(state.tx.length === txAntesCot - 1, "y se lleva su movimiento de Finanzas en vez de dejarlo suelto");
+assert(state.txPapelera.some(t => t.id === "tx-comision-cot" && t.eliminadoConCotizacion === cotParaBorrar.id), "el movimiento queda en la papelera, no se borra de una");
+state.txPapelera = state.txPapelera.filter(t => t.id !== "tx-comision-cot");
+
 // --- la fecha de "hoy" es la del reloj del usuario, no la de UTC ---
 // En Colombia (UTC-5), a partir de las 7pm `toISOString()` ya devuelve el día
 // siguiente: todo lo registrado en la tarde-noche quedaba fechado mañana, y el

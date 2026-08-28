@@ -184,21 +184,132 @@ export function origenDeTx(t) {
 //
 // Devuelve null si es manual, o { que, donde } describiendo qué representa y
 // dónde se revierte de verdad.
+// Cada marca dice tres cosas: qué representa el movimiento, dónde se deshace
+// de verdad, y —lo que faltaba— cómo comprobar que ese origen TODAVÍA EXISTE.
+//
+// Esa tercera parte es la que evita el problema que tenía el bloqueo: si el
+// pedido o la cotización que generó el movimiento ya se borró, no queda ningún
+// lado al que ir a deshacerlo, y el mensaje "deshazlo en su origen" mandaba al
+// usuario a un lugar que ya no existe. El movimiento quedaba atrapado para
+// siempre — no se podía borrar desde la app, y editarlo a mano en la Sheet
+// tampoco servía porque la app reescribe el bloque completo desde memoria en
+// el siguiente guardado.
+//
+// El bloqueo existe para impedir un DESCUADRE: borrar un lado mientras el otro
+// sigue afirmando que pasó. Si el otro lado ya no existe, no hay descuadre
+// posible — el movimiento quedó huérfano y tiene que poder borrarse.
 var MARCAS_ORIGEN_SISTEMA = [
-  { campo: "origenAbonoId", que: "un abono cobrado de un pedido", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar" },
-  { campo: "origenReembolsoId", que: "un reembolso hecho a un cliente", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar" },
-  { campo: "origenComisionPedidoId", que: "la comisión de un vendedor", donde: "Pedidos → tarjeta del pedido → Dinero y documentos → botón \"pagada\" del vendedor (vuelve a dejarla pendiente)" },
-  { campo: "origenComisionCotId", que: "la comisión de un vendedor", donde: "Cotizaciones → la cotización → Vendedor → botón \"pagada\" (vuelve a dejarla pendiente)" },
-  { campo: "origenVentaConsignacionId", que: "una venta reportada por un punto de consignación", donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar" },
-  { campo: "origenComisionConsignacionId", que: "la comisión de un punto de consignación", donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar (borra la venta y su comisión)" },
-  { campo: "origenGastoFijoPeriodo", que: "el pago de un gasto fijo", donde: "Pendientes → Gastos fijos → botón \"pagado\" (vuelve a dejarlo pendiente)" },
-  { campo: "origenCompraClave", que: "una compra de la lista de una cotización", donde: "Cotizaciones → la cotización → Producción → desmarca \"Comprado\" y pulsa \"Actualizar movimientos financieros\"" },
-  { campo: "deudaId", que: "el pago de una cuota de una deuda", donde: "Pendientes → Deudas (el pago queda en su historial; para deshacerlo hay que editar la deuda)" }
+  {
+    campo: "origenAbonoId", que: "un abono cobrado de un pedido",
+    donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar",
+    existe: function (t) {
+      var p = state.pedidos.filter(function (x) { return x.id === t.pedidoId; })[0];
+      return !!(p && (p.abonos || []).some(function (a) { return a.id === t.origenAbonoId; }));
+    }
+  },
+  {
+    campo: "origenReembolsoId", que: "un reembolso hecho a un cliente",
+    donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar",
+    existe: function (t) {
+      var p = state.pedidos.filter(function (x) { return x.id === t.pedidoId; })[0];
+      return !!(p && (p.abonos || []).some(function (a) { return a.id === t.origenReembolsoId; }));
+    }
+  },
+  {
+    campo: "origenComisionPedidoId", que: "la comisión de un vendedor",
+    donde: "Pedidos → tarjeta del pedido → Dinero y documentos → botón \"pagada\" del vendedor (vuelve a dejarla pendiente)",
+    existe: function (t) {
+      var p = state.pedidos.filter(function (x) { return x.id === t.origenComisionPedidoId; })[0];
+      return !!(p && p.vendedor && p.vendedor.nombre);
+    }
+  },
+  {
+    campo: "origenComisionCotId", que: "la comisión de un vendedor",
+    donde: "Cotizaciones → la cotización → Vendedor → botón \"pagada\" (vuelve a dejarla pendiente)",
+    existe: function (t) {
+      var c = state.cotizaciones.filter(function (x) { return x.id === t.origenComisionCotId; })[0];
+      return !!(c && c.vendedor && c.vendedor.nombre);
+    }
+  },
+  {
+    campo: "origenVentaConsignacionId", que: "una venta reportada por un punto de consignación",
+    donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar",
+    existe: function (t) { return existeVentaConsignacion(t.pedidoId, t.origenVentaConsignacionId); }
+  },
+  {
+    campo: "origenComisionConsignacionId", que: "la comisión de un punto de consignación",
+    donde: "Pedidos → tarjeta de la consignación → Ventas reportadas → Eliminar (borra la venta y su comisión)",
+    existe: function (t) { return existeVentaConsignacion(t.pedidoId, t.origenComisionConsignacionId); }
+  },
+  {
+    campo: "origenGastoFijoPeriodo", que: "el pago de un gasto fijo",
+    donde: "Pendientes → Gastos fijos → botón \"pagado\" (vuelve a dejarlo pendiente)",
+    existe: function (t) {
+      return (state.config.gastosFijos || []).some(function (g) { return g.id === t.gastoFijoId; });
+    }
+  },
+  {
+    campo: "origenCompraClave", que: "una compra de la lista de una cotización",
+    donde: "Cotizaciones → la cotización → Producción → desmarca \"Comprado\" y pulsa \"Actualizar movimientos financieros\"",
+    existe: function (t) {
+      var c = state.cotizaciones.filter(function (x) { return x.id === t.cotizacionId; })[0];
+      return !!(c && (c.compras || []).some(function (co) { return co.clave === t.origenCompraClave; }));
+    }
+  },
+  {
+    campo: "deudaId", que: "el pago de una cuota de una deuda",
+    donde: "Pendientes → Deudas (o su historial, si ya quedó saldada)",
+    existe: function (t) {
+      return state.deudas.some(function (d) { return d.id === t.deudaId; }) ||
+        state.deudasHistorial.some(function (d) { return d.id === t.deudaId; });
+    }
+  }
 ];
-export function origenSistemaDeTx(t) {
+
+function existeVentaConsignacion(pedidoId, ventaId) {
+  var p = state.pedidos.filter(function (x) { return x.id === pedidoId; })[0];
+  if (!p || !p.consignacion) return false;
+  return (p.consignacion.ventas || []).some(function (v) { return v.id === ventaId; });
+}
+
+function marcaDeTx(t) {
   if (!t) return null;
-  var marca = MARCAS_ORIGEN_SISTEMA.filter(function (m) { return t[m.campo]; })[0];
-  return marca ? { que: marca.que, donde: marca.donde } : null;
+  return MARCAS_ORIGEN_SISTEMA.filter(function (m) { return t[m.campo]; })[0] || null;
+}
+
+// Movimiento generado por la app cuyo origen SIGUE existiendo: ese es el que
+// no se debe poder borrar suelto desde Finanzas. Devuelve { que, donde } o null.
+export function origenSistemaDeTx(t) {
+  var marca = marcaDeTx(t);
+  if (!marca) return null;
+  if (!marca.existe(t)) return null; // huérfano: ya no hay nada que descuadrar
+  return { que: marca.que, donde: marca.donde };
+}
+
+// Movimiento que la app generó pero cuyo origen ya NO existe (se borró el
+// pedido, la cotización, el gasto fijo...). Sirve para dos cosas: dejarlo
+// borrar, y decirle al usuario por qué ese movimiento quedó suelto en vez de
+// que parezca un error.
+export function origenSistemaHuerfano(t) {
+  var marca = marcaDeTx(t);
+  if (!marca || marca.existe(t)) return null;
+  return { que: marca.que };
+}
+
+// Los movimientos que generó una COTIZACIÓN: la comisión de su vendedor, las
+// compras que se llevaron a Finanzas desde su lista, y el registro del costo
+// estimado completo si se creó. Es el equivalente de
+// movimientosGeneradosPorPedido, y se usa al eliminar la cotización para que
+// no queden sueltos apuntando a algo que ya no está.
+export function movimientosGeneradosPorCotizacion(cot) {
+  if (!cot) return [];
+  var idsCompra = (cot.compras || []).map(function (c) { return c.txId; }).filter(Boolean);
+  return state.tx.filter(function (t) {
+    if (t.origenComisionCotId === cot.id) return true;
+    if (cot.estimadoTxId && t.id === cot.estimadoTxId) return true;
+    if (idsCompra.indexOf(t.id) !== -1) return true;
+    return !!(t.origenCompraClave && t.cotizacionId === cot.id);
+  });
 }
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que

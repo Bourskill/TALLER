@@ -25,6 +25,44 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Registro de cambios — agosto 2026 (quinta ronda: movimientos atrapados)
+
+**Bug propio, reportado por el usuario.** El bloqueo de borrado que se agregó
+en la primera ronda (un movimiento generado por la app no se borra suelto desde
+Finanzas, hay que deshacerlo en su origen) tenía un agujero: **nunca comprobaba
+que el origen siguiera existiendo**. Si el pedido o la cotización que lo generó
+ya se había borrado, el mensaje mandaba al usuario a un lugar que ya no existe
+y el movimiento quedaba **atrapado para siempre** — ni desde la app, ni
+editando la Sheet a mano (eso tampoco funciona: la app reescribe el bloque
+completo desde memoria en el siguiente guardado, así que el cambio manual se
+pierde).
+
+El bloqueo existe para impedir un DESCUADRE: borrar un lado mientras el otro
+sigue afirmando que pasó. Si el otro lado ya no existe, no hay descuadre
+posible. Ahora cada marca de origen trae su propia comprobación de existencia
+(`MARCAS_ORIGEN_SISTEMA[].existe` en `core/calc.js`):
+
+- **Origen vivo** → sigue bloqueado, con el candado 🔒 y el mensaje de dónde
+  deshacerlo de verdad.
+- **Origen eliminado** → el movimiento quedó huérfano y **sí se puede borrar**,
+  con la papelera de siempre. En el historial sale con una etiqueta
+  *"origen eliminado"* para que se entienda por qué quedó suelto, y hay un
+  filtro **⚠ Sueltos (N)** que los aísla — aparece solo si hay alguno.
+
+**Y se cierra la fuente del problema.** Eliminar una cotización no pedía
+confirmación (era un clic al lado del de convertir) y dejaba sueltos todos sus
+movimientos: la comisión de su vendedor, las compras que había llevado a
+Finanzas y el registro del estimado completo. Ahora pregunta, dice cuántos
+movimientos se lleva y con qué efecto neto en la caja, y los manda a la
+papelera de movimientos — no los borra de una, por si alguno correspondía a un
+gasto que sí ocurrió (`movimientosGeneradosPorCotizacion`). Es el mismo trato
+que ya recibían los pedidos en la ronda anterior.
+
+Verificado en pantalla con el caso reportado (movimientos de un pedido y de una
+cotización ya borrados): el filtro los encuentra, salen marcados, se borran y
+van a la papelera; el movimiento de un pedido que sí existe sigue con candado y
+Finanzas se niega a borrarlo.
+
 ## Registro de cambios — agosto 2026 (cuarta ronda: eliminar vs. cancelar un pedido)
 
 Un pedido puede terminar de dos formas muy distintas, y la app solo conocía
