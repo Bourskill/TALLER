@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista } from "../core/calc.js";
+import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderClienteCombo, renderHelp } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
@@ -495,7 +495,9 @@ function renderHistorialPedidos() {
   html += "</div>";
 
   var filtered = state.filtroPedidos === "todos" ? state.pedidos : state.pedidos.filter(function (p) { return p.estado === state.filtroPedidos; });
-  if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return num(p.total) - num(p.abono) > 0; }); }
+  // Un pedido cancelado ya no se va a cobrar, así que no es "saldo pendiente"
+  // — mismo criterio que usa calcPorCobrarPedidos para el KPI.
+  if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return !pedidoCancelado(p) && num(p.total) - num(p.abono) > 0; }); }
   var q = norm(state.buscarPedidos || "").trim();
   filtered = filtrarPedidosPorTexto(filtered, q);
   if (filtered.length === 0) { html += '<div class="empty">No hay pedidos <b>' + (state.filtroPedidos !== "todos" || q ? "que coincidan" : "todavía") + "</b>.</div>"; }
@@ -520,11 +522,14 @@ function renderHistorialPedidos() {
     var gananciaPct = (ganancia != null && num(p.total) > 0) ? (ganancia / num(p.total) * 100) : null;
     var gananciaTxt = ganancia == null ? "" : (fmt(ganancia) + (gananciaPct != null ? " (" + gananciaPct.toFixed(1) + "%)" : " · sin precio de venta asignado"));
 
-    html += '<div class="pedido-card" data-pedido-id="' + p.id + '">' +
+    var cancelado = pedidoCancelado(p);
+    html += '<div class="pedido-card' + (cancelado ? " cancelado" : "") + '" data-pedido-id="' + p.id + '">' +
       '<div class="pedido-top"><div>' +
       '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;">' + esc(p.numeroOp || "—") + "</span> " +
       '<span class="pedido-cliente">' + esc(p.cliente) + "</span>" +
-      '<span class="pedido-tipo">' + (p.tipoCliente === "propio" ? "Propio" : "Tercero") + "</span>" +
+      (cancelado
+        ? '<span class="badge danger" title="Este pedido no se completó. Lo que ya se movió en Finanzas se conservó tal cual.">Cancelado' + (p.fechaCancelacion ? " · " + esc(p.fechaCancelacion) : "") + "</span>"
+        : '<span class="pedido-tipo">' + (p.tipoCliente === "propio" ? "Propio" : "Tercero") + "</span>") +
       '<div class="pedido-meta">' + esc(p.descripcion) + " · cantidad " + esc(p.cantidad) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + "</div>" +
       (cliente ? '<div class="pedido-meta">📦 ' + esc(cliente.direccion || "—") + ", " + esc(cliente.ciudad || "—") + (cliente.cp ? " (CP " + esc(cliente.cp) + ")" : "") + "</div>" : "") +
       (ganancia != null ? '<div class="pedido-meta">Costo ' + fmt(p.costo) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
@@ -532,10 +537,14 @@ function renderHistorialPedidos() {
       '<div class="saldo ' + (saldo > 0 ? "" : (num(p.total) > 0 ? "ok" : "neutral")) + '">' + (saldo > 0 ? "saldo " + fmt(saldo) : (num(p.total) > 0 ? "cobrado completo" : "sin valor asignado")) + "</div>" +
       "</div></div>" +
       renderDetalleLineasPedido(p) +
-      (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p)) +
+      // Un pedido cancelado no está "en producción": mostrarle la barra de
+      // etapas invitaría a avanzarlo, que es justo lo contrario de lo que pasó.
+      (cancelado ? "" : (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p))) +
       '<div class="pedido-actions">' +
       '<span class="accion-grupo">' +
-      (saldo > 0 ? '<button class="btn small" data-action="cobrar" data-id="' + p.id + '">Marcar saldo cobrado</button>' : "") +
+      (cancelado
+        ? '<button class="btn ghost small" data-action="reactivar-pedido" data-id="' + p.id + '" title="Volver a ponerlo en marcha">↺ Reactivar pedido</button>'
+        : (saldo > 0 ? '<button class="btn small" data-action="cobrar" data-id="' + p.id + '">Marcar saldo cobrado</button>' : "")) +
       "</span>" +
       (cotRelacionada ? '<button class="btn ghost small" data-action="ver-cotizacion-relacionada" data-id="' + cotRelacionada.id + '">↗ Ver cotización relacionada</button>' :
         '<button class="btn ghost small" data-action="escalar-a-cotizacion" data-id="' + p.id + '" title="Si este pedido rápido escaló y necesitas cotizar insumos, tallas y márgenes en detalle.">📈 Cotizar este pedido</button>') +
@@ -817,8 +826,16 @@ function renderPanelPedido(p, saldo) {
     renderHelp("Para una nota que aplica a todo el pedido, no a una talla en particular (esas se editan en la cotización de origen). Se incluye en el PDF de orden de producción.") +
     '</label><textarea rows="2" data-action-change="set-pedido-obs-generales" data-id="' + p.id + '" placeholder="Ej. Todo el pedido en tela impermeable, entregar en cajas separadas por talla...">' + esc(p.observacionesGenerales || "") + "</textarea></div>";
   html += '<hr class="stitch" style="margin:18px 0 12px;" />';
-  html += '<div class="pedido-actions" style="margin-top:0;">' +
-    '<span class="accion-peligro" style="margin-left:0;padding-left:0;border-left:none;"><button class="btn danger small" data-action="remove-pedido" data-id="' + p.id + '">Eliminar pedido</button></span>' +
+  // Cancelar y eliminar juntos y explicados: son las dos salidas de un pedido y
+  // significan cosas distintas con la plata (ver "cancelar-pedido" en las
+  // acciones). Antes solo existía eliminar, así que un pedido que se cayó se
+  // borraba —y con él desaparecía de la vista que sí había movido dinero.
+  html += '<div class="pedido-salidas">' +
+    (pedidoCancelado(p)
+      ? '<button class="btn ghost small" data-action="reactivar-pedido" data-id="' + p.id + '">↺ Reactivar pedido</button>'
+      : '<button class="btn ghost small" data-action="cancelar-pedido" data-id="' + p.id + '" title="El pedido existió y movió plata, pero no se completó. Se conserva el registro y sus movimientos de Finanzas.">⊘ Cancelar pedido</button>') +
+    '<button class="btn danger small" data-action="remove-pedido" data-id="' + p.id + '" title="El pedido no debió existir (error, duplicado). Se va a la papelera junto con los movimientos que generó.">🗑 Eliminar pedido</button>' +
+    '<div class="section-sub pedido-salidas-nota">Cancelar conserva lo que ya se movió en Finanzas; eliminar se lo lleva a la papelera junto con el pedido.</div>' +
     "</div>";
   html += "</div>";
 
@@ -1779,15 +1796,27 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
-    // El stock sí se restituye solo (más abajo), pero la plata que este
-    // pedido ya generó en Finanzas (abonos, comisión pagada, ventas de
-    // consignación) NO se toca ni se borra al eliminarlo — eliminar el
-    // pedido no debe hacer parecer que ese dinero nunca entró/salió. Se
-    // avisa acá para que quede claro antes de confirmar, no después.
-    var dineroVinculado = num(pedido.abono);
-    if (pedido.vendedor && pedido.vendedor.estado === "pagado") dineroVinculado += calcComisionValor(pedido);
-    if (pedido.consignacion) dineroVinculado += (pedido.consignacion.ventas || []).reduce(function (a, v) { return a + num(v.montoTotal); }, 0);
-    var avisoDinero = dineroVinculado > 0 ? ("\n\nOjo: este pedido ya tiene " + fmt(dineroVinculado) + " en movimientos de Finanzas (abonos/comisión/ventas) — esos movimientos NO se eliminan ni se revierten solos.") : "";
+    // ELIMINAR = este pedido no debió existir (se cargó por error, se
+    // duplicó). Por eso se lleva consigo los movimientos que él mismo generó:
+    // si el pedido nunca debió estar, esa plata tampoco tiene por qué figurar
+    // en la caja. Antes quedaban huérfanos en Finanzas y la caja seguía
+    // mostrando ingresos de un pedido que ya no existía.
+    //
+    // Si el pedido SÍ existió y se cayó después, eso es CANCELAR, no eliminar:
+    // ahí los movimientos se conservan porque la plata de verdad se movió.
+    // Ver "cancelar-pedido" más abajo.
+    //
+    // Cada lado va a su papelera (el pedido a la de pedidos, sus movimientos a
+    // la de movimientos) para que restaurarlo devuelva todo junto y nunca
+    // quede la mitad de un lado.
+    var movimientos = movimientosGeneradosPorPedido(id);
+    var netoMovimientos = movimientos.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
+    var avisoDinero = movimientos.length
+      ? ("\n\nSe van con él " + movimientos.length + " movimiento(s) de Finanzas que generó este pedido (abonos, comisión, ventas)" +
+         (netoMovimientos ? ", con un efecto neto de " + fmt(Math.abs(netoMovimientos)) + " en la caja" : "") +
+         ". También van a la papelera, así que restaurar el pedido los devuelve." +
+         "\n\nSi el pedido SÍ existió y solo se cayó, no lo elimines: usa Cancelar, que conserva esos movimientos.")
+      : "";
     // En consignación el stock salió del taller vía remisiones, no vía
     // `stockConsumido` del pedido: eliminarlo NO lo devuelve al Catálogo (la
     // mercancía sigue físicamente en el punto). Decirlo antes de confirmar,
@@ -1800,6 +1829,17 @@ export var actions = {
     if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero + avisoStock)) return;
     state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
+    // Los movimientos generados se MUEVEN a la papelera de movimientos, no se
+    // borran: eliminar un pedido sigue siendo reversible de punta a punta.
+    // `eliminadoConPedido` es lo que permite devolverlos exactamente con él.
+    if (movimientos.length) {
+      var idsMov = movimientos.map(function (t) { return t.id; });
+      state.tx = state.tx.filter(function (t) { return idsMov.indexOf(t.id) === -1; });
+      movimientos.forEach(function (t) {
+        state.txPapelera.unshift(Object.assign({}, t, { eliminadoEl: todayStr(), eliminadoConPedido: id }));
+      });
+      persist("tx"); persist("txPapelera");
+    }
     persist("pedidos"); persist("pedidosPapelera"); notify();
     if (pedido.calendarEventId) eliminarEvento(pedido.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del pedido", e); });
     // Se restituye el stock que este pedido había consumido — si se restaura
@@ -1836,6 +1876,18 @@ export var actions = {
     });
     restaurado.stockConsumido = stockConsumidoReal;
     state.pedidos.unshift(restaurado);
+    // Vuelven con él los movimientos que se llevó al eliminarse, para que la
+    // caja quede igual que antes de borrarlo.
+    var devueltos = state.txPapelera.filter(function (t) { return t.eliminadoConPedido === id; });
+    if (devueltos.length) {
+      state.txPapelera = state.txPapelera.filter(function (t) { return t.eliminadoConPedido !== id; });
+      devueltos.forEach(function (t) {
+        var limpio = Object.assign({}, t);
+        delete limpio.eliminadoEl; delete limpio.eliminadoConPedido;
+        state.tx.unshift(limpio);
+      });
+      persist("tx"); persist("txPapelera");
+    }
     persist("pedidos"); persist("pedidosPapelera"); notify();
     sincronizarEventoPedido(restaurado);
     if (faltantes.length) {
@@ -1845,9 +1897,85 @@ export var actions = {
   },
   "eliminar-pedido-definitivo": function (el) {
     var id = el.getAttribute("data-id");
-    if (!window.confirm("Esto elimina el pedido para siempre (incluyendo sus abonos y detalle) y no se puede deshacer. ¿Continuar?")) return;
+    var enPapelera = state.txPapelera.filter(function (t) { return t.eliminadoConPedido === id; }).length;
+    if (!window.confirm("Esto elimina el pedido para siempre (incluyendo sus abonos y detalle)" +
+      (enPapelera ? ", junto con sus " + enPapelera + " movimiento(s) de Finanzas que estan en la papelera" : "") +
+      ", y no se puede deshacer. ¿Continuar?")) return;
     state.pedidosPapelera = state.pedidosPapelera.filter(function (p) { return p.id !== id; });
+    // "Para siempre" vale también para sus movimientos: dejarlos en la
+    // papelera de Finanzas los volvería restaurables sin un pedido al que
+    // pertenecer.
+    if (enPapelera) {
+      state.txPapelera = state.txPapelera.filter(function (t) { return t.eliminadoConPedido !== id; });
+      persist("txPapelera");
+    }
     persist("pedidosPapelera"); notify();
+  },
+  // CANCELAR = el pedido sí existió y sí movió plata; simplemente no se va a
+  // completar. A diferencia de eliminar, acá NO se toca ni un movimiento de
+  // Finanzas: el abono que el cliente hizo entró de verdad, y la comisión que
+  // se alcanzó a pagar salió de verdad. El pedido se queda a la vista marcado
+  // como cancelado, y ese es el registro de que ocurrió.
+  //
+  // Lo que sí deja de contar es todo lo que mira hacia ADELANTE: su saldo sale
+  // de "por cobrar", deja de ser un pedido activo, su comisión pendiente deja
+  // de deberse y no cuenta como venta en los reportes (ver pedidoCancelado en
+  // core/calc.js).
+  "cancelar-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!pedido) return;
+    var movimientos = movimientosGeneradosPorPedido(id);
+    var saldo = num(pedido.total) - num(pedido.abono);
+    var stock = (pedido.stockConsumido || []).reduce(function (a, l) { return a + num(l.cantidad); }, 0);
+    var detalle = "";
+    if (saldo > 0) detalle += "· Deja de figurar " + fmt(saldo) + " como saldo por cobrar." + "\n";
+    detalle += "· Deja de contar como pedido activo y como venta en los reportes." + "\n";
+    if (pedido.vendedor && pedido.vendedor.nombre && pedido.vendedor.estado !== "pagado") {
+      detalle += "· Su comisión pendiente deja de deberse." + "\n";
+    }
+    if (stock) detalle += "· Vuelven " + stock + " unidad(es) al stock del Catálogo." + "\n";
+    if (!window.confirm("¿Cancelar el pedido " + (pedido.numeroOp || "") + " — " + pedido.descripcion + "?\n\n" +
+      "Queda registrado como cancelado y NO se toca nada de lo que ya se movió en Finanzas" +
+      (movimientos.length ? " (" + movimientos.length + " movimiento(s): esa plata entró o salió de verdad)" : "") + ".\n\n" +
+      "Lo que sí cambia:\n" + detalle +
+      "\nSe puede reactivar después. Si el pedido nunca debió existir, elimínalo en vez de cancelarlo.")) return;
+    state.pedidos = state.pedidos.map(function (p) {
+      return p.id === id ? Object.assign({}, p, { cancelado: true, fechaCancelacion: todayStr() }) : p;
+    });
+    // La mercancía vuelve a ser tuya: se restituye igual que al eliminar. Si
+    // en realidad ya se había entregado, se ajusta a mano en Catálogo.
+    (pedido.stockConsumido || []).forEach(function (l) {
+      ajustarStockProducto(l.productoId, l.talla, l.cantidad, "Pedido cancelado — restitución", "pedido:" + id);
+    });
+    persist("pedidos"); notify();
+    if (pedido.calendarEventId) eliminarEvento(pedido.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar del pedido", e); });
+  },
+  "reactivar-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (!pedido) return;
+    if (!window.confirm("¿Reactivar el pedido " + (pedido.numeroOp || "") + "?\n\nVuelve a contar como pedido activo, su saldo vuelve a por cobrar y se descuenta otra vez el stock que tenía reservado.")) return;
+    var stockReal = [];
+    var faltantes = [];
+    (pedido.stockConsumido || []).forEach(function (l) {
+      var aplicado = Math.abs(ajustarStockProducto(l.productoId, l.talla, -num(l.cantidad), "Pedido reactivado", "pedido:" + id));
+      if (aplicado) stockReal.push({ productoId: l.productoId, productoNombre: l.productoNombre, talla: l.talla, cantidad: aplicado });
+      if (aplicado < num(l.cantidad)) faltantes.push({ productoNombre: l.productoNombre, talla: l.talla, faltan: num(l.cantidad) - aplicado });
+    });
+    state.pedidos = state.pedidos.map(function (p) {
+      if (p.id !== id) return p;
+      var reactivado = Object.assign({}, p, { stockConsumido: stockReal });
+      delete reactivado.cancelado; delete reactivado.fechaCancelacion;
+      return reactivado;
+    });
+    persist("pedidos"); notify();
+    var actualizado = state.pedidos.filter(function (p) { return p.id === id; })[0];
+    if (actualizado) sincronizarEventoPedido(actualizado);
+    if (faltantes.length) {
+      window.alert("Se reactivó el pedido, pero parte del stock que tenía reservado ya se vendió mientras estuvo cancelado:\n\n" +
+        faltantes.map(function (f) { return "- " + f.productoNombre + " (" + f.talla + "): faltaron " + f.faltan; }).join("\n"));
+    }
   },
   "set-pedido-obs-generales": function (el) {
     var id = el.getAttribute("data-id");

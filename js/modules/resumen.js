@@ -8,14 +8,16 @@ import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
-  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango
+  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado
 } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
 
 export function render() {
-  var activos = state.pedidos.filter(function (p) { return p.estado !== "entregado"; });
+  // Un pedido cancelado no está pendiente de entregar: sacarlo de acá evita
+  // que siga apareciendo en "Próximas entregas" como si hubiera que producirlo.
+  var activos = state.pedidos.filter(function (p) { return p.estado !== "entregado" && !pedidoCancelado(p); });
   var proximas = activos
     .filter(function (p) { return p.fechaEntrega; })
     .sort(function (a, b) { return new Date(a.fechaEntrega) - new Date(b.fechaEntrega); })
@@ -542,18 +544,24 @@ function renderDesglosePedidos(fr) {
   var COLS = "85px 90px 1fr 70px 105px 105px 105px";
   var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>N.º OP</span><span>Cliente</span><span>Cant.</span><span>Total</span><span>Abonado</span><span>Saldo</span></div>';
   filas.forEach(function (f) {
-    html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
+    html += '<div class="tx-row' + (f.cancelado ? " fila-cancelada" : "") + '" style="grid-template-columns:' + COLS + ';">' +
       '<span class="mobile-th">Fecha</span><span>' + esc(f.fecha) + "</span>" +
       '<span class="mobile-th">N.º OP</span><span style="font-family:\'IBM Plex Mono\',monospace;">' + esc(f.numeroOp) + "</span>" +
-      '<span class="mobile-th">Cliente</span><span>' + esc(f.cliente) + '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) + "</div></span>" +
+      '<span class="mobile-th">Cliente</span><span>' + esc(f.cliente) +
+      (f.cancelado ? ' <span class="badge danger">Cancelado</span>' : "") +
+      '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) + "</div></span>" +
       '<span class="mobile-th">Cant.</span><span class="amount">' + f.cantidad + "</span>" +
       '<span class="mobile-th">Total</span><span class="amount">' + fmt(f.total) + "</span>" +
       '<span class="mobile-th">Abonado</span><span class="amount">' + fmt(f.abonado) + "</span>" +
       '<span class="mobile-th">Saldo</span><span class="amount" style="color:' + (f.saldo > 0 ? "var(--danger-ink)" : "var(--success-ink)") + ';">' + fmt(f.saldo) + "</span>" +
       "</div>";
   });
+  // Se dice cuántos cancelados hay para que la suma de la columna no parezca
+  // que no cuadra: están en la lista (es el registro) pero no en los totales.
   html += '<div class="section-sub" style="margin:6px 0 0;">' + r.pedidos + " pedido(s) · " + fmt(r.total) + " vendido · " +
-    fmt(r.abonado) + " cobrado · <b>" + fmt(r.saldo) + "</b> por cobrar.</div>";
+    fmt(r.abonado) + " cobrado · <b>" + fmt(r.saldo) + "</b> por cobrar." +
+    (r.cancelados ? " <span style=\"color:var(--danger-ink);\">" + r.cancelados + " cancelado(s), no incluido(s) en estos totales.</span>" : "") +
+    "</div>";
   return html;
 }
 

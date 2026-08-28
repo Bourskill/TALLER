@@ -25,6 +25,48 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Registro de cambios — agosto 2026 (cuarta ronda: eliminar vs. cancelar un pedido)
+
+Un pedido puede terminar de dos formas muy distintas, y la app solo conocía
+una. La diferencia no es de etiqueta, es de plata:
+
+- **ELIMINAR** = el pedido **no debió existir** (se cargó por error, se
+  duplicó). Ahora se lleva consigo los movimientos que él mismo generó: si el
+  pedido nunca debió estar, esa plata tampoco tiene por qué figurar en la caja.
+  Antes quedaban huérfanos en Finanzas — se borraba el pedido y la caja seguía
+  mostrando sus ingresos. Los dos lados van a su papelera (el pedido a la de
+  pedidos, sus movimientos a la de movimientos, marcados con
+  `eliminadoConPedido`), así que **restaurar el pedido devuelve también su
+  plata** y la caja queda exactamente como estaba. Eliminarlo definitivamente
+  purga las dos cosas.
+- **CANCELAR** (nuevo) = el pedido **sí existió y sí movió plata**, pero no se
+  va a completar. Acá **no se toca ni un movimiento**: el abono que el cliente
+  hizo entró de verdad y la comisión que se alcanzó a pagar salió de verdad. El
+  pedido se queda visible, marcado como cancelado con su fecha — ese es el
+  registro de que ocurrió. Se puede reactivar.
+
+Qué deja de contar un pedido cancelado (todo lo que mira hacia **adelante**,
+ver `pedidoCancelado` en `core/calc.js`): su saldo sale de "por cobrar" y de
+"Quién debe", deja de ser un pedido activo, su comisión pendiente deja de
+deberse, sale de "Próximas entregas" y de los avisos de la campanita, y no
+cuenta como venta en el reporte de productos ni en el de ventas por vendedor.
+En el reporte de pedidos **sí aparece** —marcado y atenuado, porque es el
+registro— pero fuera de los totales, y el pie dice cuántos cancelados hay para
+que no parezca que la suma no cuadra.
+
+Qué NO se lleva el borrado: un movimiento cargado **a mano** al que alguien le
+eligió ese pedido en el desplegable "Pedido relacionado" también tiene
+`pedidoId`, pero representa un gasto propio que existió al margen (la tela que
+se compró). Solo se van los que la app generó, reconocidos por su marca de
+origen — abonos, reembolsos, comisión del vendedor y ventas/comisiones de
+consignación (`movimientosGeneradosPorPedido`).
+
+Verificado con números en la prueba de humo: al cancelar, la caja no cambia y
+el saldo sale de "por cobrar"; al eliminar, los movimientos salen de la caja y
+vuelven intactos al restaurar. En pantalla, con un pedido cancelado de $800.000
+con $150.000 abonados junto a uno vivo: **Caja $350.000** (incluye el abono del
+cancelado), **Por cobrar $400.000** (solo el vivo), **Pedidos activos: 1**.
+
 ## Registro de cambios — agosto 2026 (tercera ronda: detalles reportados)
 
 - **El aviso de guardado ya no parpadea en cada cambio.** La causa no era el

@@ -203,6 +203,46 @@ export function origenSistemaDeTx(t) {
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que
 // aún no se recibió no es un movimiento de Finanzas, es saldo de un pedido.
+// ---------- pedidos cancelados ----------
+// Un pedido CANCELADO no es lo mismo que uno ELIMINADO, y la diferencia es de
+// plata, no de etiqueta:
+//
+//  - ELIMINADO = no debió existir (se cargó por error, se duplicó). Se va a la
+//    papelera y se lleva consigo los movimientos que él mismo generó: si el
+//    pedido nunca debió estar, esa plata tampoco. Ver "remove-pedido" en
+//    modules/pedidos.js.
+//  - CANCELADO = sí existió y sí movió plata (el cliente abonó, se le pagó al
+//    vendedor, el punto reportó una venta). La venta no se va a completar,
+//    pero lo que ya pasó pasó: los movimientos se quedan en Finanzas, y el
+//    pedido se queda visible marcado como cancelado. Borrar ese rastro sería
+//    hacer desaparecer plata real de la caja.
+//
+// Lo que sí deja de contar un pedido cancelado es todo lo que mira hacia
+// ADELANTE: no es un saldo por cobrar (no se va a cobrar), no es un pedido
+// activo, no genera comisión pendiente y no cuenta como venta en los reportes.
+export function pedidoCancelado(p) {
+  return !!(p && p.cancelado);
+}
+
+// Los movimientos de Finanzas que este pedido GENERÓ por sí mismo: abonos,
+// reembolsos, la comisión de su vendedor y las ventas/comisiones de su
+// consignación. Se reconocen por la marca de origen que la app les puso al
+// crearlos (ver origenSistemaDeTx), no por `pedidoId` a secas.
+//
+// Esa distinción es deliberada: un movimiento cargado A MANO al que alguien le
+// eligió este pedido en el desplegable "Pedido relacionado" también tiene
+// `pedidoId`, pero representa un gasto propio que existió al margen del pedido
+// (la tela que se compró, por ejemplo). Ese no se va con él. Lo mismo con las
+// compras sincronizadas desde una cotización, que pertenecen a la cotización.
+export function movimientosGeneradosPorPedido(pedidoId) {
+  if (!pedidoId) return [];
+  return state.tx.filter(function (t) {
+    if (t.origenComisionPedidoId === pedidoId) return true;
+    if (t.pedidoId !== pedidoId) return false;
+    return !!(t.origenAbonoId || t.origenReembolsoId || t.origenVentaConsignacionId || t.origenComisionConsignacionId);
+  });
+}
+
 export function calcSaldoPedido(p) {
   return num(p.total) - num(p.abono);
 }
@@ -223,6 +263,7 @@ export function calcAbonadoDeLista(abonos) {
 }
 export function calcPorCobrarPedidos() {
   return state.pedidos.reduce(function (a, p) {
+    if (pedidoCancelado(p)) return a; // cancelado: ese saldo ya no se va a cobrar
     var saldo = calcSaldoPedido(p);
     return a + (saldo > 0 ? saldo : 0);
   }, 0);
@@ -234,6 +275,7 @@ export function calcPorCobrar() {
 export function listaDeudores() {
   var lista = [];
   state.pedidos.forEach(function (p) {
+    if (pedidoCancelado(p)) return; // cancelado: el cliente ya no debe eso
     var saldo = calcSaldoPedido(p);
     if (saldo > 0) lista.push({ nombre: p.cliente, monto: saldo, nota: p.descripcion });
   });
@@ -407,6 +449,7 @@ export function calcResumenPorPagar() {
   // de pago propia definida, se consideran urgentes desde ya (vencidas), sin
   // mostrar una fecha inventada en su lugar.
   state.pedidos.forEach(function (p) {
+    if (pedidoCancelado(p)) return;
     if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") {
       if (p.vendedor.fechaPago) items.push({ monto: calcComisionValor(p), fecha: new Date(p.vendedor.fechaPago + "T00:00:00") });
       else items.push({ monto: calcComisionValor(p), vencida: true });
@@ -423,7 +466,7 @@ export function calcResumenPorPagar() {
   // punto ya vendió la mercancía), se tratan como urgentes desde ya, igual
   // que las comisiones de vendedor sin fecha de pago propia.
   state.pedidos.forEach(function (p) {
-    if (!p.consignacion) return;
+    if (!p.consignacion || pedidoCancelado(p)) return;
     (p.consignacion.ventas || []).forEach(function (v) {
       if (!v.comisionPagada) items.push({ monto: num(v.comisionMonto), vencida: true });
     });
@@ -458,6 +501,7 @@ export function calcSaldosVendedores() {
     if (!mapa[nombre].fechaPago && fechaPago) mapa[nombre].fechaPago = fechaPago;
   }
   state.pedidos.forEach(function (p) {
+    if (pedidoCancelado(p)) return;
     if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") agregar(p.vendedor.nombre, calcComisionValor(p), p.vendedor.fechaPago);
   });
   state.cotizaciones.forEach(function (c) {
@@ -473,6 +517,7 @@ export function calcSaldosVendedores() {
 export function calcDetalleComisionesVendedor(nombre) {
   var items = [];
   state.pedidos.forEach(function (p) {
+    if (pedidoCancelado(p)) return;
     if (p.vendedor && p.vendedor.nombre === nombre && p.vendedor.estado !== "pagado") {
       items.push({ tipo: "pedido", id: p.id, label: (p.numeroOp || "Pedido") + " — " + p.cliente + " · " + p.descripcion, monto: calcComisionValor(p) });
     }
@@ -552,7 +597,7 @@ export function calcNominaPendiente() {
 
 // ---------- pedidos / equipo ----------
 export function calcPedidosActivos() {
-  return state.pedidos.filter(function (p) { return p.estado !== "entregado"; }).length;
+  return state.pedidos.filter(function (p) { return p.estado !== "entregado" && !pedidoCancelado(p); }).length;
 }
 // El salario de cada persona se guarda EN LA BASE que se eligió al cargarlo
 // (e.salarioPeriodo: "semanal" | "quincenal" | "mensual"), no siempre
@@ -636,6 +681,10 @@ export function calcComisionValor(p) {
 }
 export function calcComisionesPendientes() {
   return state.pedidos.reduce(function (a, p) {
+    // Cancelado: la venta no se completó, así que esa comisión ya no se debe.
+    // Si alcanzó a PAGARSE, su movimiento sigue en Finanzas — lo que deja de
+    // contar es la obligación futura, no la plata que ya salió.
+    if (pedidoCancelado(p)) return a;
     if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") return a + calcComisionValor(p);
     return a;
   }, 0);
@@ -750,7 +799,7 @@ export function calcConsignacionComision(consignacion, cantidad, montoTotal) {
 }
 export function calcComisionesConsignacionPendientes() {
   return state.pedidos.reduce(function (a, p) {
-    if (!p.consignacion) return a;
+    if (!p.consignacion || pedidoCancelado(p)) return a;
     var pend = (p.consignacion.ventas || []).filter(function (v) { return !v.comisionPagada; }).reduce(function (s, v) { return s + num(v.comisionMonto); }, 0);
     return a + pend;
   }, 0);
@@ -764,7 +813,7 @@ export function calcSaldosConsignacion() {
     mapa[nombre].cantidad += 1;
   }
   state.pedidos.forEach(function (p) {
-    if (!p.consignacion) return;
+    if (!p.consignacion || pedidoCancelado(p)) return;
     (p.consignacion.ventas || []).forEach(function (v) {
       if (!v.comisionPagada) agregar(p.cliente || "Punto de consignación", num(v.comisionMonto));
     });
@@ -836,7 +885,7 @@ export function calcNotificaciones(esAdmin) {
 
   // 3. Entregas de hoy o ya vencidas, de pedidos que siguen activos.
   (state.pedidos || []).forEach(function (p) {
-    if (p.estado === "entregado" || !p.fechaEntrega || p.fechaEntrega > hoy) return;
+    if (p.estado === "entregado" || pedidoCancelado(p) || !p.fechaEntrega || p.fechaEntrega > hoy) return;
     var vencida = p.fechaEntrega < hoy;
     items.push({
       id: "entrega:" + p.id,
@@ -1309,6 +1358,11 @@ export function calcProductosVendidosRango(desde, hasta) {
   function enRango(f) { return f && (!desde || f >= desde) && (!hasta || f <= hasta); }
 
   (state.pedidos || []).forEach(function (p) {
+    // Un pedido cancelado no vendió nada: sacarlo de acá es lo que evita que
+    // el reporte cuente como ingreso una venta que no ocurrió. La plata que sí
+    // se movió (un abono que no se devolvió) sigue estando en Finanzas, que es
+    // donde corresponde.
+    if (pedidoCancelado(p)) return;
     var vendedor = (p.vendedor && p.vendedor.nombre) || "";
     if (p.consignacion) {
       (p.consignacion.ventas || []).forEach(function (v) {
@@ -1388,7 +1442,11 @@ export function calcPedidosRango(desde, hasta) {
         cantidad: num(p.cantidad),
         total: total, costo: num(p.costo), ganancia: total - num(p.costo),
         abonado: abonado, saldo: total - abonado,
-        estado: estadoLabelDe(p),
+        // El cancelado SIGUE apareciendo en la lista —es el registro de que
+        // existió— pero va marcado, y calcResumenPedidos lo deja fuera de los
+        // totales para no contar como vendido algo que no se vendió.
+        cancelado: pedidoCancelado(p),
+        estado: pedidoCancelado(p) ? "Cancelado" : estadoLabelDe(p),
         tipo: p.consignacion ? "Consignación" : "Venta directa",
         vendedor: (p.vendedor && p.vendedor.nombre) || ""
       };
@@ -1396,9 +1454,14 @@ export function calcPedidosRango(desde, hasta) {
     .sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
 }
 
+// Los totales del reporte cuentan solo lo que de verdad se vendió: un pedido
+// cancelado aparece en la lista (para que quede el registro) pero no suma.
+// `cancelados` se expone aparte para poder decirlo en pantalla en vez de que
+// el usuario note que la suma de la columna no da el total.
 export function calcResumenPedidos(filas) {
-  var acc = { pedidos: (filas || []).length, unidades: 0, total: 0, costo: 0, ganancia: 0, abonado: 0, saldo: 0 };
-  (filas || []).forEach(function (f) {
+  var vigentes = (filas || []).filter(function (f) { return !f.cancelado; });
+  var acc = { pedidos: vigentes.length, cancelados: (filas || []).length - vigentes.length, unidades: 0, total: 0, costo: 0, ganancia: 0, abonado: 0, saldo: 0 };
+  vigentes.forEach(function (f) {
     acc.unidades += num(f.cantidad); acc.total += num(f.total); acc.costo += num(f.costo);
     acc.ganancia += num(f.ganancia); acc.abonado += num(f.abonado); acc.saldo += num(f.saldo);
   });
@@ -1411,6 +1474,7 @@ export function calcResumenPedidos(filas) {
 export function calcVentasPorVendedorRango(desde, hasta) {
   var mapa = {};
   calcPedidosRango(desde, hasta).forEach(function (f) {
+    if (f.cancelado) return; // no es una venta suya: no se le acredita
     var nombre = f.vendedor || "(sin vendedor)";
     if (!mapa[nombre]) mapa[nombre] = { vendedor: nombre, pedidos: 0, unidades: 0, total: 0, ganancia: 0, comision: 0 };
     mapa[nombre].pedidos++;

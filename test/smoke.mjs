@@ -654,6 +654,79 @@ assert(!state.lastError, "un pedido con costo y sin precio de venta no rompe el 
 assert(document.body.textContent.includes("sin precio de venta asignado"), "y se explica por qué no hay porcentaje de ganancia");
 state.pedidos = state.pedidos.filter(p => p.id !== "ped-sin-precio");
 
+// --- ELIMINAR vs CANCELAR: la diferencia es de plata, no de etiqueta ---
+// Eliminar = no debió existir, así que sus movimientos se van con él.
+// Cancelar = sí existió y sí movió plata, así que los movimientos se quedan.
+const { movimientosGeneradosPorPedido, pedidoCancelado, calcPorCobrar: porCobrarAhora, calcPedidosActivos } = await import("../js/core/calc.js");
+
+// se arma un pedido con un abono real (plata que de verdad entró)
+click('[data-action="tab"][data-tab="pedidos"]');
+click('[data-action="pedido-vista"][data-val="nueva"]');
+setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+click('[data-action="add-pedido-linea-libre"]');
+const lineaCancelId = state.formPedido.lineas[0].id;
+setLinea(lineaCancelId, "productoNombre", "Pedido que se va a caer");
+setLinea(lineaCancelId, "cantidad", "2");
+setLinea(lineaCancelId, "precioUnitario", "150000");
+setChange('[data-action-change="set-form-pedido-campo"][data-campo="abono"]', "50000");
+click('[data-action="add-pedido"]');
+const pedCancel = state.pedidos.find(p => p.descripcion.indexOf("Pedido que se va a caer") === 0);
+assert(!!pedCancel && pedCancel.abono === 50000, "pedido de prueba creado con un abono real de $50.000");
+assert(movimientosGeneradosPorPedido(pedCancel.id).length === 1, "el abono dejó su movimiento en Finanzas");
+
+// --- CANCELAR: el registro y la plata se conservan ---
+const cajaAntesCancelar = state.tx.reduce((a, t) => t.tipo === "ingreso" ? a + Number(t.monto) : a - Number(t.monto), 0);
+const porCobrarAntes = porCobrarAhora();
+const activosAntes = calcPedidosActivos();
+click('[data-action="pedido-vista"][data-val="historial"]');
+// Cancelar y eliminar viven en el panel de "Dinero y documentos" de la
+// tarjeta (son las dos salidas del pedido, no acciones de un clic suelto).
+click('[data-action="toggle-pedido-panel"][data-id="' + pedCancel.id + '"]');
+click('[data-action="cancelar-pedido"][data-id="' + pedCancel.id + '"]');
+let pc = state.pedidos.find(p => p.id === pedCancel.id);
+assert(!!pc && pedidoCancelado(pc), "el pedido cancelado SIGUE existiendo (es el registro de que pasó)");
+assert(movimientosGeneradosPorPedido(pedCancel.id).length === 1, "cancelar NO borra el movimiento: esa plata entró de verdad");
+const cajaDespuesCancelar = state.tx.reduce((a, t) => t.tipo === "ingreso" ? a + Number(t.monto) : a - Number(t.monto), 0);
+assert(cajaDespuesCancelar === cajaAntesCancelar, "la caja no cambia al cancelar (no se toca nada ya movido)");
+assert(porCobrarAhora() === porCobrarAntes - 250000, "el saldo del cancelado sale de 'por cobrar' (300.000 - 50.000 abonados)");
+assert(calcPedidosActivos() === activosAntes - 1, "un pedido cancelado deja de contar como activo");
+
+// no cuenta como venta en los reportes, pero sí queda listado como registro
+const { calcPedidosRango: rangoPed, calcResumenPedidos: resumenPed } = await import("../js/core/calc.js");
+const filasRango = rangoPed(pc.fechaCreacion, pc.fechaCreacion);
+const filaCancelada = filasRango.find(f => f.id === pedCancel.id);
+assert(!!filaCancelada && filaCancelada.cancelado === true, "el cancelado aparece en el reporte, marcado como tal");
+assert(filaCancelada.estado === "Cancelado", "el reporte lo muestra como Cancelado, no en su etapa de producción");
+const resumenRango = resumenPed(filasRango);
+assert(resumenRango.cancelados >= 1, "el resumen dice cuántos cancelados hay");
+assert(!resumenPed([filaCancelada]).total, "un cancelado no suma a lo vendido");
+
+// reactivar lo devuelve a la circulación
+click('[data-action="reactivar-pedido"][data-id="' + pedCancel.id + '"]');
+pc = state.pedidos.find(p => p.id === pedCancel.id);
+assert(!pedidoCancelado(pc), "se puede reactivar un pedido cancelado");
+assert(porCobrarAhora() === porCobrarAntes, "al reactivarlo su saldo vuelve a 'por cobrar'");
+
+// --- ELIMINAR: se lleva los movimientos que generó ---
+const txAntesEliminar = state.tx.length;
+const movsDelPedido = movimientosGeneradosPorPedido(pedCancel.id).map(t => t.id);
+click('[data-action="remove-pedido"][data-id="' + pedCancel.id + '"]');
+assert(state.tx.length === txAntesEliminar - movsDelPedido.length, "eliminar el pedido se lleva sus movimientos de Finanzas");
+assert(!state.tx.some(t => movsDelPedido.indexOf(t.id) >= 0), "esos movimientos ya no están en la caja");
+assert(state.txPapelera.some(t => t.eliminadoConPedido === pedCancel.id), "van a la papelera de movimientos, no se borran");
+
+// y restaurar el pedido los devuelve, para que la caja quede como estaba
+click('[data-action="ver-papelera-pedidos"]');
+click('[data-action="restaurar-pedido"][data-id="' + pedCancel.id + '"]');
+assert(state.tx.length === txAntesEliminar, "restaurar el pedido devuelve sus movimientos a la caja");
+assert(!state.txPapelera.some(t => t.eliminadoConPedido === pedCancel.id), "y los saca de la papelera de movimientos");
+click('[data-action="ver-papelera-pedidos"]');
+
+// un movimiento cargado A MANO y solo asociado al pedido NO se va con él
+state.tx.unshift({ id: "manual-suelto", tipo: "gasto", concepto: "Tela comprada aparte", monto: 20000, fecha: state.pedidos[0].fechaCreacion, pedidoId: pedCancel.id });
+assert(!movimientosGeneradosPorPedido(pedCancel.id).some(t => t.id === "manual-suelto"), "un gasto propio asociado al pedido no cuenta como generado por él (no se borraría con él)");
+state.tx = state.tx.filter(t => t.id !== "manual-suelto");
+
 // --- la fecha de "hoy" es la del reloj del usuario, no la de UTC ---
 // En Colombia (UTC-5), a partir de las 7pm `toISOString()` ya devuelve el día
 // siguiente: todo lo registrado en la tarde-noche quedaba fechado mañana, y el

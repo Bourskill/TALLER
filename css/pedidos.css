@@ -66,3 +66,21 @@
 @media (max-width: 780px){
   .pedido-panel{grid-template-columns:1fr;gap:22px;}
 }
+
+/* ---------- pedido cancelado ----------
+   Existió y movió plata, pero no se completó. Se atenúa para que no compita
+   con los pedidos vivos en el historial, sin esconderlo: el registro de que
+   pasó es justamente lo que hay que conservar. */
+.pedido-card.cancelado{opacity:.72;border-left:3px solid var(--danger);}
+.pedido-card.cancelado:hover{opacity:1;}
+.pedido-card.cancelado .pedido-money .total{text-decoration:line-through;color:var(--ink-faint);}
+
+/* Las dos salidas de un pedido, juntas y con su nota: significan cosas
+   distintas con la plata, así que se eligen viéndolas al lado. */
+.pedido-salidas{display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center;}
+.pedido-salidas-nota{flex-basis:100%;margin:2px 0 0;font-size:11.5px;line-height:1.5;}
+
+/* Fila de un pedido cancelado en el reporte: se ve, pero se lee como lo que
+   es — un registro, no una venta que sume. */
+.fila-cancelada{opacity:.65;}
+.fila-cancelada .amount{text-decoration:line-through;}
