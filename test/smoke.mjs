@@ -844,6 +844,104 @@ assert(state.productos.find(p => p.id === prodUnicoId).precioVenta === 123456, "
 assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 51, "al aprobar, el movimiento de stock propuesto se aplica (1 + 50 = 51)");
 assert(!state.productoPropuestas.some(p => p.productoId === prodUnicoId), "no quedan propuestas pendientes de este producto");
 
+// ---------------------------------------------------------------------------
+// Navegación por teclado (core/teclado.js): que la app entera se pueda usar
+// sin mouse. Se simulan teclas reales sobre el elemento que tiene el foco,
+// igual que click() simula clics reales.
+// ---------------------------------------------------------------------------
+function tecla(key, opts) {
+  const o = Object.assign({ key: key, bubbles: true, cancelable: true }, opts || {});
+  const destino = document.activeElement && document.activeElement !== document.body
+    ? document.activeElement
+    : document;
+  destino.dispatchEvent(new dom.window.KeyboardEvent("keydown", o));
+}
+function focoId() {
+  return document.activeElement ? document.activeElement.id : "";
+}
+
+state.tab = "resumen";
+render();
+assert(document.querySelector('.skip-link[href="#contenido"]'), 'existe el enlace "Saltar al contenido" y apunta al contenido');
+assert(document.getElementById("contenido"), "el contenedor del contenido tiene el id al que salta ese enlace");
+assert(document.getElementById("nav-tab-resumen"), "cada sección del menú tiene un id estable, para poder devolverle el foco después del render");
+const tabulables = Array.from(document.querySelectorAll(".nav .nav-item")).filter(b => b.getAttribute("tabindex") === "0");
+assert(tabulables.length === 1 && tabulables[0].id === "nav-tab-resumen", "solo la sección activa es tabulable (roving tabindex): Tab sale del menú de una");
+assert(document.getElementById("nav-tab-resumen").getAttribute("aria-current") === "page", "la sección activa se anuncia con aria-current");
+
+// Alt + flechas recorre las secciones en el orden en que se VEN en el menú
+// (Panel: resumen, notas → Ventas: pedidos...), no en el orden interno de TABS.
+tecla("ArrowDown", { altKey: true });
+assert(state.tab === "notas", "Alt + ↓ pasa a la sección siguiente del menú");
+assert(focoId() === "nav-tab-notas", "el foco sigue a la sección nueva, así las flechas encadenan");
+tecla("ArrowUp", { altKey: true });
+assert(state.tab === "resumen", "Alt + ↑ vuelve a la anterior");
+
+// Alt + número salta directo a la n-ésima sección visible.
+tecla("3", { altKey: true, code: "Digit3" });
+assert(state.tab === "pedidos", "Alt + 3 va a la tercera sección tal como se ve en el menú");
+
+// Flechas dentro del menú: mueven el foco, sin cambiar de sección todavía.
+document.getElementById("nav-tab-pedidos").focus();
+tecla("ArrowDown");
+assert(focoId() === "nav-tab-cotizaciones", "↑/↓ dentro del menú mueven el foco a la sección de al lado");
+assert(state.tab === "pedidos", "mover el foco con las flechas NO cambia de sección: eso lo hace Enter");
+tecla("Home");
+assert(focoId() === "nav-tab-resumen", "Inicio lleva el foco a la primera sección");
+tecla("End");
+assert(focoId() === "nav-tab-config", "Fin lleva el foco a la última");
+
+// ← cierra la categoría del item con foco: sus secciones dejan de ser
+// alcanzables con las flechas, y el foco no puede quedarse en una oculta.
+document.getElementById("nav-tab-pedidos").focus();
+tecla("ArrowLeft");
+assert(state.ui.navGroups.ventas === false, "← cierra la categoría en la que se está parado");
+assert(focoId() && focoId() !== "nav-tab-pedidos", "al cerrarse la categoría el foco se mueve a una sección que sí se puede alcanzar");
+document.getElementById("nav-tab-resumen").focus();
+tecla("ArrowDown");
+assert(focoId() === "nav-tab-notas", "las flechas se saltan las secciones de una categoría cerrada");
+document.getElementById("nav-tab-notas").focus();
+tecla("ArrowRight");
+assert(state.ui.navGroups.general === true, "→ deja abierta la categoría que ya lo estaba, sin cerrarla por error");
+state.ui.navGroups.ventas = true;
+render();
+
+// "?" abre y cierra la ayuda; Esc también la cierra.
+tecla("?");
+assert(state.atajosAbiertos && document.querySelector(".atajos-overlay"), '"?" abre el panel de atajos');
+assert(document.body.textContent.includes("Alt + M"), "el panel lista los atajos de verdad, no un texto genérico");
+tecla("Escape");
+assert(!state.atajosAbiertos && !document.querySelector(".atajos-overlay"), "Esc cierra el panel de atajos");
+
+// Esc cierra SOLO la capa de más arriba, en orden: primero la imagen, después
+// el panel de avisos. Cerrar las dos de un golpe haría perder el contexto.
+state.notificacionesAbiertas = true;
+state.imagenPreview = "https://example.com/foto.png";
+render();
+tecla("Escape");
+assert(!state.imagenPreview, "Esc cierra primero la imagen ampliada, que es la capa de más arriba");
+assert(state.notificacionesAbiertas, "y deja abierto el panel de avisos que estaba debajo");
+tecla("Escape");
+assert(!state.notificacionesAbiertas, "el segundo Esc ya cierra el panel de avisos");
+
+// Un vendedor solo salta con el teclado a las secciones que le tocan: los
+// atajos usan la misma lista filtrada por rol con la que se dibuja el menú.
+loginComo("vendedor", "Juana", "juana@taller.test");
+state.tab = "mis-ventas";
+render();
+assert(!document.getElementById("nav-tab-config"), "el menú de un vendedor no incluye Configuración");
+tecla("1", { altKey: true, code: "Digit1" });
+assert(state.tab === "mis-ventas", "Alt + 1 lleva a la primera sección del menú del vendedor");
+let fueraDeRol = false;
+for (let i = 0; i < 12; i++) {
+  tecla("ArrowDown", { altKey: true });
+  if (state.tab === "config" || state.tab === "finanzas" || state.tab === "pendientes") fueraDeRol = true;
+}
+assert(!fueraDeRol, "recorriendo con Alt + ↓ nunca se cae en una sección que el rol no puede ver");
+auth.logout();
+state.tab = "resumen";
+render();
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

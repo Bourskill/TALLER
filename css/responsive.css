@@ -33,6 +33,9 @@
   /* El panel de la campanita se ancla al borde derecho de la pantalla, no al
      del botón, para no quedar cortado. */
   .campanita-panel{position:fixed;top:calc(var(--topbar-h) + 12px);left:12px;right:12px;width:auto;max-height:70vh;}
+  /* Sin teclado físico los atajos no aplican, y la topbar en un teléfono no
+     tiene ancho de sobra: el botón del panel de atajos se va. */
+  .atajos-btn{display:none;}
   .sidebar-mobile-toggle{
     display:flex;align-items:center;justify-content:center;
     width:34px;height:34px;border-radius:9px;flex:0 0 34px;

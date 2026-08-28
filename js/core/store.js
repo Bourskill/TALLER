@@ -90,6 +90,9 @@ export const state = {
   recuperacion: null,
   // Panel de la campanita desplegado o no — estado de UI, nunca se persiste.
   notificacionesAbiertas: false,
+  // Panel con la lista de atajos de teclado (tecla "?" o el botón del teclado
+  // en la topbar, ver core/teclado.js). También es solo de UI: nunca se persiste.
+  atajosAbiertos: false,
   tx: [],
   txPapelera: [], // movimientos eliminados (papelera): se pueden restaurar o borrar definitivo
   pedidos: [],

@@ -895,6 +895,7 @@ css/
   clientes.css             solo pestaña Clientes
   pendientes.css           solo pestaña Pendientes
   config.css               solo pestaña Configuración
+  atajos.css           panel de atajos de teclado (tecla "?")
   responsive.css       media queries transversales
 js/
   app.js              punto de entrada: login con Google, luego carga datos y pinta
@@ -914,6 +915,7 @@ js/
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
     components.js          piezas de HTML compartidas (combobox de cliente)
     dom.js                 orquestador: layout fijo + registro de acciones + filtro por rol
+    teclado.js              navegación por teclado de toda la app (atajos, Esc, flechas)
   modules/
     resumen.js, finanzas.js, pedidos.js, cotizaciones.js,
     clientes.js, pendientes.js, config.js, mis-ventas.js (solo rol vendedor)
@@ -958,6 +960,50 @@ Patrones genéricos ya disponibles para cualquier pestaña nueva:
 3. Si necesita estilos propios, crear `css/mi-area.css` y enlazarlo en `index.html`.
 
 Nada más se toca. Los otros módulos ni se enteran.
+
+## Navegación por teclado
+
+Toda la app se puede usar sin mouse. La lógica está en `core/teclado.js`, en
+un solo archivo, y el panel de ayuda que se abre con `?` (o con el botón del
+teclado en la barra superior) lista exactamente los atajos que ese archivo
+implementa — si se agrega uno, se agrega en las dos partes o queda invisible.
+
+| Tecla | Qué hace |
+| --- | --- |
+| `Tab` / `Mayús+Tab` | Elemento siguiente / anterior |
+| `Enter` | Estando en un campo, salta al campo siguiente |
+| `Esc` | Cierra la capa de más arriba: panel de atajos → imagen ampliada → ventana de insumos/productos → avisos → cajón del menú en móvil. Si no hay ninguna, suelta el foco del campo |
+| `Alt` + `1…9`, `0` | Va a esa sección del menú, en el orden en que se ve |
+| `Alt` + `↓` / `↑` | Sección siguiente / anterior |
+| `Alt` + `M` | Pone el foco en el menú lateral |
+| `↑` `↓` `Inicio` `Fin` | Dentro del menú: mover el foco entre secciones |
+| `←` `→` | Dentro del menú: cerrar / abrir la categoría |
+| `/` o `Ctrl+K` | Va al buscador de la sección, si tiene |
+| `Alt` + `B` | Colapsa/expande el menú lateral |
+| `Alt` + `T` | Cambia entre tema claro y oscuro |
+| `?` | Muestra u oculta el panel de atajos |
+
+Tres decisiones que conviene no revertir sin querer:
+
+- **El menú usa *roving tabindex***: solo la sección activa es tabulable
+  (`tabindex="0"`), las demás se alcanzan con las flechas. Sin esto, pasar del
+  menú al contenido costaba doce `Tab`. Se complementa con el enlace "Saltar
+  al contenido", que es el primer elemento tabulable de la página y solo se ve
+  cuando tiene el foco.
+- **Cada botón del menú tiene un `id` estable** (`nav-tab-<clave>`): `render()`
+  reemplaza el DOM entero y solo sabe devolver el foco a elementos con `id`
+  (ver `activeId` allá). Sin el `id`, cada cambio de sección con el teclado
+  perdía el foco y las flechas dejaban de encadenar.
+- **Esc resuelve las capas por selector CSS, no por clave de estado**: cada
+  overlay ya lleva en su `data-action` la acción que lo cierra bien (limpiando
+  su selección, su búsqueda…), así que una ventana nueva que siga el mismo
+  patrón `picker-overlay` queda cubierta sin tocar `core/teclado.js`.
+
+Los atajos con `Alt` funcionan también mientras se escribe en un campo (`Alt`
+no produce texto); las teclas sueltas `/` y `?` no, para que se puedan
+escribir. Nota de navegador: en Firefox para Windows, `Alt`+número está
+tomado por el propio navegador para cambiar de pestaña y no llega a la página
+— ahí sirven `Alt`+`↓`/`↑`, que no chocan con nada.
 
 ## Persistencia
 

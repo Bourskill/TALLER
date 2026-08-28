@@ -78,6 +78,17 @@
 .nav-item.active .nav-icon{opacity:1;}
 .nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
+/* Foco por teclado dentro del menú: el anillo va POR DENTRO del botón
+   (outline-offset negativo) porque la sidebar recorta en horizontal
+   (overflow-x:hidden) y un anillo por fuera quedaba cortado a los lados.
+   Se refuerza con el mismo fondo del hover: el menú es donde más se navega
+   con flechas, y ahí saber dónde se está parado tiene que ser obvio. */
+.nav-item:focus-visible{outline-offset:-2px;background:var(--surface-2);color:var(--ink);}
+.nav-group-head:focus-visible,.sidebar-collapse-btn:focus-visible,.sidebar-logo:focus-visible{outline-offset:-2px;}
+/* El nombre del taller marca su foco con el subrayado punteado de arriba, no
+   con el anillo: es un campo de texto, no un botón. */
+.sidebar-brand:focus-visible{outline:none;}
+
 .sidebar-overlay{display:none;}
 
 /* ==========================================================================

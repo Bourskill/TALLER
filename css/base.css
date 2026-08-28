@@ -2,6 +2,33 @@
 html{scrollbar-color:var(--border-strong) transparent;}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;}
 #app{min-height:100vh;}
+
+/* ---------- foco visible en toda la app ----------
+   Sin esto no se puede navegar con el teclado: los botones se recorren igual
+   con Tab, pero no hay forma de saber en cuál se está parado. Se usa
+   :focus-visible (no :focus) para que el anillo aparezca al navegar con
+   teclado y NO al hacer clic con el mouse, que es cuando estorba. Va acá,
+   una sola vez, y no componente por componente. */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-sm);}
+/* Los campos de formulario ya tienen su propia señal de foco (borde + halo,
+   ver forms.css), así que ahí el anillo sería una segunda línea encima de la
+   primera. */
+input:focus-visible, select:focus-visible, textarea:focus-visible{outline:none;}
+/* El contenedor del contenido recibe el foco desde el enlace "Saltar al
+   contenido"; es un destino, no un control, y no necesita anillo. */
+.main-inner:focus, .main-inner:focus-visible{outline:none;}
+
+/* Enlace de salto: invisible hasta que se tabula sobre él. Deja pasar del
+   menú lateral al contenido de un solo Tab (ver render() en core/dom.js). */
+.skip-link{
+  position:fixed;top:8px;left:8px;z-index:400;
+  transform:translateY(-200%);
+  background:var(--accent);color:#fff;text-decoration:none;
+  font-size:13px;font-weight:700;padding:10px 16px;border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md);
+}
+.skip-link:focus{transform:translateY(0);}
+
 .empty{padding:26px 10px;text-align:center;color:var(--ink-faint);font-size:13px;}
 .empty b{color:var(--ink-soft);}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}

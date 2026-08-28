@@ -1,0 +1,12 @@
+-mejorar apariencia y metodo de categorias en insumos
+-agregar estimacion de tiempos de produccion
+-mejorar los campos de pedido, mas lógica
+-la notificación de guardar cambios en cotización es muy invasiva
+-como en algún momento se van a crear muchas plantillas y variaciones, implementar un mejor sistema de separación, también de experiencia, pueden ser tarjetas con vista previa y adentro toda su info 
+-hice un pedido rápido , pero me salió con estados de producción, porque? (ni siquiera tiene la estética actualizada como cuando se hace desde cotizacion)
+-a la hora de agregar insumos a la cotización, el campo de nombre deje de ser editable, si se quiere algo personalizado que sea desde el botón "insumo personalizado" para eso es
+-mejorar apariencia de graficas en resumen, no tienen mucho estilo  inpacto
+-separar bien los campos de contactos
+-agregar un campo en contactos, como algún distintivo, para recordarlo, por ejemplo poder poner el nombre del equipo al que pertenece
+-guardar en memoria que hay que reutizar elementos, funciones, todo, no estar haciendo redundancias, por ejemplo como lo que pasò con pedidos y sus estados de producción, en una parte se actualizò y en la otra se quedó viejo, cuando debería ser el mismo elemento reutilizable para ambos casos, pedido rápido o desde cotización 
+-pedido/dinero/abono corregir texto y jerarquita, mal css, todo amontonado

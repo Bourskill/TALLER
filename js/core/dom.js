@@ -18,6 +18,7 @@ import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
 import { subirImagenReferencia } from "./drive.js";
+import { initTeclado, renderAtajos, atajosActions } from "./teclado.js";
 
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
@@ -80,6 +81,13 @@ function navGroupsActivo() {
   var session = getSession();
   return (session && session.rol === "vendedor") ? NAV_GROUPS_VENDEDOR : NAV_GROUPS_ADMIN;
 }
+// Orden real de las pestañas tal como se ven en el menú, aplanando las
+// categorías. Es lo que usan Alt+1…0 y Alt+↑/↓ (ver core/teclado.js) para que
+// "la tercera sección" sea la tercera que se VE, no la tercera de TABS — y
+// para que un vendedor solo pueda saltar a las suyas.
+function pestanasVisibles() {
+  return navGroupsActivo().reduce(function (acc, g) { return acc.concat(g[2]); }, []);
+}
 var TAB_LABEL = TABS.reduce(function (acc, t) { acc[t[0]] = t[1]; return acc; }, {});
 
 // Timers de debounce por campo de búsqueda en vivo (ver bindEvents). Vive a nivel
@@ -89,18 +97,26 @@ var liveFilterTimers = {};
 // Acciones que no pertenecen a un módulo de pestaña porque son transversales
 // (cambiar de pestaña, o vincular un cliente sugerido desde el combobox
 // compartido entre Pedidos y Cotizaciones).
+// Cambiar de pestaña. Extraído de la acción "tab" porque el teclado
+// (Alt+1…0, Alt+↑/↓ — ver core/teclado.js) tiene que hacer exactamente lo
+// mismo que un clic en el menú, incluidos los reseteos de filtros de abajo.
+function irAPestana(key) {
+  if (!key) return;
+  state.tab = key;
+  state.sidebarMobileOpen = false; // al elegir una pestaña en móvil, cerrar el cajón
+  if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; }
+  if (state.tab !== "pedidos") { state.filtroPedidosVista = "activos"; }
+  // Nota: `cotizacionesVista` NO se resetea acá — arranca en "nueva" (ver
+  // DEFAULT en store.js) para que la primera vez que se entra a
+  // Cotizaciones reciba con el formulario, pero después queda como el
+  // usuario la haya dejado. Resetearla en cada clic de pestaña rompía ir y
+  // volver de Pedidos a seguir editando algo en el historial.
+  notify();
+}
+
 var coreActions = {
   tab: function (el) {
-    state.tab = el.getAttribute("data-tab");
-    state.sidebarMobileOpen = false; // al elegir una pestaña en móvil, cerrar el cajón
-    if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; }
-    if (state.tab !== "pedidos") { state.filtroPedidosVista = "activos"; }
-    // Nota: `cotizacionesVista` NO se resetea acá — arranca en "nueva" (ver
-    // DEFAULT en store.js) para que la primera vez que se entra a
-    // Cotizaciones reciba con el formulario, pero después queda como el
-    // usuario la haya dejado. Resetearla en cada clic de pestaña rompía ir y
-    // volver de Pedidos a seguir editando algo en el historial.
-    notify();
+    irAPestana(el.getAttribute("data-tab"));
   },
   "kpi-nav": function (el) {
     state.tab = el.getAttribute("data-tab");
@@ -249,7 +265,7 @@ var coreActions = {
 
 var actionRegistry = Object.assign(
   {},
-  coreActions,
+  coreActions, atajosActions,
   resumen.actions, finanzas.actions, pedidos.actions, cotizaciones.actions,
   catalogo.actions, productos.actions, plantillas.actions,
   clientes.actions, pendientes.actions, notas.actions, config.actions,
@@ -290,12 +306,18 @@ export function render() {
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
+      // Primer elemento tabulable de la app: con el menú lateral navegándose
+      // por flechas (roving tabindex, ver renderSidebar), este enlace es la
+      // forma de saltarse el menú y la topbar de un solo Tab. Solo se ve
+      // cuando tiene el foco.
+      '<a class="skip-link" href="#contenido">Saltar al contenido</a>' +
       '<div class="shell' + (state.ui.sidebarCollapsed ? " sidebar-collapsed" : "") + (state.sidebarMobileOpen ? " sidebar-mobile-open" : "") + '">' +
       renderSidebar() +
       '<div class="sidebar-overlay" data-action="toggle-sidebar-mobile"></div>' +
-      '<main class="main"><div class="main-inner">' + mainInner + "</div></main>" +
+      '<main class="main"><div class="main-inner" id="contenido" tabindex="-1">' + mainInner + "</div></main>" +
       "</div>" +
       renderImagenPreview() +
+      renderAtajos() +
       renderToast() +
       renderDatalists();
 
@@ -366,13 +388,23 @@ function renderSidebar() {
     "</div>" +
     '<button class="sidebar-collapse-btn" data-action="toggle-sidebar" title="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '" aria-label="' + (collapsed ? "Expandir menú" : "Colapsar menú") + '">' + collapseIcon() + "</button>" +
     "</div>" +
-    '<nav class="nav">';
+    '<nav class="nav" aria-label="Secciones">';
+
+  // Tabindex "rotatorio" (roving tabindex, el patrón estándar de un menú):
+  // solo la sección ACTIVA es tabulable, las demás se alcanzan con ↑/↓ desde
+  // ella (ver core/teclado.js). Sin esto, entrar al contenido desde el menú
+  // costaba pasar por las doce secciones una por una con Tab.
+  var visibles = pestanasVisibles();
+  var conFoco = visibles.indexOf(state.tab) >= 0 ? state.tab : visibles[0];
 
   navGroupsActivo().forEach(function (g) {
     var groupKey = g[0], groupLabel = g[1], tabs = g[2];
     var open = !!state.ui.navGroups[groupKey];
     html += '<div class="nav-group' + (open ? " open" : "") + '">';
-    html += '<button class="nav-group-head" data-action="toggle-nav-group" data-group="' + groupKey + '">' +
+    // El encabezado de categoría queda fuera del recorrido de Tab a propósito:
+    // se pliega/despliega con ←/→ estando en cualquiera de sus secciones, así
+    // que tabularlo aparte solo agregaría paradas sin destino.
+    html += '<button class="nav-group-head" data-action="toggle-nav-group" data-group="' + groupKey + '" tabindex="-1" aria-expanded="' + (open ? "true" : "false") + '">' +
       '<span class="nav-group-title">' + esc(groupLabel) + "</span>" +
       '<span class="nav-group-chevron">' + chevronIcon() + "</span>" +
       "</button>";
@@ -380,7 +412,8 @@ function renderSidebar() {
     tabs.forEach(function (key) {
       var label = TAB_LABEL[key];
       var active = state.tab === key;
-      html += '<button class="nav-item' + (active ? " active" : "") + '" data-action="tab" data-tab="' + key + '" title="' + esc(label) + '">' +
+      html += '<button class="nav-item' + (active ? " active" : "") + '" id="nav-tab-' + key + '" data-action="tab" data-tab="' + key + '" title="' + esc(label) + '"' +
+        ' tabindex="' + (key === conFoco ? "0" : "-1") + '"' + (active ? ' aria-current="page"' : "") + ">" +
         '<span class="nav-icon">' + (ICONS[key] || "") + "</span>" +
         '<span class="nav-label">' + esc(label) + "</span>" +
         "</button>";
@@ -409,6 +442,10 @@ function moonIcon() {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z"/></svg>';
 }
 
+function tecladoIcon() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6.5 9.5h.01M10 9.5h.01M13.5 9.5h.01M17 9.5h.01M6.5 12.5h.01M10 12.5h.01M13.5 12.5h.01M17 12.5h.01M8.5 15.5h7"/></svg>';
+}
+
 function logoutIcon() {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17l5-5-5-5"/><path d="M20 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg>';
 }
@@ -426,6 +463,7 @@ function renderTopbar() {
     renderIndicadorGuardado() +
     renderCampanita() +
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
+    '<button class="theme-toggle-btn atajos-btn" data-action="abrir-atajos" title="Atajos de teclado (tecla ?)" aria-label="Atajos de teclado">' + tecladoIcon() + "</button>" +
     '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
     '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
     "</div>";
@@ -653,27 +691,12 @@ function dispatch(action, el) {
 // necesite importar este archivo.
 document.addEventListener("app:render", render);
 
-// Navegación por teclado (y por "Enter/Ir" del teclado táctil) en TODA la
-// app: al presionar Enter en un campo, salta al siguiente campo visible en
-// vez de no hacer nada (o de disparar un submit accidental). Se registra
-// UNA sola vez sobre `document` (no dentro de bindEvents, que se ejecuta en
-// cada render) porque el contenedor #app persiste entre renders aunque su
-// contenido interno se reemplace por completo.
-document.addEventListener("keydown", function (e) {
-  if (e.key !== "Enter") return;
-  var el = e.target;
-  if (!el || (el.tagName !== "INPUT" && el.tagName !== "SELECT")) return;
-  if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return; // su Enter/Espacio nativo ya funciona bien
-  var app = document.getElementById("app");
-  if (!app || !app.contains(el)) return;
-  e.preventDefault();
-  var focusables = Array.prototype.slice.call(
-    app.querySelectorAll('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])')
-  ).filter(function (f) { return f.offsetParent !== null; }); // solo los visibles
-  var idx = focusables.indexOf(el);
-  if (idx >= 0 && idx < focusables.length - 1) {
-    var next = focusables[idx + 1];
-    next.focus();
-    if (typeof next.select === "function" && next.tagName === "INPUT") next.select();
-  }
+// Navegación por teclado de toda la app (Enter entre campos, Esc para cerrar,
+// Alt+número para saltar de sección, flechas en el menú…): vive en
+// core/teclado.js. Acá solo se le entregan las tres cosas que necesita de
+// este archivo y que él no puede importar sin crear un ciclo.
+initTeclado({
+  pestanas: pestanasVisibles,
+  irAPestana: irAPestana,
+  dispatch: dispatch
 });
