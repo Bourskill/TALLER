@@ -146,7 +146,22 @@ export const TIPOS_COSTO = {
   // deja de pertenecer a una referencia y pasa a la lista global de la
   // cotización: aparece al final de TODAS ellas, y su costo por prenda es el
   // promedio sobre la suma de prendas de todo el pedido.
-  global: { label: "Costo global del pedido", ayuda: "costo = costo total ÷ todas las prendas del pedido (de todas las referencias)" }
+  global: { label: "Costo global del pedido", ayuda: "costo = costo total ÷ todas las prendas del pedido (de todas las referencias)" },
+  // Se le COBRA al cliente como línea aparte (diseño, arreglos, un bordado
+  // suelto). Es lo que separa este tipo de "global": un costo global no se
+  // puede atribuir a nada, así que se reparte entre las prendas y se recupera
+  // subiéndoles el precio; esto sí se atribuye —a sí mismo—, tiene precio
+  // propio y sale en la cotización del cliente como su propia fila. Por eso
+  // NO se reparte entre las prendas: hacerlo sería cobrarlo dos veces.
+  //
+  // `soloCotizacion` lo esconde de los desplegables de Catálogo, Plantillas y
+  // Productos: allá no hay ninguna cotización a la que cobrarle, así que
+  // elegirlo no significaría nada. Ver renderTipoCostoOptions.
+  servicio_cobrado: {
+    label: "Se cobra aparte al cliente",
+    ayuda: "no se reparte entre las prendas: sale como su propia línea en la cotización, con su precio",
+    soloCotizacion: true
+  }
 };
 
 // Unidad reservada para lo que se paga pero no se compra en ningún lado:

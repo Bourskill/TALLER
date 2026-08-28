@@ -942,6 +942,130 @@ auth.logout();
 state.tab = "resumen";
 render();
 
+// ---------------------------------------------------------------------------
+// Servicios que se le cobran aparte al cliente (el diseño). Lo que se prueba
+// no es que cada cálculo funcione por separado, sino que los MISMOS números
+// sobrevivan cotización → pedido → líneas → reporte, con igualdad exacta.
+// ---------------------------------------------------------------------------
+const calcMod = await import("../js/core/calc.js");
+
+state.tab = "cotizaciones";
+state.cotizacionEditando = "";
+render();
+setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Diseño");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Pedido con diseño cobrado");
+click('[data-action="add-cotizacion"]');
+const cotD = state.cotizaciones[0];
+const cotDId = cotD.id;
+const refDId = cotD.referencias[0].id;
+
+// Una referencia sencilla: 10 prendas a $50.000, con un insumo de $20.000 por
+// prenda. Números redondos a propósito: cualquier descuadre salta a la vista.
+setChange('[data-ref-id="' + refDId + '"] input[data-campo="cantidadPedida"]', "10");
+setChange('[data-ref-id="' + refDId + '"] input[data-campo="precioVenta"]', "50000");
+setChange('[data-ref-id="' + refDId + '"] input[data-campo="nombre"]', "Camiseta");
+click('[data-action="add-insumo-personalizado"][data-cot="' + cotDId + '"][data-ref="' + refDId + '"]');
+const ultimoInsumo = () => { const is = state.cotizaciones.find(c => c.id === cotDId).referencias[0].insumos; return is[is.length - 1].id; };
+const insDId = ultimoInsumo();
+setChange('[data-ref-id="' + refDId + '"] input[data-ins="' + insDId + '"][data-campo="costo"]', "20000");
+setChange('[data-ref-id="' + refDId + '"] select[data-ins="' + insDId + '"][data-campo="tipo"]', "por_prenda");
+
+// Un costo global de verdad (domicilio $30.000): no se cobra aparte, se
+// reparte entre las prendas. Sirve para comprobar que el diseño NO lo diluye.
+// Se crea como se crea de verdad: un insumo al que se le elige el tipo
+// "Costo global del pedido".
+click('[data-action="add-insumo-personalizado"][data-cot="' + cotDId + '"][data-ref="' + refDId + '"]');
+const globDId = ultimoInsumo();
+setChange('[data-ref-id="' + refDId + '"] input[data-ins="' + globDId + '"][data-campo="nombre"]', "Domicilio");
+setChange('[data-ref-id="' + refDId + '"] input[data-ins="' + globDId + '"][data-campo="costo"]', "30000");
+setChange('[data-ref-id="' + refDId + '"] select[data-ins="' + globDId + '"][data-campo="tipo"]', "global");
+assert(state.cotizaciones.find(c => c.id === cotDId).costosGlobales.length === 1, "el domicilio queda como costo global del pedido");
+
+// El diseño: nace como insumo de la referencia y se convierte en servicio
+// cobrado eligiéndole el tipo de costo, que es el gesto real del usuario.
+click('[data-action="add-insumo-personalizado"][data-cot="' + cotDId + '"][data-ref="' + refDId + '"]');
+const insDisId = ultimoInsumo();
+setChange('[data-ref-id="' + refDId + '"] input[data-ins="' + insDisId + '"][data-campo="nombre"]', "Diseño");
+setChange('[data-ref-id="' + refDId + '"] input[data-ins="' + insDisId + '"][data-campo="costo"]', "50000");
+setChange('[data-ref-id="' + refDId + '"] select[data-ins="' + insDisId + '"][data-campo="tipo"]', "servicio_cobrado");
+
+let cotDs = state.cotizaciones.find(c => c.id === cotDId);
+assert(cotDs.referencias[0].insumos.length === 1, "al cobrarse aparte, el diseño deja de ser un insumo de la prenda");
+assert(cotDs.serviciosCobrados.length === 1 && cotDs.serviciosCobrados[0].costo === 50000, "pasa a la lista de servicios cobrados, conservando lo que cuesta");
+assert(cotDs.serviciosCobrados[0].precio === 0, "nace sin precio: cuánto cobrar es una decisión aparte, no se hereda del costo");
+
+setChange('[data-cot="' + cotDId + '"][data-servicio="' + insDisId + '"][data-campo="precio"]', "80000");
+cotDs = state.cotizaciones.find(c => c.id === cotDId);
+
+// --- los totales de la cotización ---
+const tD = calcMod.calcCotizacionTotales(cotDs);
+assert(tD.precioPrendas === 500000, "el precio de las prendas son 10 × $50.000, sin el diseño");
+assert(tD.precioServicios === 80000, "el diseño aporta su precio aparte");
+assert(tD.precioTotal === 580000, "el total cotizado suma prendas + diseño");
+assert(tD.costoTotal === 200000 + 30000 + 50000, "el costo total suma insumos + domicilio + lo que cuesta el diseño");
+assert(tD.gananciaTotal === 580000 - 280000, "la ganancia es exactamente precio total − costo total");
+
+// El diseño NO es una prenda: no diluye el reparto del domicilio ni infla la
+// cantidad. Esto es justo lo que se rompía si se modelaba como una referencia.
+assert(calcMod.calcUnidadesCotizacion(cotDs) === 10, "el diseño no cuenta como una prenda más del pedido");
+assert(calcMod.calcCostoGlobalPorPrenda(cotDs) === 3000, "el domicilio se reparte entre las 10 prendas, no entre 11");
+
+// --- comisión: se calcula sobre las prendas, no sobre el diseño ---
+// El formulario del vendedor está plegado por defecto; acá lo que se prueba
+// es la fórmula de la comisión, no el desplegable, así que se asigna directo.
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotDId
+  ? Object.assign({}, c, { vendedor: { nombre: "Vendedora", tipo: "porcentaje", valor: 10, estado: "pendiente" } })
+  : c);
+cotDs = state.cotizaciones.find(c => c.id === cotDId);
+assert(calcMod.calcComisionValorCot(cotDs) === 50000, "la comisión del 10% se calcula sobre las prendas ($500.000), no sobre el total facturado");
+
+// --- la lista de compras ve el diseño como algo que hay que PAGAR ---
+const comprasD = calcMod.calcListaCompras(cotDs);
+const lineaDiseño = comprasD.find(c => c.nombre === "Diseño");
+assert(!!lineaDiseño, "el diseño aparece en la lista de compras: a quien lo hace hay que pagarle");
+assert(lineaDiseño.costoTotal === 50000, "entra con lo que CUESTA ($50.000), nunca con lo que se cobra ($80.000)");
+
+// --- el PDF del cliente lo ve como su propia línea ---
+// (se comprueba sobre los datos que alimentan la tabla, no generando el PDF:
+// jsPDF no está cargado en este entorno)
+assert(cotDs.serviciosCobrados[0].nombre === "Diseño", "el servicio lleva el nombre con el que sale en la cotización del cliente");
+
+// --- convertir en pedido: los números tienen que sobrevivir intactos ---
+click('[data-action="guardar-cotizacion"][data-id="' + cotDId + '"]');
+click('[data-action="convertir-cotizacion"][data-id="' + cotDId + '"]');
+const pedD = state.pedidos.find(p => p.cotizacionId === cotDId);
+assert(!!pedD, "la cotización se convierte en pedido");
+assert(pedD.total === tD.precioTotal, "el total del pedido es EXACTAMENTE el total cotizado (prendas + diseño)");
+assert(pedD.costo === tD.costoTotal, "y su costo es exactamente el costo cotizado");
+assert(pedD.cantidad === "10", "la cantidad del pedido cuenta prendas: el diseño no suma una unidad");
+
+const lineaServicio = pedD.lineas.find(l => l.esServicioCobrado);
+assert(!!lineaServicio, "el diseño viaja al pedido como una línea propia, marcada como servicio cobrado");
+assert(lineaServicio.precioUnitario === 80000 && lineaServicio.costoUnitario === 50000, "esa línea lleva su precio y su costo");
+assert(lineaServicio.costoIndirectoUnitario === 0, "y no carga con nada del domicilio: no es una prenda");
+
+const totLineas = calcMod.calcTotalesLineasPedido(pedD.lineas);
+assert(totLineas.precioTotal === pedD.total, "la suma de las líneas da exactamente el total del pedido");
+assert(totLineas.costoTotal === pedD.costo, "y la suma de sus costos da exactamente el costo del pedido");
+assert(calcMod.calcComisionValor(pedD) === calcMod.calcComisionValorCot(cotDs), "la comisión no cambia al convertir: misma base antes y después");
+
+// --- el reporte de productos vendidos cuadra con el pedido ---
+const filasD = calcMod.calcProductosVendidosRango("2000-01-01", "2100-12-31").filter(f => f.numeroOp === pedD.numeroOp);
+const precioReporte = filasD.reduce((a, f) => a + f.precioTotal, 0);
+const costoReporte = filasD.reduce((a, f) => a + f.costoTotal, 0);
+assert(precioReporte === pedD.total, "lo que el reporte dice que se vendió es exactamente el total del pedido");
+assert(costoReporte === pedD.costo, "y lo que dice que costó es exactamente el costo del pedido");
+
+// --- el camino de vuelta: dejar de cobrarlo aparte ---
+state.tab = "cotizaciones";
+state.cotizacionEditando = cotDId;
+render();
+setChange('[data-cot="' + cotDId + '"][data-servicio="' + insDisId + '"][data-campo="tipo"]', "global");
+cotDs = state.cotizaciones.find(c => c.id === cotDId);
+assert(cotDs.serviciosCobrados.length === 0 && cotDs.costosGlobales.length === 2, "devolverle un tipo de costo normal lo saca de los servicios cobrados");
+assert(calcMod.calcCotizacionTotales(cotDs).precioTotal === 500000, "al dejar de cobrarse aparte, su precio desaparece del total");
+assert(calcMod.calcCotizacionTotales(cotDs).costoTotal === 280000, "pero su costo sigue contando: se volvió a repartir entre las prendas");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

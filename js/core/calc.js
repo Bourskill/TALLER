@@ -782,13 +782,29 @@ export function calcGastosFijosMensuales() {
 // El vendedor puede definirse por % (sobre el total) o por valor fijo. Los
 // pedidos antiguos guardaban solo "porcentaje": se sigue leyendo por
 // compatibilidad si no hay "tipo"/"valor" nuevos.
+// Base del porcentaje: el total del pedido MENOS lo que se cobró como
+// servicio aparte (diseño, arreglos). Un servicio cobrado es en buena parte
+// un costo que solo pasa de largo —se le paga a quien lo hace—, así que
+// comisionarlo puede dejar esa línea en pérdida. Mismo criterio que nadie
+// aplica a un domicilio. Es el espejo exacto de `precioPrendas` en
+// calcCotizacionTotales, para que la comisión no cambie al convertir.
+//
+// Un pedido sin líneas de servicio (todos los que existían antes de esto, y
+// cualquiera creado a mano sin servicios) da exactamente `p.total`: el número
+// de siempre.
+export function calcBaseComision(p) {
+  var servicios = ((p && p.lineas) || []).reduce(function (a, l) {
+    return a + (l.esServicioCobrado ? num(l.precioUnitario) * num(l.cantidad) : 0);
+  }, 0);
+  return num(p.total) - servicios;
+}
 export function calcComisionValor(p) {
   var v = p.vendedor;
   if (!v || !v.nombre) return 0;
   var tipo = v.tipo || "porcentaje";
   if (tipo === "fijo") return num(v.valor);
   var pct = v.porcentaje != null ? num(v.porcentaje) : num(v.valor);
-  return num(p.total) * (pct / 100);
+  return calcBaseComision(p) * (pct / 100);
 }
 export function calcComisionesPendientes() {
   return state.pedidos.reduce(function (a, p) {
@@ -801,14 +817,17 @@ export function calcComisionesPendientes() {
   }, 0);
 }
 // Comisión definida directamente en una cotización (antes de convertirse en
-// pedido). Se calcula sobre el precio total cotizado.
+// pedido). Se calcula sobre el precio de las PRENDAS, no sobre el total
+// facturado: los servicios que se cobran aparte (diseño) quedan fuera, igual
+// que en el pedido resultante (ver calcBaseComision). Sin servicios,
+// precioPrendas === precioTotal y el número es el de siempre.
 export function calcComisionValorCot(cot) {
   var v = cot.vendedor;
   if (!v || !v.nombre) return 0;
   var tipo = v.tipo || "porcentaje";
   if (tipo === "fijo") return num(v.valor);
   var totales = calcCotizacionTotales(cot);
-  return totales.precioTotal * (num(v.valor) / 100);
+  return totales.precioPrendas * (num(v.valor) / 100);
 }
 // Solo cuenta cotizaciones aún NO convertidas: una vez convertida, la comisión
 // vive en el pedido resultante (se copia al convertir) y ya se cuenta en
@@ -1241,6 +1260,30 @@ export function calcRefTotales(ref) {
 export function calcCostosGlobales(cot) {
   return ((cot && cot.costosGlobales) || []).reduce(function (a, c) { return a + num(c.costo); }, 0);
 }
+
+// Servicios que se le COBRAN aparte al cliente: el diseño, un arreglo, un
+// bordado suelto. Tienen las dos caras — lo que se cobra y lo que cuesta
+// producirlo — y por eso no son un costo global:
+//
+//   - un costo global (domicilio, envío a sublimar) no se puede atribuir a
+//     nada, así que se reparte entre todas las prendas y se recupera dentro
+//     del precio de ellas;
+//   - un servicio cobrado SÍ se atribuye —a sí mismo—, sale como su propia
+//     línea en la cotización del cliente, y NO se reparte entre las prendas.
+//     Repartirlo además de cobrarlo sería cobrarlo dos veces, y dejaría el
+//     margen de cada prenda peor de lo que es.
+//
+// No cuentan como prendas en ningún lado: no entran en
+// calcUnidadesCotizacion, así que no diluyen el reparto de los costos
+// globales ni inflan la cantidad del pedido.
+export function calcServiciosCobrados(cot) {
+  return ((cot && cot.serviciosCobrados) || []).reduce(function (a, s) {
+    a.precio += num(s.precio);
+    a.costo += num(s.costo);
+    return a;
+  }, { precio: 0, costo: 0 });
+}
+
 export function calcCotizacionTotales(cot) {
   var acc = { costoTotal: 0, precioTotal: 0, gananciaTotal: 0 };
   (cot.referencias || []).forEach(function (ref) {
@@ -1251,6 +1294,17 @@ export function calcCotizacionTotales(cot) {
   acc.costosGlobales = globales;
   acc.costoTotal += globales;
   acc.gananciaTotal -= globales;
+  // Precio de las PRENDAS solamente, ya con los globales adentro del costo.
+  // Se guarda antes de sumar los servicios porque es la base de la comisión
+  // del vendedor (ver calcComisionValorCot): lo que se le cobra al cliente
+  // por el diseño no es margen que el vendedor haya generado.
+  acc.precioPrendas = acc.precioTotal;
+  var serv = calcServiciosCobrados(cot);
+  acc.precioServicios = serv.precio;
+  acc.costoServicios = serv.costo;
+  acc.precioTotal += serv.precio;
+  acc.costoTotal += serv.costo;
+  acc.gananciaTotal += serv.precio - serv.costo;
   acc.margenPct = acc.precioTotal > 0 ? (acc.gananciaTotal / acc.precioTotal * 100) : 0;
   return acc;
 }
@@ -1381,6 +1435,19 @@ export function calcListaCompras(cot) {
       esServicio: esInsumoServicio(g),
       proveedorId: g.proveedorId || "",
       cantidadFisica: num(g.cantidad) || 0, costoTotal: num(g.costo), refs: []
+    };
+  });
+  // Los servicios que se le cobran al cliente también hay que pagarlos (al
+  // diseñador, al bordador), así que son una compra más del pedido. Entran
+  // con su COSTO, nunca con su precio: lo que se cobra no se compra.
+  ((cot && cot.serviciosCobrados) || []).forEach(function (s) {
+    var key = "servicio|" + s.id;
+    mapa[key] = {
+      clave: key, nombre: (s.nombre || "Servicio").trim(), unidad: "",
+      tipo: "servicio_cobrado", esGlobal: true, esServicioCobrado: true,
+      esServicio: true, // no se compra por cantidad: "1 UND de diseño" no le sirve a nadie
+      proveedorId: s.proveedorId || "",
+      cantidadFisica: 0, costoTotal: num(s.costo), refs: []
     };
   });
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });

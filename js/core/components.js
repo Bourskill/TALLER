@@ -20,8 +20,15 @@ export function renderHelp(texto, alinear) {
     "</span>";
 }
 
-export function renderTipoCostoOptions(current) {
-  return Object.keys(TIPOS_COSTO).map(function (k) {
+// `enCotizacion` habilita los tipos que solo tienen sentido dentro de una
+// cotización (ver `soloCotizacion` en TIPOS_COSTO): en Catálogo, Plantillas o
+// Productos no hay a quién cobrarle, así que ahí se esconden. El valor actual
+// siempre se incluye aunque esté filtrado — si no, un insumo guardado con ese
+// tipo se vería en pantalla como si tuviera otro.
+export function renderTipoCostoOptions(current, enCotizacion) {
+  return Object.keys(TIPOS_COSTO).filter(function (k) {
+    return enCotizacion || k === current || !TIPOS_COSTO[k].soloCotizacion;
+  }).map(function (k) {
     return '<option value="' + k + '" ' + (k === current ? "selected" : "") + '>' + esc(TIPOS_COSTO[k].label) + "</option>";
   }).join("");
 }

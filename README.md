@@ -711,6 +711,47 @@ y (2) no había forma de saber de un vistazo de dónde salió un movimiento.
   tocar el pedido real — la fila de edición ya no ofrece esa posibilidad
   para movimientos con origen conocido.
 
+## Tres formas de costear, y una de cobrar: costo global vs. servicio cobrado
+
+Un pedido tiene costos que no son de ninguna prenda en particular. Hasta acá
+había una sola forma de manejarlos —el **costo global del pedido**— y desde
+que el diseño se empezó a cobrar aparte hay dos, que no se deben confundir:
+
+| | Costo global del pedido | Se cobra aparte al cliente |
+| --- | --- | --- |
+| Ejemplos | Domicilio, envío a sublimar | Diseño, un arreglo, un bordado suelto |
+| Dónde vive | `cot.costosGlobales` | `cot.serviciosCobrados` |
+| Tiene precio propio | No | Sí (`precio`) |
+| Se reparte entre las prendas | Sí, entre todas | **No** |
+| Sale en la cotización del cliente | No | Sí, como su propia línea |
+| Cuenta como prenda | No | No |
+
+La regla que separa a los dos: **un costo global no se puede atribuir a nada,
+así que se reparte y se recupera dentro del precio de las prendas; un servicio
+cobrado sí se atribuye —a sí mismo—, tiene precio propio y por eso NO se
+reparte.** Repartirlo además de cobrarlo sería cobrarlo dos veces, y dejaría el
+margen de cada prenda peor de lo que realmente es.
+
+Un insumo se convierte en cualquiera de los dos eligiéndole su **tipo de
+costo** (mismo gesto de siempre), y se puede devolver por el mismo camino. Al
+volverse servicio cobrado conserva su costo y nace con precio 0: cuánto cobrar
+es una decisión aparte y no se hereda de lo que cuesta.
+
+**La comisión del vendedor se calcula sobre las prendas, no sobre el total
+facturado** (`precioPrendas` en `calcCotizacionTotales`, `calcBaseComision` en
+el pedido). Un servicio cobrado es en buena parte un costo que solo pasa de
+largo —hay que pagarle a quien lo hace—, así que comisionarlo puede dejar esa
+línea en pérdida; es el mismo criterio que nadie aplica a un domicilio. Una
+cotización sin servicios da exactamente el mismo número de siempre.
+
+El IVA sí aplica sobre todo lo facturado, servicios incluidos: se calcula
+sobre el subtotal, que ya los trae.
+
+Lo que hay que respetar al tocar esto (ver el test de humo, que lo afirma con
+igualdad exacta): el total y el costo de la cotización, la suma de las líneas
+del pedido, y lo que reporta "productos vendidos" tienen que dar **el mismo
+número**, antes y después de convertir.
+
 ## Cotizaciones: modo demo + la cantidad sigue al listado de tallas
 
 Dos ajustes chicos, pero que tocan dinero, así que van documentados aparte:

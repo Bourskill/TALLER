@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -716,11 +716,54 @@ function renderFilasGlobales(cotId, ref) {
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
-      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global") + "</select>" +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global", true) + "</select>" +
       // La cantidad no aplica: se paga una vez, no por prenda.
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="1" disabled />' +
       '<span class="mobile-th">Costo x prenda</span><span class="amount" title="' + fmt(g.costo) + " entre " + unidades + ' prenda(s) del pedido">' + fmt(calcCostoPrendaGlobal(cot, g)) + "</span>" +
       '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '">✕</button>' +
+      "</div>";
+  });
+  return html;
+}
+
+// Servicios que se le COBRAN aparte al cliente (el diseño, un arreglo, un
+// bordado suelto). Se ven al final de la tabla de insumos igual que los
+// costos globales, pero son otra cosa y por eso van en su propio bloque: un
+// costo global se reparte entre las prendas y se recupera dentro del precio
+// de ellas; esto sale como su propia línea en la cotización del cliente, con
+// su precio, y NO se reparte — repartirlo además de cobrarlo sería cobrarlo
+// dos veces y dejaría el margen de cada prenda peor de lo que es.
+//
+// Un insumo se convierte en servicio cobrado eligiéndole el tipo de costo
+// "Se cobra aparte al cliente", igual que con los globales.
+function renderFilasServicios(cotId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var servicios = (cot && cot.serviciosCobrados) || [];
+  if (!servicios.length) return "";
+  var tot = calcServiciosCobrados(cot);
+  var html = '<div class="ins-row-separador">' +
+    '<span class="ins-row-separador-nota">Se le cobra aparte al cliente' +
+    renderHelp("Sale como su propia línea en la cotización del cliente, aparte de las prendas: suma " + fmt(tot.precio) +
+      " al total. Su costo (" + fmt(tot.costo) + ") es lo que te cuesta a ti producirlo, y NO se reparte entre las prendas — " +
+      "si se repartiera lo estarías cobrando dos veces. La diferencia es la ganancia de esta línea.") +
+    "</span></div>" +
+    // Encabezado propio: estas filas NO significan lo mismo que las de
+    // arriba (las columnas 5 y 6 son precio y ganancia, no cantidad y costo
+    // por prenda), así que reusar el encabezado de la tabla de insumos las
+    // haría leer al revés.
+    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+    "<span>Servicio</span><span>Unidad</span><span>Te cuesta</span><span>Tipo de costo</span><span>Le cobras</span><span>Ganancia</span><span></span></div>";
+  servicios.forEach(function (s) {
+    var attrs = ' data-action-change="set-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '"';
+    var ganancia = num(s.precio) - num(s.costo);
+    html += '<div class="ins-row servicio" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+      '<span class="mobile-th">Servicio</span><input class="mini-input" style="width:100%" placeholder="Ej. diseño" value="' + esc(s.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0." />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
+      '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
+      '<span class="mobile-th">Ganancia</span><span class="amount' + (ganancia < 0 ? " neg" : "") + '" title="Lo que le cobras menos lo que te cuesta">' + fmt(ganancia) + "</span>" +
+      '<button class="btn danger small" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '">✕</button>' +
       "</div>";
   });
   return html;
@@ -782,7 +825,7 @@ function renderRefCard(cotId, ref) {
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
-      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
@@ -790,6 +833,7 @@ function renderRefCard(cotId, ref) {
   });
   if ((ref.insumos || []).length === 0) { html += '<div class="empty" style="padding:8px 0;">Sin insumos aún.</div>'; }
   html += renderFilasGlobales(cotId, ref);
+  html += renderFilasServicios(cotId);
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
@@ -1006,7 +1050,7 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!exigirCampos([["Cliente", fc.cliente], ["Descripción", fc.descripcion]])) return;
-    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, fechaEntrega: fc.fechaEntrega || "", referencias: [nuevaReferencia()], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, fechaEntrega: fc.fechaEntrega || "", referencias: [nuevaReferencia()], costosGlobales: [], serviciosCobrados: [], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
     state.cotizaciones.unshift(nueva);
     state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" };
     // Se queda en esta misma pestaña, ahora mostrando el detalle completo de
@@ -1338,6 +1382,13 @@ export var actions = {
       moverInsumoAGlobal(cotId, refId, insId);
       return;
     }
+    // Y "Se cobra aparte al cliente" lo saca de la referencia hacia la lista
+    // de servicios cobrados: deja de ser un costo escondido en el precio de
+    // la prenda y pasa a ser una línea propia de la cotización.
+    if (campo === "tipo" && valor === "servicio_cobrado") {
+      moverInsumoAServicio(cotId, refId, insId);
+      return;
+    }
     mapRef(cotId, refId, function (r) {
       var insumos = (r.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
@@ -1548,6 +1599,10 @@ export var actions = {
     var valor = campo === "costo" ? num(el.value) : el.value;
     // Devolverle un tipo normal lo saca de la lista global y lo baja a la
     // referencia que se esté viendo: vuelve a ser un insumo de esa prenda.
+    if (campo === "tipo" && valor === "servicio_cobrado") {
+      moverGlobalAServicio(cotId, gId);
+      return;
+    }
     if (campo === "tipo" && valor !== "global") {
       moverGlobalAInsumo(cotId, gId, valor);
       return;
@@ -1561,6 +1616,35 @@ export var actions = {
           return Object.assign({}, g, patch);
         })
       });
+    });
+    marcarSucia(cotId);
+  },
+  "set-servicio-cobrado": function (el) {
+    var cotId = el.getAttribute("data-cot"), sId = el.getAttribute("data-servicio"), campo = el.getAttribute("data-campo");
+    var valor = (campo === "costo" || campo === "precio") ? num(el.value) : el.value;
+    // Devolverle un tipo normal lo saca de la lista de servicios: vuelve a
+    // ser un costo (global, o un insumo de la referencia que se esté viendo).
+    if (campo === "tipo" && valor !== "servicio_cobrado") {
+      moverServicioACosto(cotId, sId, valor);
+      return;
+    }
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (c.id !== cotId) return c;
+      return Object.assign({}, c, {
+        serviciosCobrados: (c.serviciosCobrados || []).map(function (s) {
+          if (s.id !== sId) return s;
+          var patch = {}; patch[campo] = valor;
+          return Object.assign({}, s, patch);
+        })
+      });
+    });
+    marcarSucia(cotId);
+  },
+  "remove-servicio-cobrado": function (el) {
+    var cotId = el.getAttribute("data-cot"), sId = el.getAttribute("data-servicio");
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (c.id !== cotId) return c;
+      return Object.assign({}, c, { serviciosCobrados: (c.serviciosCobrados || []).filter(function (s) { return s.id !== sId; }) });
     });
     marcarSucia(cotId);
   },
@@ -2006,6 +2090,23 @@ function lineasDeCotizacion(cot) {
   });
   lineas = lineas.filter(function (l) { return num(l.cantidad) > 0; });
   repartirCostosGlobales(cot, lineas);
+  // Los servicios cobrados se agregan DESPUÉS del reparto, a propósito: no
+  // son prendas, así que no les toca nada de los costos globales del pedido.
+  // Si entraran antes, el domicilio se repartiría también sobre el diseño y
+  // las prendas cargarían de menos.
+  (cot.serviciosCobrados || []).forEach(function (s) {
+    lineas.push({
+      id: uid(), tipo: "libre", productoId: "",
+      productoNombre: s.nombre || "Servicio",
+      imagenUrl: "", talla: "", cantidad: 1,
+      precioUnitario: num(s.precio), costoUnitario: num(s.costo),
+      costoIndirectoUnitario: 0,
+      // Lo que hace que el pedido resultante sepa que esta línea no es una
+      // prenda: la comisión del vendedor la excluye (ver calcBaseComision).
+      esServicioCobrado: true,
+      observacion: "", campos: []
+    });
+  });
   return lineas;
 }
 
@@ -2259,6 +2360,95 @@ function moverInsumoAGlobal(cotId, refId, insId) {
     });
   });
   mostrarToast('"' + (insumo.nombre || "El costo") + '" pasó a ser global: ahora aparece al final de todas las referencias y se reparte entre todas las prendas del pedido.');
+  marcarSucia(cotId);
+}
+
+// Un insumo pasa a ser un servicio que se le cobra al cliente. Conserva lo
+// que costaba (eso no cambia: sigue siendo lo que hay que pagarle a quien lo
+// hace) y nace con precio 0 — el precio es una decisión aparte, y arrancarlo
+// en 0 obliga a ponerlo a conciencia en vez de heredar un número que no
+// significaba lo mismo.
+function moverInsumoAServicio(cotId, refId, insId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  if (!cot) return;
+  var ref = (cot.referencias || []).filter(function (r) { return r.id === refId; })[0];
+  var insumo = ref && (ref.insumos || []).filter(function (i) { return i.id === insId; })[0];
+  if (!insumo) return;
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, {
+      referencias: (c.referencias || []).map(function (r) {
+        if (r.id !== refId) return r;
+        return Object.assign({}, r, { insumos: (r.insumos || []).filter(function (i) { return i.id !== insId; }) });
+      }),
+      serviciosCobrados: (c.serviciosCobrados || []).concat([{
+        id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
+        costo: num(insumo.costo), precio: 0, proveedorId: insumo.proveedorId || ""
+      }])
+    });
+  });
+  mostrarToast('"' + (insumo.nombre || "El costo") + '" ahora se cobra aparte: ponle cuánto le cobras al cliente y saldrá como su propia línea en la cotización.');
+  marcarSucia(cotId);
+}
+
+// Un costo global pasa a cobrarse aparte. Es el caso del diseño cuando se
+// deja de absorber dentro del precio de las prendas y se empieza a facturar.
+function moverGlobalAServicio(cotId, gId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var global = cot && (cot.costosGlobales || []).filter(function (g) { return g.id === gId; })[0];
+  if (!global) return;
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, {
+      costosGlobales: (c.costosGlobales || []).filter(function (g) { return g.id !== gId; }),
+      serviciosCobrados: (c.serviciosCobrados || []).concat([{
+        id: global.id, nombre: global.nombre, unidad: global.unidad || "",
+        costo: num(global.costo), precio: 0, proveedorId: global.proveedorId || ""
+      }])
+    });
+  });
+  mostrarToast('"' + (global.nombre || "El costo") + '" dejó de repartirse entre las prendas y ahora se cobra aparte. Ponle cuánto le cobras al cliente.');
+  marcarSucia(cotId);
+}
+
+// El camino de vuelta de un servicio cobrado: vuelve a ser un costo. Si se
+// elige "global" se va a la lista global; con cualquier otro tipo baja como
+// insumo de la referencia que se esté viendo. El precio se descarta: como
+// costo ya no hay nada que cobrar aparte.
+function moverServicioACosto(cotId, sId, tipo) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  var serv = cot && (cot.serviciosCobrados || []).filter(function (s) { return s.id === sId; })[0];
+  if (!serv) return;
+  var destino = null;
+  if (tipo !== "global") {
+    var refs = cot.referencias || [];
+    if (!refs.length) { window.alert("No hay ninguna referencia a la que devolverlo. Crea una primero, o déjalo como costo global del pedido."); return; }
+    destino = refs.filter(function (r) { return r.id === state.refActiva[cotId]; })[0] || refs[0];
+  }
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    var base = Object.assign({}, c, {
+      serviciosCobrados: (c.serviciosCobrados || []).filter(function (s) { return s.id !== sId; })
+    });
+    if (tipo === "global") {
+      base.costosGlobales = (c.costosGlobales || []).concat([{
+        id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "",
+        costo: num(serv.costo), proveedorId: serv.proveedorId || ""
+      }]);
+      return base;
+    }
+    base.referencias = (c.referencias || []).map(function (r) {
+      if (r.id !== destino.id) return r;
+      return Object.assign({}, r, {
+        insumos: (r.insumos || []).concat([{
+          id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "UND",
+          costo: num(serv.costo), tipo: tipo, cantidad: 1, proveedorId: serv.proveedorId || ""
+        }])
+      });
+    });
+    return base;
+  });
+  mostrarToast('"' + (serv.nombre || "El servicio") + '" volvió a ser un costo: ya no se le cobra aparte al cliente.');
   marcarSucia(cotId);
 }
 

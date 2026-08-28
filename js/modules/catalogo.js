@@ -43,7 +43,10 @@ export function render() {
   var session = getSession();
   var lista = state.catalogoInsumos || [];
   var categorias = state.catalogoCategorias || [];
-  var ayudaTipos = Object.keys(TIPOS_COSTO).map(function (k) { return TIPOS_COSTO[k].label + ": " + TIPOS_COSTO[k].ayuda; }).join(" · ");
+  // Los tipos que solo existen dentro de una cotizacion (ver `soloCotizacion`
+  // en TIPOS_COSTO) no se ofrecen aca, asi que tampoco se explican.
+  var ayudaTipos = Object.keys(TIPOS_COSTO).filter(function (k) { return !TIPOS_COSTO[k].soloCotizacion; })
+    .map(function (k) { return TIPOS_COSTO[k].label + ": " + TIPOS_COSTO[k].ayuda; }).join(" · ");
   var html = renderPropuestasPendientes(session);
   html += '<div class="card"><div class="section-title small">Catálogo de insumos' +
     renderHelp("Guarda aquí tus telas e insumos con su costo y tipo de cálculo. Luego los agregas a cualquier referencia de una cotización con un clic, en vez de escribir el costo cada vez. Agrupa por categoría (ej. Telas, Hilos, Empaques) para encontrarlos más rápido. Tipos de costo — " + ayudaTipos) +

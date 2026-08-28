@@ -215,6 +215,13 @@ export async function generarPDFCotizacion(cot, opts) {
   var filas = refs.map(function (r) {
     return ["", numFmt(r.ref.cantidadPedida), r.ref.nombre || "Referencia", money(r.calc.precioUnit), money(r.calc.precioTotal)];
   });
+  // Los servicios que se cobran aparte (diseño, arreglos) van como sus
+  // propias filas, después de las prendas: es justo lo que el cliente tiene
+  // que ver desglosado para saber por qué está pagando. Su costo interno
+  // nunca sale acá, igual que no sale el de ninguna prenda.
+  (cot.serviciosCobrados || []).forEach(function (s) {
+    filas.push(["", "1", s.nombre || "Servicio", money(num(s.precio)), money(num(s.precio))]);
+  });
 
   doc.autoTable({
     startY: y,
@@ -711,6 +718,32 @@ export async function generarPDFInternoCotizacion(cot, opts) {
       body: filasRef,
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
+      margin: { left: marginX, right: marginX }
+    });
+    y = doc.lastAutoTable.finalY + 20;
+  }
+
+  // Los servicios cobrados aparte van en su propia tabla y no mezclados con
+  // las referencias: acá lo que importa es el par precio/costo de cada uno
+  // (¿el diseño te está dejando algo, o lo estás cobrando al costo?), que es
+  // una pregunta distinta de la del margen de una prenda.
+  if (opts.referencias && (cot.serviciosCobrados || []).length) {
+    if (y > 640) { doc.addPage(); y = 54; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+    doc.text("Servicios cobrados aparte", marginX, y); y += 8;
+    doc.autoTable({
+      startY: y,
+      head: [["Servicio", "Te cuesta", "Le cobras", "Ganancia", "Margen"]],
+      body: (cot.serviciosCobrados || []).map(function (s) {
+        var precio = num(s.precio), costo = num(s.costo);
+        return [
+          s.nombre || "—", money(costo), money(precio), money(precio - costo),
+          precio > 0 ? ((precio - costo) / precio * 100).toFixed(1) + "%" : "—"
+        ];
+      }),
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
+      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
       margin: { left: marginX, right: marginX }
     });
     y = doc.lastAutoTable.finalY + 20;

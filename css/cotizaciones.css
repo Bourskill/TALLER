@@ -220,6 +220,10 @@
    intermitente que dice "de aquí para abajo esto no es de esta referencia,
    es de todo el pedido" sin necesidad de un panel aparte. */
 .ins-row.global{opacity:.92;}
+/* Un servicio que se COBRA no es un costo mas: se marca con el color de exito
+   por el borde izquierdo para que se lea de un vistazo que esa fila entra
+   plata, a diferencia de las de arriba, que la sacan. */
+.ins-row.servicio{border-left:2.5px solid var(--success);padding-left:8px;}
 /* La nota del separador va discreta y a la derecha: un rótulo corto con su
    "?" en vez de una línea de texto bajo la tabla. */
 .ins-row-separador{border-top:1px dashed var(--border);margin:8px 0 6px;display:flex;justify-content:flex-end;}
