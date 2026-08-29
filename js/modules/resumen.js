@@ -8,7 +8,7 @@ import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
-  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido } from "../core/calc.js";
+  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import {
   configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
@@ -133,12 +133,29 @@ function renderKpis() {
   var caja = calcCaja(), porCobrar = calcPorCobrar(), activos = calcPedidosActivos();
   var resumenPago = calcResumenPorPagar();
   return '<div class="kpis">' +
+    renderKpiIvaCobrado() +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmt(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmt(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
     renderKpiPorPagar(resumenPago) +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
     "</div>";
 }
+// Parte de la caja que NO es del taller.
+//
+// POR QUE EXISTE: el IVA se le cobra al cliente y se le gira al Estado, pero
+// mientras tanto esta fisicamente en la caja. Sin este KPI, quien mira "Caja
+// actual" ve como propia una plata que va a tener que entregar — y con un 19%
+// esa diferencia no es un detalle. Solo aparece si hay algo cobrado: en un
+// taller que no factura IVA, esta tarjeta no existe y no estorba.
+function renderKpiIvaCobrado() {
+  var iva = calcIvaCobradoTotal();
+  if (iva <= 0) return "";
+  return '<div class="kpi"><div class="kpi-label">IVA cobrado' +
+    renderHelp("De la plata que ya entro a la caja, esto es IVA que le cobraste a tus clientes y que le corresponde al Estado, no al taller. No cuenta como ganancia. Aparece aca para que al mirar la caja sepas cuanto de ese dinero ya tiene dueno.") +
+    '</div><div class="kpi-value warning">' + fmt(iva) + '</div>' +
+    '<div class="kpi-note">Esta en la caja, pero es del Estado</div></div>';
+}
+
 // Aviso para el admin de cambios propuestos por un vendedor que siguen sin
 // revisar (precio de insumo/producto, movimiento manual de stock, categoría)
 // — antes solo se veían si el admin entraba puntualmente a Catálogo o

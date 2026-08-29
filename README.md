@@ -975,6 +975,52 @@ y (2) no había forma de saber de un vistazo de dónde salió un movimiento.
   tocar el pedido real — la fila de edición ya no ofrece esa posibilidad
   para movimientos con origen conocido.
 
+## El IVA: qué es del taller y qué no (no revertir esto)
+
+**La regla, en una frase: el IVA no es plata del taller.** Se le cobra al
+cliente y se le gira al Estado; el taller solo lo tiene guardado un rato. De
+ahí salen dos consecuencias que la app trata **por separado**:
+
+| | ¿Lleva IVA? | Por qué |
+| --- | --- | --- |
+| Lo que el cliente **debe** (cartera, saldo, "Por cobrar") | **Sí** | Se lo facturaste: si la factura dice $1.190.000, eso te debe |
+| Lo que el taller **gana** (margen, ganancia, reportes) | **No** | Esos $190.000 nunca fueron suyos; contarlos infla la ganancia un 19% |
+| La **caja** | Sí, el dinero está ahí | Pero una parte tiene dueño: ver el KPI "IVA cobrado" |
+
+**Qué estaba mal.** `calcSaldoPedido` era `total − abono` con el total **sin**
+IVA, mientras la factura cobraba **con** IVA. Un cliente que pagaba su factura
+completa dejaba el pedido en saldo **negativo**, y la app anunciaba un "saldo a
+favor del cliente" de exactamente el IVA — plata que en realidad hay que
+girarle a la DIAN. El KPI "Por cobrar" también quedaba corto por ese 19%, y la
+factura en PDF se contradecía a sí misma delante del cliente ("TOTAL
+$1.190.000 / Abonado $0 / SALDO PENDIENTE $1.000.000").
+
+**Cómo quedó.** Todo entra por `core/calc.js`:
+
+- `calcIvaPedido(p)` — el IVA del pedido (0 si no aplica).
+- `calcTotalConIvaPedido(p)` — lo que dice la factura.
+- `calcSaldoPedido(p)` = total con IVA − abonado. **Una sola fórmula**, y de
+  ella cuelgan el panel, la cabecera de la tarjeta, el KPI "Por cobrar", el
+  filtro "con saldo pendiente", "Marcar saldo cobrado" y la factura en PDF.
+- `calcIvaCobrado(p)` — del dinero ya cobrado, cuánto es IVA (proporcional: si
+  pagaron la mitad de la factura, se cobró la mitad del IVA).
+- `calcIvaCobradoTotal()` — alimenta el KPI **"IVA cobrado"** del Resumen, que
+  solo aparece si hay algo. En un taller que no factura IVA, esa tarjeta no
+  existe y no estorba.
+
+En pantalla el panel de dinero desglosa **Valor del pedido → IVA 19% → Total a
+cobrar → Abonado → Falta por cobrar**, así que las cinco cifras suman a la
+vista; y bajo la barra de cobro avisa cuánto de lo ya cobrado le pertenece al
+Estado. Un pedido sin IVA (o guardado antes de que existiera el campo) da
+exactamente el número de siempre.
+
+**Lo que NO se tocó a propósito:** la ganancia, el margen y el reporte de
+productos vendidos siguen midiéndose sobre la base sin IVA — que es lo
+correcto. Si algún día hay que llevar el IVA como una obligación formal (con su
+fecha de declaración), el lugar natural es Pendientes, junto a las demás
+cuentas por pagar; hoy el KPI cumple el papel de recordarlo sin obligar a
+mantener nada.
+
 ## Tres formas de costear, y una de cobrar: costo global vs. servicio cobrado
 
 Un pedido tiene costos que no son de ninguna prenda en particular. Hasta acá

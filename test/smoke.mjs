@@ -1266,6 +1266,64 @@ assert(document.body.textContent.includes("Sin movimientos en este rango para gr
 assert(!document.getElementById("chart-ingresos-gastos"),
   "y ni siquiera emite el canvas: no hay nada que graficar");
 
+// ---------------------------------------------------------------------------
+// IVA. La regla contable: se le cobra al cliente y se le gira al Estado.
+//   - lo que el cliente DEBE lo incluye (se lo facturaste),
+//   - lo que el taller GANA no lo incluye (nunca fue suyo).
+// Antes el saldo se calculaba sin IVA mientras la factura cobraba con IVA:
+// pagar la factura completa dejaba el pedido en saldo NEGATIVO y la app
+// anunciaba un "saldo a favor del cliente" que era exactamente el IVA.
+// ---------------------------------------------------------------------------
+const pedIva = {
+  id: "piva", numeroOp: "OP-IVA", cliente: "Con IVA", descripcion: "Uniformes", cantidad: "10",
+  total: 1000000, costo: 600000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-08-29", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null,
+  iva: { activo: true, porcentaje: 19 }
+};
+assert(calcMod.calcIvaPedido(pedIva) === 190000, "el IVA del 19% sobre un millón son $190.000");
+assert(calcMod.calcTotalConIvaPedido(pedIva) === 1190000, "lo que se le factura al cliente es la base más el IVA");
+assert(calcMod.calcSaldoPedido(pedIva) === 1190000, "y eso es lo que el cliente DEBE mientras no haya abonado nada");
+
+const pedIvaPago = Object.assign({}, pedIva, { abono: 1190000 });
+assert(calcMod.calcSaldoPedido(pedIvaPago) === 0, "pagar la factura completa deja el saldo en CERO, no en negativo");
+assert(calcMod.calcIvaCobrado(pedIvaPago) === 190000, "y todo el IVA quedó cobrado");
+
+const pedIvaMitad = Object.assign({}, pedIva, { abono: 595000 });
+assert(calcMod.calcIvaCobrado(pedIvaMitad) === 95000, "si pagan la mitad de la factura, se cobró la mitad del IVA");
+assert(calcMod.calcSaldoPedido(pedIvaMitad) === 595000, "y falta por cobrar la otra mitad");
+
+// Sin IVA nada cambia: es exactamente el número de siempre.
+const pedSinIva = Object.assign({}, pedIva, { iva: { activo: false, porcentaje: 19 }, abono: 400000 });
+assert(calcMod.calcIvaPedido(pedSinIva) === 0 && calcMod.calcSaldoPedido(pedSinIva) === 600000,
+  "un pedido sin IVA sigue dando total − abonado, igual que siempre");
+const pedViejo = Object.assign({}, pedIva); delete pedViejo.iva; pedViejo.abono = 400000;
+assert(calcMod.calcSaldoPedido(pedViejo) === 600000, "y un pedido viejo, guardado antes de que existiera el campo iva, tampoco cambia");
+
+// El IVA NO es ganancia: la ganancia se sigue midiendo sobre la base.
+state.pedidos = [Object.assign({}, pedIva, { abono: 1190000 })];
+state.tx = [];
+assert(calcMod.calcIvaCobradoTotal() === 190000, "la app sabe cuánta plata de la caja es IVA que hay que girar");
+const lineasIva = calcMod.calcTotalesLineasPedido(state.pedidos[0].lineas);
+assert(lineasIva.precioTotal === 0, "las líneas del pedido siguen midiéndose sin IVA (acá no hay líneas, pero la fórmula no lo suma)");
+
+// Y se ve en pantalla: el desglose y el aviso de que esa plata tiene dueño.
+state.tab = "pedidos";
+state.pedidosVista = "historial";
+state.pedidoPanelAbierto = { piva: true };
+render();
+const textoIva = document.body.textContent;
+assert(textoIva.includes("IVA 19%"), "el panel desglosa el IVA en vez de esconderlo dentro del total");
+assert(textoIva.includes("Total a cobrar"), "y muestra el total que de verdad se le factura al cliente");
+assert(textoIva.includes("es IVA — no es plata del taller"), "avisa que parte de lo cobrado le pertenece al Estado");
+
+state.tab = "resumen";
+render();
+assert(document.body.textContent.includes("IVA cobrado"), "el Resumen avisa cuánta plata de la caja es IVA");
+state.pedidos = [];
+render();
+assert(!document.body.textContent.includes("IVA cobrado"), "y si no se factura IVA, esa tarjeta no aparece: no estorba a quien no lo usa");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
