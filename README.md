@@ -25,6 +25,270 @@ habían acumulado varios de estos textos duplicados (`pedidos.js`,
 `pendientes.js`) y se recortaron; si en el futuro un panel necesita más
 contexto, el lugar es el `renderHelp()` de esa sección, no un párrafo aparte.
 
+## Regla: reutilizar antes de crear (no revertir esto)
+
+Antes de escribir un componente, un botón, una barra de búsqueda, un
+explorador, una tarjeta o un formulario: **buscar si ya existe uno equivalente
+y reutilizarlo**. Si hace falta que se comporte distinto en un caso puntual,
+se parametriza la pieza compartida — no se duplica.
+
+El lugar de las piezas compartidas es `js/core/components.js` (HTML) y
+`css/forms.css` / `css/layout.css` / `css/tables.css` (estilo). Un cálculo
+compartido va a `core/calc.js`, una fórmula por concepto.
+
+**Por qué es una regla y no una preferencia:** los estados de producción de un
+pedido estaban implementados dos veces (el camino "pedido rápido" y el camino
+"desde cotización"). Se actualizó uno, el otro quedó viejo, y la misma cosa se
+veía distinta según por dónde hubiera entrado el pedido. La duplicación no
+falla el día que se escribe: falla meses después, cuando alguien arregla una
+sola copia.
+
+Piezas compartidas que ya existen y **hay que usar** en vez de escribir otra:
+
+| Pieza | Dónde | Qué reemplazó |
+| --- | --- | --- |
+| `renderBuscador()` | `core/components.js` + `.buscador` en `forms.css` | Tres barras de búsqueda distintas (`.search-bar` de Contactos, un `.field` con estilos inline en Finanzas/Pedidos, y el `<input>` suelto de los tres exploradores) |
+| `renderTarjetaMini()` | `core/components.js` + `.tarjeta-grid`/`.tarjeta-mini` en `layout.css` | `.producto-card-mini`, que era la única pantalla con índice visual |
+| `renderHelp()` | `core/components.js` | Párrafos explicativos sueltos en la UI |
+| `etapasDe()` | `core/calc.js` | Siete resoluciones distintas de "cuáles son las etapas de esto" |
+| `.chip` + `.chip-n`/`.chip-aviso`/`.chip-accion` | `forms.css` | Chips de filtro con contador, antes cada pestaña se lo inventaba |
+| `.tx-row` + modificador | `tables.css` | Filas de tabla; una pestaña que necesite otra jerarquía agrega un modificador (ej. `.tx-row.insumo`), no una fila nueva |
+
+## Regla: la facilidad manda (UI/UX)
+
+Esta app se usa **en hora pico, llenando muchos formularios**. El criterio al
+diseñar cualquier pantalla es cuánto esfuerzo le cuesta a quien la usa, no
+cuánta información cabe:
+
+- Jerarquía explícita: lo importante grande y arriba; lo accesorio detrás de un
+  separador, un plegado o un `?`. **Que todo pese lo mismo es el error**, no que
+  falte información.
+- Mostrar un campo solo cuando aplica, en vez de dejarlo vacío ahí siempre.
+- Un aviso permanente y grande solo se justifica si hay plata en riesgo. Lo
+  demás va discreto (ver el dock de "sin guardar" más abajo).
+- Toda lista que pueda crecer necesita buscador y contador de resultados.
+- Toda alta ("+ Nuevo X") debe dejar el cursor listo para escribir, no un
+  registro en blanco perdido al final de una lista.
+
+## Regla: documentar el porqué de cada falla
+
+Cuando se corrige un error, se deja escrito **qué fallaba, por qué fallaba y
+por qué la solución es esa** — en un comentario junto al código y en el README.
+Un arreglo sin su porqué es indistinguible de una preferencia arbitraria: el
+siguiente que pase por ahí lo "simplifica" y reintroduce el bug. Y se suma una
+prueba en `test/smoke.mjs`, que es la documentación que no se puede ignorar.
+
+## Registro de cambios — agosto 2026 (sexta ronda: jerarquía, reutilización y teclado)
+
+**Navegación por teclado en toda la app** — ver la sección "Navegación por
+teclado" más abajo. Nuevo `core/teclado.js`.
+
+**Insumos, rehecho** (`modules/catalogo.js` + `css/catalogo.css`, que estaba
+vacío). Era la única lista grande de la app **sin buscador**: con veinte
+insumos había que recorrerla con los ojos. Y era una tabla de siete columnas
+del mismo peso visual, donde el costo —el dato por el que se entra— se leía
+igual que la unidad. Ahora:
+
+- Buscador compartido (nombre, unidad o proveedor) con contador de resultados.
+- Orden por A–Z / más caro / recientes.
+- Cada chip de categoría dice cuántos insumos tiene; "Sin categoría" se marca
+  en ámbar cuando hay insumos sin clasificar.
+- Panel ⚙ Categorías, plegado, donde por fin **se puede renombrar** una
+  categoría. Antes solo se podía crear o borrar: un nombre mal escrito obligaba
+  a borrar la categoría (dejando sus insumos sueltos) y reclasificarlos uno por
+  uno. Los insumos guardan el id, no el nombre, así que renombrar no toca nada.
+- La fila usa `.tx-row` con el modificador `.insumo`: el nombre se lee como
+  texto (sin caja hasta el clic) y el costo como dinero (monospace, a la
+  derecha, con la unidad de sufijo). Lo accesorio se atenúa.
+- "+ Nuevo insumo" nace **vacío y enfocado**, hereda la categoría que se esté
+  viendo y cambia el orden a "Recientes" para que quede a la vista. Antes
+  aparecía como "Nuevo insumo" al final de la lista, fuera de pantalla.
+
+**El aviso de "cambios sin guardar" de una cotización dejó de ser invasivo.**
+Era una barra sticky a lo ancho, con fondo de alerta, clavada arriba del
+documento mientras se editaba: robaba la parte superior de la pantalla justo
+donde están los datos del cliente, empujaba el contenido al aparecer, y
+gritaba "problema" cuando editar sin guardar es el estado **normal** de
+trabajo. Ahora es un dock flotante abajo a la derecha (`.guardado-dock`):
+imposible de perder de vista, sin ocupar espacio del documento y sin el color
+de alerta — que queda reservado para lo que sí es un problema. Y se guarda con
+**Ctrl+S**.
+
+**Bug de posicionamiento encontrado al hacer lo anterior** (vale para cualquier
+pieza flotante futura): `.tab-panel` animaba `transform`, y un elemento que
+anima `transform` se convierte en el bloque contenedor de cualquier
+`position:fixed` que tenga dentro. Como todo el contenido de cada pestaña vive
+dentro de `.tab-panel`, el dock aparecía 282px por debajo del borde inferior de
+la pantalla, invisible. La animación de entrada ahora es solo de opacidad. **No
+volver a meter `transform` ahí.**
+
+**Estados de producción: una sola resolución.** Es el defecto que originó la
+regla de reutilizar. La pregunta "¿cuáles son las etapas de esto?" estaba
+respondida en siete lugares: `estadosDefDe(pedido)` y `estadosDefDeRef(ref)` en
+`calc.js` (la segunda conocía el caso "comprado a proveedor", la primera no) y
+cinco copias inline en `cotizaciones.js`. Consecuencias reales que se
+arreglaron:
+
+- El editor de etapas de una referencia **de proveedor** ofrecía las 5 etapas
+  del taller mientras la tarjeta del pedido mostraba las 2 del proveedor.
+- `estadoAgregadoDeCot` devolvía el `estado` sacado de un flujo y la lista de
+  etapas de **otro**, así que la etiqueta no se podía resolver y se mostraba el
+  id crudo.
+- "Pedido terminado" se preguntaba comparando contra el id literal
+  `"entregado"`, pero las etapas de un flujo creado desde Plantillas nacen con
+  ids `uid()`: un pedido con flujo propio **nunca** se daba por terminado —
+  seguía contando como activo y avisando de entrega vencida para siempre.
+
+Ahora todo entra por `etapasDe(entidad)`, `estadoIdx()`, `pedidoTerminado()` y
+`siguienteEtapa()` en `core/calc.js`. `estadosDefDe`/`estadosDefDeRef` quedan
+como alias del mismo cuerpo — **no agregarles lógica**.
+
+Y el progreso lo **pinta una sola pieza**, `renderProgresoEtapas()` en
+`core/components.js`, para los dos caminos. Antes eran `renderProgresoTape`
+(barra + etapas + botones con texto) y `renderProgresoPorReferencia` (fila
+compacta + flechas): la misma información con markup, CSS y afordancias
+distintas. Lo único que las diferencia ahora es la bandera `conBarra` — un
+pedido rápido es una cosa que avanza y merece verse completa; una cotización
+con seis referencias usa el mismo componente seis veces en su forma compacta.
+Su CSS se mudó de `pedidos.css` a `layout.css` justamente porque dejó de ser
+de una sola pestaña.
+
+**El bug reproducible que salió de ahí:** un pedido rápido que iba en
+"Acabados" volvía visualmente a la primera etapa apenas se pulsaba "📈 Cotizar
+este pedido" — las referencias nuevas nacían sin `estado`, así que la tarjeta
+(que pasa a leer el progreso por referencia) mostraba una cosa y el KPI y los
+filtros (que siguen leyendo el `estado` del pedido) otra. Ahora cada
+referencia se siembra con el progreso que el pedido ya llevaba. Hay prueba de
+humo que lo fija.
+
+**Plantillas: índice de tarjetas en vez de una lista infinita.** Se dibujaban
+TODAS desplegadas a la vez, con su tabla de insumos editable incluida — con
+cuarenta plantillas era inusable, y no había búsqueda ni categorías. Ahora es
+maestro/detalle, el mismo patrón que ya usaba Catálogo: dos vistas
+(Plantillas / Flujos de producción, con los flujos abajo porque son
+configuración ocasional, no el contenido principal), un grid de tarjetas con
+foto, categoría, **costo estimado por prenda** y número de insumos, buscador,
+chips por categoría, y el detalle completo de UNA a la vez. Se agregó
+**"Duplicar plantilla"**, que era el gesto que faltaba para trabajar con
+variaciones. El costo estimado no se calcula ahí: entra por
+`calcCostoUnitarioRef` de `core/calc.js`, la misma fórmula que costea una
+referencia de cotización.
+
+**Gráficas del Resumen.** Dos de las tres tenían la configuración duplicada
+carácter por carácter. Ahora hay `core/graficas.js` con la paleta del tema,
+los `Chart.defaults` y las opciones base compartidas — la tipografía de las
+gráficas es la de la app (antes era la Helvetica de fábrica de Chart.js) y el
+tooltip usa los tokens del tema. Se corrigió además que **el eje X saltaba los
+días sin movimiento**: no era una línea de tiempo, era una lista de fechas con
+datos, así que dos días separados por una semana se veían pegados. Y se añadió
+`beforeUnmount()` al contrato de los módulos (`core/dom.js`): al salir de
+Resumen las instancias de Chart.js se destruyen, en vez de quedar vivas
+apuntando a un `<canvas>` ya desechado con sus listeners de resize colgando.
+
+**Panel de dinero de un pedido.** La tabla de abonos pedía ~566px dentro de
+una columna de ~512px, así que **se desbordaba sobre la columna de PDF**; el
+panel no mostraba ningún monto agregado (ni total, ni abonado, ni cuánto
+falta); el número más grande de la tarjeta era el que nunca se toca (el total,
+sin etiqueta) mientras el que decide la acción (el saldo) iba a 12px debajo; y
+el saldo pendiente se pintaba en rojo de peligro mientras el mismo concepto en
+el Resumen iba en ámbar. Ahora: la cabecera dice **"Falta por cobrar"** en
+grande con "de $TOTAL · abonado $X" debajo, el panel abre con las tres cifras
+y una barra de cuánto se lleva cobrado, y la tabla de movimientos pasó a ancho
+completo con columnas flexibles definidas una sola vez en CSS. Dos arreglos de
+fondo más: **el borrador del abono vive en `state.formAbono`** (antes solo en
+el DOM, así que cualquier re-render borraba el monto ya tecleado — y es
+plata), y la comisión del vendedor dejó de pagarse con un clic en lo que
+parecía una etiqueta pasiva: ahora es un botón explícito que confirma el monto
+y avisa que creará un gasto en Finanzas.
+
+**Arreglos transversales que salieron de revisar lo anterior:**
+
+- `.muted` se usaba en tres módulos y **no estaba definida en ningún CSS**: las
+  rayas de "acá no hay nada" se veían exactamente igual que un dato real. Ahora
+  vive en `tables.css`, junto a `.amount`.
+- `.ref-summary` (el bloque de cifras) vivía en `cotizaciones.css` pero lo usa
+  también Pedidos — y `cotizaciones.css` se carga **después** de `pedidos.css`,
+  así que cualquier modificador de Pedidos perdía por orden y no se aplicaba.
+  Subió a `layout.css`, por el mismo motivo que `.tape-*`.
+- En el panel de consignación, "pagada" era un `.status-pill`, que trae
+  `cursor:pointer`: un texto que no hace nada parecía pulsable. Pasó a `.badge`.
+- Las plantillas de ejemplo nacían sin categoría, así que en el primer arranque
+  caían todas bajo "Sin categoría" y los chips no se entendían.
+- `state.formAbono` era un borrador **global** mientras pueden estar abiertos
+  varios paneles de pedido: lo tecleado en uno aparecía escrito dentro del
+  formulario del otro. Ahora lleva `pedidoId` y solo se muestra en el suyo.
+- `calcSerieMovimientos` devuelve la serie **ya continua**. El relleno de días
+  vacíos estaba hecho en `resumen.js`, lo que obligaba a mantener allí una
+  segunda copia del formato de claves de agrupación (día / lunes de la semana /
+  mes); en cuanto las dos se separaran, el relleno habría duplicado puntos en
+  vez de completarlos. Vive junto a `clave()`, que es lo único que garantiza
+  que no se separen. Hay prueba de que los totales siguen exactos.
+- Las cifras bajo el título de una gráfica tenían estilos inline; pasaron a
+  `.grafica-cifras` en `layout.css`, porque las usan las dos gráficas del panel.
+
+**Lo que encontró la revisión adversarial** (tres revisores independientes
+sobre el código ya escrito). Dos de los hallazgos eran regresiones introducidas
+en esta misma ronda, y quedan con prueba de humo para que no vuelvan:
+
+- **`estadoAgregadoDeCot` comparaba índices entre flujos de largo distinto.**
+  Una referencia comprada a proveedor (2 etapas) ya recibida —índice 1 de 2, o
+  sea terminada— salía "menos avanzada" que una del taller en Confección
+  —índice 2 de 5, o sea a la mitad—, y el pedido entero quedaba estampado con
+  el flujo del proveedor en su última etapa: `pedidoTerminado()` lo daba por
+  entregado con la prenda todavía en la máquina. Ahora se compara la **fracción
+  de avance**, no el índice crudo.
+- **El estado vacío de la gráfica quedó inalcanzable** al volverse continua la
+  serie: `puntos.length` ya nunca es 0, así que en vez del aviso se dibujaban
+  30 barras en cero con "Entró $0 · Salió $0". Se pregunta si hubo movimientos,
+  no si hay puntos.
+- **La cantidad de puntos pasó a fijarla el rango, no los datos.** Un año mal
+  tecleado en "Desde" ("1900" por "2020") le pasaba miles de etiquetas a
+  Chart.js con un solo movimiento en todo el rango. Se agregó la granularidad
+  **"año"** para rangos de más de cinco años y un tope duro de 600 periodos que
+  conserva los más recientes — el eje sigue mostrando fechas reales, así que se
+  ve que la serie arranca después de lo pedido; no es una truncada silenciosa.
+- **Insumos: un filtro apuntando a una categoría borrada** dejaba la lista
+  vacía, sin ningún chip encendido y con un mensaje que hablaba de una búsqueda
+  que el usuario nunca hizo. Pasa por dos vías reales (aprobar una propuesta de
+  vendedor que borró la categoría, o el mismo taller abierto en dos pestañas).
+  Se sanea **en el estado**, no solo en la vista — si no, resucita.
+- **El conteo del buscador ignoraba los chips**: decía "2 insumos" con una sola
+  fila en pantalla. Ahora `total` es lo que el chip deja pasar.
+- **La factura en PDF se contradecía a sí misma** delante del cliente. Con IVA
+  activo imprimía "TOTAL $1.190.000 / Abonado $0 / SALDO PENDIENTE $1.000.000",
+  porque el saldo salía de `calcSaldoPedido` (sin IVA) y el total sí lo llevaba.
+  Y un pedido cobrado de más imprimía "PAGADO COMPLETO" seguido de un monto
+  negativo. **Ojo:** con IVA activo el saldo de la factura ya no coincide con el
+  "Falta por cobrar" de la app, porque internamente el IVA no cuenta como
+  cartera. Si el IVA debe contar, es una decisión del negocio y hay que
+  aplicarla en `calcPorCobrarPedidos`, no solo en el PDF.
+- **La gráfica que va al PDF era ilegible en tema oscuro**: se captura sin fondo
+  y jsPDF la compone sobre papel blanco, así que ejes y leyenda salían en
+  `--ink-soft` (~2:1 de contraste). Ahora esa gráfica usa una paleta de tinta
+  oscura fija (`paletaImpresion`).
+- **Registrar un abono borraba el borrador tecleado en otro pedido abierto.**
+  Solo se limpia el del pedido en el que se registró.
+- **El porcentaje cobrado contradecía al "Falta por cobrar"** de tres líneas
+  más arriba: `Math.round` mostraba "Cobrado el 100%" con $2.000 pendientes.
+- **Un pedido cancelado ofrecía cobrar** lo que la propia tarjeta declara
+  perdido, y etiquetaba el mismo saldo "Quedó sin cobrar" arriba y "Falta por
+  cobrar" abajo. Y al revés: un pedido **ya cobrado no dejaba registrar otro
+  abono** (el formulario solo salía con saldo > 0), así que todo el aviso de
+  "este pedido ya no tiene saldo pendiente" era código muerto.
+- **La fórmula del saldo seguía escrita a mano en seis sitios** pese al
+  comentario que decía haberla unificado. Ahora todos entran por
+  `calcSaldoPedido`.
+- `beforeUnmount()` corría **después** del `afterRender()` de la pestaña nueva:
+  la que se va limpiaba cuando la que entra ya se había montado. Con Chart.js
+  funcionaba de casualidad; en cuanto dos pestañas tocaran el mismo recurso
+  global, la saliente le habría borrado la configuración a la entrante.
+- Detalles: el input "Nombre de la nueva etapa" no tenía `id`, así que perdía
+  lo tecleado en cada redibujo y soltaba el foco tras cada Enter; "+ Nuevo
+  insumo" caía al final de la página (el grupo "Sin categoría" se pinta de
+  último) contradiciendo su propio comentario; el aviso "N sin clasificar" se
+  encendía por la fila que el usuario estaba escribiendo en ese instante; y el
+  filtro por categoría de Plantillas revivía solo al reaparecer el nombre.
+
 ## Registro de cambios — agosto 2026 (quinta ronda: movimientos atrapados)
 
 **Bug propio, reportado por el usuario.** El bloqueo de borrado que se agregó
@@ -933,6 +1197,8 @@ css/
   tables.css             filas de transacciones (tx-row), tags, montos
   pedidos.css              solo pestaña Pedidos
   cotizaciones.css         solo pestaña Cotizaciones
+  catalogo.css             solo pestaña Insumos (categorías + jerarquía de la fila)
+  plantillas.css           solo pestaña Plantillas (índice de tarjetas + detalle)
   clientes.css             solo pestaña Clientes
   pendientes.css           solo pestaña Pendientes
   config.css               solo pestaña Configuración
@@ -954,7 +1220,10 @@ js/
     backup.js                     copia de seguridad diaria de la Sheet a una carpeta de Drive
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
-    components.js          piezas de HTML compartidas (combobox de cliente)
+    components.js          piezas de HTML COMPARTIDAS: buscador, tarjeta de índice,
+                             combobox de cliente, burbuja de ayuda, tipos de costo.
+                             Antes de escribir un componente nuevo, mirar acá.
+    graficas.js             configuración compartida de Chart.js (paleta del tema, defaults, opciones)
     dom.js                 orquestador: layout fijo + registro de acciones + filtro por rol
     teclado.js              navegación por teclado de toda la app (atajos, Esc, flechas)
   modules/

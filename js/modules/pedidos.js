@@ -1,9 +1,9 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, estadosDefDe, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadosDefDeRef, estadoIdxRef, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista } from "../core/calc.js";
+import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
-import { renderClienteCombo, renderHelp } from "../core/components.js";
+import { renderClienteCombo, renderHelp, renderBuscador, renderProgresoEtapas } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
@@ -484,7 +484,12 @@ function renderHistorialPedidos() {
   // resultó más invasivo que útil para este caso — el picker sí tiene
   // sentido para elegir UN producto del catálogo (ver renderProductoPickerPedido),
   // no para filtrar una lista que ya está en pantalla.
-  var html = '<div class="field" style="max-width:340px;margin-bottom:10px;"><input id="inp-buscar-pedidos" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, descripción o fecha…" value="' + esc(state.buscarPedidos || "") + '" data-live-filter="buscarPedidos" /></div>';
+  var html = '<div style="margin-bottom:10px;">' + renderBuscador({
+    id: "inp-buscar-pedidos",
+    filtro: "buscarPedidos",
+    valor: state.buscarPedidos,
+    placeholder: "Buscar por N.º OP, cédula, cliente, descripción o fecha…"
+  }) + "</div>";
 
   html += '<div class="filters"><button class="chip ' + (state.filtroPedidos === "todos" ? "active" : "") + '" data-action="filtro-pedidos" data-val="todos">Todos</button>';
   chipsEstadosDisponibles().forEach(function (e) {
@@ -497,14 +502,16 @@ function renderHistorialPedidos() {
   var filtered = state.filtroPedidos === "todos" ? state.pedidos : state.pedidos.filter(function (p) { return p.estado === state.filtroPedidos; });
   // Un pedido cancelado ya no se va a cobrar, así que no es "saldo pendiente"
   // — mismo criterio que usa calcPorCobrarPedidos para el KPI.
-  if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return !pedidoCancelado(p) && num(p.total) - num(p.abono) > 0; }); }
+  if (state.filtroPedidosSoloSaldo) { filtered = filtered.filter(function (p) { return !pedidoCancelado(p) && calcSaldoPedido(p) > 0; }); }
   var q = norm(state.buscarPedidos || "").trim();
   filtered = filtrarPedidosPorTexto(filtered, q);
   if (filtered.length === 0) { html += '<div class="empty">No hay pedidos <b>' + (state.filtroPedidos !== "todos" || q ? "que coincidan" : "todavía") + "</b>.</div>"; }
 
   filtered.forEach(function (p) {
     if (p.consignacion) { html += renderPedidoConsignacion(p); return; }
-    var saldo = num(p.total) - num(p.abono);
+    // Una sola fórmula para el saldo por cobrar en toda la app (core/calc.js);
+    // acá se recalculaba a mano el mismo total - abonado.
+    var saldo = calcSaldoPedido(p);
     var cliente = p.clienteId ? clienteById(p.clienteId) : null;
     var abierto = !!state.pedidoPanelAbierto[p.id];
     var cotRelacionada = p.cotizacionId ? state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0] : null;
@@ -533,9 +540,8 @@ function renderHistorialPedidos() {
       '<div class="pedido-meta">' + esc(p.descripcion) + " · cantidad " + esc(p.cantidad) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + "</div>" +
       (cliente ? '<div class="pedido-meta">📦 ' + esc(cliente.direccion || "—") + ", " + esc(cliente.ciudad || "—") + (cliente.cp ? " (CP " + esc(cliente.cp) + ")" : "") + "</div>" : "") +
       (ganancia != null ? '<div class="pedido-meta">Costo ' + fmt(p.costo) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
-      "</div><div class=\"pedido-money\"><div class=\"total\">" + fmt(p.total) + "</div>" +
-      '<div class="saldo ' + (saldo > 0 ? "" : (num(p.total) > 0 ? "ok" : "neutral")) + '">' + (saldo > 0 ? "saldo " + fmt(saldo) : (num(p.total) > 0 ? "cobrado completo" : "sin valor asignado")) + "</div>" +
-      "</div></div>" +
+      "</div>" + renderCabeceraDinero(p, saldo, cancelado) +
+      "</div>" +
       renderDetalleLineasPedido(p) +
       // Un pedido cancelado no está "en producción": mostrarle la barra de
       // etapas invitaría a avanzarlo, que es justo lo contrario de lo que pasó.
@@ -560,21 +566,20 @@ function renderHistorialPedidos() {
 // (pedidos rápidos creados directo en esta pestaña, sin pasar por una
 // cotización). El avance/retroceso es del pedido completo.
 function renderProgresoTape(p) {
-  var estadosDef = estadosDefDe(p);
-  var estadoIds = estadosDef.map(function (e) { return e.id; });
-  var idx = estadoIds.indexOf(p.estado);
-  if (idx < 0) idx = 0; // por seguridad, si el estado guardado ya no existe en la lista
-  // Un flujo de UNA sola etapa (posible con un flujo personalizado de
-  // Plantillas) dividía por cero y dejaba la barra con un ancho inválido:
-  // estando en la única etapa, el avance es del 100%.
-  var pct = estadosDef.length > 1 ? (idx / (estadosDef.length - 1) * 100) : 100;
-  return '<div class="tape-track"><div class="tape-fill" style="width:' + pct + '%;"></div></div>' +
-    '<div class="tape-labels">' + estadosDef.map(function (e, i) { return '<span class="' + (i <= idx ? "current" : "") + '">' + esc(e.label) + "</span>"; }).join("") + "</div>" +
-    '<div class="pedido-actions" style="margin-top:6px;">' +
-    '<span class="accion-grupo">' +
-    (idx > 0 ? '<button class="btn ghost small" data-action="retreat" data-id="' + p.id + '">← Retroceder</button>' : "") +
-    (idx < estadosDef.length - 1 ? '<button class="btn small" data-action="advance" data-id="' + p.id + '">Avanzar a ' + esc(estadosDef[idx + 1].label) + " →</button>" : "") +
-    "</span></div>";
+  // Un pedido rápido es UNA cosa que avanza, así que lleva la barra con todas
+  // las etapas; una cotización con seis referencias usa el mismo componente
+  // seis veces, en su forma compacta. Ver renderProgresoEtapas en
+  // core/components.js: antes esto eran dos implementaciones paralelas y por
+  // eso se desincronizaban.
+  return renderProgresoEtapas({
+    etapas: etapasDe(p),
+    estado: p.estado,
+    nombre: "Producción",
+    accionAvanzar: "advance",
+    accionRetroceder: "retreat",
+    datos: { id: p.id },
+    conBarra: true
+  });
 }
 
 // Un pedido salido de una cotización con varias (o incluso una sola)
@@ -584,17 +589,14 @@ function renderProgresoTape(p) {
 function renderProgresoPorReferencia(p, cot, refs) {
   var html = '<div class="pedido-refs-progreso">';
   refs.forEach(function (r) {
-    var def = estadosDefDeRef(r);
-    var idx = estadoIdxRef(r);
-    html += '<div class="pedido-ref-progreso">' +
-      '<span class="pedido-ref-nombre">' + esc(r.nombre || "Referencia") + "</span>" +
-      '<span class="pedido-ref-etapa">' + esc(def[idx].label) + "</span>" +
-      '<span class="pedido-ref-frac">' + (idx + 1) + "/" + def.length + "</span>" +
-      '<span class="pedido-ref-btns">' +
-      '<button class="btn ghost small" ' + (idx === 0 ? "disabled" : "") + ' data-action="retreat-ref" data-pedido="' + p.id + '" data-cot="' + cot.id + '" data-ref="' + r.id + '" title="Retroceder">←</button>' +
-      '<button class="btn ghost small" ' + (idx === def.length - 1 ? "disabled" : "") + ' data-action="advance-ref" data-pedido="' + p.id + '" data-cot="' + cot.id + '" data-ref="' + r.id + '" title="Avanzar">→</button>' +
-      "</span>" +
-      "</div>";
+    html += renderProgresoEtapas({
+      etapas: etapasDe(r),
+      estado: r.estado,
+      nombre: r.nombre || "Referencia",
+      accionAvanzar: "advance-ref",
+      accionRetroceder: "retreat-ref",
+      datos: { pedido: p.id, cot: cot.id, ref: r.id }
+    });
   });
   html += "</div>";
   return html;
@@ -653,7 +655,11 @@ function renderPedidoConsignacion(p) {
         '<span class="mobile-th">Monto</span><span class="amount">' + fmt(v.montoTotal) + "</span>" +
         '<span class="mobile-th">Comisión</span><span class="amount">' + fmt(v.comisionMonto) + "</span>" +
         '<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' + (v.comisionPagada
-          ? '<span class="status-pill pagado">pagada</span>'
+          // `.badge` y no `.status-pill`: esta es una ETIQUETA de estado, no un
+          // boton. .status-pill trae cursor:pointer y hover, asi que un texto
+          // que no hace nada parecia pulsable — el mismo defecto que se
+          // corrigio en la comision del vendedor.
+          ? '<span class="badge success">pagada</span>'
           : '<button class="btn ghost small" data-action="pagar-comision-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '">Pagar comisión</button>') +
         '<button class="btn danger small" data-action="eliminar-venta-consignacion" data-id="' + p.id + '" data-venta="' + v.id + '" title="Anular esta venta (retira su ingreso de Finanzas y devuelve las unidades al punto)">✕</button>' +
         "</span></div>";
@@ -789,26 +795,169 @@ function renderRemisionSection(p) {
   return html;
 }
 
+// ---------- Dinero de la tarjeta: cabecera y color del saldo ----------
+
+// Un saldo pendiente cuya fecha de entrega YA PASÓ sí es un problema: la
+// prenda salió del taller y la plata no entró. Ese —y solo ese— es el caso
+// rojo; mientras la entrega no ha llegado, deber plata es lo normal.
+function entregaVencida(p) {
+  return !!p.fechaEntrega && p.fechaEntrega < todayStr();
+}
+
+// Un solo criterio de color para el saldo por cobrar, usado por la cabecera de
+// la tarjeta y por el resumen del panel. Antes la cabecera lo pintaba en
+// --danger-ink SIEMPRE, mientras el MISMO concepto ("Por cobrar") se pinta en
+// --warning-ink en el Resumen: dos pantallas decían cosas distintas sobre la
+// misma plata, y el rojo permanente dejaba de significar nada.
+function tonoSaldo(p, saldo, cancelado) {
+  if (num(p.total) <= 0) return "neutro";      // sin precio asignado todavía
+  if (cancelado) return "neutro";              // ya no se va a cobrar
+  if (saldo < 0) return "alerta";              // se cobró de más: hay que devolverlo
+  if (saldo <= 0) return "cobrado";
+  return entregaVencida(p) ? "alerta" : "pendiente";
+}
+
+// Cabecera de dinero de la tarjeta. La jerarquía estaba invertida: el número
+// grande (21px) era el TOTAL —que nunca se toca y ni siquiera llevaba etiqueta,
+// era una cifra suelta sin decir de qué— y el saldo por cobrar, que es el que
+// decide si hay que llamar al cliente, iba a 12px debajo. Ahora arriba va la
+// etiqueta chica, el monto que manda va grande, y el total pasa a ser el
+// contexto de abajo ("de X · abonado Y").
+function renderCabeceraDinero(p, saldo, cancelado) {
+  // OJO: el contexto usa el total QUE SE COBRA (con IVA si aplica), no la base.
+  // Si arriba dice "Falta por cobrar $1.190.000" y abajo "de $1.000.000", las
+  // dos cifras de la misma tarjeta se contradicen. Ver calcTotalConIvaPedido.
+  var total = calcTotalConIvaPedido(p);
+  var abonado = num(p.abono);
+  var iva = calcIvaPedido(p);
+  var contexto = "de " + fmt(total) + (iva ? " con IVA" : "") + " · abonado " + fmt(abonado);
+  var etiqueta, monto, sub;
+
+  if (total <= 0) {
+    etiqueta = "Valor del pedido";
+    monto = fmt(0);
+    sub = "Todavía sin precio asignado";
+  } else if (saldo < 0) {
+    etiqueta = "Saldo a favor del cliente";
+    monto = fmt(-saldo);
+    sub = contexto;
+  } else if (saldo <= 0) {
+    etiqueta = "Cobrado completo";
+    monto = fmt(total);
+    sub = "Valor del pedido · nada pendiente";
+  } else {
+    etiqueta = cancelado ? "Quedó sin cobrar" : "Falta por cobrar";
+    monto = fmt(saldo);
+    sub = contexto;
+  }
+
+  return '<div class="pedido-money">' +
+    '<div class="pm-etiqueta">' + esc(etiqueta) + "</div>" +
+    '<div class="pm-monto ' + tonoSaldo(p, saldo, cancelado) + '">' + monto + "</div>" +
+    '<div class="pm-sub">' + esc(sub) + "</div>" +
+    "</div>";
+}
+
+// Las tres cifras que se buscan al abrir el panel. Antes NO había ninguna: el
+// panel recibía el saldo y solo lo usaba como booleano (para decidir si mostrar
+// el formulario de abono), así que para saber cuánto llevaba pagado el cliente
+// había que sumar a ojo las filas de abonos.
+// Reutiliza .ref-summary/.rs-item —el mismo bloque de cifras del formulario de
+// pedido y de las cotizaciones— en vez de inventar otro componente de cifra.
+// El porcentaje se redondea SIN cruzar los extremos: solo dice 100% si de
+// verdad no queda nada por cobrar, y solo dice 0% si de verdad no ha entrado
+// nada. En el medio se muestra con un decimal cuando redondear mentiría.
+function pctCobradoTexto(pct) {
+  if (pct >= 100) return "100%";
+  if (pct <= 0) return "0%";
+  var r = Math.round(pct);
+  if (r >= 100) return "99,9%";
+  if (r <= 0) return "0,1%";
+  return r + "%";
+}
+
+function renderResumenDinero(p, saldo, cancelado) {
+  var base = num(p.total);
+  var iva = calcIvaPedido(p);
+  var total = calcTotalConIvaPedido(p);
+  var abonado = num(p.abono);
+  // El porcentaje se mide contra lo que se COBRA, no contra la base: con IVA
+  // activo, cobrar la base entera es haber cobrado el 84%, no el 100%.
+  var pct = total > 0 ? Math.max(0, Math.min(100, abonado / total * 100)) : 0;
+
+  var html = '<div class="ref-summary pedido-dinero-cifras">' +
+    '<div class="rs-item"><div class="rl">Valor del pedido</div><div class="rv">' + fmt(base) + "</div></div>" +
+    // El IVA solo se desglosa cuando existe: si no aplica, "Valor del pedido"
+    // YA es el total a cobrar y repetirlo sería una cifra de más.
+    (iva
+      ? '<div class="rs-item"><div class="rl">IVA ' + esc(num(p.iva.porcentaje)) + "%" +
+        renderHelp("El IVA no es plata del taller: se lo cobras al cliente y se lo giras al Estado. Por eso suma a lo que el cliente te debe, pero NO cuenta como ganancia ni entra en el margen del pedido.") +
+        '</div><div class="rv">' + fmt(iva) + "</div></div>" +
+        '<div class="rs-item"><div class="rl">Total a cobrar</div><div class="rv">' + fmt(total) + "</div></div>"
+      : "") +
+    '<div class="rs-item"><div class="rl">Abonado</div><div class="rv">' + fmt(abonado) + "</div></div>" +
+    // El mismo saldo se etiquetaba "Quedó sin cobrar" en la cabecera y "Falta
+    // por cobrar" tres líneas más abajo. Un pedido cancelado NO se va a
+    // cobrar — de hecho calcPorCobrarPedidos() lo excluye del KPI a propósito.
+    '<div class="rs-item"><div class="rl">' + (saldo < 0 ? "Saldo a favor del cliente" : (cancelado ? "Quedó sin cobrar" : "Falta por cobrar")) + "</div>" +
+    '<div class="rv ' + tonoSaldo(p, saldo, cancelado) + '">' + fmt(Math.abs(saldo)) + "</div></div>" +
+    "</div>";
+
+  // Qué porcentaje del pedido ya se cobró: es el dato que se busca de un
+  // vistazo, y una barra lo dice sin leer tres cifras. Reutiliza el mismo
+  // .tape-track/.tape-fill de la barra de etapas de producción, con su
+  // variante de color (verde = plata que ya entró).
+  if (total > 0) {
+    html += '<div class="pedido-cobro">' +
+      '<div class="tape-track cobro"><div class="tape-fill cobro" style="width:' + pct.toFixed(1) + '%;"></div></div>' +
+      // Ni 100% con saldo pendiente, ni 0% con plata ya abonada: Math.round
+      // hacía que 99,8% se leyera "Cobrado el 100%" justo debajo de un
+      // "Falta por cobrar $2.000". Dos cifras del mismo bloque no pueden
+      // decir cosas incompatibles (ver la regla de rigor con el dinero).
+      '<div class="pedido-cobro-nota">Cobrado el <b>' + pctCobradoTexto(pct) + "</b> de lo que se le factura al cliente</div>" +
+      "</div>";
+  }
+  // Con IVA activo, parte de lo que ya entró NO es del taller. Decirlo acá
+  // evita que se lea la caja como si todo fuera ganancia disponible.
+  var ivaCobrado = calcIvaCobrado(p);
+  if (ivaCobrado > 0) {
+    html += '<div class="pedido-iva-nota">De lo cobrado, <b>' + fmt(ivaCobrado) + "</b> es IVA — no es plata del taller, se le gira al Estado.</div>";
+  }
+  return html;
+}
+
 // Todo lo secundario de la tarjeta (antes amontonado en una sola fila de
-// botones difícil de leer) vive aquí, oculto por defecto y dividido en dos
-// zonas claras: lo que tiene que ver con dinero, y lo que tiene que ver con
-// documentos/PDF.
+// botones difícil de leer) vive aquí, oculto por defecto y dividido en zonas
+// claras: dinero y documentos arriba, una junto a la otra, y los movimientos
+// de dinero A ANCHO COMPLETO debajo.
+// Ese ancho completo no es estética: la tabla de abonos pedía ~566px de
+// columnas fijas dentro de una media columna de ~512px, así que se desbordaba
+// literalmente encima de la columna de PDF.
 // Mismo tratamiento que la pestaña Producción de una cotización: título de
 // sección chico en mayúsculas (.cot-col-title) en vez de section-title, y los
 // botones de PDF pasan de una fila apretada de botones chicos a bloques
-// grandes apilados (.cot-doc-btn) — son la acción principal de esta columna,
+// grandes apilados (.cot-doc-btn) — son la acción principal de esa columna,
 // no un detalle secundario.
 function renderPanelPedido(p, saldo) {
+  var cancelado = pedidoCancelado(p);
   var html = '<div class="pedido-panel">';
 
-  html += '<div class="pedido-panel-col"><div class="cot-col-title">💰 Dinero</div>';
-  html += renderVendedor(p);
-  html += (saldo > 0 ? renderAbonoForm(p) : "");
+  html += '<div class="pedido-panel-col"><div class="cot-col-title">💰 Dinero del pedido</div>';
+  html += renderResumenDinero(p, saldo, cancelado);
+  // El formulario se ofrece SIEMPRE salvo en un pedido cancelado:
+  //  - antes solo aparecía con saldo > 0, así que en un pedido ya cobrado (o
+  //    cobrado de más, o sin precio todavía) NO había forma de registrar un
+  //    abono más — y el aviso de "este pedido ya no tiene saldo pendiente" que
+  //    vive en add-abono era inalcanzable, código muerto que nunca protegía nada;
+  //  - en uno cancelado sí se esconde, para no ofrecer cobrar lo que la propia
+  //    tarjeta acaba de declarar perdido (el botón "Marcar saldo cobrado" ya
+  //    se escondía ahí: eran dos afordancias opuestas para lo mismo).
+  html += (cancelado ? "" : renderAbonoForm(p, saldo));
   if (state.reembolsoAbierto === p.id) html += renderReembolsoForm(p);
-  html += renderAbonosPedido(p);
-  if (num(p.abono) > 0 && state.reembolsoAbierto !== p.id) {
-    html += '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-reembolso-form" data-id="' + p.id + '" title="Registrar que se le devolvió dinero al cliente">↩ Registrar reembolso al cliente</button>';
+  else if (num(p.abono) > 0) {
+    html += '<button class="btn ghost small pedido-reembolso-btn" data-action="toggle-reembolso-form" data-id="' + p.id + '" title="Registrar que se le devolvió dinero al cliente">↩ Devolverle dinero al cliente (reembolso)</button>';
   }
+  html += renderVendedor(p);
   html += "</div>";
 
   html += '<div class="pedido-panel-col"><div class="cot-col-title">📄 PDF y documentos</div>' +
@@ -839,6 +988,11 @@ function renderPanelPedido(p, saldo) {
     "</div>";
   html += "</div>";
 
+  // Tercera zona, a lo ancho de las dos columnas: el historial de plata de
+  // este pedido. Acá abajo cabe entero (antes vivía apretado dentro de la
+  // media columna de "Dinero" y se salía encima de la de documentos).
+  html += renderMovimientosPedido(p);
+
   html += "</div>"; // .pedido-panel
   return html;
 }
@@ -855,7 +1009,7 @@ function renderPapelera() {
   }
 
   state.pedidosPapelera.forEach(function (p) {
-    var saldo = num(p.total) - num(p.abono);
+    var saldo = calcSaldoPedido(p);
     html += '<div class="pedido-card" style="opacity:.85;">' +
       '<div class="pedido-top"><div>' +
       '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;">' + esc(p.numeroOp || "—") + "</span> " +
@@ -872,6 +1026,13 @@ function renderPapelera() {
   return html;
 }
 
+// Comisión del vendedor. Antes ESTO era una pastilla de estado (.status-pill)
+// que parecía una etiqueta pasiva —"pendiente"/"pagada"— y sin embargo movía
+// plata real: un solo clic creaba (o borraba) un gasto en Finanzas, sin decir
+// de cuánto y sin preguntar nada. Ahora el estado es solo estado (una insignia
+// no clickeable de la misma familia visual, .badge) y pagar es un botón
+// explícito que dice lo que hace; la confirmación con el monto vive en la
+// acción toggle-comision.
 function renderVendedor(p) {
   if (!p.vendedor || !p.vendedor.nombre) return "";
   var v = p.vendedor;
@@ -879,23 +1040,43 @@ function renderVendedor(p) {
   var pagado = v.estado === "pagado";
   var tipo = v.tipo || "porcentaje";
   // Compatibilidad: pedidos antiguos guardaban solo "porcentaje" (sin tipo/valor).
-  var etiquetaValor = tipo === "fijo" ? fmt(valor) : (esc(v.porcentaje != null ? v.porcentaje : v.valor) + "% = " + fmt(valor));
-  return '<div class="section-sub" style="margin:8px 0 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-    "Vendedor: <b style=\"color:var(--ink);\">" + esc(v.nombre) + "</b> · " + etiquetaValor +
-    '<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision" data-id="' + p.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
-    (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-vendedor-fecha-pago" data-id="' + p.id + '" /></label>') : "") +
+  var etiquetaValor = tipo === "fijo" ? fmt(valor) : (esc(v.porcentaje != null ? v.porcentaje : v.valor) + "% del pedido = " + fmt(valor));
+  return '<div class="cot-col-title">Comisión del vendedor</div>' +
+    '<div class="pedido-comision">' +
+    '<div class="pedido-comision-quien">' + esc(v.nombre) + " · <b>" + etiquetaValor + "</b></div>" +
+    '<span class="badge ' + (pagado ? "success" : "warning") + '">' + (pagado ? "Ya se le pagó" : "Pendiente de pago") + "</span>" +
+    (pagado
+      ? '<button class="btn ghost small" data-action="toggle-comision" data-id="' + p.id + '" title="Deshace el pago: retira de Finanzas el gasto de esta comisión y la deja otra vez pendiente.">↩ Deshacer el pago</button>'
+      : '<button class="btn small" data-action="toggle-comision" data-id="' + p.id + '">Marcar comisión como pagada</button>') +
+    (!pagado
+      ? '<label class="pedido-comision-fecha">Fecha prevista de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-vendedor-fecha-pago" data-id="' + p.id + '" /></label>'
+      : "") +
     "</div>";
 }
 
-function renderAbonoForm(p) {
-  return '<div class="inline-form" style="flex-wrap:wrap;">' +
-    '<input type="number" class="mini-input" data-role="abono-input" placeholder="Monto abono" style="width:110px" />' +
-    '<input type="date" class="mini-input" data-role="abono-fecha" style="width:135px" value="' + todayStr() + '" />' +
-    '<select class="mini-input" data-role="abono-metodo" style="width:130px">' +
-    '<option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option>' +
+// El formulario de abono vivía SOLO en el DOM: se escribía en inputs sin id y
+// se leían con data-role + closest al pulsar "Registrar abono". Cualquier
+// re-render (un abono en otro pedido, la campanita, el aviso de guardado)
+// borraba lo tecleado y se llevaba el foco — y esto es plata. Ahora vive en
+// state.formAbono (data-form="abono"), y cada campo tiene id estable, que es
+// lo único que el re-render usa para devolver el foco donde estaba.
+// El comprobante es la excepción y sigue leyéndose del DOM con data-role: un
+// File no es serializable, no puede vivir en el estado.
+function renderAbonoForm(p, saldo) {
+  // Solo se muestra el borrador si es DE ESTE pedido: pueden estar abiertos
+  // varios paneles a la vez y, con un borrador global, lo tecleado en uno
+  // aparecía escrito dentro del formulario del otro.
+  var fa = state.formAbono.pedidoId === p.id ? state.formAbono : { monto: "", fecha: "", metodo: "efectivo" };
+  var metodos = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro medio"]];
+  return '<div class="cot-col-title">Registrar un abono del cliente</div>' +
+    '<div class="inline-form pedido-abono-form">' +
+    '<input type="number" class="mini-input abono-monto" id="abono-monto-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="monto" value="' + esc(fa.monto) + '" placeholder="Monto — faltan ' + fmt(saldo) + '" />' +
+    '<input type="date" class="mini-input abono-fecha" id="abono-fecha-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="fecha" value="' + esc(fa.fecha || todayStr()) + '" />' +
+    '<select class="mini-input abono-metodo" id="abono-metodo-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="metodo">' +
+    metodos.map(function (m) { return opt(m[0], m[1], fa.metodo || "efectivo"); }).join("") +
     "</select>" +
-    '<label class="btn ghost small" style="cursor:pointer;">📎 Comprobante<input type="file" accept="image/*" data-role="abono-comprobante" style="display:none" /></label>' +
-    '<button class="btn ghost small" data-action="add-abono" data-id="' + p.id + '">Registrar abono</button>' +
+    '<label class="btn ghost small pedido-abono-adjunto">📎 Adjuntar comprobante<input type="file" accept="image/*" data-role="abono-comprobante" /></label>' +
+    '<button class="btn small" data-action="add-abono" data-id="' + p.id + '">Registrar abono</button>' +
     "</div>";
 }
 
@@ -908,61 +1089,110 @@ function renderAbonoForm(p) {
 function renderReembolsoForm(p) {
   var fr = state.formReembolso;
   var disponible = num(p.abono);
-  return '<div class="inline-form" style="flex-wrap:wrap;background:var(--surface-2);border-radius:10px;padding:8px 10px;margin-top:8px;">' +
-    '<input type="number" class="mini-input" data-form="reembolso" data-field="monto" value="' + esc(fr.monto) + '" placeholder="Monto (máx. ' + fmt(disponible) + ')" style="width:150px" />' +
-    '<input type="date" class="mini-input" data-form="reembolso" data-field="fecha" value="' + esc(fr.fecha || todayStr()) + '" style="width:135px" />' +
-    '<input class="mini-input" data-form="reembolso" data-field="motivo" value="' + esc(fr.motivo) + '" placeholder="Motivo (opcional)" style="width:170px" />' +
+  // Mismo tratamiento que el formulario de abono: anchos por clase (no px
+  // inline, que en la columna angosta del panel obligaban a scroll lateral) e
+  // id estable en cada campo, que es lo único que el re-render usa para
+  // devolver el foco donde estaba.
+  return '<div class="cot-col-title">Devolverle dinero al cliente</div>' +
+    '<div class="inline-form pedido-abono-form pedido-reembolso-form">' +
+    '<input type="number" class="mini-input abono-monto" id="reembolso-monto-' + p.id + '" data-form="reembolso" data-field="monto" value="' + esc(fr.monto) + '" placeholder="Monto — máximo ' + fmt(disponible) + '" />' +
+    '<input type="date" class="mini-input abono-fecha" id="reembolso-fecha-' + p.id + '" data-form="reembolso" data-field="fecha" value="' + esc(fr.fecha || todayStr()) + '" />' +
+    '<input class="mini-input abono-monto" id="reembolso-motivo-' + p.id + '" data-form="reembolso" data-field="motivo" value="' + esc(fr.motivo) + '" placeholder="Motivo (opcional)" />' +
     '<button class="btn danger small" data-action="add-reembolso" data-id="' + p.id + '">Confirmar reembolso</button>' +
     '<button class="btn ghost small" data-action="toggle-reembolso-form" data-id="' + p.id + '">Cancelar</button>' +
     "</div>";
 }
 
-function renderAbonosPedido(p) {
+// Nombre presentable de un medio de pago. Se usa en el concepto de cada fila
+// ("Abono · Transferencia"), así que tiene que leerse como texto humano y no
+// como el valor interno en minúsculas que se guarda.
+var METODOS_ABONO = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro medio"]];
+function nombreMetodoPago(m) {
+  var f = METODOS_ABONO.filter(function (x) { return x[0] === m; })[0];
+  return f ? f[1] : (m ? String(m) : "medio sin registrar");
+}
+
+// El comprobante adjunto (o una raya si no hay). Antes esta columna se llamaba
+// "Comprobante" pero en las filas de reembolso mostraba el MOTIVO, que no es
+// ningún comprobante.
+function celdaSoporteAbono(a) {
+  return a.comprobanteUrl
+    ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver adjunto</a>'
+    : '<span class="sin-dato">—</span>';
+}
+
+// Historial de plata de un pedido: abonos que entraron y reembolsos que
+// salieron, en una sola tabla cronológica.
+//
+// Dos cosas que estaban mal y se corrigen acá:
+//  1. Los encabezados MENTÍAN en las filas de reembolso: bajo "Método" salía
+//     "Reembolso" (que es el TIPO de movimiento, no el medio de pago) y bajo
+//     "Comprobante" salía el motivo. Ahora la columna es "Concepto" y dice
+//     "Abono · Transferencia" o "Reembolso · motivo", y "Soporte" solo lleva
+//     el adjunto.
+//  2. El ancho de las columnas se escribía inline y REPETIDO en las cuatro
+//     variantes de fila (100px 90px 110px 1fr 190px = 490px fijos, que no
+//     cabían donde se dibujaba). Ahora se define una sola vez en
+//     css/pedidos.css con minmax(), y la tabla va a ancho completo.
+function renderMovimientosPedido(p) {
   var abonos = p.abonos || [];
-  if (!abonos.length) return "";
-  var html = '<div class="section-sub" style="margin-top:8px;">Abonos registrados</div>' +
-    '<div class="tx-row head" style="grid-template-columns:100px 90px 110px 1fr 190px;"><span>Fecha</span><span>Monto</span><span>Método</span><span>Comprobante</span><span></span></div>';
+  var html = '<div class="pedido-panel-full pedido-movimientos">' +
+    '<div class="cot-col-title">Movimientos de dinero de este pedido' +
+    renderHelp("Cada abono que entró y cada reembolso que se le devolvió al cliente. Editar, anular o emitir el recibo de cualquiera de ellos actualiza también su movimiento en Finanzas, para que la caja y el saldo del pedido nunca se separen.") +
+    "</div>";
+
+  if (!abonos.length) {
+    return html + '<div class="empty">Todavía no se ha registrado <b>ningún abono ni reembolso</b> de este pedido.</div></div>';
+  }
+
+  html += '<div class="tx-row head"><span>Fecha</span><span>Concepto</span><span>Monto</span><span>Soporte</span><span>Acciones</span></div>';
   abonos.forEach(function (a) {
     if (a.tipo === "reembolso") {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;">' +
+      html += '<div class="tx-row">' +
         '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
+        '<span class="mobile-th">Concepto</span><span class="mov-concepto salida">↩ Reembolso' + (a.motivo ? " · " + esc(a.motivo) : "") + "</span>" +
         '<span class="mobile-th">Monto</span><span class="amount neg">-' + fmt(a.monto) + "</span>" +
-        '<span class="mobile-th">Método</span><span style="color:var(--danger);font-weight:700;">↩ Reembolso</span>' +
-        '<span class="mobile-th">Comprobante</span><span class="muted">' + esc(a.motivo || "—") + "</span>" +
-        '<span><button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este reembolso (también retira su movimiento de Finanzas)">Eliminar</button></span>' +
-        "</div>";
+        '<span class="mobile-th">Soporte</span><span>' + celdaSoporteAbono(a) + "</span>" +
+        '<span class="mobile-th">Acciones</span><span class="pedido-mov-acciones">' +
+        '<button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este reembolso (también retira su movimiento de Finanzas)">Anular</button>' +
+        "</span></div>";
       return;
     }
     if (state.abonoEditando === a.id) {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;" data-abono-edit-row="' + a.id + '">' +
-        '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" style="width:100%" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
-        '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" style="width:100%" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
-        '<span class="mobile-th">Método</span><span><select class="mini-input" style="width:100%" data-role="edit-abono-metodo">' +
-        ["efectivo", "transferencia", "tarjeta", "otro"].map(function (m) { return opt(m, m.charAt(0).toUpperCase() + m.slice(1), a.metodoPago || "efectivo"); }).join("") +
+      html += '<div class="tx-row" data-abono-edit-row="' + a.id + '">' +
+        '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
+        '<span class="mobile-th">Concepto</span><span><select class="mini-input" data-role="edit-abono-metodo">' +
+        METODOS_ABONO.map(function (m) { return opt(m[0], "Abono · " + m[1], a.metodoPago || "efectivo"); }).join("") +
         "</select></span>" +
-        '<span class="mobile-th">Comprobante</span><span>' + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
-        '<span style="display:flex;gap:6px;">' +
+        '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
+        '<span class="mobile-th">Soporte</span><span>' + celdaSoporteAbono(a) + "</span>" +
+        '<span class="mobile-th">Acciones</span><span class="pedido-mov-acciones">' +
         '<button class="btn small" data-action="guardar-abono-edit" data-id="' + p.id + '" data-abono="' + a.id + '">Guardar</button>' +
-        '<button class="btn ghost small" data-action="cancelar-edicion-abono">✕</button>' +
+        '<button class="btn ghost small" data-action="cancelar-edicion-abono" title="Cancelar la edición" aria-label="Cancelar la edición">✕</button>' +
         "</span></div>";
-    } else {
-      html += '<div class="tx-row" style="grid-template-columns:100px 90px 110px 1fr 190px;">' +
-        '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
-        '<span class="mobile-th">Monto</span><span class="amount">' + fmt(a.monto) + "</span>" +
-        '<span class="mobile-th">Método</span><span>' + esc(a.metodoPago || "—") + "</span>" +
-        '<span class="mobile-th">Comprobante</span><span>' + (a.comprobanteUrl ? '<a href="' + esc(a.comprobanteUrl) + '" target="_blank" rel="noopener">Ver comprobante</a>' : '<span class="muted">—</span>') + "</span>" +
-        '<span style="display:flex;gap:6px;">' +
-        '<button class="btn ghost small" data-action="editar-abono" data-id="' + a.id + '">Editar</button>' +
-        '<button class="btn ghost small" data-action="generar-pdf-recibo" data-id="' + p.id + '" data-abono="' + a.id + '">Recibo</button>' +
-        '<button class="btn ghost small" data-action="enviar-recibo-correo" data-id="' + p.id + '" data-abono="' + a.id + '" title="Envía el recibo al correo del cliente">✉</button>' +
-        // Anular un abono mal cargado es el ÚNICO camino correcto para
-        // deshacerlo: revierte los dos lados a la vez (el abonado del pedido y
-        // el movimiento de Finanzas). Antes solo se podía editar el monto, y
-        // borrar el movimiento en Finanzas dejaba al pedido cobrado igual.
-        '<button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este abono (también retira su movimiento de Finanzas)">Eliminar</button>' +
-        "</span></div>";
+      return;
     }
+    html += '<div class="tx-row">' +
+      '<span class="mobile-th">Fecha</span><span>' + esc(a.fecha || "—") + "</span>" +
+      '<span class="mobile-th">Concepto</span><span class="mov-concepto">Abono · ' + esc(nombreMetodoPago(a.metodoPago)) + "</span>" +
+      '<span class="mobile-th">Monto</span><span class="amount pos">' + fmt(a.monto) + "</span>" +
+      '<span class="mobile-th">Soporte</span><span>' + celdaSoporteAbono(a) + "</span>" +
+      // Cuatro botones apretados en 190px no se podían pulsar. Los dos de
+      // texto son los que se usan a diario; los dos de un solo gesto (enviar
+      // el recibo, anular) quedan como iconos con su título, y la celda deja
+      // que se envuelvan en dos líneas antes que encogerse.
+      '<span class="mobile-th">Acciones</span><span class="pedido-mov-acciones">' +
+      '<button class="btn ghost small" data-action="editar-abono" data-id="' + a.id + '">Editar</button>' +
+      '<button class="btn ghost small" data-action="generar-pdf-recibo" data-id="' + p.id + '" data-abono="' + a.id + '" title="Generar el recibo de este abono en PDF">Recibo</button>' +
+      '<button class="btn ghost small" data-action="enviar-recibo-correo" data-id="' + p.id + '" data-abono="' + a.id + '" title="Enviar el recibo al correo del cliente" aria-label="Enviar el recibo al correo del cliente">✉</button>' +
+      // Anular un abono mal cargado es el ÚNICO camino correcto para
+      // deshacerlo: revierte los dos lados a la vez (el abonado del pedido y
+      // el movimiento de Finanzas). Antes solo se podía editar el monto, y
+      // borrar el movimiento en Finanzas dejaba al pedido cobrado igual.
+      '<button class="btn danger small" data-action="eliminar-abono" data-id="' + p.id + '" data-abono="' + a.id + '" title="Anular este abono (también retira su movimiento de Finanzas)" aria-label="Anular este abono">🗑</button>' +
+      "</span></div>";
   });
+  html += "</div>";
   return html;
 }
 
@@ -1546,10 +1776,18 @@ export var actions = {
             id: uid(), nombre: l.productoNombre || p.descripcion, imagenUrl: l.imagenUrl || "",
             consumoAprox: 1, cantidadPedida: num(l.cantidad) || 1, precioVenta: num(l.precioUnitario) || 0,
             insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "",
-            productoId: l.productoId || ""
+            productoId: l.productoId || "",
+            // El progreso que el pedido YA llevaba se siembra en cada
+            // referencia. Sin esto, un pedido rápido que iba en "Acabados"
+            // volvía visualmente a la primera etapa apenas se cotizaba: la
+            // tarjeta pasaba a leer el progreso por referencia (que nacía
+            // vacío) mientras el KPI y los filtros seguían leyendo el
+            // `estado` viejo del pedido. Es exactamente el "en una parte se
+            // actualizó y en la otra se quedó viejo" que se reportó.
+            estado: p.estado, estadosDef: p.estadosDef || null
           };
         })
-        : [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "" }],
+        : [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "", estado: p.estado, estadosDef: p.estadosDef || null }],
       gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: p.vendedor ? Object.assign({}, p.vendedor) : null,
       codigoPublico: codigoPublico()
     };
@@ -1584,15 +1822,25 @@ export var actions = {
   // crearía un segundo movimiento para la misma comisión (plata duplicada).
   // origenComisionPedidoId es lo que permite encontrar y borrar ESE
   // movimiento puntual sin tocar otros (mismo patrón que remove-cot-gasto).
+  // Esto mueve PLATA REAL: marcar la comisión como pagada crea un gasto en
+  // Finanzas y desmarcarla lo retira. Antes se disparaba con un clic en una
+  // pastilla que parecía una etiqueta de estado, sin confirmación y sin decir
+  // de cuánto era. Ahora lo dispara un botón explícito (ver renderVendedor) y
+  // el confirm dice el monto y qué va a pasar en Finanzas.
   "toggle-comision": function (el) {
     var id = el.getAttribute("data-id");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!ped || !ped.vendedor) return;
     var pagando = ped.vendedor.estado !== "pagado";
+    var valor = calcComisionValor(ped);
     if (pagando) {
-      var valor = calcComisionValor(ped);
+      if (!window.confirm("¿Marcar como pagada la comisión de " + ped.vendedor.nombre + "?\n\n" +
+        "Monto: " + fmt(valor) + "\n\n" +
+        "Se registra un gasto de " + fmt(valor) + " en Finanzas (esa plata sale de la caja). Puedes deshacerlo desde este mismo pedido.")) return;
       state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + ped.vendedor.nombre, monto: valor, contraparte: ped.vendedor.nombre, fecha: todayStr(), pedidoId: ped.id, origenComisionPedidoId: id });
     } else {
+      if (!window.confirm("¿Deshacer el pago de la comisión de " + ped.vendedor.nombre + " (" + fmt(valor) + ")?\n\n" +
+        "Se retira de Finanzas el gasto que se había creado y la comisión vuelve a quedar pendiente de pago.")) return;
       state.tx = state.tx.filter(function (t) { return t.origenComisionPedidoId !== id; });
     }
     persist("tx");
@@ -1610,7 +1858,7 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (pedido) {
-      var saldo = num(pedido.total) - num(pedido.abono);
+      var saldo = calcSaldoPedido(pedido);
       if (saldo > 0) {
         if (!window.confirm('¿Registrar el saldo completo de ' + fmt(saldo) + ' como cobrado para "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nEsto crea un movimiento de ingreso en Finanzas. Puedes anular el abono luego desde Finanzas si te equivocas.')) return;
         var abonoId = uid();
@@ -1618,7 +1866,8 @@ export var actions = {
         state.pedidos = state.pedidos.map(function (p) {
           if (p.id !== id) return p;
           var abonos = (p.abonos || []).concat([{ id: abonoId, monto: saldo, fecha: todayStr(), metodoPago: "otro", comprobanteUrl: "" }]);
-          // Da exactamente p.total (el saldo es total - abonado), pero pasa
+          // Deja el pedido cobrado hasta el total FACTURADO (con IVA si
+          // aplica, ver calcSaldoPedido), pero pasa
           // por la misma puerta que el resto para que la lista y el total
           // abonado no puedan separarse nunca.
           return Object.assign({}, p, { abono: recalcularAbonoPedido(p, abonos), abonos: abonos });
@@ -1660,23 +1909,38 @@ export var actions = {
     state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
     persist("tx"); persist("pedidos"); notify();
   },
+  // El monto, la fecha y el método ya NO viven solo en el DOM: su casa es el
+  // borrador state.formAbono (ver renderAbonoForm). Antes vivían únicamente en
+  // los inputs, así que cualquier re-render que ocurriera mientras se escribía
+  // —y en esta app re-render es todo el #app— borraba lo tecleado sin rastro.
+  //
+  // Matiz que importa porque es plata: el borrador es UNO SOLO para toda la app
+  // (igual que formReembolso o formTx), pero puede haber VARIOS paneles de
+  // pedido abiertos a la vez. Por eso gana lo que se ve en el campo de ESTE
+  // pedido (cada uno tiene su id estable) y el borrador queda de respaldo: se
+  // registra siempre el monto que el usuario tenía delante, nunca uno que
+  // quedó escrito en la tarjeta de otro pedido. Mismo criterio que ya seguía
+  // el aviso de "abono mayor al saldo" de más abajo.
+  // El comprobante sí sale del DOM y nada más: es un File, no cabe en el estado.
   "add-abono": function (el) {
     var id = el.getAttribute("data-id");
-    var card = el.closest(".pedido-card");
-    var input = card ? card.querySelector('[data-role="abono-input"]') : null;
-    var monto = input ? num(input.value) : 0;
+    var fa = state.formAbono;
+    var visible = function (campo, respaldo) {
+      var input = document.getElementById("abono-" + campo + "-" + id);
+      return input ? input.value : respaldo;
+    };
+    var monto = num(visible("monto", fa.monto));
     if (monto <= 0) return;
-    var fechaEl = card ? card.querySelector('[data-role="abono-fecha"]') : null;
-    var metodoEl = card ? card.querySelector('[data-role="abono-metodo"]') : null;
+    var fecha = visible("fecha", fa.fecha) || todayStr();
+    var metodo = visible("metodo", fa.metodo) || "efectivo";
+    var card = el.closest(".pedido-card");
     var fileEl = card ? card.querySelector('[data-role="abono-comprobante"]') : null;
-    var fecha = (fechaEl && fechaEl.value) || todayStr();
-    var metodo = metodoEl ? metodoEl.value : "efectivo";
     var file = fileEl && fileEl.files && fileEl.files[0];
 
     function registrarAbono(comprobanteUrl) {
       var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
       if (!ped) return;
-      var saldoDisponible = num(ped.total) - num(ped.abono);
+      var saldoDisponible = calcSaldoPedido(ped);
       // Antes, un abono mayor al saldo se RECORTABA en silencio hasta el
       // saldo: quien escribía 150.000 sobre un saldo de 100.000 veía
       // registrados 100.000 y no se enteraba de que le faltaban 50.000 por
@@ -1696,6 +1960,14 @@ export var actions = {
         var abonos = (p.abonos || []).concat([{ id: abonoId, monto: monto, fecha: fecha, metodoPago: metodo, comprobanteUrl: comprobanteUrl || "" }]);
         return Object.assign({}, p, { abono: recalcularAbonoPedido(p, abonos), abonos: abonos });
       });
+      // El borrador se limpia SOLO cuando el abono quedó registrado: si el
+      // usuario cancela el confirm de más arriba, lo que escribió sigue ahí.
+      // Solo se limpia si el borrador guardado era EL DE ESTE pedido: con dos
+      // paneles abiertos, resetearlo entero le borraba al usuario el monto que
+      // tenía tecleado en el otro, sin aviso y en pleno registro de plata.
+      if (state.formAbono.pedidoId === id || !state.formAbono.pedidoId) {
+        state.formAbono = { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" };
+      }
       persist("tx"); persist("pedidos"); notify();
     }
 
@@ -1926,7 +2198,7 @@ export var actions = {
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
     var movimientos = movimientosGeneradosPorPedido(id);
-    var saldo = num(pedido.total) - num(pedido.abono);
+    var saldo = calcSaldoPedido(pedido);
     var stock = (pedido.stockConsumido || []).reduce(function (a, l) { return a + num(l.cantidad); }, 0);
     var detalle = "";
     if (saldo > 0) detalle += "· Deja de figurar " + fmt(saldo) + " como saldo por cobrar." + "\n";
@@ -2072,11 +2344,10 @@ function moveEstado(el, dir) {
   var id = el.getAttribute("data-id");
   state.pedidos = state.pedidos.map(function (p) {
     if (p.id !== id) return p;
-    var estadoIds = estadosDefDe(p).map(function (e) { return e.id; });
-    var idx = estadoIds.indexOf(p.estado);
-    if (idx < 0) idx = 0;
-    var nidx = dir > 0 ? Math.min(idx + 1, estadoIds.length - 1) : Math.max(idx - 1, 0);
-    return Object.assign({}, p, { estado: estadoIds[nidx] });
+    // La aritmética de "avanzar/retroceder acotado al flujo" vive en
+    // core/calc.js y la comparten los dos caminos: acá solo se decide DÓNDE
+    // se escribe el resultado.
+    return Object.assign({}, p, { estado: siguienteEtapa(etapasDe(p), p.estado, dir) });
   });
   persist("pedidos"); notify();
 }
@@ -2095,10 +2366,7 @@ function moveEstadoRef(el, dir) {
     if (c.id !== cotId) return c;
     var refs = (c.referencias || []).map(function (r) {
       if (r.id !== refId) return r;
-      var estadoIds = estadosDefDeRef(r).map(function (e) { return e.id; });
-      var idx = estadoIdxRef(r);
-      var nidx = dir > 0 ? Math.min(idx + 1, estadoIds.length - 1) : Math.max(idx - 1, 0);
-      return Object.assign({}, r, { estado: estadoIds[nidx] });
+      return Object.assign({}, r, { estado: siguienteEtapa(etapasDe(r), r.estado, dir) });
     });
     cotActualizada = Object.assign({}, c, { referencias: refs });
     return cotActualizada;
@@ -2119,7 +2387,7 @@ function chipsEstadosDisponibles() {
   var vistos = {}; var lista = [];
   ESTADOS_DEFAULT.forEach(function (e) { vistos[e.id] = true; lista.push(e); });
   state.pedidos.forEach(function (p) {
-    estadosDefDe(p).forEach(function (e) {
+    etapasDe(p).forEach(function (e) {
       if (!vistos[e.id]) { vistos[e.id] = true; lista.push(e); }
     });
   });

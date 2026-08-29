@@ -429,7 +429,7 @@ assert(!!document.querySelector('[data-action="abrir-insumo-picker-producto"][da
 // pestaña "Catálogo": índice visual en cards — clic en una abre su detalle completo
 click('[data-action="cerrar-producto-editor"]');
 click('[data-action="producto-vista"][data-val="catalogo"]');
-assert(!!document.querySelector('.producto-card-mini[data-id="' + productoId + '"]'), "el producto creado aparece como card visual en el Catálogo");
+assert(!!document.querySelector('.tarjeta-mini[data-id="' + productoId + '"]'), "el producto creado aparece como card visual en el Catálogo");
 click('[data-action="abrir-producto-editor"][data-id="' + productoId + '"]');
 assert(state.productoEditando === productoId && state.productosVista === "nueva", "la card abre el detalle completo en la otra pestaña");
 
@@ -1065,6 +1065,206 @@ cotDs = state.cotizaciones.find(c => c.id === cotDId);
 assert(cotDs.serviciosCobrados.length === 0 && cotDs.costosGlobales.length === 2, "devolverle un tipo de costo normal lo saca de los servicios cobrados");
 assert(calcMod.calcCotizacionTotales(cotDs).precioTotal === 500000, "al dejar de cobrarse aparte, su precio desaparece del total");
 assert(calcMod.calcCotizacionTotales(cotDs).costoTotal === 280000, "pero su costo sigue contando: se volvió a repartir entre las prendas");
+
+// ---------------------------------------------------------------------------
+// Estados de producción: UNA sola resolución de etapas.
+// El usuario reportó que "en una parte se actualizó y en la otra se quedó
+// viejo". La causa era que la misma pregunta —cuáles son las etapas de esto—
+// estaba respondida en siete lugares distintos, y no todos conocían los
+// mismos casos. Estos checks fijan que ahora hay una sola puerta.
+// ---------------------------------------------------------------------------
+const refProveedor = { id: "r1", origen: "proveedor", estado: "pendiente", estadosDef: null };
+const refTaller = { id: "r2", origen: "taller", estado: "cortado", estadosDef: null };
+
+assert(calcMod.etapasDe(refProveedor).length === 2, "una referencia comprada a proveedor tiene su propio flujo de 2 etapas");
+assert(calcMod.etapasDe(refTaller).length === 5, "una que se fabrica en el taller usa el flujo de producción completo");
+assert(calcMod.estadosDefDe(refProveedor) === calcMod.etapasDe(refProveedor), "estadosDefDe y etapasDe son la MISMA función: no pueden divergir");
+assert(calcMod.estadosDefDeRef(refProveedor) === calcMod.etapasDe(refProveedor), "estadosDefDeRef también");
+
+// Antes esto fallaba: el pedido salía con el `estado` de un flujo y la lista
+// de etapas de OTRO, así que su etiqueta no se podía resolver.
+const cotProv = { referencias: [refProveedor] };
+const agregado = calcMod.estadoAgregadoDeCot(cotProv);
+assert(agregado.estadosDef.some(e => e.id === agregado.estado), "el estado agregado del pedido SIEMPRE existe dentro de la lista de etapas que lo acompaña");
+assert(calcMod.estadoLabelDe(agregado) === "Pendiente proveedor", "y por eso su etiqueta se resuelve, en vez de mostrar el id crudo");
+
+// Un flujo hecho a mano desde Plantillas tiene ids uid(), nunca "entregado".
+const flujoPropio = [{ id: "aaa", label: "Corte" }, { id: "bbb", label: "Despachado" }];
+assert(calcMod.pedidoTerminado({ estado: "bbb", estadosDef: flujoPropio }), "un pedido está terminado si va en la ÚLTIMA etapa de su flujo, se llame como se llame");
+assert(!calcMod.pedidoTerminado({ estado: "aaa", estadosDef: flujoPropio }), "y no lo está si le falta alguna");
+assert(calcMod.pedidoTerminado({ estado: "entregado", estadosDef: null }), "con el flujo estándar, la última sigue siendo Entregado");
+
+assert(calcMod.siguienteEtapa(flujoPropio, "aaa", 1) === "bbb", "avanzar una etapa lleva a la siguiente");
+assert(calcMod.siguienteEtapa(flujoPropio, "bbb", 1) === "bbb", "avanzar en la última no se sale del flujo");
+assert(calcMod.siguienteEtapa(flujoPropio, "aaa", -1) === "aaa", "retroceder en la primera tampoco");
+
+// El bug concreto que reportó el usuario: un pedido rápido que ya iba
+// avanzado perdía su progreso al cotizarlo. Desde ese momento la tarjeta leía
+// el progreso por referencia (que nacía vacío) mientras el KPI y los filtros
+// seguían leyendo el `estado` viejo del pedido — "en una parte se actualizó y
+// en la otra se quedó viejo".
+state.pedidos = [{
+  id: "ped-esc", numeroOp: "OP-9999", cliente: "Cliente Escalado", descripcion: "Camisetas",
+  cantidad: "8", total: 400000, costo: 200000, abono: 0, estado: "acabados", estadosDef: null,
+  fechaCreacion: "2026-08-29", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [];
+state.tab = "pedidos";
+state.pedidosVista = "historial";
+render();
+click('[data-action="escalar-a-cotizacion"][data-id="ped-esc"]');
+const cotEscalada = state.cotizaciones.find(c => c.pedidoOrigenId === "ped-esc");
+assert(!!cotEscalada, "cotizar un pedido rápido crea su cotización");
+assert(cotEscalada.referencias.every(r => r.estado === "acabados"), "y cada referencia nace CON el progreso que el pedido ya llevaba, no desde cero");
+assert(calcMod.estadoAgregadoDeCot(cotEscalada).estado === "acabados", "así el estado agregado del pedido sigue siendo el mismo: las dos vistas no se pueden contradecir");
+
+// El progreso lo pinta UNA sola pieza para los dos caminos (pedido rápido y
+// desde cotización): si vuelve a haber dos renderizadores, esto se cae.
+state.pedidos[0].cotizacionId = cotEscalada.id;
+state.tab = "pedidos";
+render();
+const filasProgreso = document.querySelectorAll(".pedido-ref-progreso");
+assert(filasProgreso.length === cotEscalada.referencias.length, "el pedido desde cotización pinta una fila de progreso por referencia");
+state.pedidos[0].cotizacionId = "";
+render();
+assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "y el pedido rápido usa EXACTAMENTE la misma fila, una sola vez");
+assert(!!document.querySelector(".tape-track"), "con la barra de etapas encima, que es lo único que los diferencia");
+
+// ---------------------------------------------------------------------------
+// La serie de movimientos es una LÍNEA DE TIEMPO, no una lista de fechas con
+// datos. Antes solo existían los periodos con movimientos, así que dos días
+// separados por una semana se dibujaban pegados y la forma de la curva mentía.
+// ---------------------------------------------------------------------------
+const serieHuecos = calcMod.calcSerieMovimientos([
+  { tipo: "ingreso", monto: 100000, fecha: "2026-03-02" },
+  { tipo: "gasto", monto: 40000, fecha: "2026-03-12" }
+], "2026-03-01", "2026-03-15");
+assert(serieHuecos.puntos.length === 15, "la serie trae un punto por cada día del rango, no solo por los días con movimientos");
+assert(serieHuecos.puntos[0].clave === "2026-03-01" && serieHuecos.puntos[14].clave === "2026-03-15", "empieza y termina exactamente en el rango pedido");
+assert(serieHuecos.puntos[0].ingresos === 0 && serieHuecos.puntos[0].gastos === 0, "un día sin nada existe y vale cero");
+assert(serieHuecos.puntos[1].ingresos === 100000, "y el día con movimiento conserva su monto");
+const sumaIngresos = serieHuecos.puntos.reduce((a, p) => a + p.ingresos, 0);
+const sumaGastos = serieHuecos.puntos.reduce((a, p) => a + p.gastos, 0);
+assert(sumaIngresos === 100000 && sumaGastos === 40000, "rellenar con ceros no inventa ni pierde plata: los totales son exactos");
+
+// El borrador del abono es de UN pedido: con varios paneles abiertos, lo
+// tecleado en uno no puede aparecer escrito dentro del formulario del otro.
+state.pedidos = [
+  { id: "pa", numeroOp: "OP-A", cliente: "A", descripcion: "A", cantidad: "1", total: 100000, costo: 0,
+    abono: 0, estado: "nuevo", estadosDef: null, fechaCreacion: "2026-08-29", fechaEntrega: "",
+    tipoCliente: "propio", cotizacionId: "", abonos: [], lineas: [], stockConsumido: [], vendedor: null },
+  { id: "pb", numeroOp: "OP-B", cliente: "B", descripcion: "B", cantidad: "1", total: 200000, costo: 0,
+    abono: 0, estado: "nuevo", estadosDef: null, fechaCreacion: "2026-08-29", fechaEntrega: "",
+    tipoCliente: "propio", cotizacionId: "", abonos: [], lineas: [], stockConsumido: [], vendedor: null }
+];
+state.tab = "pedidos";
+state.pedidosVista = "historial";
+state.pedidoPanelAbierto = { pa: true, pb: true };
+state.formAbono = { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" };
+render();
+setInput('#abono-monto-pa', "50000");
+assert(state.formAbono.monto === "50000" && state.formAbono.pedidoId === "pa", "escribir un abono lo guarda en el estado, marcado con su pedido");
+render();
+assert(document.getElementById("abono-monto-pa").value === "50000", "al redibujar, el monto tecleado sigue ahí (antes se perdía: es plata)");
+assert(document.getElementById("abono-monto-pb").value === "", "y NO aparece dentro del formulario del otro pedido");
+
+// ---------------------------------------------------------------------------
+// Regresiones encontradas en la revisión adversarial. Cada assert de acá fija
+// un caso que ya se rompió una vez.
+// ---------------------------------------------------------------------------
+
+// Dos referencias del mismo pedido pueden tener flujos de LARGO distinto. Una
+// comprada a proveedor tiene 2 etapas; una del taller, 5. Comparando índices
+// crudos, la de proveedor ya recibida (1 de 2 = terminada) salía "menos
+// avanzada" que la del taller en Confección (2 de 5 = a la mitad), y el pedido
+// entero se daba por entregado con la prenda todavía en la máquina.
+const cotMixta = { referencias: [
+  { id: "rp", origen: "proveedor", estado: "recibido", estadosDef: null },
+  { id: "rt", origen: "taller", estado: "confeccion", estadosDef: null }
+] };
+const agrMixto = calcMod.estadoAgregadoDeCot(cotMixta);
+assert(agrMixto.estado === "confeccion", "el pedido sigue el ritmo de la pieza REALMENTE menos avanzada, comparando fracción de avance y no índices de flujos de distinto largo");
+assert(!calcMod.pedidoTerminado(agrMixto), "y por lo tanto NO se da por terminado mientras esa pieza siga en producción");
+
+// Desde que la serie es continua, la cantidad de puntos la fija el rango: un
+// año mal tecleado no puede generar decenas de miles de etiquetas.
+const serieAbsurda = calcMod.calcSerieMovimientos(
+  [{ tipo: "ingreso", monto: 1000, fecha: "2026-08-01" }], "1900-01-01", "2026-12-31");
+assert(serieAbsurda.granularidad === "anio", "un rango de más de cinco años se agrupa por año, no por mes");
+assert(serieAbsurda.puntos.length <= 600, "y en ningún caso la serie pasa del tope de periodos (" + serieAbsurda.puntos.length + ")");
+assert(serieAbsurda.puntos.some(p => p.ingresos === 1000), "el movimiento real sigue estando en la serie recortada");
+
+// Insumos: un filtro que apunta a una categoría borrada dejaba la lista vacía
+// sin ningún chip encendido que lo explicara.
+state.catalogoCategorias = [{ id: "cx", nombre: "Telas" }];
+state.catalogoInsumos = [{ id: "ix", nombre: "Tela", unidad: "MT", costo: 1000, tipo: "tela", categoriaId: "cx", proveedorId: "" }];
+state.filtroCatalogoCategoria = "cx";
+state.buscarCatalogo = "";
+state.tab = "catalogo";
+render();
+state.catalogoCategorias = []; // la categoría desaparece (aprobar una propuesta, otra pestaña…)
+render();
+assert(state.filtroCatalogoCategoria === "todos", "si la categoría filtrada deja de existir, el filtro se sanea EN EL ESTADO (no solo en la vista, o resucita)");
+assert(document.querySelectorAll(".tx-row.insumo:not(.head)").length === 1, "y el insumo vuelve a verse en vez de quedar una lista vacía sin explicación");
+
+// El conteo del buscador no puede prometer resultados que el chip ya descartó.
+state.catalogoCategorias = [{ id: "c1", nombre: "Telas" }, { id: "c2", nombre: "Hilos" }];
+state.catalogoInsumos = [
+  { id: "i1", nombre: "Tela", unidad: "MT", costo: 1, tipo: "tela", categoriaId: "c1", proveedorId: "" },
+  { id: "i2", nombre: "Hilo", unidad: "UND", costo: 1, tipo: "por_prenda", categoriaId: "c2", proveedorId: "" }
+];
+state.filtroCatalogoCategoria = "c2";
+render();
+assert(document.querySelector(".buscador-conteo").textContent === "1 insumo", "con un chip activo el conteo habla de lo que el chip deja pasar, no del catálogo entero");
+
+// Registrar un abono no puede borrar el borrador que hay tecleado en OTRO pedido.
+state.pedidos = [
+  { id: "pa", numeroOp: "OP-A", cliente: "A", descripcion: "A", cantidad: "1", total: 100000, costo: 0,
+    abono: 0, estado: "nuevo", estadosDef: null, fechaCreacion: "2026-08-29", fechaEntrega: "",
+    tipoCliente: "propio", cotizacionId: "", abonos: [], lineas: [], stockConsumido: [], vendedor: null },
+  { id: "pb", numeroOp: "OP-B", cliente: "B", descripcion: "B", cantidad: "1", total: 200000, costo: 0,
+    abono: 0, estado: "nuevo", estadosDef: null, fechaCreacion: "2026-08-29", fechaEntrega: "",
+    tipoCliente: "propio", cotizacionId: "", abonos: [], lineas: [], stockConsumido: [], vendedor: null }
+];
+state.tab = "pedidos"; state.pedidosVista = "historial"; state.pedidoPanelAbierto = { pa: true, pb: true };
+state.formAbono = { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" };
+render();
+setInput('#abono-monto-pb', "30000");
+click('[data-action="add-abono"][data-id="pa"]');
+assert(state.formAbono.monto === "30000" && state.formAbono.pedidoId === "pb", "el borrador del OTRO pedido sobrevive: solo se limpia el de aquel en el que se registró");
+
+// Un pedido cancelado no ofrece cobrar lo que la propia tarjeta da por perdido.
+state.pedidos = [{ id: "pc", numeroOp: "OP-C", cliente: "C", descripcion: "C", cantidad: "1",
+  total: 500000, costo: 0, abono: 0, estado: "cancelado", cancelado: true, estadosDef: null,
+  fechaCreacion: "2026-08-29", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null }];
+state.pedidoPanelAbierto = { pc: true };
+render();
+if (calcMod.pedidoCancelado(state.pedidos[0])) {
+  assert(!document.querySelector('[data-action="add-abono"][data-id="pc"]'), "un pedido cancelado no muestra el formulario de abono");
+  assert(document.body.textContent.includes("Quedó sin cobrar"), "y su saldo se etiqueta 'Quedó sin cobrar', no 'Falta por cobrar'");
+}
+
+// Y al revés: un pedido ya cobrado SÍ debe dejar registrar otro abono (antes
+// el formulario solo salía con saldo > 0, así que no había forma).
+state.pedidos = [{ id: "pd", numeroOp: "OP-D", cliente: "D", descripcion: "D", cantidad: "1",
+  total: 100000, costo: 0, abono: 100000, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-08-29", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null }];
+state.pedidoPanelAbierto = { pd: true };
+render();
+assert(!!document.querySelector('[data-action="add-abono"][data-id="pd"]'), "un pedido cobrado completo sigue permitiendo registrar un abono (antes era imposible)");
+
+// El estado vacío de la gráfica quedó inalcanzable al volverse continua la
+// serie: en vez del aviso se dibujaban 30 barras en cero con "Entró $0".
+state.tx = [];
+state.tab = "resumen";
+render();
+assert(document.body.textContent.includes("Sin movimientos en este rango para graficar"),
+  "sin movimientos, la tarjeta de la gráfica lo DICE en vez de dibujar 30 barras en cero");
+assert(!document.getElementById("chart-ingresos-gastos"),
+  "y ni siquiera emite el canvas: no hay nada que graficar");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

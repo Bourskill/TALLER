@@ -15,35 +15,68 @@ var ESTADOS_PROVEEDOR_DEFAULT = [
   { id: "recibido", label: "Recibido" }
 ];
 
-// ---------- estados de producción por pedido ----------
-// Un pedido puede traer su propio flujo de estados (definido desde la
-// cotización de origen, ver cotizaciones.js: c.estadosDef) porque no todas
-// las prendas pasan por las mismas etapas. Si no trae uno propio, se usa el
-// flujo por defecto de toda la app.
-export function estadosDefDe(p) {
-  return (p && p.estadosDef && p.estadosDef.length) ? p.estadosDef : ESTADOS_DEFAULT;
+// ---------- estados de producción: UNA sola resolución ----------
+//
+// POR QUÉ ESTA FUNCIÓN EXISTE (no borrar ni volver a repartir): la misma
+// pregunta —"¿cuáles son las etapas de esto?"— estaba respondida en SIETE
+// lugares distintos: estadosDefDe(pedido) acá, estadosDefDeRef(referencia)
+// acá al lado (que sí conocía el caso "comprado a proveedor", mientras la
+// primera no), y cinco expresiones inline copiadas dentro de
+// modules/cotizaciones.js. El resultado era el defecto que reportó el
+// usuario: el editor de etapas de una referencia de proveedor ofrecía las 5
+// etapas de producción del taller, mientras la tarjeta del pedido mostraba
+// las 2 del proveedor — la misma referencia, dos flujos distintos, según por
+// dónde se mirara.
+//
+// `etapasDe` sirve a los DOS caminos de un pedido (rápido y desde
+// cotización) y también a una referencia. Cualquier código nuevo que
+// necesite las etapas de algo entra por acá.
+export function etapasDe(entidad) {
+  if (entidad && entidad.estadosDef && entidad.estadosDef.length) return entidad.estadosDef;
+  if (entidad && entidad.origen === "proveedor") return ESTADOS_PROVEEDOR_DEFAULT;
+  return ESTADOS_DEFAULT;
 }
+// Alias históricos: se mantienen porque medio proyecto los importa, pero los
+// dos son ya el MISMO cuerpo. No agregar lógica a ninguno de los dos.
+export function estadosDefDe(p) { return etapasDe(p); }
+export function estadosDefDeRef(ref) { return etapasDe(ref); }
+
+// En qué etapa va algo (pedido o referencia), como índice dentro de SU flujo.
+export function estadoIdx(entidad) {
+  var def = etapasDe(entidad);
+  var idx = def.map(function (e) { return e.id; }).indexOf(entidad && entidad.estado);
+  return idx < 0 ? 0 : idx;
+}
+export function estadoIdxRef(ref) { return estadoIdx(ref); }
+
 export function estadoLabelDe(p) {
-  var def = estadosDefDe(p);
+  var def = etapasDe(p);
   var found = def.filter(function (e) { return e.id === p.estado; })[0];
   return found ? found.label : (p.estado || "—");
 }
 
-// ---------- estados de producción por REFERENCIA (dentro de una cotización) ----------
-// Cada referencia de una cotización puede llevar su propio flujo (ver
-// cotizaciones.js: renderEstadosRef) y, una vez el pedido entra a producción,
-// su propio progreso — no todas las piezas de un mismo pedido avanzan al
-// mismo ritmo (ver pedidos.js, que ya no muestra un solo "tape" para todo el
-// pedido sino el progreso de cada referencia).
-export function estadosDefDeRef(ref) {
-  if (ref && ref.estadosDef && ref.estadosDef.length) return ref.estadosDef;
-  if (ref && ref.origen === "proveedor") return ESTADOS_PROVEEDOR_DEFAULT;
-  return ESTADOS_DEFAULT;
+// ¿Terminó? Es la ÚLTIMA etapa del flujo que sea, se llame como se llame.
+//
+// POR QUÉ: antes esto se preguntaba comparando contra el id literal
+// "entregado" en tres sitios (KPI de pedidos activos, avisos de entrega
+// vencida y Próximas entregas del Resumen). Pero las etapas de un flujo
+// creado desde Plantillas nacen con ids uid(), nunca "entregado" — así que
+// un pedido con flujo propio NUNCA se daba por terminado: seguía contando
+// como activo y avisando de entrega vencida para siempre.
+export function pedidoTerminado(p) {
+  var def = etapasDe(p);
+  return estadoIdx(p) === def.length - 1;
 }
-export function estadoIdxRef(ref) {
-  var def = estadosDefDeRef(ref);
-  var idx = def.map(function (e) { return e.id; }).indexOf(ref.estado);
-  return idx < 0 ? 0 : idx;
+
+// Mover una etapa hacia adelante o atrás, acotado al flujo. Es aritmética
+// pura y la comparten los dos caminos (el pedido rápido y la referencia
+// dentro de una cotización), que antes la repetían cada uno por su lado.
+export function siguienteEtapa(etapas, estadoActual, dir) {
+  var ids = (etapas || []).map(function (e) { return e.id; });
+  var i = ids.indexOf(estadoActual);
+  if (i < 0) i = 0;
+  var destino = Math.max(0, Math.min(ids.length - 1, i + dir));
+  return ids[destino];
 }
 // El pedido en sí sigue guardando un solo `estado`/`estadosDef` (de eso
 // dependen el filtro por etapa, el KPI "Pedidos activos" y el PDF de
@@ -55,13 +88,35 @@ export function estadoIdxRef(ref) {
 export function estadoAgregadoDeCot(cot) {
   var refs = (cot && cot.referencias) || [];
   if (!refs.length) return null;
-  var peor = refs[0], peorIdx = estadoIdxRef(refs[0]);
+  // Se compara el AVANCE RELATIVO (qué fracción del flujo lleva), no el índice
+  // crudo.
+  //
+  // POR QUÉ: dos referencias del mismo pedido pueden tener flujos de largo
+  // distinto — una comprada a proveedor tiene 2 etapas y una del taller 5.
+  // Comparando índices, una referencia de proveedor YA RECIBIDA (índice 1 de 2,
+  // o sea terminada) salía "menos avanzada" que una del taller en Confección
+  // (índice 2 de 5, o sea a la mitad), y el pedido entero quedaba estampado con
+  // el flujo del proveedor en su última etapa: pedidoTerminado() lo daba por
+  // entregado mientras la prenda seguía en la máquina.
+  function avance(r) {
+    var def = etapasDe(r);
+    var idx = estadoIdx(r);
+    return def.length > 1 ? idx / (def.length - 1) : (idx >= def.length - 1 ? 1 : 0);
+  }
+  var peor = refs[0], peorAvance = avance(refs[0]);
   refs.forEach(function (r) {
-    var idx = estadoIdxRef(r);
-    if (idx < peorIdx) { peor = r; peorIdx = idx; }
+    var a = avance(r);
+    if (a < peorAvance) { peor = r; peorAvance = a; }
   });
-  var def = estadosDefDeRef(peor);
-  return { estado: def[peorIdx].id, estadosDef: (peor.estadosDef && peor.estadosDef.length) ? peor.estadosDef : null };
+  var peorIdx = estadoIdx(peor);
+  // Se devuelve el flujo EFECTIVO, no el personalizado. Antes el `estado`
+  // salía de un flujo (el efectivo, que para una referencia de proveedor son
+  // sus 2 etapas) y el `estadosDef` de otro (el personalizado, que en ese
+  // caso es null): el pedido quedaba con un estado "recibido" y una lista de
+  // etapas donde ese id no existe, así que estadoLabelDe() no encontraba la
+  // etiqueta y mostraba el id crudo.
+  var def = etapasDe(peor);
+  return { estado: def[peorIdx].id, estadosDef: def };
 }
 
 // ---------- finanzas ----------
@@ -119,9 +174,16 @@ export function calcResumenMovimientos(movimientos) {
 export function calcSerieMovimientos(movimientos, desde, hasta) {
   var dIni = new Date(desde + "T00:00:00"), dFin = new Date(hasta + "T00:00:00");
   var dias = Math.max(1, Math.round((dFin - dIni) / 86400000) + 1);
-  var granularidad = dias <= 31 ? "dia" : dias <= 180 ? "semana" : "mes";
+  // La granularidad crece con el rango. "anio" existe por una razón concreta:
+  // desde que la serie es continua, la cantidad de puntos la fija el RANGO y no
+  // los datos, así que un año mal tecleado en el campo "Desde" del reporte
+  // ("1900" en vez de "2020", o "0202" por "2020") generaba miles de etiquetas
+  // por meses — con un solo movimiento en todo el rango. Antes el tamaño estaba
+  // acotado por la cantidad de movimientos y no podía pasar.
+  var granularidad = dias <= 31 ? "dia" : dias <= 180 ? "semana" : dias <= 1900 ? "mes" : "anio";
   function clave(fechaStr) {
     if (granularidad === "dia") return fechaStr;
+    if (granularidad === "anio") return fechaStr.slice(0, 4);
     if (granularidad === "mes") return fechaStr.slice(0, 7);
     var d = new Date(fechaStr + "T00:00:00");
     var dow = (d.getDay() + 6) % 7; // lunes = 0
@@ -135,8 +197,66 @@ export function calcSerieMovimientos(movimientos, desde, hasta) {
     var v = num(t.monto);
     if (t.tipo === "ingreso") mapa[k].ingresos += v; else mapa[k].gastos += v;
   });
+
+  // La serie sale CONTINUA: un punto por cada periodo del rango, con ceros
+  // donde no hubo movimientos.
+  //
+  // POR QUÉ (no quitar el relleno): antes solo se creaba un punto por fecha
+  // CON movimientos, así que el eje X de las gráficas no era una línea de
+  // tiempo sino una lista de días con datos — dos días separados por una
+  // semana se dibujaban pegados, y la forma de la curva mentía. El relleno
+  // vive acá, junto a clave(), porque generar las claves del rango exige
+  // usar EXACTAMENTE el mismo formato de agrupación (día / lunes de la
+  // semana / mes): tenerlo en la vista obligaba a mantener dos copias de ese
+  // formato, y en cuanto se separaran el relleno duplicaría puntos en vez de
+  // completarlos.
+  claveDeCadaPeriodo(dIni, dFin, granularidad).forEach(function (k) {
+    if (!mapa[k]) mapa[k] = { clave: k, ingresos: 0, gastos: 0 };
+  });
+
   var claves = Object.keys(mapa).sort();
-  return { granularidad: granularidad, puntos: claves.map(function (k) { return mapa[k]; }) };
+  return {
+    granularidad: granularidad, desde: desde, hasta: hasta,
+    puntos: claves.map(function (k) { return mapa[k]; })
+  };
+}
+
+// Todas las claves de un rango, en el mismo formato con el que agrupa
+// calcSerieMovimientos. Vive pegada a ella justamente para que las dos no se
+// puedan separar.
+function claveDeCadaPeriodo(dIni, dFin, granularidad) {
+  var claves = [];
+  if (isNaN(dIni) || isNaN(dFin) || dIni > dFin) return claves;
+  function iso(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  // Tope duro de periodos. No es una truncada silenciosa: se conservan los
+  // periodos MÁS RECIENTES y el eje sigue mostrando sus fechas reales, así que
+  // en pantalla se ve que la serie arranca después de lo que se pidió. Existe
+  // para que una fecha absurda (un año mal tecleado) no le pase decenas de
+  // miles de etiquetas a Chart.js.
+  var TOPE = 600;
+  function recortar(lista) { return lista.length > TOPE ? lista.slice(lista.length - TOPE) : lista; }
+
+  if (granularidad === "anio") {
+    for (var y = dIni.getFullYear(); y <= dFin.getFullYear(); y++) claves.push(String(y));
+    return recortar(claves);
+  }
+  if (granularidad === "mes") {
+    var m = new Date(dIni.getFullYear(), dIni.getMonth(), 1);
+    while (m <= dFin) {
+      claves.push(m.getFullYear() + "-" + String(m.getMonth() + 1).padStart(2, "0"));
+      m.setMonth(m.getMonth() + 1);
+    }
+    return recortar(claves);
+  }
+  var d = new Date(dIni);
+  if (granularidad === "semana") d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // lunes = 0
+  while (d <= dFin) {
+    claves.push(iso(d));
+    d.setDate(d.getDate() + (granularidad === "semana" ? 7 : 1));
+  }
+  return recortar(claves);
 }
 // Un movimiento generado POR el sistema (abono, comisión, pago de gasto
 // fijo/deuda...) siempre tiene un registro real del que salió — a
@@ -354,8 +474,54 @@ export function movimientosGeneradosPorPedido(pedidoId) {
   });
 }
 
+// ---------- IVA ----------
+//
+// LA REGLA, en una frase: el IVA NO es plata del taller. Se le cobra al
+// cliente y se le entrega al Estado; el taller solo lo tiene guardado un rato.
+//
+// De ahí salen DOS consecuencias que la app tiene que respetar por separado, y
+// que antes estaban mezcladas:
+//
+//   1. Lo que el cliente DEBE sí incluye el IVA. Si le facturaste $1.190.000
+//      (un millón más 19%), eso es lo que te debe: la cartera va con IVA.
+//   2. Lo que el taller GANA no lo incluye. El margen, la ganancia y los
+//      reportes se calculan sobre la base ($1.000.000), porque esos $190.000
+//      nunca fueron suyos. Contarlos como ingreso infla la ganancia en 19%.
+//
+// QUÉ ESTABA MAL: `calcSaldoPedido` era `total - abono` con el total SIN IVA,
+// mientras la factura cobraba CON IVA. Un cliente que pagaba la factura
+// completa dejaba el pedido en saldo NEGATIVO, y la app anunciaba un "saldo a
+// favor del cliente" de exactamente el IVA — plata que en realidad hay que
+// girarle a la DIAN. El KPI "Por cobrar" también quedaba corto por ese 19%.
+export function calcIvaPedido(p) {
+  var iva = p && p.iva;
+  if (!iva || !iva.activo) return 0;
+  return num(p.total) * (num(iva.porcentaje) / 100);
+}
+// Lo que dice la factura: es el número contra el que se cobra.
+export function calcTotalConIvaPedido(p) {
+  return num(p && p.total) + calcIvaPedido(p);
+}
+
 export function calcSaldoPedido(p) {
-  return num(p.total) - num(p.abono);
+  return calcTotalConIvaPedido(p) - num(p && p.abono);
+}
+
+// Del dinero YA cobrado de un pedido, cuánto es IVA. Proporcional: si te
+// pagaron la mitad de la factura, cobraste la mitad del IVA. Sirve para poder
+// decirle al usuario qué parte de su caja no le pertenece.
+export function calcIvaCobrado(p) {
+  var conIva = calcTotalConIvaPedido(p);
+  if (conIva <= 0) return 0;
+  var proporcion = Math.min(1, Math.max(0, num(p && p.abono) / conIva));
+  return calcIvaPedido(p) * proporcion;
+}
+
+// IVA cobrado en TODA la app: plata que está en la caja pero es del Estado.
+// Incluye los pedidos cancelados a propósito — si el dinero se recibió, el
+// IVA se debe igual; y si se devolvió, el abono baja y este número baja solo.
+export function calcIvaCobradoTotal() {
+  return (state.pedidos || []).reduce(function (a, p) { return a + calcIvaCobrado(p); }, 0);
 }
 // Total realmente abonado de un pedido a partir de su lista de abonos. Los
 // reembolsos viven en esa misma lista (para que el historial sea uno solo y
@@ -708,7 +874,7 @@ export function calcNominaPendiente() {
 
 // ---------- pedidos / equipo ----------
 export function calcPedidosActivos() {
-  return state.pedidos.filter(function (p) { return p.estado !== "entregado" && !pedidoCancelado(p); }).length;
+  return state.pedidos.filter(function (p) { return !pedidoTerminado(p) && !pedidoCancelado(p); }).length;
 }
 // El salario de cada persona se guarda EN LA BASE que se eligió al cargarlo
 // (e.salarioPeriodo: "semanal" | "quincenal" | "mensual"), no siempre
@@ -1015,7 +1181,7 @@ export function calcNotificaciones(esAdmin) {
 
   // 3. Entregas de hoy o ya vencidas, de pedidos que siguen activos.
   (state.pedidos || []).forEach(function (p) {
-    if (p.estado === "entregado" || pedidoCancelado(p) || !p.fechaEntrega || p.fechaEntrega > hoy) return;
+    if (pedidoTerminado(p) || pedidoCancelado(p) || !p.fechaEntrega || p.fechaEntrega > hoy) return;
     var vencida = p.fechaEntrega < hoy;
     items.push({
       id: "entrega:" + p.id,

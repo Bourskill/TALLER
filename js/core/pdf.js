@@ -1053,6 +1053,12 @@ export async function generarPDFFactura(p, opts) {
   var subtotal = num(p.total);
   var ivaMonto = ivaActivo ? subtotal * (ivaPct / 100) : 0;
   var totalConIva = subtotal + ivaMonto;
+  // El saldo sale de calcSaldoPedido, que YA cobra con IVA (ver la sección
+  // "IVA" de core/calc.js). Antes ese cálculo era total - abono SIN IVA
+  // mientras el TOTAL impreso arriba sí lo llevaba, así que la factura se
+  // contradecía a sí misma delante del cliente: "TOTAL $1.190.000 / Abonado $0
+  // / SALDO PENDIENTE $1.000.000". Ahora el documento y la pantalla dicen
+  // exactamente el mismo número.
   var saldo = calcSaldoPedido(p);
 
   var finalY = doc.lastAutoTable.finalY + 26;
@@ -1074,9 +1080,14 @@ export async function generarPDFFactura(p, opts) {
   doc.text(money(p.abono), pageW - marginX, finalY, { align: "right" });
   finalY += 16;
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(saldo > 0 ? 190 : 30, saldo > 0 ? 60 : 140, 40);
-  doc.text(saldo > 0 ? "SALDO PENDIENTE" : "PAGADO COMPLETO", pageW - marginX - 160, finalY);
-  doc.text(money(saldo), pageW - marginX, finalY, { align: "right" });
+  // Tres casos, no dos: antes un pedido con plata cobrada de más imprimía
+  // "PAGADO COMPLETO" seguido de un monto NEGATIVO — la etiqueta decía una
+  // cosa y la cifra otra. Se imprime siempre el valor absoluto y la etiqueta
+  // que le corresponde.
+  var etiquetaSaldo = saldo > 0 ? "SALDO PENDIENTE" : (saldo < 0 ? "SALDO A FAVOR DEL CLIENTE" : "PAGADO COMPLETO");
+  if (saldo > 0) doc.setTextColor(190, 60, 40); else doc.setTextColor(30, 140, 40);
+  doc.text(etiquetaSaldo, pageW - marginX - 160, finalY);
+  doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
 
   finalY += 60;
   doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);

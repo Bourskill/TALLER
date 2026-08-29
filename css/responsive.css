@@ -154,9 +154,6 @@
 
   /* La barra de guardado de una cotización es sticky: en móvil compite con la
      topbar, así que se compacta y sus botones ocupan el ancho completo. */
-  .save-bar{padding:var(--sp-2) var(--sp-3);}
-  .save-bar > span{width:100%;}
-  .save-bar > span .btn{flex:1;}
 
   /* Con varias pestañas ("+ Nuevo pedido", "Historial (24)") la fila se salía
      de la pantalla y la segunda quedaba inalcanzable: ahora la barra scrollea

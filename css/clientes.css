@@ -16,10 +16,11 @@
 .cliente-campo-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;}
 .cliente-campo-valor{font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-.search-bar{margin-bottom:14px;}
-.search-bar input{font-family:'Inter',sans-serif;font-size:13px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);width:100%;max-width:320px;}
-.search-bar input:focus{outline:none;border-color:var(--accent);}
-.client-count{font-size:11.5px;color:var(--ink-faint);margin-top:6px;}
+/* `.search-bar` y `.client-count` vivian aca: eran la barra de busqueda
+   PROPIA de esta pestana, distinta de las de Finanzas y Pedidos sin ninguna
+   razon. Contactos usa ahora la barra compartida `.buscador` (forms.css +
+   renderBuscador en core/components.js), que ademas trae lupa, boton de
+   limpiar y el conteo de resultados que aqui se hacia a mano. */
 
 /* combobox de búsqueda de clientes, reutilizado en Pedidos y Cotizaciones */
 .combo-wrap{position:relative;}

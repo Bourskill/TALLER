@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
 import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos } from "../core/calc.js";
-import { renderHelp } from "../core/components.js";
+import { renderHelp, renderBuscador } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -121,7 +121,13 @@ function renderFormMovimiento() {
 }
 
 function renderHistorial() {
-  var html = '<div class="field" style="max-width:360px;margin-bottom:10px;"><input id="inp-buscar-tx" class="mini-input" style="width:100%" placeholder="Buscar por N.º OP, cédula, cliente, producción o fecha…" value="' + esc(state.buscarTx || "") + '" data-live-filter="buscarTx" /></div>';
+  var html = '<div style="margin-bottom:10px;">' + renderBuscador({
+    id: "inp-buscar-tx",
+    filtro: "buscarTx",
+    valor: state.buscarTx,
+    ancho: 360,
+    placeholder: "Buscar por N.º OP, cédula, cliente, producción o fecha…"
+  }) + "</div>";
 
   html += '<div class="filters">';
   [["todos", "Todos"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["nomina", "Nómina"], ["comision", "Comisiones"]].forEach(function (c) {

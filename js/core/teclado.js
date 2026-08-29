@@ -104,6 +104,7 @@ var ATAJOS = [
   ]],
   ["Lo demás", [
     ["/ o Ctrl + K", "Ir al buscador de la sección (si tiene)"],
+    ["Ctrl + S", "Guardar lo que esté sin guardar en pantalla"],
     ["Alt + B", "Colapsar o expandir el menú lateral"],
     ["Alt + T", "Cambiar entre tema claro y oscuro"],
     ["?", "Mostrar u ocultar esta ayuda"]
@@ -277,10 +278,18 @@ document.addEventListener("keydown", function (e) {
     return;
   }
 
-  // Ctrl/⌘ + K: ir al buscador de la sección. Es el único atajo con Ctrl — el
-  // resto del teclado con Ctrl es del navegador y no se le quita.
+  // Ctrl/⌘ + K: ir al buscador de la sección.
   if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
     if (irAlBuscador()) e.preventDefault();
+    return;
+  }
+  // Ctrl/⌘ + S: guardar lo que esté sin guardar en pantalla. No conoce
+  // ninguna pestaña en particular: busca el botón que se haya marcado como la
+  // acción de guardado principal (hoy, el dock de la cotización). Cualquier
+  // pantalla futura con guardado explícito solo tiene que poner ese atributo.
+  if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+    var botonGuardar = document.querySelector("[data-guardar-principal]");
+    if (botonGuardar) { e.preventDefault(); botonGuardar.click(); }
     return;
   }
   if (e.ctrlKey || e.metaKey) return;
@@ -293,6 +302,14 @@ document.addEventListener("keydown", function (e) {
   if (e.key === "Enter") {
     if (!el || (el.tagName !== "INPUT" && el.tagName !== "SELECT")) return;
     if (el.type === "checkbox" || el.type === "radio" || el.type === "file") return; // su Enter/Espacio nativo ya funciona bien
+    // Un campo puede declarar QUE hace su Enter con `data-enter-action`. Es
+    // para los campos que son un mini-formulario de una sola linea ("Nueva
+    // categoria", "Nueva etapa"): ahi el gesto obvio —y el unico que ofrece
+    // el teclado tactil de un telefono— es pulsar Enter, y saltar al
+    // siguiente campo en vez de dar de alta la cosa dejaba al usuario
+    // escribiendo dentro de un dato real sin darse cuenta.
+    var accionEnter = el.getAttribute("data-enter-action");
+    if (accionEnter) { e.preventDefault(); api.dispatch(accionEnter, el); return; }
     e.preventDefault();
     saltarAlSiguienteCampo(el);
     return;

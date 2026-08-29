@@ -78,6 +78,61 @@
 .section-sub{font-size:12.5px;color:var(--ink-faint);margin:0 0 var(--sp-3);line-height:1.55;}
 .card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:var(--sp-4) 26px;margin-bottom:var(--sp-4);}
 .card.nested{background:var(--surface-2);border-color:var(--border);}
+
+/* ---------- tarjeta de indice visual (compartida) ----------
+   Ver renderTarjetaMini() en core/components.js. Nacio en el catalogo de
+   Productos como `.producto-card-mini` y era la unica pantalla que dejaba
+   reconocer sus cosas por la foto; Plantillas necesitaba lo mismo, asi que
+   subio aca en vez de copiarse. Cualquier lista que se reconozca mejor de un
+   vistazo que leyendo texto debe usar esto y no una tarjeta nueva. */
+.tarjeta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;}
+.tarjeta-mini{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);
+  overflow:hidden;cursor:pointer;transition:border-color .12s ease,transform .12s ease,box-shadow .12s ease;}
+.tarjeta-mini:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow-md);}
+/* La tarjeta cuyo detalle esta abierto se marca: sin esto, al desplegar el
+   detalle debajo de la grilla no habia forma de saber cual se abrio. */
+.tarjeta-mini.activa{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+.tarjeta-mini-img{aspect-ratio:1/1;background:var(--surface-3);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.tarjeta-mini-img img{width:100%;height:100%;object-fit:cover;display:block;}
+.tarjeta-mini-noimg{font-size:11px;color:var(--ink-faint);}
+.tarjeta-mini-body{padding:10px 12px 12px;}
+.tarjeta-mini-nombre{font-weight:700;font-size:13.5px;color:var(--ink);line-height:1.3;}
+.tarjeta-mini-meta{font-size:11px;color:var(--ink-faint);margin-top:3px;}
+.tarjeta-mini-pie{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px;}
+.tarjeta-mini-pie .amount{font-size:13px;}
+
+/* ---------- bloque de cifras (etiqueta chica arriba, monto abajo) ----------
+   Compartido: lo usan el resumen de una referencia de cotizacion y el panel
+   de dinero de un pedido. Vivia en cotizaciones.css, que se carga DESPUES de
+   pedidos.css: cualquier modificador de Pedidos perdia por orden contra la
+   regla base y no se aplicaba. Vive aca por eso. */
+.ref-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--sp-3);margin-top:var(--sp-5);padding:var(--sp-4) 0 2px;border-top:1px dashed var(--border);}
+.ref-summary .rs-item .rl{font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;}
+.ref-summary .rs-item .rv{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:17px;margin-top:4px;}
+
+/* ---------- progreso de produccion (compartido) ----------
+   Lo pinta renderProgresoEtapas() en core/components.js, que es UNA sola
+   pieza para los dos caminos de un pedido (rapido y desde cotizacion).
+   Antes cada camino tenia su propio renderizador y su propio markup, y por
+   eso se desincronizaban. Vive aca y no en pedidos.css justamente porque ya
+   no es de una sola pestana. */
+.tape-track{height:5px;background:var(--surface-3);border-radius:3px;position:relative;margin:14px 0 6px;overflow:hidden;}
+.tape-fill{height:100%;background:var(--accent);border-radius:3px;}
+.tape-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
+.tape-labels span.current{color:var(--accent);}
+
+/* Progreso por referencia (pedidos que vienen de una cotización con varias
+   piezas, cada una a su propio ritmo) — reemplaza el "tape" único cuando
+   aplica. Una fila compacta por referencia: nombre, etapa actual, fracción
+   y sus propios botones de avanzar/retroceder. */
+.pedido-refs-progreso{display:flex;flex-direction:column;gap:6px;margin:14px 0 4px;}
+.pedido-ref-progreso{display:flex;align-items:center;gap:10px;background:var(--surface-2);border-radius:var(--radius-sm);padding:8px 12px;flex-wrap:wrap;}
+.pedido-ref-nombre{font-weight:600;font-size:12.5px;flex:1;min-width:120px;}
+.pedido-ref-etapa{font-size:11.5px;color:var(--accent-ink);}
+.pedido-ref-frac{font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:var(--ink-soft);background:var(--surface-3);padding:2px 7px;border-radius:8px;}
+.pedido-ref-btns{display:flex;gap:4px;}
+.pedido-ref-btns .btn{padding:4px 9px;}
+
 /* Un título de sección seguido de contenido necesita separarse de él; el
    primero de una tarjeta no, porque ya tiene el padding de la tarjeta. */
 .card > .section-title:not(:first-child),
@@ -109,8 +164,28 @@
 .gsheet-tab.active{background:var(--surface);color:var(--ink);border-color:var(--border);}
 .gsheet-tab:hover:not(.active){color:var(--ink);background:var(--surface-hover);}
 
+/* La entrada del panel anima SOLO la opacidad, a proposito.
+   POR QUE (no volver a meter transform aca): un elemento que anima `transform`
+   se convierte en el bloque contenedor de cualquier `position:fixed` que tenga
+   dentro. Como TODO el contenido de cada pestana vive dentro de .tab-panel,
+   ese translateY(2px) hacia que cualquier pieza flotante de un modulo se
+   posicionara respecto al panel y no respecto a la ventana: el dock de
+   "sin guardar" de Cotizaciones aparecia 282px por debajo del borde inferior
+   de la pantalla, invisible. El deslizamiento de 2px en 120ms no se percibe;
+   el bug si. */
 .tab-panel{animation:panel-in .12s ease;}
-@keyframes panel-in{from{opacity:0;transform:translateY(2px);}to{opacity:1;transform:none;}}
+@keyframes panel-in{from{opacity:0;}to{opacity:1;}}
+
+/* ---------- cifras bajo el titulo de una grafica ----------
+   La curva dice la FORMA del mes; esto dice el NUMERO, para que la tarjeta
+   comunique aunque nadie se detenga a leer la grafica. Tiene clase propia (y
+   no estilos inline) porque lo usan las dos graficas del panel y encajaria en
+   cualquier otra tarjeta con grafica. */
+.grafica-cifras{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-1) var(--sp-3);margin:0 0 var(--sp-3);}
+.grafica-cifra{display:inline-flex;align-items:baseline;gap:5px;}
+.grafica-cifra-label{font-size:11.5px;color:var(--ink-faint);}
+.grafica-cifra .amount{font-size:15px;}
+.grafica-cifra-sep{color:var(--border-strong);font-size:11px;}
 
 /* ---------- previsualización de fotos en grande (cualquier foto de la app) ---------- */
 .imgprev-overlay{position:fixed;inset:0;z-index:200;background:rgba(6,7,11,.86);display:flex;align-items:center;justify-content:center;padding:40px;cursor:zoom-out;}

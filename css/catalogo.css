@@ -1,3 +1,88 @@
-/* La pestaña Catálogo reutiliza .tx-row, .mini-input, .report-grid y .report-item
-   ya definidos en tables.css / forms.css / config.css — no necesita clases propias.
-   Este archivo queda como punto de extensión si más adelante gana su propio look. */
+/* ==========================================================================
+   Pestaña Insumos (js/modules/catalogo.js — la clave interna sigue siendo
+   "catalogo").
+
+   POR QUÉ EXISTE ESTE ARCHIVO AHORA: antes estaba vacío, con una nota que
+   decía que la pestaña "no necesita clases propias" porque reutilizaba
+   .tx-row. El resultado era una tabla de siete columnas idénticas en peso
+   visual, sin buscador y sin jerarquía: el costo —el dato por el que se entra
+   a esta pantalla— se leía igual que la unidad.
+   Se sigue reutilizando .tx-row como base (misma grilla, mismo manejo de
+   min-width, mismas etiquetas .mobile-th); lo que hay acá son SOLO los
+   modificadores de jerarquía, no una fila nueva.
+   ========================================================================== */
+
+/* ---------- cabecera: qué es, cuánto hay, y la acción primaria ---------- */
+.cat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-4);}
+.cat-sin-clasificar{color:var(--warning-ink);}
+
+/* ---------- buscador + orden ---------- */
+.cat-toolbar{display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-3);}
+.cat-toolbar .buscador{flex:1;min-width:220px;}
+.cat-orden{display:flex;gap:6px;flex-wrap:wrap;padding-top:1px;}
+.cat-filters{margin-bottom:var(--sp-3);align-items:center;}
+
+/* ---------- administrar categorías (plegado) ---------- */
+.cat-admin{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:var(--sp-3) 15px;margin-bottom:var(--sp-4);}
+.cat-admin-titulo{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink-faint);margin-bottom:var(--sp-2);display:flex;align-items:center;}
+.cat-admin-fila{display:flex;align-items:center;gap:var(--sp-2);padding:5px 0;}
+.cat-admin-n{font-size:11.5px;color:var(--ink-faint);white-space:nowrap;font-variant-numeric:tabular-nums;}
+
+/* ---------- grupos por categoría ---------- */
+.cat-grupo{margin-bottom:var(--sp-5);}
+.cat-grupo-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-2);
+  padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--border);}
+.cat-grupo-nombre{font-size:13px;font-weight:700;color:var(--ink);letter-spacing:-0.01em;}
+.cat-grupo-meta{font-size:11px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+
+/* ==========================================================================
+   Fila de insumo: modificador de .tx-row, no una fila nueva.
+   La jerarquía es la del negocio — el NOMBRE identifica y el COSTO es el
+   dato; unidad, tipo, proveedor y categoría son atributos de apoyo.
+   ========================================================================== */
+
+/* El nombre se lee como texto, no como un campo más: sin caja hasta que se
+   hace clic. Antes los seis campos de la fila competían por la atención con
+   el mismo borde y el mismo tamaño. */
+.tx-row.insumo .insumo-nombre{
+  background:transparent;border-color:transparent;
+  font-size:13.5px;font-weight:600;color:var(--ink);padding-left:2px;
+}
+.tx-row.insumo:hover .insumo-nombre{background:var(--surface-3);border-color:var(--border);}
+.tx-row.insumo .insumo-nombre:focus{background:var(--surface-3);border-color:var(--accent);}
+.insumo-nombre-cell{display:flex;align-items:center;gap:7px;min-width:0;}
+.insumo-tag-servicio{background:var(--info-soft);color:var(--info-ink);flex-shrink:0;cursor:help;}
+
+/* El costo es dinero: monospace, alineado a la derecha y con la unidad como
+   sufijo, para poder recorrer la columna comparando precios de un vistazo. */
+.insumo-costo-cell{display:flex;align-items:center;gap:4px;min-width:0;}
+.tx-row.insumo .insumo-costo{
+  font-family:'IBM Plex Mono',monospace;font-weight:700;font-variant-numeric:tabular-nums;
+  text-align:right;background:transparent;border-color:transparent;color:var(--ink);
+}
+.tx-row.insumo:hover .insumo-costo{background:var(--surface-3);border-color:var(--border);}
+.tx-row.insumo .insumo-costo:focus{background:var(--surface-3);border-color:var(--accent);text-align:left;}
+.insumo-costo-unidad{font-size:10.5px;color:var(--ink-faint);white-space:nowrap;flex-shrink:0;}
+
+/* Lo accesorio se atenúa: sigue siendo editable, pero deja de competir. */
+.tx-row.insumo select, .tx-row.insumo input[data-campo="unidad"]{font-size:12px;color:var(--ink-soft);}
+.tx-row.insumo select:focus, .tx-row.insumo input:focus{color:var(--ink);}
+.insumo-sin-proveedores{font-size:11px;color:var(--ink-faint);cursor:help;}
+
+/* La cabecera de la tabla alinea "Costo" con su columna, que está a la
+   derecha; si no, el título quedaba a la izquierda de números derechados. */
+.tx-row.head.insumo > span:nth-child(2){text-align:right;}
+
+@media (max-width:880px){
+  /* Apilada, la fila ya muestra su etiqueta .mobile-th por campo, así que el
+     nombre y el costo recuperan su caja: sin la columna al lado, un campo sin
+     borde deja de leerse como editable. */
+  .tx-row.insumo .insumo-nombre,
+  .tx-row.insumo .insumo-costo{background:var(--surface-3);border-color:var(--border);text-align:left;}
+  .cat-head{flex-direction:column;align-items:stretch;}
+  .cat-head .btn{width:100%;}
+  .cat-toolbar{flex-direction:column;align-items:stretch;}
+  .chip.chip-accion{margin-left:0;}
+}

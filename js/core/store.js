@@ -213,6 +213,15 @@ export const state = {
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
   reembolsoAbierto: "", // id del pedido con el mini-formulario de reembolso abierto (o "")
   formReembolso: { monto: "", fecha: "", motivo: "" },
+  // Borrador del abono. Antes vivía SOLO en el DOM (se leía con data-role al
+  // pulsar "Registrar"), así que cualquier re-render en medio —un filtro que
+  // se dispara, otra pestaña que guarda— borraba el monto ya tecleado y
+  // devolvía el foco a ninguna parte. Es plata: no puede depender de que no
+  // ocurra un render.
+  // `pedidoId` acota el borrador al pedido que lo está escribiendo: pueden
+  // estar abiertos varios paneles a la vez, y un borrador global hacía que lo
+  // tecleado en un pedido apareciera dentro del formulario de otro.
+  formAbono: { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" },
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
@@ -272,6 +281,21 @@ export const state = {
   configLogoSubiendo: false,
   filtroClientes: "",
   filtroCatalogoCategoria: "todos",
+  // Buscador y orden del catálogo de insumos. Sin buscador, encontrar un
+  // insumo entre decenas obligaba a recorrer la lista con los ojos — era la
+  // única de las listas grandes de la app que no tenía uno.
+  buscarCatalogo: "",
+  ordenCatalogo: "abc", // "abc" | "caro" | "nuevos"
+  // Panel para renombrar/eliminar categorías, plegado por defecto: se
+  // administra de vez en cuando, no en el día a día.
+  catalogoCategoriasAbierto: false,
+  // Pestaña Plantillas. Mismo patrón maestro/detalle que Catálogo y
+  // Cotizaciones: una vista de índice (tarjetas con foto) y el detalle de UNA
+  // sola a la vez, en vez de todas desplegadas siempre.
+  buscarPlantillas: "",
+  plantillasVista: "plantillas", // "plantillas" | "flujos"
+  plantillaEditando: "", // id de la plantilla con el detalle abierto, o ""
+  filtroPlantillaCategoria: "todos",
   buscarPedidos: "",
   buscarTx: "",
   filtroTxPeriodo: "todos",

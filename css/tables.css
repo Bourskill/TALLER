@@ -31,6 +31,12 @@
 .tag.comision,.badge.info{background:var(--info-soft);color:var(--info-ink);}
 .amount{font-family:'IBM Plex Mono',monospace;font-weight:700;font-variant-numeric:tabular-nums;}
 .amount.neg{color:var(--danger-ink);} .amount.pos{color:var(--success-ink);}
+/* Texto que NO es un dato: la raya de "no hay nada aca", una fecha accesoria.
+   POR QUE: `.muted` se usaba en tres sitios (cotizaciones.js, notas.js,
+   pedidos.js) y no estaba definida en NINGUN archivo de estilos, asi que esos
+   "—" se veian exactamente igual que un valor real. Va aca, con .amount, que
+   es donde vive el lenguaje visual de lo que se lee en una tabla. */
+.muted{color:var(--ink-faint);}
 .status-pill{cursor:pointer;border:none;transition:filter .12s ease;}
 .status-pill:hover{filter:brightness(1.12);}
 .status-pill.pagado{background:var(--success-soft);color:var(--success-ink);}

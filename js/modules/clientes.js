@@ -3,7 +3,7 @@ import { esc, uid, val, num, fmt, opt, norm, todayStr, exigirCampos } from "../c
 import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
 import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
-import { renderHelp } from "../core/components.js";
+import { renderHelp, renderBuscador } from "../core/components.js";
 import { TIPOS_RELACION_CONTACTO } from "../core/constants.js";
 
 // Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo contacto" es solo el
@@ -135,9 +135,19 @@ function renderListaContactos(vista) {
   });
   var orden = ordenActivo(esProveedores);
 
-  var html = '<div class="search-bar"><input id="inp-filtro-clientes" data-live-filter="filtroClientes" value="' + esc(state.filtroClientes) + '" placeholder="' +
-    (esProveedores ? "Buscar proveedor por nombre, ciudad o teléfono..." : "Buscar por nombre, cédula, ciudad o teléfono...") + '" />' +
-    '<div class="client-count">' + lista.length + " " + (esProveedores ? "proveedor" : "contacto") + (lista.length === 1 ? "" : "es") + "</div></div>";
+  // Barra de búsqueda compartida con el resto de la app (ver renderBuscador
+  // en core/components.js) — antes esta pestaña tenía la suya propia,
+  // `.search-bar`, distinta de las de Finanzas y Pedidos sin ninguna razón.
+  var totalContactos = (state.clientes || []).filter(function (c) {
+    return esProveedores ? c.tipoRelacion === "proveedor" : c.tipoRelacion !== "proveedor";
+  }).length;
+  var html = '<div style="margin-bottom:14px;">' + renderBuscador({
+    id: "inp-filtro-clientes",
+    filtro: "filtroClientes",
+    valor: state.filtroClientes,
+    placeholder: esProveedores ? "Buscar proveedor por nombre, ciudad o teléfono…" : "Buscar por nombre, cédula, ciudad o teléfono…",
+    conteo: { visibles: lista.length, total: totalContactos, singular: esProveedores ? "proveedor" : "contacto", plural: esProveedores ? "proveedores" : "contactos" }
+  }) + "</div>";
 
   html += renderSyncGoogle(lista);
 

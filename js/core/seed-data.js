@@ -17,6 +17,9 @@ export function catalogoInsumosDefault() {
   ];
 }
 
+// Las plantillas de ejemplo nacen CON categoría: sin ella caían todas bajo el
+// chip "Sin categoría" y, en el primer arranque, los filtros por categoría de
+// la pestaña no se entendían (un solo chip, sin nada que comparar).
 function plantillaInsumo(nombre, unidad, costo, tipo, cantidad) {
   return { id: uid(), nombre: nombre, unidad: unidad, costo: costo, tipo: tipo, cantidad: cantidad || 1 };
 }
@@ -24,7 +27,7 @@ function plantillaInsumo(nombre, unidad, costo, tipo, cantidad) {
 export function plantillasPrendasDefault() {
   return [
     {
-      id: uid(), nombre: "T-shirt básica", consumoSugerido: 1.1, insumos: [
+      id: uid(), nombre: "T-shirt básica", categoria: "Camisetas", consumoSugerido: 1.1, insumos: [
         plantillaInsumo("Tela lisa", "MT", 8000, "tela"),
         plantillaInsumo("Confección", "UND", 3000, "por_prenda"),
         plantillaInsumo("Hilo e hilaza", "UND", 500, "por_prenda"),
@@ -32,7 +35,7 @@ export function plantillasPrendasDefault() {
       ]
     },
     {
-      id: uid(), nombre: "Manga ranglán", consumoSugerido: 1.3, insumos: [
+      id: uid(), nombre: "Manga ranglán", categoria: "Camisetas", consumoSugerido: 1.3, insumos: [
         plantillaInsumo("Tela lisa", "MT", 8000, "tela"),
         plantillaInsumo("Confección", "UND", 3500, "por_prenda"),
         plantillaInsumo("Hilo e hilaza", "UND", 600, "por_prenda"),
@@ -40,7 +43,7 @@ export function plantillasPrendasDefault() {
       ]
     },
     {
-      id: uid(), nombre: "Polo", consumoSugerido: 1.4, insumos: [
+      id: uid(), nombre: "Polo", categoria: "Polos", consumoSugerido: 1.4, insumos: [
         plantillaInsumo("Tela lisa", "MT", 8000, "tela"),
         plantillaInsumo("Confección", "UND", 4500, "por_prenda"),
         plantillaInsumo("Hilo e hilaza", "UND", 600, "por_prenda"),

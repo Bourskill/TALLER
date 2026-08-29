@@ -43,9 +43,52 @@
 .btn.success:hover{filter:brightness(0.92);}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
 
+/* ---------- barra de búsqueda (única en toda la app) ----------
+   Ver renderBuscador() en core/components.js: antes había tres variantes de
+   esto (.search-bar de Contactos, un .field con estilos inline en Finanzas y
+   Pedidos, y .picker-search dentro de los modales), visualmente distintas
+   sin razón. Esta es la base; las tres entran por acá. */
+.buscador{position:relative;display:flex;align-items:center;}
+.buscador-icono{position:absolute;left:11px;display:flex;color:var(--ink-faint);pointer-events:none;}
+.buscador-icono svg{width:15px;height:15px;}
+.buscador-input{
+  font-family:'Inter',sans-serif;font-size:13px;
+  padding:9px 34px 9px 34px;   /* espacio a los lados para la lupa y el ✕ */
+  border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:var(--surface-2);color:var(--ink);width:100%;
+  transition:border-color .12s ease, box-shadow .12s ease;
+}
+.buscador-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.buscador-input::placeholder{color:var(--ink-faint);}
+/* La X nativa de <input type="search"> no se puede estilar y aparece además
+   de la nuestra: se esconde en los navegadores que la dibujan. */
+.buscador-input::-webkit-search-cancel-button{display:none;}
+.buscador-limpiar{
+  position:absolute;right:7px;width:20px;height:20px;border:none;border-radius:50%;
+  background:var(--surface-3);color:var(--ink-faint);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;padding:0;
+}
+.buscador-limpiar:hover{background:var(--surface-hover);color:var(--ink);}
+.buscador-conteo{font-size:11.5px;color:var(--ink-faint);margin-top:6px;font-variant-numeric:tabular-nums;}
+/* Dentro de un explorador modal la barra ya vive en su propia franja con
+   borde: no necesita separarse de nada más abajo. */
+.buscador.compacto .buscador-input{background:var(--surface-3);}
+
 .filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
 .chip{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--border);background:var(--surface-2);color:var(--ink-soft);cursor:pointer;transition:all .12s ease;}
 .chip:hover{border-color:var(--border-strong);color:var(--ink);}
 .chip.active{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent);}
+/* Modificadores de .chip, compartidos (no duplicar en cada pestana):
+   -n      contador dentro del chip ("Telas 8") — evita entrar a una
+           categoria solo para descubrir que esta vacia.
+   -aviso  el chip senala algo que conviene resolver (ej. "Sin categoria 3").
+   -accion el chip abre algo en vez de filtrar; se separa del grupo. */
+.chip-n{display:inline-block;margin-left:5px;padding:0 5px;border-radius:8px;
+  background:var(--surface-3);color:var(--ink-faint);font-size:10.5px;font-weight:700;
+  font-variant-numeric:tabular-nums;}
+.chip.active .chip-n{background:var(--accent);color:#fff;}
+.chip.chip-aviso{border-color:var(--warning);color:var(--warning-ink);}
+.chip.chip-aviso .chip-n{background:var(--warning-soft);color:var(--warning-ink);}
+.chip.chip-accion{margin-left:auto;border-style:dashed;}
 
 input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}

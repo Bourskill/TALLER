@@ -1,3 +1,49 @@
-/* La pestaña Plantillas reutiliza .card.nested, .ins-table/.ins-row y .mini-input
-   ya definidos en cotizaciones.css / forms.css — no necesita clases propias.
-   Este archivo queda como punto de extensión si más adelante gana su propio look. */
+/* Lo PROPIO de la pestaña Plantillas — solo el acomodo de esta pantalla.
+   El índice en tarjetas (.tarjeta-grid/.tarjeta-mini), los chips de categoría
+   (.filters/.chip/.chip-n), el buscador (.buscador) y el control segmentado
+   (.segmented) son piezas compartidas que ya existen en layout.css, forms.css
+   y core/components.js: acá no se redefine ninguna. */
+
+/* Las dos vistas (plantillas / flujos) necesitan aire antes del contenido:
+   son un cambio de pantalla, no una fila más del formulario. */
+.pla-tabs{margin-bottom:var(--sp-4);}
+
+/* Franja del índice: el buscador crece con el ancho disponible y
+   "+ Nueva plantilla" queda siempre a la vista, a la derecha. El buscador se
+   pide con ancho "full" justamente para que el ancho lo decida esta franja y
+   no un max-width inline. */
+.pla-barra{display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap;margin-top:var(--sp-3);}
+.pla-barra-buscar{flex:1 1 260px;min-width:200px;}
+/* Los chips van pegados a la franja de arriba (son su continuación, no una
+   sección nueva) y sin margen abajo: el borde de la tarjeta ya cierra. */
+.pla-filtros{margin-top:var(--sp-3);margin-bottom:0;}
+
+/* Barra de vuelta del detalle: el camino de salida se lee primero (izquierda)
+   y el borrado queda empujado al extremo opuesto, lejos de los botones de uso
+   diario — es la única acción que no se puede deshacer. */
+.pla-detalle-top{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3);}
+.pla-detalle-top .pla-peligro{margin-left:auto;}
+
+/* Fila "elegir flujo + crear/editar" del detalle. Va pegada a su título:
+   `.cot-col-title + *` le pone margen 0 y acá se le devuelve el mínimo, en
+   tokens de la escala, en vez de un px suelto inline. */
+.pla-flujo-fila{margin-top:var(--sp-2);}
+
+/* Editor de flujo incrustado en el detalle de una plantilla: fondo y borde
+   punteado propios para que se lea como "otra entidad que estoy tocando de
+   paso" (el flujo es compartido entre prendas) y no como un campo más de esta
+   prenda. */
+.pla-flujo-inline{background:var(--surface-2);border:1px dashed var(--border);
+  border-radius:var(--radius-sm);padding:var(--sp-3);margin-top:var(--sp-3);}
+.pla-flujo-inline .card.nested{margin-top:0;}
+
+/* Separación entre flujos en su propia vista (antes venía de un style inline
+   en cada tarjeta). */
+.pla-flujos-lista .card.nested{margin-top:var(--sp-3);}
+
+@media (max-width:700px){
+  /* En pantalla angosta el botón de crear pasa a ocupar el ancho completo
+     debajo del buscador, en vez de quedar apretado a su lado. */
+  .pla-barra{flex-direction:column;align-items:stretch;}
+  .pla-detalle-top .pla-peligro{margin-left:0;}
+}

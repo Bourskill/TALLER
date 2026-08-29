@@ -8,16 +8,22 @@ import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
-  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado
-} from "../core/calc.js";
+  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
+import {
+  configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
+} from "../core/graficas.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
 
 export function render() {
   // Un pedido cancelado no está pendiente de entregar: sacarlo de acá evita
   // que siga apareciendo en "Próximas entregas" como si hubiera que producirlo.
-  var activos = state.pedidos.filter(function (p) { return p.estado !== "entregado" && !pedidoCancelado(p); });
+  // pedidoTerminado() y no `estado !== "entregado"`: las etapas de un flujo
+  // creado desde Plantillas tienen ids uid(), nunca "entregado", asi que un
+  // pedido con flujo propio jamas salia de "Proximas entregas" (ver etapasDe
+  // en core/calc.js).
+  var activos = state.pedidos.filter(function (p) { return !pedidoTerminado(p) && !pedidoCancelado(p); });
   var proximas = activos
     .filter(function (p) { return p.fechaEntrega; })
     .sort(function (a, b) { return new Date(a.fechaEntrega) - new Date(b.fechaEntrega); })
@@ -93,7 +99,7 @@ function renderProximasEntregas(proximas, activosSinFecha) {
     return html + "</div>";
   }
   proximas.forEach(function (p, i) {
-    var saldo = num(p.total) - num(p.abono);
+    var saldo = calcSaldoPedido(p);
     var d = diasHasta(p.fechaEntrega);
     html += '<div class="entrega-row" data-action="ir-a-pedido" data-id="' + p.id + '" title="Ver este pedido">' +
       '<span class="entrega-puesto">' + (i + 1) + "</span>" +
@@ -186,14 +192,54 @@ function renderKpiPorPagar(r) {
 // DOM), el <canvas> se recrea de cero en cada render — Chart.js necesita
 // engancharse DESPUÉS de que ese HTML ya esté en el DOM real, así que la
 // instancia se crea en afterRender() (ver core/dom.js), no acá.
+// Una serie continua SIEMPRE trae puntos; lo que hay que preguntar es si
+// alguno de ellos lleva plata. Lo usan las dos graficas de dinero del panel.
+function hayMovimientoEnSerie(serie) {
+  return ((serie && serie.puntos) || []).some(function (p) { return p.ingresos || p.gastos; });
+}
+
 function renderGraficaResumen() {
   var serie = serieResumen30Dias();
   var html = '<div class="card"><div class="section-title">Ingresos y gastos' +
     '<span style="font-weight:400;font-size:12px;color:var(--ink-faint);margin-left:8px;">últimos 30 días</span></div>';
-  if (!serie.puntos.length) {
+  // Se pregunta si hubo MOVIMIENTOS, no si hay puntos.
+  // POR QUE: desde que la serie es continua (un punto por dia del rango,
+  // ver calcSerieMovimientos), `puntos.length` nunca vale 0 — asi que este
+  // aviso quedo inalcanzable y en su lugar se dibujaban 30 barras en cero con
+  // "Entro $0 - Salio $0 - Balance $0", que no le dice nada a nadie.
+  if (!hayMovimientoEnSerie(serie)) {
     return html + '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div></div>';
   }
-  return html + '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div></div>';
+  var t = totalesSerie(serie);
+  return html + renderCifrasGrafica([
+    { label: "Entró", valor: fmt(t.ingresos), clase: "pos" },
+    { label: "Salió", valor: fmt(t.gastos), clase: "neg" },
+    { label: "Balance", valor: fmt(t.balance), clase: t.balance >= 0 ? "pos" : "neg" }
+  ]) +
+    '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div></div>';
+}
+
+// Cifras grandes bajo el título de una gráfica, en el mismo lenguaje visual
+// que el resto de la app (.amount con --success/--danger vía .pos/.neg). La
+// curva dice la FORMA del mes; esto dice el NÚMERO — la tarjeta tiene que
+// comunicar aunque nadie se detenga a leer la gráfica. Es una sola función
+// para las dos gráficas del panel: si la línea de cifras cambia, cambia en
+// las dos a la vez.
+function renderCifrasGrafica(items) {
+  return '<div class="grafica-cifras">' +
+    items.map(function (it) {
+      return '<span class="grafica-cifra">' +
+        '<span class="grafica-cifra-label">' + esc(it.label) + "</span>" +
+        '<span class="amount' + (it.clase ? " " + it.clase : "") + '">' + esc(it.valor) + "</span>" +
+        "</span>";
+    }).join('<span class="grafica-cifra-sep">·</span>') +
+    "</div>";
+}
+
+function totalesSerie(serie) {
+  var ingresos = 0, gastos = 0;
+  serie.puntos.forEach(function (p) { ingresos += p.ingresos; gastos += p.gastos; });
+  return { ingresos: ingresos, gastos: gastos, balance: ingresos - gastos };
 }
 
 function serieResumen30Dias() {
@@ -201,7 +247,36 @@ function serieResumen30Dias() {
   var d = new Date(); d.setDate(d.getDate() - 29);
   var desde = isoDate(d);
   var movimientos = state.tx.filter(function (t) { return t.fecha >= desde && t.fecha <= hasta; });
+  // calcSerieMovimientos ya devuelve la serie CONTINUA (un punto por día del
+  // rango, con ceros donde no hubo nada) — ver el porqué allá. Acá se rellenaba
+  // a mano, lo que obligaba a mantener una segunda copia del formato de claves
+  // de agrupación; si las dos se separaban, el relleno duplicaba puntos.
   return calcSerieMovimientos(movimientos, desde, hasta);
+}
+
+// Datos + formato de una serie de dinero, listos para crearBarrasIngresosGastos.
+// Las dos gráficas de dinero del panel (el vistazo de 30 días y la del reporte)
+// entran por acá, así que no pueden quedar con criterios distintos — que era
+// justamente el problema: una llevaba leyenda y 30 fechas apretadas en el eje,
+// la otra ni leyenda ni la mitad de las marcas.
+function datosSerieMovimientos(s, extra) {
+  return Object.assign({
+    labels: s.puntos.map(function (p) { return etiquetaPuntoGrafica(p.clave, s.granularidad); }),
+    ingresos: s.puntos.map(function (p) { return p.ingresos; }),
+    gastos: s.puntos.map(function (p) { return p.gastos; }),
+    formatoY: fmtCorto,
+    formatoTooltip: fmt,
+    maxTicksX: 8,
+    // El tooltip muestra las dos series del mismo día a la vez; la pregunta
+    // que sigue siempre es "¿ese día ganó o perdió?", así que la resta va
+    // hecha en el pie en vez de dejársela al usuario.
+    formatoFooter: function (items) {
+      var p = items && items.length ? s.puntos[items[0].dataIndex] : null;
+      if (!p) return "";
+      var balance = p.ingresos - p.gastos;
+      return "Balance: " + (balance >= 0 ? "+" : "−") + fmt(Math.abs(balance));
+    }
+  }, extra || {});
 }
 
 // "Rendimiento de planta": no cuánto stock hay (eso vive en Catálogo), sino
@@ -218,8 +293,14 @@ function renderRendimientoPlanta() {
   if (!datos.total) {
     return html + '<div class="empty" style="padding:10px 0;">Sin salidas de stock registradas en este rango.</div></div>';
   }
-  return html + '<div style="position:relative;height:200px;"><canvas id="chart-prendas-dia"></canvas></div>' +
-    '<div class="section-sub" style="margin-top:8px;">' + datos.total + " prendas en los últimos 30 días · promedio " + (datos.total / 30).toFixed(1) + "/día</div>" +
+  // Las cifras pasaron de debajo de la gráfica a arriba (mismo componente que
+  // usa "Ingresos y gastos"): son el titular de la tarjeta, no un pie de foto.
+  // El "en los últimos 30 días" ya lo dice el subtítulo, no se repite acá.
+  return html + renderCifrasGrafica([
+    { label: "Salieron", valor: datos.total + (datos.total === 1 ? " prenda" : " prendas") },
+    { label: "Promedio", valor: (datos.total / 30).toFixed(1) + "/día" }
+  ]) +
+    '<div style="position:relative;height:200px;"><canvas id="chart-prendas-dia"></canvas></div>' +
     "</div>";
 }
 
@@ -246,63 +327,54 @@ function etiquetaFechaCorta(iso) {
   return partes[2] + "/" + partes[1];
 }
 
-function cssVar(nombre) {
-  return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
-}
-
-var chartIngresosGastos = null, chartPrendasDia = null;
+var chartIngresosGastos = null, chartPrendasDia = null, chartReportePeriodo = null;
 
 // Único punto imperativo de este módulo (todo lo demás es render() puro que
 // devuelve un string) — llamado por core/dom.js justo después de insertar el
 // HTML en el DOM real. Si el CDN de Chart.js no cargó (ej. sin internet), se
 // sale en silencio: el resto del panel (KPIs, reporte financiero, etc.)
-// sigue funcionando igual, solo faltan estas dos gráficas.
+// sigue funcionando igual, solo faltan estas gráficas.
 export function afterRender() {
   if (typeof window.Chart === "undefined") return;
+  // Antes de dibujar, no una sola vez al arrancar: el tema claro/oscuro se
+  // cambia en caliente y los defaults llevan colores del tema.
+  configurarDefaults();
   dibujarChartIngresosGastos();
   dibujarChartPrendasDia();
   dibujarChartReportePeriodo();
 }
 
-var chartReportePeriodo = null;
+// Simétrico a afterRender (lo llama core/dom.js al salir de esta pestaña).
+// ANTES no existía: al cambiar de pestaña las tres instancias quedaban vivas
+// apuntando a un <canvas> que el re-render ya había tirado, cada una con su
+// listener de resize colgando — se acumulaba una por cada visita a Resumen.
+export function beforeUnmount() {
+  chartIngresosGastos = destruirGrafica(chartIngresosGastos);
+  chartPrendasDia = destruirGrafica(chartPrendasDia);
+  chartReportePeriodo = destruirGrafica(chartReportePeriodo);
+}
 
 // Gráfica del rango elegido en el reporte (distinta de la de arriba, que son
 // siempre los últimos 30 días). Se dibuja solo si su apartado está abierto —
 // si el canvas no está en el DOM, no hay nada que hacer.
 function dibujarChartReportePeriodo() {
-  if (chartReportePeriodo) { chartReportePeriodo.destroy(); chartReportePeriodo = null; }
+  chartReportePeriodo = destruirGrafica(chartReportePeriodo);
   var canvas = document.getElementById("chart-reporte-periodo");
   if (!canvas) return;
   var fr = state.formReporte;
   var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
-  if (!movimientos.length) return;
   var serie = calcSerieMovimientos(movimientos, fr.desde, fr.hasta);
-  if (!serie.puntos.length) return;
-  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft");
-  chartReportePeriodo = new window.Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: serie.puntos.map(function (p) { return etiquetaPuntoGrafica(p.clave, serie.granularidad); }),
-      datasets: [
-        { label: "Ingresos", data: serie.puntos.map(function (p) { return p.ingresos; }), backgroundColor: cssVar("--success"), borderRadius: 4, maxBarThickness: 22 },
-        { label: "Gastos", data: serie.puntos.map(function (p) { return p.gastos; }), backgroundColor: cssVar("--danger"), borderRadius: 4, maxBarThickness: 22 }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      // Sin animación: el PDF toma la imagen del canvas apenas se pide, y con
-      // animación podría capturarlo a medio dibujar.
-      animation: false,
-      plugins: {
-        legend: { labels: { color: ink, boxWidth: 10, boxHeight: 10 } },
-        tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmt(ctx.parsed.y); } } }
-      },
-      scales: {
-        x: { ticks: { color: ink }, grid: { display: false } },
-        y: { ticks: { color: ink, callback: function (v) { return fmtCorto(v); } }, grid: { color: grid }, beginAtZero: true }
-      }
-    }
-  });
+  // Mismo criterio que la de arriba: con la serie continua, `puntos.length`
+  // ya no distingue "no hubo nada" de "hubo algo".
+  if (!hayMovimientoEnSerie(serie)) return;
+  // animar:false a propósito — esta es la que va al PDF: se captura el canvas
+  // con toDataURL apenas se pide, y con animación se tomaría a medio dibujar.
+  // `serie` ya trae desde/hasta/granularidad/puntos: rearmar ese objeto a mano
+  // dejaba dos formas del mismo dato conviviendo.
+  // paraImpresion: esta gráfica se captura con toDataURL y se compone sobre el
+  // papel BLANCO del PDF, así que sus ejes y su leyenda no pueden usar la
+  // tinta del tema oscuro — sobre blanco quedaban ilegibles.
+  chartReportePeriodo = crearBarrasIngresosGastos(canvas, datosSerieMovimientos(serie, { animar: false, paraImpresion: true }));
 }
 
 // Imagen de la gráfica para incrustarla en el PDF. Devuelve null si el
@@ -319,59 +391,31 @@ function imagenGraficaPeriodo() {
 }
 
 function dibujarChartIngresosGastos() {
-  if (chartIngresosGastos) { chartIngresosGastos.destroy(); chartIngresosGastos = null; }
+  chartIngresosGastos = destruirGrafica(chartIngresosGastos);
   var canvas = document.getElementById("chart-ingresos-gastos");
   if (!canvas) return;
   var serie = serieResumen30Dias();
   if (!serie.puntos.length) return;
-  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft");
-  chartIngresosGastos = new window.Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: serie.puntos.map(function (p) { return etiquetaPuntoGrafica(p.clave, serie.granularidad); }),
-      datasets: [
-        { label: "Ingresos", data: serie.puntos.map(function (p) { return p.ingresos; }), backgroundColor: cssVar("--success"), borderRadius: 4, maxBarThickness: 22 },
-        { label: "Gastos", data: serie.puntos.map(function (p) { return p.gastos; }), backgroundColor: cssVar("--danger"), borderRadius: 4, maxBarThickness: 22 }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color: ink, boxWidth: 10, boxHeight: 10 } },
-        tooltip: { callbacks: { label: function (ctx) { return ctx.dataset.label + ": " + fmt(ctx.parsed.y); } } }
-      },
-      scales: {
-        x: { ticks: { color: ink }, grid: { display: false } },
-        y: { ticks: { color: ink, callback: function (v) { return fmtCorto(v); } }, grid: { color: grid }, beginAtZero: true }
-      }
-    }
-  });
+  chartIngresosGastos = crearBarrasIngresosGastos(canvas, datosSerieMovimientos(serie));
 }
 
 function dibujarChartPrendasDia() {
-  if (chartPrendasDia) { chartPrendasDia.destroy(); chartPrendasDia = null; }
+  chartPrendasDia = destruirGrafica(chartPrendasDia);
   var canvas = document.getElementById("chart-prendas-dia");
   if (!canvas) return;
   var datos = datosPrendasPorDia();
   if (!datos.total) return;
-  var ink = cssVar("--ink-faint"), grid = cssVar("--border-soft"), accent = cssVar("--info");
-  chartPrendasDia = new window.Chart(canvas, {
-    type: "line",
-    data: {
-      labels: datos.labels.map(etiquetaFechaCorta),
-      datasets: [{ label: "Prendas producidas", data: datos.valores, borderColor: accent, backgroundColor: accent, tension: 0.3, fill: false, pointRadius: 2 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (ctx) { return ctx.parsed.y + " prendas"; } } } },
-      scales: {
-        x: { ticks: { color: ink, maxTicksLimit: 10 }, grid: { display: false } },
-        y: { ticks: { color: ink, precision: 0 }, grid: { color: grid }, beginAtZero: true }
-      }
-    }
+  // Sin label de serie a propósito: el título de la tarjeta ya dice qué se
+  // está contando, y con leyenda oculta el label solo servía para que el
+  // tooltip dijera "Prendas producidas: 7 prendas".
+  chartPrendasDia = crearLinea(canvas, {
+    labels: datos.labels.map(etiquetaFechaCorta), valores: datos.valores,
+    precisionY: 0, maxTicksX: 8,
+    formatoTooltip: function (v) { return v + (v === 1 ? " prenda" : " prendas"); }
   });
 }
 function etiquetaPuntoGrafica(clave, granularidad) {
+  if (granularidad === "anio") return clave;
   if (granularidad === "mes") {
     var partes = clave.split("-");
     var meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];

@@ -15,7 +15,7 @@
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
-import { renderTipoCostoOptions, renderHelp } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderBuscador } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos } from "../core/calc.js";
@@ -193,25 +193,24 @@ function renderCatalogoGrid() {
   else if (activa !== "todos") filtrados = lista.filter(function (p) { return (p.categoria || "").trim() === activa; });
 
   if (!filtrados.length) { html += '<div class="empty">Sin productos en esta categoría.</div>'; return html; }
-  html += '<div class="producto-grid">' + filtrados.map(renderProductoCardMini).join("") + "</div>";
+  html += '<div class="tarjeta-grid">' + filtrados.map(renderProductoCardMini).join("") + "</div>";
   return html;
 }
 
 function renderProductoCardMini(p) {
   var stockTotal = stockTotalProducto(p);
-  var imgHtml = p.imagenUrl
-    ? '<img src="' + esc(p.imagenUrl) + '" alt="" onerror="this.style.opacity=0.15" />'
-    : '<span class="producto-card-mini-noimg">Sin foto</span>';
-  var meta = [p.categoria, p.referencia].filter(Boolean).map(esc).join(" · ");
-  return '<div class="producto-card-mini" data-action="abrir-producto-editor" data-id="' + p.id + '" title="Clic para abrir y editar">' +
-    '<div class="producto-card-mini-img">' + imgHtml + "</div>" +
-    '<div class="producto-card-mini-body">' +
-    '<div class="producto-card-mini-nombre">' + esc(p.nombre || "Sin nombre") + "</div>" +
-    (meta ? '<div class="producto-card-mini-meta">' + meta + "</div>" : "") +
-    '<div class="producto-card-mini-footer">' +
-    '<span class="amount">' + fmtMoney(p.precioVenta) + "</span>" +
-    '<span class="badge ' + (stockTotal > 0 ? "success" : "danger") + '">' + stockTotal + " en stock</span>" +
-    "</div></div></div>";
+  return renderTarjetaMini({
+    id: p.id,
+    accion: "abrir-producto-editor",
+    imagenUrl: p.imagenUrl,
+    nombre: p.nombre,
+    meta: [p.categoria, p.referencia].filter(Boolean).join(" · "),
+    titulo: "Clic para abrir y editar",
+    pie: [
+      '<span class="amount">' + fmtMoney(p.precioVenta) + "</span>",
+      '<span class="badge ' + (stockTotal > 0 ? "success" : "danger") + '">' + stockTotal + " en stock</span>"
+    ]
+  });
 }
 
 // ---------- Detalle completo de un producto puntual ----------
@@ -409,7 +408,18 @@ function renderInsumoPickerProducto() {
     '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
     '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker-producto" aria-label="Cerrar">✕</button>' +
     "</div>" +
-    '<div class="picker-search"><input id="inp-insumo-picker-producto-buscar" class="mini-input" style="width:100%" placeholder="Buscar insumo por nombre o unidad…" value="' + esc(state.productoInsumoPickerBusqueda || "") + '" data-live-filter="productoInsumoPickerBusqueda" /></div>' +
+    // Misma barra de búsqueda que el resto de la app (ver renderBuscador en
+    // core/components.js). Antes cada explorador tenía su propio <input>
+    // suelto: sin lupa, sin botón de limpiar y con un aspecto distinto al
+    // de los buscadores de las listas.
+    '<div class="picker-search">' + renderBuscador({
+      id: "inp-insumo-picker-producto-buscar",
+      filtro: "productoInsumoPickerBusqueda",
+      valor: state.productoInsumoPickerBusqueda,
+      placeholder: "Buscar insumo por nombre o unidad…",
+      ancho: "full",
+      compacto: true
+    }) + "</div>" +
     '<div class="picker-body">' +
     '<div class="picker-side">' +
     itemsCat.map(function (c) {

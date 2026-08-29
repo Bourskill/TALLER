@@ -132,6 +132,20 @@ var coreActions = {
     if (el.getAttribute("data-filtro-saldo")) state.filtroPedidosSoloSaldo = true;
     notify();
   },
+  // Botón ✕ de cualquier barra de búsqueda de la app (ver renderBuscador en
+  // core/components.js). Vive acá, en las acciones transversales, porque la
+  // barra es una sola pieza compartida: si cada pestaña trajera su propia
+  // acción de limpiar volveríamos a tener seis variantes de lo mismo.
+  "limpiar-buscador": function (el) {
+    var clave = el.getAttribute("data-filtro");
+    if (!clave) return;
+    state[clave] = "";
+    notify();
+    // El foco vuelve al campo, no se queda en un botón que acaba de
+    // desaparecer: quien limpia casi siempre quiere escribir otra cosa.
+    var input = document.getElementById(el.getAttribute("data-input"));
+    if (input) input.focus();
+  },
   "toggle-sidebar": function () {
     state.ui.sidebarCollapsed = !state.ui.sidebarCollapsed;
     persist("ui");
@@ -273,10 +287,13 @@ var actionRegistry = Object.assign(
 );
 
 // form -> clave en `state` que guarda su borrador.
-var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte", producto: "formProducto", nominaPago: "formNominaPago", reembolso: "formReembolso" };
+var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte", producto: "formProducto", nominaPago: "formNominaPago", reembolso: "formReembolso", abono: "formAbono" };
 
 var rendering = false;
 var pendingRerender = false;
+// Última pestaña dibujada, para poder avisarle cuando se sale de ella (ver
+// beforeUnmount más abajo).
+var tabAnterior = null;
 
 export function render() {
   // Blindaje contra reentradas: si algo dispara notify() DENTRO de este mismo
@@ -331,6 +348,25 @@ export function render() {
     if (active && typeof active.blur === "function" && app && app.contains(active)) {
       active.blur();
     }
+
+    // Simétrico a afterRender, y ANTES de tocar el DOM: si la pestaña CAMBIÓ,
+    // se avisa a la que se deja atrás para que suelte lo que haya creado a
+    // mano (hoy: Resumen destruye sus gráficas de Chart.js, que si no quedaban
+    // vivas apuntando a un <canvas> ya desechado con sus listeners de resize
+    // colgando). Opcional: la mayoría de los módulos no lo necesitan.
+    //
+    // POR QUÉ ACÁ Y NO DESPUÉS: corría después del afterRender de la pestaña
+    // NUEVA, así que la de salida limpiaba cuando la de entrada ya se había
+    // montado. Con Chart.js todavía funcionaba de casualidad; en cuanto dos
+    // pestañas tocaran el mismo recurso global, la que se va le borraría la
+    // configuración a la que acaba de llegar.
+    if (tabAnterior && tabAnterior !== state.tab) {
+      var modAnterior = TAB_MODULES[tabAnterior];
+      if (modAnterior && modAnterior.beforeUnmount) {
+        try { modAnterior.beforeUnmount(); } catch (e) { console.error(e); }
+      }
+    }
+    tabAnterior = state.tab;
 
     app.innerHTML = html;
     bindEvents();
@@ -673,6 +709,15 @@ function handleFormInput(el) {
 
   // Caso especial: el campo "cliente" de pedido/cotización limpia el vínculo
   // (clienteId) al escribir y necesita re-render inmediato para refrescar el combobox.
+  // El borrador del abono se marca con el pedido al que pertenece: hay un solo
+  // state.formAbono pero puede haber varios paneles de pedido abiertos, y sin
+  // esto lo tecleado en uno se veía dentro del formulario del otro (ver
+  // renderAbonoForm en modules/pedidos.js).
+  if (form === "abono") {
+    var pedidoDelAbono = el.getAttribute("data-pedido");
+    if (pedidoDelAbono) state.formAbono.pedidoId = pedidoDelAbono;
+  }
+
   if ((form === "pedido" || form === "cotizacion") && field === "cliente") {
     state[stateKey].cliente = el.value;
     state[stateKey].clienteId = "";

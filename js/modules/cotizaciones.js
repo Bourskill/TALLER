@@ -1,12 +1,12 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados } from "../core/calc.js";
-import { renderClienteCombo, renderTipoCostoOptions, renderHelp } from "../core/components.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe } from "../core/calc.js";
+import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp, sincronizarEventoPedido } from "./pedidos.js";
-import { ESTADOS_DEFAULT, TIPOS_COSTO } from "../core/constants.js";
+import { TIPOS_COSTO } from "../core/constants.js";
 import { ajustarStockProducto } from "../core/stock.js";
 
 // costoCompra/proveedorId solo se usan cuando origen === "proveedor" (ver
@@ -107,7 +107,18 @@ function renderInsumoPicker() {
     '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
     '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker" aria-label="Cerrar">✕</button>' +
     "</div>" +
-    '<div class="picker-search"><input id="inp-insumo-picker-buscar" class="mini-input" style="width:100%" placeholder="Buscar insumo por nombre o unidad…" value="' + esc(state.insumoPickerBusqueda || "") + '" data-live-filter="insumoPickerBusqueda" /></div>' +
+    // Misma barra de búsqueda que el resto de la app (ver renderBuscador en
+    // core/components.js). Antes cada explorador tenía su propio <input>
+    // suelto: sin lupa, sin botón de limpiar y con un aspecto distinto al
+    // de los buscadores de las listas.
+    '<div class="picker-search">' + renderBuscador({
+      id: "inp-insumo-picker-buscar",
+      filtro: "insumoPickerBusqueda",
+      valor: state.insumoPickerBusqueda,
+      placeholder: "Buscar insumo por nombre o unidad…",
+      ancho: "full",
+      compacto: true
+    }) + "</div>" +
     '<div class="picker-body">' +
     '<div class="picker-side">' +
     itemsCat.map(function (c) {
@@ -190,10 +201,25 @@ function renderEditor() {
   return html;
 }
 
-// Barra de guardado: aparece SOLO cuando hay cambios sin guardar en esta
-// cotización. Es sticky para que no se pierda de vista al bajar por una
-// cotización larga y quede claro que lo que se ve en pantalla todavía no es
-// lo que está guardado.
+// Aviso de "cambios sin guardar" de una cotización.
+//
+// POR QUÉ CAMBIÓ: antes era una barra sticky a lo ancho, con fondo amarillo y
+// borde de alerta, clavada arriba del documento mientras se editaba. Cumplía
+// su función (no perder cambios) pero cobraba un precio desproporcionado:
+// robaba la parte superior de la pantalla justo donde están los datos del
+// cliente, empujaba el contenido al aparecer, y gritaba "problema" cuando en
+// realidad editar sin guardar es el estado NORMAL de trabajo — la barra
+// estaba encendida casi todo el tiempo.
+//
+// Ahora es un dock flotante abajo a la derecha: sigue siendo imposible de
+// perder de vista (es fijo, no se va con el scroll) y conserva las dos
+// salidas — guardar y descartar —, pero no ocupa espacio del documento ni
+// usa el color de alerta, que queda reservado para lo que sí es un problema
+// (ver `.aviso-barra malo` arriba). Además se puede guardar con Ctrl+S sin
+// tener que ir a buscar el botón (ver core/teclado.js).
+//
+// Si se vuelve a hacer sticky y a lo ancho, se reintroduce exactamente el
+// problema que el usuario reportó como "muy invasiva".
 // Aviso de que el pedido ya creado quedó diciendo otra cosa. Pasa con los
 // pedidos convertidos ANTES de que guardar propagara los cambios: se editó la
 // cotización y el pedido —y con él los reportes, que leen de él— se quedó con
@@ -205,26 +231,30 @@ function renderAvisoPedidoDesfasado(cot) {
   if (d.difCantidad) partes.push("cantidad: el pedido dice " + d.cantidadPedido + " y la cotización " + d.cantidadCot);
   if (d.difTotal) partes.push("precio: el pedido dice " + fmt(d.totalPedido) + " y la cotización " + fmt(d.totalCot));
   if (d.difCosto) partes.push("costo: diferencia de " + fmt(Math.abs(d.difCosto)));
-  return '<div class="save-bar" style="background:var(--danger-soft);border-color:var(--danger);">' +
-    '<span class="save-bar-msg" style="color:var(--danger-ink);">⚠ El pedido ' + esc(d.pedido.numeroOp || "") + " quedó desactualizado" +
+  // Usa `.aviso-barra`, la MISMA barra con la que el resto de la app avisa de
+  // algo que hay que resolver (guardado fallido, recuperación al arrancar —
+  // ver core/dom.js). Antes reutilizaba `.save-bar` pisándole los colores con
+  // estilos inline: dos avisos con el mismo peso visual que sin embargo
+  // significan cosas muy distintas.
+  return '<div class="aviso-barra malo">' +
+    '<div><b>⚠ El pedido ' + esc(d.pedido.numeroOp || "") + " quedó desactualizado</b>" +
     renderHelp("Este pedido se creó con una versión anterior de la cotización y no se enteró de los cambios que hiciste después. Como los reportes leen del pedido, hasta que no lo actualices seguirán mostrando los números viejos. Actualizar NO toca los abonos ya cobrados, el N.º de OP ni la etapa de producción — solo qué se vende, cuánto y a qué precio.") +
-    "</span>" +
-    '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-    '<span class="section-sub" style="margin:0;">' + esc(partes.join(" · ")) + "</span>" +
+    '<div class="aviso-barra-sub">' + esc(partes.join(" · ")) + "</div></div>" +
     '<button class="btn" data-action="sincronizar-pedido-cotizacion" data-id="' + cot.id + '">Actualizar el pedido</button>' +
-    "</span></div>";
+    "</div>";
 }
 
 function renderBarraGuardado(cot) {
   if (state.cotSucia !== cot.id) return "";
-  return '<div class="save-bar">' +
-    '<span class="save-bar-msg">● Cambios sin guardar' +
-    renderHelp("Lo que editaste se ve en pantalla pero todavía no reemplazó a la cotización guardada. Guardá para confirmarlo, o descartá para volver a la última versión guardada. Registrar un costo real, pagar una comisión o convertir en pedido guardan solos (son movimientos reales, no una simulación).") +
+  return '<div class="save-bar guardado-dock">' +
+    '<span class="guardado-dock-msg"><span class="guardado-dock-punto"></span>Sin guardar' +
+    renderHelp("Lo que editaste se ve en pantalla pero todavía no reemplazó a la cotización guardada. Guardá para confirmarlo (o Ctrl+S), o descartá para volver a la última versión guardada. Registrar un costo real, pagar una comisión o convertir en pedido guardan solos (son movimientos reales, no una simulación).", "right") +
     "</span>" +
-    '<span style="display:flex;gap:8px;flex-wrap:wrap;">' +
     '<button class="btn ghost small" data-action="descartar-cambios-cotizacion">Descartar</button>' +
-    '<button class="btn" data-action="guardar-cotizacion" data-id="' + cot.id + '">Guardar cambios</button>' +
-    "</span></div>";
+    // `data-guardar-principal` es lo que hace que Ctrl+S guarde: core/teclado.js
+    // busca ese atributo en pantalla en vez de conocer esta pestaña en particular.
+    '<button class="btn small" data-guardar-principal data-action="guardar-cotizacion" data-id="' + cot.id + '" title="Guardar cambios (Ctrl+S)">Guardar</button>' +
+    "</div>";
 }
 
 // El historial es SIEMPRE un índice de tarjetas chicas — clic en cualquiera
@@ -252,7 +282,12 @@ function renderCotResumen(c) {
 // de prenda aplicada trae un flujo asignado, nace precargado con ese (ver
 // acción "aplicar-plantilla"); si no, parte del flujo estándar de la app.
 function renderEstadosRef(cotId, ref) {
-  var estados = (ref.estadosDef && ref.estadosDef.length) ? ref.estadosDef : ESTADOS_DEFAULT;
+  // Antes esta línea era una copia inline de la resolución de etapas que
+  // NO contemplaba el caso "comprado a proveedor": el editor ofrecía las 5
+  // etapas del taller mientras la tarjeta del pedido mostraba las 2 del
+  // proveedor. Ahora las dos entran por la misma puerta (ver etapasDe en
+  // core/calc.js).
+  var estados = etapasDe(ref);
   var esPersonalizado = !!(ref.estadosDef && ref.estadosDef.length);
   var COLS_E = "30px 1fr 36px 36px 30px";
   var html = '<div class="det-row head" style="grid-template-columns:' + COLS_E + ';"><span>#</span><span>Etapa</span><span></span><span></span><span></span></div>';
@@ -1994,7 +2029,7 @@ export var actions = {
   "set-estado-ref-label": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx"));
     mapRef(cotId, refId, function (r) {
-      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      var estados = etapasDe(r).map(function (e) { return Object.assign({}, e); });
       if (!estados[idx]) return r;
       estados[idx].label = el.value;
       return Object.assign({}, r, { estadosDef: estados });
@@ -2006,7 +2041,7 @@ export var actions = {
     var nombre = val(card, "nueva-etapa-" + refId);
     if (!nombre) return;
     mapRef(cotId, refId, function (r) {
-      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      var estados = etapasDe(r).map(function (e) { return Object.assign({}, e); });
       estados.push({ id: uid(), label: nombre });
       return Object.assign({}, r, { estadosDef: estados });
     });
@@ -2014,7 +2049,7 @@ export var actions = {
   "remove-estado-ref": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx"));
     mapRef(cotId, refId, function (r) {
-      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      var estados = etapasDe(r).map(function (e) { return Object.assign({}, e); });
       if (estados.length <= 1) { window.alert("Debe quedar al menos una etapa en el flujo."); return r; }
       estados.splice(idx, 1);
       return Object.assign({}, r, { estadosDef: estados });
@@ -2023,7 +2058,7 @@ export var actions = {
   "mover-estado-ref": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), idx = Number(el.getAttribute("data-idx")), dir = Number(el.getAttribute("data-dir"));
     mapRef(cotId, refId, function (r) {
-      var estados = ((r.estadosDef && r.estadosDef.length) ? r.estadosDef : ESTADOS_DEFAULT).map(function (e) { return Object.assign({}, e); });
+      var estados = etapasDe(r).map(function (e) { return Object.assign({}, e); });
       var nidx = idx + dir;
       if (nidx < 0 || nidx >= estados.length) return r;
       var tmp = estados[idx]; estados[idx] = estados[nidx]; estados[nidx] = tmp;
