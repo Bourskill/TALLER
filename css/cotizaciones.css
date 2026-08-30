@@ -30,7 +30,7 @@
    contra la comparación de arriba; ahora tiene su propio bloque, con la cifra
    como protagonista y una segunda línea que dice contra qué se compara. */
 .variacion{display:flex;align-items:flex-start;gap:13px;padding:15px 17px;border-radius:var(--radius-sm);
-  margin-top:var(--sp-4);border:1px solid;font-family:'Inter',sans-serif;}
+  margin-top:var(--sp-5);border:1px solid;font-family:'Inter',sans-serif;}
 .variacion-icono{font-size:14px;line-height:1.45;flex-shrink:0;}
 .variacion-texto{display:flex;flex-direction:column;gap:3px;min-width:0;}
 .variacion-texto b{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:15.5px;letter-spacing:-0.01em;}
