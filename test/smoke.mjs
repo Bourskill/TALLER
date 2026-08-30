@@ -1824,6 +1824,57 @@ plaSelectEnRef.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 const refConPla = state.cotizaciones.find(c => c.id === cotServ2.id).referencias[0];
 assert(refConPla.insumos.some(i => i.esServicio === true), "aplicar-plantilla hereda 'servicio' ya resuelto desde la plantilla hacia la referencia");
 
+// ---------------------------------------------------------------------------
+// La ganancia mostrada (arriba de la cotización Y en Producción) tiene que
+// descontar la comisión del vendedor tanto en "Estimado" como en "Real" — de
+// lo contrario la MISMA cotización parece perder plata de más al entrar a
+// Producción, sin ningún aviso de por qué (justo el reporte real que motivó
+// este fix: "Ganancia estimada $88.280" vs "Ganancia real $20.350", una
+// diferencia mayor que el sobrecosto, por la comisión sin descontar en el
+// estimado).
+// ---------------------------------------------------------------------------
+const { fmt } = await import("../js/core/utils.js");
+state.cotizacionEditando = "";
+render();
+setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Comisión");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba comisión en estimado y real");
+click('[data-action="add-cotizacion"]');
+const cotCom = state.cotizaciones.find(c => c.descripcion === "Prueba comisión en estimado y real");
+const refCom = cotCom.referencias[0];
+const refComCard = document.querySelector('[data-ref-id="' + refCom.id + '"]');
+const cantidadInputCom = refComCard.querySelector('input[data-campo="cantidadPedida"]');
+cantidadInputCom.value = "1"; // por defecto nace en 10 — se fija en 1 para que el precio total sea igual al precio x1
+cantidadInputCom.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const precioInputCom = document.querySelector('[data-ref-id="' + refCom.id + '"] input[data-campo="precioVenta"]');
+precioInputCom.value = "50000";
+precioInputCom.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+// Sin insumos (costo 0), cantidad 1: ganancia bruta = precio = 50.000, para
+// que la cuenta de comisión (10% de las prendas) sea fácil de verificar a
+// mano: 5.000.
+click('[data-action="toggle-cot-vendedor"][data-id="' + cotCom.id + '"]');
+setChange('input[data-action-change="set-cot-vendedor"][data-id="' + cotCom.id + '"][data-campo="nombre"]', "Vendedor Prueba");
+setChange('select[data-action-change="set-cot-vendedor"][data-id="' + cotCom.id + '"][data-campo="tipo"]', "porcentaje");
+setChange('input[data-action-change="set-cot-vendedor"][data-id="' + cotCom.id + '"][data-campo="valor"]', "10");
+render();
+const cotComAhora = state.cotizaciones.find(c => c.id === cotCom.id);
+const totalesCom = calcMod2.calcCotizacionTotales(cotComAhora);
+const realCom = calcMod2.calcCotResultadoReal(cotComAhora);
+assert(realCom.comision === 5000, "sanity: 10% de 50.000 de precio de prendas da 5.000 de comisión");
+assert(totalesCom.gananciaTotal === 50000, "sanity: la ganancia BRUTA (sin descontar comisión) es el precio completo, sin insumos de por medio");
+
+const heroGanancia = document.querySelector('[data-cot-id="' + cotCom.id + '"] .cot-hero-stat:nth-child(2) .rv');
+assert(heroGanancia.textContent.indexOf(fmt(45000)) !== -1, "'Ganancia estimada' arriba de la cotización YA descuenta la comisión (50.000 - 5.000 = 45.000), no muestra la bruta");
+assert(heroGanancia.textContent.indexOf(fmt(5000)) !== -1, "y la nota entre paréntesis dice cuánto se descontó de comisión");
+
+click('[data-action="set-cot-tab"][data-id="' + cotCom.id + '"][data-val="produccion"]');
+render();
+const colEstimado = document.querySelectorAll('[data-cot-id="' + cotCom.id + '"] .cot-compara-col')[0];
+const colReal = document.querySelectorAll('[data-cot-id="' + cotCom.id + '"] .cot-compara-col')[1];
+assert(colEstimado.textContent.indexOf(fmt(45000)) !== -1, "en Producción, 'Estimado' también muestra la ganancia ya neta de comisión (antes mostraba la bruta 50.000, distinta de 'Real' sin ningún aviso)");
+assert(colEstimado.textContent.indexOf("comisión del vendedor") !== -1, "'Estimado' explica con la misma nota cuánto se le descontó");
+assert(colReal.textContent.indexOf(fmt(45000)) !== -1, "'Real' coincide con 'Estimado' cuando no hay sobrecosto (los dos ya restan la misma comisión)");
+assert(colReal.textContent.indexOf("comisión del vendedor") !== -1, "'Real' también trae la nota, no solo 'Estimado'");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

@@ -344,7 +344,7 @@ function renderCotCard(c) {
 
   var html = '<div class="cot-card" data-cot-id="' + c.id + '">';
   html += renderCotHead(c, iva);
-  html += renderCotStatsRow(totales);
+  html += renderCotStatsRow(totales, real.comision);
   html += renderCotVendedorCompact(c);
   html += renderCotTabsStrip(c, tab);
   html += '<div class="cot-tab-body">';
@@ -398,11 +398,21 @@ function renderCotHead(c, iva) {
 // Cifras grandes (estilo dashboard financiero) en vez de una fila de texto
 // chico: es lo primero que se debe leer de una cotización. IVA y "convertir
 // en pedido" viven arriba a la derecha, junto al menú "⋮" (ver renderCotHead).
-function renderCotStatsRow(totales) {
+//
+// "Ganancia estimada" ya descuenta la comisión del vendedor (si hay uno) —
+// antes NO lo hacía acá, pero SÍ en "Real" (pestaña Producción), así que la
+// misma cotización parecía perder plata sola al pasar de una a otra sin
+// ningún aviso de por qué. Con la nota entre paréntesis queda visible de
+// entrada, no solo si se entra a mirar el detalle de Producción.
+function renderCotStatsRow(totales, comision) {
+  var gananciaNeta = totales.gananciaTotal - (comision || 0);
+  var margenNeto = totales.precioTotal > 0 ? (gananciaNeta / totales.precioTotal * 100) : 0;
   return '<div class="cot-hero-stats">' +
     '<div class="cot-hero-stat"><div class="rl">Precio total cotizado</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
-    '<div class="cot-hero-stat"><div class="rl">Ganancia estimada</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
-    '<div class="cot-hero-stat"><div class="rl">Margen</div><div class="rv">' + totales.margenPct.toFixed(1) + "%</div></div>" +
+    '<div class="cot-hero-stat"><div class="rl">Ganancia estimada</div><div class="rv" style="color:' + (gananciaNeta >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(gananciaNeta) +
+    (comision > 0 ? '<div class="section-sub" style="margin:2px 0 0;font-size:11px;font-weight:400;text-transform:none;letter-spacing:normal;">(ya se descontó ' + fmt(comision) + " de comisión del vendedor)</div>" : "") +
+    "</div></div>" +
+    '<div class="cot-hero-stat"><div class="rl">Margen</div><div class="rv">' + margenNeto.toFixed(1) + "%</div></div>" +
     "</div>";
 }
 
@@ -461,23 +471,32 @@ function renderTabReferencias(c) {
 function renderTabProduccion(c, totales, real) {
   var sobrecosto = real.sobrecosto;
   var vClass = sobrecosto === 0 ? "neutra" : (sobrecosto > 0 ? "mala" : "ok");
+  // "Real" ya descuenta la comisión del vendedor (ver calcCotResultadoReal),
+  // pero "Estimado" no lo hacía: la misma cotización parecía perder plata de
+  // más —más allá del sobrecosto— sin ningún aviso del porqué. La comisión no
+  // cambia entre estimado y real (se calcula sobre el precio cotizado, no
+  // sobre costos reales), así que se usa el mismo valor en los dos lados.
+  var comisionVal = real.comision;
+  var gananciaEstimadaNeta = totales.gananciaTotal - comisionVal;
+  var margenEstimadoNeto = totales.precioTotal > 0 ? (gananciaEstimadaNeta / totales.precioTotal * 100) : 0;
+  var notaComision = comisionVal > 0 ? '<div class="section-sub" style="margin:2px 0 0;font-size:11px;font-weight:400;text-transform:none;letter-spacing:normal;">(ya se descontó ' + fmt(comisionVal) + " de comisión del vendedor)</div>" : "";
 
-  var html = '<div class="cot-col-title">Estimado vs. real' + renderHelp("Estimado es lo que se planeó al cotizar. Real ajusta esos números con los costos reales que hayas registrado abajo, para comparar lo planeado contra lo que en verdad pasó.") + "</div>";
+  var html = '<div class="cot-col-title">Estimado vs. real' + renderHelp("Estimado es lo que se planeó al cotizar. Real ajusta esos números con los costos reales que hayas registrado abajo, para comparar lo planeado contra lo que en verdad pasó. Las dos ganancias ya tienen descontada la comisión del vendedor, si hay uno.") + "</div>";
   html += '<div class="cot-compara-grid">' +
     '<div class="cot-compara-col">' +
     '<div class="cot-compara-titulo">Estimado</div>' +
     '<div class="cot-resumen-total">' +
     '<div><div class="rl">Costo total</div><div class="rv">' + fmt(totales.costoTotal) + "</div></div>" +
     '<div><div class="rl">Precio total</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
-    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
-    '<div><div class="rl">Margen</div><div class="rv">' + totales.margenPct.toFixed(1) + "%</div></div>" +
+    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (gananciaEstimadaNeta >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(gananciaEstimadaNeta) + notaComision + "</div></div>" +
+    '<div><div class="rl">Margen</div><div class="rv">' + margenEstimadoNeto.toFixed(1) + "%</div></div>" +
     "</div></div>" +
     '<div class="cot-compara-col">' +
     '<div class="cot-compara-titulo">Real</div>' +
     '<div class="cot-resumen-total">' +
     '<div><div class="rl">Costo total</div><div class="rv">' + fmt(real.costoTotal) + "</div></div>" +
     '<div><div class="rl">Precio total</div><div class="rv">' + fmt(real.precioTotal) + "</div></div>" +
-    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (real.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(real.gananciaTotal) + "</div></div>" +
+    '<div><div class="rl">Ganancia</div><div class="rv" style="color:' + (real.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(real.gananciaTotal) + notaComision + "</div></div>" +
     '<div><div class="rl">Margen</div><div class="rv">' + real.margenPct.toFixed(1) + "%</div></div>" +
     "</div></div>" +
     "</div>";

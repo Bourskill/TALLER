@@ -692,16 +692,24 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   y += 26;
 
   if (opts.general) {
+    // La ganancia real ya descuenta la comisión del vendedor (ver
+    // calcCotResultadoReal); la estimada, acá, también — mismo criterio que
+    // en pantalla (renderCotStatsRow/renderTabProduccion en cotizaciones.js),
+    // para que este PDF no muestre una tercera versión distinta del número.
+    var comisionPdf = real.comision;
+    var gananciaEstimadaPdf = totales.gananciaTotal - comisionPdf;
+    var margenEstimadoPdf = totales.precioTotal > 0 ? (gananciaEstimadaPdf / totales.precioTotal * 100) : 0;
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
     doc.text("Resumen", marginX, y); y += 16;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(60, 60, 60);
     [
       "Costo total estimado: " + money(totales.costoTotal),
       "Precio total cotizado: " + money(totales.precioTotal),
-      "Ganancia estimada: " + money(totales.gananciaTotal) + " (" + totales.margenPct.toFixed(1) + "%)",
+      "Ganancia estimada: " + money(gananciaEstimadaPdf) + " (" + margenEstimadoPdf.toFixed(1) + "%)",
       "Costo total real: " + money(real.costoTotal),
       "Ganancia real: " + money(real.gananciaTotal) + " (" + real.margenPct.toFixed(1) + "%)"
-    ].forEach(function (l) { doc.text(l, marginX, y); y += 15; });
+    ].concat(comisionPdf > 0 ? ["(las dos ganancias ya tienen descontada la comisión del vendedor: " + money(comisionPdf) + ")"] : [])
+      .forEach(function (l) { doc.text(l, marginX, y); y += 15; });
     y += 10;
   }
 
