@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -21,10 +21,17 @@ function nuevoInsumo(fuente) {
     unidad: fuente ? fuente.unidad : "UND",
     costo: fuente ? num(fuente.costo) : 0,
     tipo: fuente ? fuente.tipo : "por_prenda",
-    // Si en el catálogo está marcado como servicio (diseño, confección), la
-    // referencia lo hereda: es lo que hace que la lista de compras diga
-    // "servicio" en vez de pedir N unidades de algo que no se mide.
-    esServicio: !!(fuente && fuente.esServicio),
+    // Si en el catálogo está marcado como servicio —por su Unidad, por vivir
+    // en una categoría marcada "de servicio" (ver esInsumoServicio en
+    // core/calc.js), o por la casilla vieja— la referencia hereda ese
+    // resultado ya resuelto: es lo que hace que la lista de compras diga
+    // "servicio" en vez de pedir N unidades de algo que no se mide. Se
+    // resuelve UNA vez, al copiar (igual que el costo): la referencia no
+    // guarda `categoriaId`, así que si luego cambias la categoría en el
+    // catálogo, esta copia ya hecha no se entera — mismo criterio que ya se
+    // usa para el costo, para no cambiarle los números a una cotización ya
+    // armada sin que nadie lo pida.
+    esServicio: !!(fuente && esInsumoServicio(fuente)),
     proveedorId: (fuente && fuente.proveedorId) || "",
     cantidad: 1,
     // Vínculo con el insumo del catálogo del que salió esta copia — no con su
@@ -537,7 +544,7 @@ var COMPRA_COLS = "1.3fr 1fr 90px 105px 90px 105px 120px";
 function renderTablaCompras(c, compras, hayProveedor) {
   var resumen = calcResumenCompras(c);
   var html = '<div class="cot-col-title">Compras del pedido' +
-    renderHelp("Cada línea es algo que hay que comprar, con lo que se estimó al cotizar y lo que en verdad costó. Marca \"Comprado\" y llena el costo real: la diferencia contra lo estimado se calcula sola y alimenta el resultado real de arriba. El botón de abajo lleva esas compras a Finanzas como movimientos de gasto." +
+    renderHelp("Cada línea es algo que hay que comprar (o producir), con lo que se estimó al cotizar y lo que en verdad costó. Marca su estado: \"Sí\" si se pagó de verdad y aparte (el botón de abajo la lleva a Finanzas como gasto); \"Servicio\" si se hizo en el taller —corte, confección— y no hubo un pago instantáneo (se paga vía nómina, aparte): cuenta como costo real para que la ganancia no se infle, pero no genera ningún movimiento en Finanzas. La diferencia contra lo estimado se calcula sola y alimenta el resultado real de arriba." +
       (hayProveedor ? " Las referencias que se compran hechas aparecen como una sola línea, en unidades, no desglosadas en insumos." : "")) +
     "</div>";
 
@@ -546,26 +553,33 @@ function renderTablaCompras(c, compras, hayProveedor) {
   }
 
   html += '<div class="tx-row head" style="grid-template-columns:' + COMPRA_COLS + ';">' +
-    "<span>Qué comprar</span><span>Para / a quién</span><span>Cant. est.</span><span>Costo est.</span><span>Cant. real</span><span>Costo real</span><span>Comprado</span></div>";
+    "<span>Qué comprar</span><span>Para / a quién</span><span>Cant. est.</span><span>Costo est.</span><span>Cant. real</span><span>Costo real</span><span>Estado</span></div>";
 
   compras.forEach(function (linea) {
     html += renderFilaCompra(c, linea);
   });
 
-  var diferencia = resumen.real - resumen.estimado;
+  // "Resuelto" cuenta lo pagado Y lo de servicio: las dos son un costo real ya
+  // sabido, solo que una salió de caja y la otra todavía no (se paga vía
+  // nómina, aparte). Comparar el estimado contra ese total combinado es lo
+  // que deja ver el sobrecosto/ahorro real del pedido aunque nunca se marque
+  // "Sí" en corte/confección hechos en el taller.
+  var resuelto = resumen.compradas + resumen.servicio;
+  var realCombinado = resumen.real + resumen.realServicio;
+  var diferencia = realCombinado - resumen.estimado;
   html += '<div class="section-sub" style="margin:10px 0 0;">' +
-    resumen.compradas + " de " + resumen.total + " comprado(s) · estimado <b>" + fmt(resumen.estimado) + "</b>" +
-    (resumen.compradas
-      ? " · pagado <b>" + fmt(resumen.real) + "</b> (solo lo ya comprado)"
-      : "") +
+    resumen.compradas + " pagado(s) · " + resumen.servicio + " en servicio · " + resumen.pendientes + " pendiente(s)" +
+    " · estimado <b>" + fmt(resumen.estimado) + "</b>" +
+    (resumen.compradas ? " · pagado <b>" + fmt(resumen.real) + "</b>" : "") +
+    (resumen.servicio ? " · para apartar (nómina) <b>" + fmt(resumen.realServicio) + "</b>" : "") +
     "</div>";
-  if (resumen.compradas && diferencia !== 0 && resumen.compradas === resumen.total) {
+  if (resuelto && diferencia !== 0 && resuelto === resumen.total) {
     html += '<div class="section-sub" style="margin:2px 0 0;color:' + (diferencia > 0 ? "var(--danger-ink)" : "var(--success-ink)") + ';">' +
       (diferencia > 0 ? "Se gastó " + fmt(diferencia) + " más de lo estimado." : "Se ahorró " + fmt(Math.abs(diferencia)) + " frente a lo estimado.") + "</div>";
   }
 
   html += '<div class="row-actions" style="margin-top:12px;flex-wrap:wrap;">' +
-    '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra marcada, y borra el de las que se hayan desmarcado. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
+    '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra en estado \'Sí\', y borra el de las que ya no lo estén. Las de \'Servicio\' NO generan movimiento: no hubo un pago instantáneo que registrar. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
     (c.estado === "convertida"
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como UN solo movimiento en Finanzas. Es una alternativa a llevar las compras reales una por una: registrar los dos contaría el mismo costo dos veces.">' +
         (c.estimadoTxId ? "Actualizar el estimado ya registrado" : "Registrar estimado completo como movimiento") + "</button>"
@@ -576,7 +590,13 @@ function renderTablaCompras(c, compras, hayProveedor) {
 
 function renderFilaCompra(c, linea) {
   var compra = compraDeLinea(c, linea.clave) || {};
-  var comprado = !!compra.comprado;
+  // Sin ningún estado guardado todavía, una línea de servicio (corte,
+  // confección — ver esInsumoServicio en core/calc.js) nace en "Servicio" en
+  // vez de "No": es lo normal (se hace en el taller, se paga vía nómina), así
+  // no hay que tocarla a mano en cada pedido. Sigue siendo editable por si
+  // ESTA vez sí se tercerizó. Misma regla que usa calcResumenCompras — una
+  // sola fuente para esta pregunta, no dos que puedan divergir.
+  var estado = estadoLineaCompra(c, linea);
   var abierta = (state.compraDetalleAbierto || {})[c.id + "|" + linea.clave];
   var attrs = ' data-action-change="set-cot-compra" data-cot="' + c.id + '" data-clave="' + esc(linea.clave) + '"';
   var proveedorId = compra.proveedorId || linea.proveedorId || "";
@@ -606,8 +626,12 @@ function renderFilaCompra(c, linea) {
       ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
       : '<input type="number" class="mini-input" style="width:100%" placeholder="' + (linea.esProducto ? linea.cantidadFisica : num(linea.cantidadFisica).toFixed(2)) + '" value="' + esc(compra.cantidadReal !== undefined ? compra.cantidadReal : "") + '"' + attrs + ' data-campo="cantidadReal" />') +
     '<span class="mobile-th">Costo real</span><input type="number" class="mini-input" style="width:100%" placeholder="' + Math.round(num(linea.costoTotal)) + '" value="' + esc(compra.costoReal !== undefined ? compra.costoReal : "") + '"' + attrs + ' data-campo="costoReal" />' +
-    '<span class="mobile-th">Comprado</span><span style="display:flex;gap:6px;align-items:center;">' +
-    '<label class="mini-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" ' + (comprado ? "checked" : "") + attrs + ' data-campo="comprado" /> Sí</label>' +
+    '<span class="mobile-th">Estado</span><span style="display:flex;gap:6px;align-items:center;">' +
+    '<select class="mini-input" style="width:auto;"' + attrs + ' data-campo="estado" title="No: nada registrado todavía. Sí: se pagó de verdad y aparte (crea un movimiento en Finanzas). Servicio: mano de obra propia (corte, confección…) — cuenta como costo real para que la ganancia no se infle, pero no crea movimiento en Finanzas porque no hubo un pago instantáneo, se paga vía nómina aparte.">' +
+    '<option value="no"' + (estado === "no" ? " selected" : "") + ">No</option>" +
+    '<option value="si"' + (estado === "si" ? " selected" : "") + ">Sí</option>" +
+    '<option value="servicio"' + (estado === "servicio" ? " selected" : "") + ">Servicio</option>" +
+    "</select>" +
     '<button class="btn ghost small" data-action="toggle-compra-detalle" data-cot="' + c.id + '" data-clave="' + esc(linea.clave) + '" title="Proveedor y observaciones de esta compra">' + (abierta ? "▾" : "▸") + "</button>" +
     "</span></div>";
 
@@ -1509,7 +1533,10 @@ export var actions = {
     if (!pla) return;
     mapRef(cotId, refId, function (r) {
       var nuevosInsumos = (pla.insumos || []).map(function (ins) {
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
+        // esServicio ya viene resuelto desde la plantilla (ver add-pla-insumo-
+        // catalogo en modules/plantillas.js) — se hereda tal cual, no se
+        // vuelve a calcular acá (la referencia tampoco guarda categoriaId).
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1553,7 +1580,9 @@ export var actions = {
         patch.estadosDef = [];
       } else {
         patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1 };
+          // esServicio ya viene resuelto desde el producto (ver
+          // confirmar-insumo-picker-producto en modules/productos.js).
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio };
         }));
         if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
       }
@@ -1570,24 +1599,28 @@ export var actions = {
   // insumos nuevos no le cambia el dueño a un dato ya registrado.
   "set-cot-compra": function (el) {
     var cotId = el.getAttribute("data-cot"), clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
-    var valor = campo === "comprado" ? !!el.checked
-      : (campo === "cantidadReal" || campo === "costoReal") ? num(el.value)
-        : el.value;
+    var valor = (campo === "cantidadReal" || campo === "costoReal") ? num(el.value) : el.value;
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       var compras = (c.compras || []).slice();
       var idx = -1;
       compras.forEach(function (x, i) { if (x.clave === clave) idx = i; });
       var linea = calcListaCompras(c).filter(function (l) { return l.clave === clave; })[0];
+      // Una línea de servicio nace en "servicio" (ver renderFilaCompra): si
+      // esta es la primera vez que se toca (no había registro), hay que
+      // partir de ese mismo default y no de "no", o el primer clic en
+      // "Costo real" la dejaría silenciosamente en "no".
+      var estadoInicial = linea && linea.esServicio ? "servicio" : "no";
       var base = idx >= 0 ? compras[idx] : {
         clave: clave, cantidadReal: "", costoReal: "", proveedorId: (linea && linea.proveedorId) || "",
-        observaciones: "", comprado: false, txId: "", fecha: ""
+        observaciones: "", estado: estadoInicial, txId: "", fecha: ""
       };
       var patch = {}; patch[campo] = valor;
-      // Marcar "comprado" sin haber escrito el costo real toma el estimado
-      // como el valor pagado: es el caso corriente (se compró por lo que se
-      // había presupuestado) y evita tener que teclear el mismo número.
-      if (campo === "comprado" && valor) {
+      // Elegir "Sí" o "Servicio" sin haber escrito el costo real toma el
+      // estimado como el valor: es el caso corriente (se produjo/compró por
+      // lo que se había presupuestado) y evita tener que teclear el mismo
+      // número.
+      if (campo === "estado" && valor !== "no") {
         if (!num(base.costoReal) && linea) patch.costoReal = num(linea.costoTotal);
         if (!base.fecha) patch.fecha = todayStr();
       }
@@ -1630,8 +1663,11 @@ export var actions = {
       var nombre = linea ? linea.nombre : compra.clave;
       var monto = num(compra.costoReal);
 
-      // Desmarcada (o sin monto): si había dejado un movimiento, se retira.
-      if (!compra.comprado || monto <= 0) {
+      // Solo "Sí" (pagado de verdad, aparte) genera un movimiento en
+      // Finanzas. "Servicio" (mano de obra propia, va a nómina) y "No" no
+      // deberían: si esta línea tenía un movimiento de un estado anterior
+      // (ej. se cambió de "Sí" a "Servicio"), se retira.
+      if (estadoCompra(compra) !== "si" || monto <= 0) {
         if (compra.txId) {
           state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
           borrados++;
@@ -2443,7 +2479,13 @@ function confirmarSalidaSiSucia() {
 // Mueve un insumo de una referencia a la lista global de la cotización. Se
 // conserva el mismo objeto (nombre, unidad, costo) para no perder lo que ya
 // estaba escrito; solo cambia de dueño. `cantidad` se descarta: un costo
-// global se paga una vez, no por prenda.
+// global se paga una vez, no por prenda. `esServicio` también se conserva en
+// esta y las otras 4 funciones "mover*" de más abajo: si el insumo era
+// servicio por vivir en una categoría marcada así (ver esInsumoServicio en
+// core/calc.js), esa marca no se puede recalcular después —ni un costo
+// global ni un servicio cobrado guardan categoriaId— así que si no se copia
+// acá se pierde en silencio la primera vez que alguien cambia el "Tipo de
+// costo" de la fila.
 function moverInsumoAGlobal(cotId, refId, insId) {
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
   if (!cot) return;
@@ -2460,7 +2502,7 @@ function moverInsumoAGlobal(cotId, refId, insId) {
       costosGlobales: (c.costosGlobales || []).concat([{
         id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
         costo: num(insumo.costo), proveedorId: insumo.proveedorId || "",
-        origenCatalogoId: insumo.origenCatalogoId || ""
+        origenCatalogoId: insumo.origenCatalogoId || "", esServicio: !!insumo.esServicio
       }])
     });
   });
@@ -2489,7 +2531,7 @@ function moverInsumoAServicio(cotId, refId, insId) {
       serviciosCobrados: (c.serviciosCobrados || []).concat([{
         id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
         costo: num(insumo.costo), precio: 0, proveedorId: insumo.proveedorId || "",
-        origenCatalogoId: insumo.origenCatalogoId || ""
+        origenCatalogoId: insumo.origenCatalogoId || "", esServicio: !!insumo.esServicio
       }])
     });
   });
@@ -2510,7 +2552,7 @@ function moverGlobalAServicio(cotId, gId) {
       serviciosCobrados: (c.serviciosCobrados || []).concat([{
         id: global.id, nombre: global.nombre, unidad: global.unidad || "",
         costo: num(global.costo), precio: 0, proveedorId: global.proveedorId || "",
-        origenCatalogoId: global.origenCatalogoId || ""
+        origenCatalogoId: global.origenCatalogoId || "", esServicio: !!global.esServicio
       }])
     });
   });
@@ -2541,7 +2583,7 @@ function moverServicioACosto(cotId, sId, tipo) {
       base.costosGlobales = (c.costosGlobales || []).concat([{
         id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "",
         costo: num(serv.costo), proveedorId: serv.proveedorId || "",
-        origenCatalogoId: serv.origenCatalogoId || ""
+        origenCatalogoId: serv.origenCatalogoId || "", esServicio: !!serv.esServicio
       }]);
       return base;
     }
@@ -2551,7 +2593,7 @@ function moverServicioACosto(cotId, sId, tipo) {
         insumos: (r.insumos || []).concat([{
           id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "UND",
           costo: num(serv.costo), tipo: tipo, cantidad: 1, proveedorId: serv.proveedorId || "",
-          origenCatalogoId: serv.origenCatalogoId || ""
+          origenCatalogoId: serv.origenCatalogoId || "", esServicio: !!serv.esServicio
         }])
       });
     });
@@ -2582,7 +2624,7 @@ function moverGlobalAInsumo(cotId, gId, tipo) {
           insumos: (r.insumos || []).concat([{
             id: global.id, nombre: global.nombre, unidad: global.unidad || "UND",
             costo: num(global.costo), tipo: tipo, cantidad: 1, proveedorId: global.proveedorId || "",
-            origenCatalogoId: global.origenCatalogoId || ""
+            origenCatalogoId: global.origenCatalogoId || "", esServicio: !!global.esServicio
           }])
         });
       })

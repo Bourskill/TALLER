@@ -18,7 +18,7 @@ import { state, persist, notify } from "../core/store.js";
 import { esc, fmt, num, uid, val, norm } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp, renderBuscador, renderTarjetaMini } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
-import { calcCostoUnitarioRef } from "../core/calc.js";
+import { calcCostoUnitarioRef, esInsumoServicio } from "../core/calc.js";
 
 var INS_COLS = "1fr 60px 90px 150px 70px 30px";
 
@@ -493,7 +493,12 @@ export var actions = {
     var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === el.value; })[0];
     if (!item) return;
     mapPla(id, function (p) {
-      return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1 }]) });
+      // Igual que al copiar del catálogo a una referencia (ver nuevoInsumo en
+      // modules/cotizaciones.js): "servicio" se resuelve UNA vez, acá, porque
+      // el insumo de la plantilla no guarda categoriaId — sin esto, un
+      // insumo marcado servicio por su CATEGORÍA (no por su Unidad) llegaba a
+      // la plantilla sin ninguna forma de saberlo.
+      return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }]) });
     });
   },
   "remove-pla-insumo": function (el) {

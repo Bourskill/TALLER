@@ -356,16 +356,33 @@ export async function loadAll() {
   try {
     var resultados = await Promise.allSettled(nombres.map(function (n) { return window.storage.get(claves[n], false); }));
     var datos = {};
+    // Claves cuyo valor cayó al espejo local (no se pudieron leer de la
+    // Sheet). Se usa más abajo para blindar la migración de tallas: si
+    // pedidos o cotizaciones vinieron de acá, pueden estar desactualizados
+    // frente a lo que YA tiene la Sheet real (ver el comentario junto a esa
+    // migración).
+    var clavesDeEspejo = {};
     nombres.forEach(function (n, i) {
       var r = resultados[i];
-      if (r.status === "fulfilled" && r.value) {
-        datos[n] = safeParse(r.value.value, undefined);
-        // Copia local de lo que SÍ se pudo leer — es lo único de donde puede
-        // salir algo la próxima vez que esto falle (ver el "else" de abajo).
-        // "configNombreLegacy" no es una clave real de `state` (es solo un
-        // campo viejo que se lee una vez para migrar el nombre del taller),
-        // así que no tiene sentido guardarle copia.
-        if (n !== "configNombreLegacy") espejar(n, r.value.value);
+      if (r.status === "fulfilled") {
+        if (r.value) {
+          datos[n] = safeParse(r.value.value, undefined);
+          // Copia local de lo que SÍ se pudo leer — es lo único de donde
+          // puede salir algo la próxima vez que esto falle (ver el "else" de
+          // abajo). "configNombreLegacy" no es una clave real de `state` (es
+          // solo un campo viejo que se lee una vez para migrar el nombre del
+          // taller), así que no tiene sentido guardarle copia.
+          if (n !== "configNombreLegacy") espejar(n, r.value.value);
+        } else {
+          // La Sheet SÍ respondió (no es un fallo de red) pero esta clave no
+          // tiene fila todavía — es un "no hay nada guardado aún" legítimo,
+          // no un "no se pudo leer". Antes esto se trataba igual que el
+          // fallo de red de abajo, y podía resucitar una copia local vieja
+          // (de una clave que el usuario borró o que nunca se guardó en este
+          // navegador) como si fuera el dato vigente, y mostrar el aviso de
+          // "sin conexión" estando en línea.
+          datos[n] = undefined;
+        }
       } else {
         // No se pudo leer de la Sheet (sin conexión, o el token no se pudo
         // renovar). Antes esto dejaba la clave en su valor SEMILLA de
@@ -378,6 +395,7 @@ export async function loadAll() {
         if (espejo != null) {
           datos[n] = safeParse(espejo, undefined);
           huboFalloDeRed = true;
+          clavesDeEspejo[n] = true;
         } else {
           datos[n] = undefined;
         }
@@ -459,7 +477,18 @@ export async function loadAll() {
     // cotización todavía no tiene tallas guardadas en ninguna referencia, se
     // traslada una sola vez (después de esto, `p.detalle` se borra, así que
     // no se repite en la siguiente carga).
-    if (state.pedidos.length && state.cotizaciones.length) {
+    //
+    // Si pedidos o cotizaciones cayeron al espejo local (offline), esta copia
+    // puede ser más vieja que lo que YA está en la Sheet real desde otro
+    // dispositivo (ej. ese otro dispositivo ya migró tallas y guardó; este
+    // espejo es de antes de eso). Migrar sobre esa copia vieja y guardarla
+    // (persist, más abajo) escribiría ese dato desactualizado ENCIMA de lo
+    // real en cuanto vuelva la señal — justo lo que la "red de seguridad" de
+    // core/guardado.js existe para evitar (nunca escribir a ciegas algo que
+    // pudo quedar viejo frente a otro dispositivo). Se salta la migración por
+    // completo en ese caso: se repite sola, sin problema, la próxima vez que
+    // este dispositivo cargue con conexión real.
+    if (state.pedidos.length && state.cotizaciones.length && !clavesDeEspejo.pedidos && !clavesDeEspejo.cotizaciones) {
       var huboMigracion = false;
       state.pedidos.forEach(function (p) {
         if (!p.detalle || !p.detalle.length || !p.cotizacionId) return;

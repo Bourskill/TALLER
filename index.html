@@ -36,12 +36,19 @@
 </script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- crossorigin: sin esto la respuesta llega "opaque" (type:'opaque',
+     status:0, ok:false) aunque el request funcione perfecto, y sw.js nunca
+     la cachea porque su guard mira res.ok — la fuente quedaba sin caché
+     offline pese a estar en la whitelist de sw.js. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" crossorigin="anonymous">
 
 <!-- Generador de PDF de cotizaciones (Cotizaciones → "Generar PDF para el cliente").
-     Scripts clásicos (no ES module): quedan disponibles como window.jspdf. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+     Scripts clásicos (no ES module): quedan disponibles como window.jspdf.
+     crossorigin: mismo motivo que el <link> de fonts de arriba — sin esto
+     sw.js no puede cachear estos scripts para que el PDF/Excel/gráficas
+     sigan funcionando sin conexión. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" crossorigin="anonymous"></script>
 
 <!-- Lectura de Excel (.xlsx) real — importar la plantilla de tallas ya
      diligenciada en Cotizaciones. Script clásico: queda disponible como
@@ -49,16 +56,16 @@
      celda (se pierden al generar el archivo), así que la DESCARGA de la
      plantilla (con el encabezado con color) usa ExcelJS en su lugar, ver
      abajo. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
 
 <!-- Generación de Excel (.xlsx) CON estilo (color de encabezado, igual al de
      las tablas de los PDF) — plantilla descargable de tallas en
      Cotizaciones. Script clásico: queda disponible como window.ExcelJS. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js" crossorigin="anonymous"></script>
 
 <!-- Gráficas del panel Resumen (Chart.js). Script clásico: queda disponible
      como window.Chart. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" crossorigin="anonymous"></script>
 
 <!-- Login con Google (core/auth.js). Script clásico: expone window.google. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>

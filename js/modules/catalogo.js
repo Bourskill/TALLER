@@ -225,6 +225,8 @@ function renderAdminCategorias(categorias, todos) {
     var n = todos.filter(function (i) { return i.categoriaId === cat.id; }).length;
     html += '<div class="cat-admin-fila">' +
       '<input class="mini-input" style="flex:1;min-width:0;" value="' + esc(cat.nombre) + '" data-action-change="set-cat-categoria-nombre" data-id="' + cat.id + '" aria-label="Nombre de la categoría" />' +
+      '<label class="mini-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;" title="Sus insumos cuentan como servicio (mano de obra que no se compra en ningún lado, ej. corte, confección) en vez de algo físico que hay que comprar — así queda marcado UNA vez para toda la categoría, sin escribir \'servicio\' a mano en cada insumo.">' +
+      '<input type="checkbox" ' + (cat.esServicio ? "checked" : "") + ' data-action-change="toggle-cat-categoria-servicio" data-id="' + cat.id + '" /> Servicio</label>' +
       '<span class="cat-admin-n">' + n + (n === 1 ? " insumo" : " insumos") + "</span>" +
       '<button class="btn danger small" data-action="remove-cat-categoria" data-id="' + cat.id + '" title="Eliminar la categoría (sus insumos quedan sin categoría, no se borran)">✕</button>' +
       "</div>";
@@ -440,6 +442,18 @@ export var actions = {
     if (!nombre) { notify(); return; } // una categoria sin nombre no se puede volver a encontrar
     state.catalogoCategorias = (state.catalogoCategorias || []).map(function (c) {
       return c.id === id ? Object.assign({}, c, { nombre: nombre }) : c;
+    });
+    persist("catalogoCategorias"); notify();
+  },
+  // Marca TODA la categoría como "de servicio" (ver esInsumoServicio en
+  // core/calc.js): así corte/confección u otra mano de obra propia se
+  // reconocen como servicio por vivir en esta categoría, sin tener que
+  // escribir "servicio" en el campo Unidad de cada insumo uno por uno.
+  "toggle-cat-categoria-servicio": function (el) {
+    var id = el.getAttribute("data-id");
+    var valor = !!el.checked;
+    state.catalogoCategorias = (state.catalogoCategorias || []).map(function (c) {
+      return c.id === id ? Object.assign({}, c, { esServicio: valor }) : c;
     });
     persist("catalogoCategorias"); notify();
   },

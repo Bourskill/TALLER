@@ -18,7 +18,7 @@ import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
 import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderBuscador } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
-import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos } from "../core/calc.js";
+import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
 import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
 
@@ -632,7 +632,10 @@ export var actions = {
     var items = (state.catalogoInsumos || []).filter(function (i) { return seleccion.indexOf(i.id) !== -1; });
     if (items.length) {
       mapPro(id, function (p) {
-        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1 }; });
+        // esServicio se resuelve UNA vez, acá (igual que en plantillas.js):
+        // el insumo del producto no guarda categoriaId, así que sin esto un
+        // insumo marcado servicio por su CATEGORÍA se perdía al copiarlo.
+        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }; });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }

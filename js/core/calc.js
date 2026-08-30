@@ -1342,13 +1342,19 @@ export function calcCostoPrenda(insumo, ref) {
 // cada pantalla) es lo que hace que el margen de la referencia, los totales
 // de la cotización, el PDF y los reportes no puedan contradecirse — todos
 // entran por esta misma puerta. Ver ORIGEN_PRODUCCION en constants.js.
-// Un "servicio" se reconoce por su UNIDAD, no por una casilla aparte: si lo
-// que compras se mide en "servicio", es que no se compra en ningún lado (no
-// es tangible). Se sigue aceptando la casilla vieja `esServicio` para los
-// insumos que se guardaron antes de este cambio.
+// Un "servicio" se reconoce por su UNIDAD ("servicio" en vez de una medida
+// real), por su CATEGORÍA (marcada como "de servicio" en el catálogo — ver
+// "Categorías" en Insumos: es lo que le da control al usuario sobre esto sin
+// tener que escribir "servicio" a mano en el campo Unidad) o, para insumos
+// guardados antes de que existiera cualquiera de las dos anteriores, por la
+// casilla vieja `esServicio`.
 export function esInsumoServicio(ins) {
   if (!ins) return false;
   if (norm(ins.unidad || "") === UNIDAD_SERVICIO) return true;
+  if (ins.categoriaId) {
+    var cat = (state.catalogoCategorias || []).filter(function (c) { return c.id === ins.categoriaId; })[0];
+    if (cat && cat.esServicio) return true;
+  }
   return !!ins.esServicio;
 }
 
@@ -1558,6 +1564,44 @@ export function compraDeLinea(cot, clave) {
   return ((cot && cot.compras) || []).filter(function (c) { return c.clave === clave; })[0] || null;
 }
 
+// Estado de una compra: "no" (nada registrado), "si" (se pagó de verdad y
+// aparte — genera movimiento en Finanzas) o "servicio" (mano de obra propia,
+// ej. corte/confección hechos en el taller: cuenta como costo real porque de
+// verdad se produjo, pero NO genera un movimiento en Finanzas porque no hubo
+// un pago instantáneo — se paga vía nómina, aparte y después). Vive en
+// `compra.estado`; las cotizaciones guardadas antes de que existiera ese
+// campo solo tienen el `comprado` booleano de siempre, que se sigue leyendo
+// tal cual (true → "si", false/ausente → "no") para no migrar nada.
+export function estadoCompra(compra) {
+  if (!compra) return "no";
+  if (compra.estado) return compra.estado;
+  return compra.comprado ? "si" : "no";
+}
+
+// Estado de una LÍNEA de la lista de compras (no de un registro de compra
+// suelto): si todavía no se tocó (no hay `compra` guardada), una línea de
+// servicio nace en "servicio" — es lo normal, se hace en el taller — en vez
+// de "no". Sin este default, el resumen ("N pagado, M en servicio...") solo
+// contaba una línea de servicio DESPUÉS de que alguien la tocara una vez en
+// pantalla, aunque ahí ya se viera marcada como "Servicio" — dos fuentes
+// distintas para la misma pregunta, justo lo que no debe pasar con dinero.
+//
+// Ojo: este default SOLO aplica a insumos de una referencia (`!linea.esGlobal`).
+// `linea.esServicio` en un costo global o un servicio cobrado al cliente
+// (domicilio, diseño facturado aparte) significa otra cosa por completo: "no
+// se compra por cantidad" (ver TIPOS_COSTO.servicio_cobrado/UNIDAD_SERVICIO
+// en constants.js), NO "es mano de obra propia pagada vía nómina" — un
+// domicilio casi siempre SÍ es un pago instantáneo real a un tercero
+// (el mensajero). Tratarlo igual haría que esas dos categorías completas
+// nacieran en "Servicio" (sin movimiento en Finanzas) por defecto, cuando
+// antes de este cambio TODA línea nacía neutral ("No") y exigía una acción
+// explícita para contar como pagada.
+export function estadoLineaCompra(cot, linea) {
+  var compra = compraDeLinea(cot, linea.clave);
+  if (compra) return estadoCompra(compra);
+  return (linea.esServicio && !linea.esGlobal) ? "servicio" : "no";
+}
+
 // Suma de variaciones (real vs. estimado) de lo que ya se compró.
 //
 // Dos fuentes que NO se pisan: `compras` es el modelo actual (una compra por
@@ -1568,7 +1612,11 @@ export function compraDeLinea(cot, clave) {
 export function calcCotGastosReales(cot) {
   var compras = calcListaCompras(cot);
   var deCompras = ((cot && cot.compras) || []).reduce(function (a, c) {
-    if (!c.comprado || !num(c.costoReal)) return a;
+    // "servicio" también es un costo real (de verdad se produjo), así que
+    // entra a la variación igual que "si" — la única diferencia entre los dos
+    // es si además genera un movimiento en Finanzas (ver sincronizar-compras-
+    // finanzas en modules/cotizaciones.js), no si cuenta como costo.
+    if (estadoCompra(c) === "no" || !num(c.costoReal)) return a;
     var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
     return a + (num(c.costoReal) - (linea ? linea.costoTotal : 0));
   }, 0);
@@ -1576,17 +1624,29 @@ export function calcCotGastosReales(cot) {
   return deCompras + deGastos;
 }
 
-// Resumen de avance de compras: cuántas líneas ya se compraron y cuánto se
-// lleva gastado de verdad contra lo estimado.
+// Resumen de avance de compras: cuántas líneas ya se compraron (con plata que
+// de verdad salió), cuántas son servicio propio (mano de obra que hay que
+// apartar para nómina, sin que haya salido nada de caja todavía) y cuántas
+// siguen sin ningún estado — separados porque cada uno significa algo
+// distinto para la caja del taller.
 export function calcResumenCompras(cot) {
   var lineas = calcListaCompras(cot);
-  var acc = { total: lineas.length, compradas: 0, estimado: 0, real: 0 };
+  var acc = { total: lineas.length, compradas: 0, servicio: 0, estimado: 0, real: 0, realServicio: 0 };
   lineas.forEach(function (l) {
     acc.estimado += num(l.costoTotal);
     var c = compraDeLinea(cot, l.clave);
-    if (c && c.comprado) { acc.compradas++; acc.real += num(c.costoReal); }
+    var estado = estadoLineaCompra(cot, l);
+    if (estado === "si") { acc.compradas++; acc.real += num(c.costoReal); }
+    else if (estado === "servicio") {
+      acc.servicio++;
+      // Ojo con "||": si de verdad se registró costoReal = 0 (se corrigió una
+      // línea que no costó nada), "" || X toma X porque 0 es falsy — así que
+      // se compara contra "sin escribir nada" explícitamente, no con falsy.
+      var hayCostoReal = c && c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
+      acc.realServicio += hayCostoReal ? num(c.costoReal) : num(l.costoTotal);
+    }
   });
-  acc.pendientes = acc.total - acc.compradas;
+  acc.pendientes = acc.total - acc.compradas - acc.servicio;
   return acc;
 }
 

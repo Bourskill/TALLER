@@ -162,6 +162,137 @@ RESTAURAR una sesión ya iniciada (`restaurarSesion()` solo mira un token
 guardado localmente, sin llamar a ningún servidor) y seguir trabajando desde
 ahí.
 
+**Cinco fallas encontradas en revisión adversarial (tres revisores
+independientes) sobre la primera versión de este apartado, ya corregidas:**
+
+- **[ROMPE] La migración de "detalle de tallas" podía escribirle a la Sheet
+  real un dato viejo del espejo local, encima de lo que otro dispositivo ya
+  hubiera guardado.** `loadAll()` tiene, desde antes de este apartado, una
+  migración de una sola vez que traslada `pedido.detalle` a
+  `cotizacion.referencias[0].detalle`, y si migra algo, guarda (`persist`) esas
+  dos claves. El problema: con el fallback nuevo al espejo, esa migración
+  podía correr sobre una copia de pedidos/cotizaciones que cayó al espejo por
+  estar offline — una copia que puede ser más VIEJA que lo que ya está en la
+  Sheet real (ej. otro dispositivo ya hizo esa misma migración y guardó). Si
+  eso pasaba, `persist()` quedaba en la cola de reintento y, al volver la
+  señal, escribía ese dato desactualizado ENCIMA de lo real — justo lo que la
+  cabecera de `core/guardado.js` dice que nunca debe pasar ("restaurar el
+  espejo a ciegas podría pisar algo hecho después desde otro dispositivo").
+  Se corrigió marcando en `loadAll()` qué claves cayeron al espejo
+  (`clavesDeEspejo`) y saltando la migración por completo si pedidos o
+  cotizaciones vinieron de ahí — se repite sola, sin problema, la próxima vez
+  que ese dispositivo cargue con conexión real. Antes de que existiera el
+  fallback al espejo esto era estructuralmente imposible (sin datos, el guard
+  de arrays vacíos bloqueaba la migración), así que era un riesgo nuevo,
+  introducido por este mismo apartado. Ver los tests nuevos en
+  `test/smoke.mjs` (buscar "la migración de tallas NO corre").
+- **[REGRESIÓN] Los scripts de CDN y la tipografía de Google Fonts nunca se
+  llegaban a cachear, pese a estar en la whitelist de `sw.js`.** Causa: los
+  `<script>`/`<link>` de `index.html` los cargaban SIN el atributo
+  `crossorigin`, así que la respuesta le llegaba al service worker "opaca"
+  (`type:'opaque'`, `status:0`, `ok:false` — así responde el navegador a un
+  fetch cross-origin sin modo CORS), y el guard `if (res && res.ok)` de
+  `sw.js` nunca la guardaba. En la práctica: jsPDF, XLSX, ExcelJS, Chart.js y
+  la fuente Inter/IBM Plex Mono no sobrevivían un reinicio en frío sin
+  conexión, así que "Generar PDF", importar/exportar Excel y las gráficas de
+  Resumen fallaban offline aunque el resto de la app sí abriera. Se agregó
+  `crossorigin="anonymous"` a esos `<script>`/`<link>` (NO al script de login
+  de Google, que no está en la whitelist de `sw.js` y no necesita cachearse).
+  Verificado en el navegador: tras el fix, esas seis respuestas quedan en
+  Cache Storage con `type:'cors'`, `status:200`.
+- **[menor] El comentario de cabecera de `sw.js` prometía reserva en caché "si
+  la red falla... o tarda"**, pero el `fetch` handler nunca implementó ningún
+  timeout — solo un fallo real de red dispara el fallback. Se corrigió el
+  comentario para que describa lo que el código realmente hace (no se agregó
+  la carrera contra un timeout: es una mejora aparte, no algo que este
+  apartado haya prometido).
+- **[REGRESIÓN, móvil] El chip nuevo "Sin conexión" no tenía la versión
+  compacta que sus hermanos `.ok`/`.guardando` sí tienen**, y al coexistir en
+  pantalla angosta con el chip "Sin guardar (N)" desbordaba la topbar lo
+  suficiente como para empujar fuera de la pantalla (sin scroll disponible) la
+  campanita, el botón de tema y el de CERRAR SESIÓN — verificado midiendo el
+  DOM real a 375px de ancho. Se agregó la misma compactación en
+  `css/responsive.css` (se queda solo con el ícono 📶 bajo 880px de ancho).
+- **[menor] `loadAll()` trataba "la Sheet respondió bien pero esa clave no
+  tiene fila" igual que un fallo de red real**, así que si el espejo local
+  todavía tenía una copia vieja de esa clave (una que el usuario borró, o que
+  nunca se guardó en ESE navegador), la resucitaba como si fuera el dato
+  vigente — y de paso disparaba el toast de "Sin conexión" estando en línea.
+  Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
+  espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
+  es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — agosto 2026 (novena ronda: "servicio" en Producción)
+
+**El problema de fondo:** corte y confección casi siempre se hacen en el
+taller y se pagan vía nómina —un sueldo fijo, no un pago por prenda—, pero el
+catálogo también tiene un precio de mercado para cuando SÍ hay que
+tercerizarlos. Antes de esto, la única forma de que ese costo contara en la
+ganancia era marcarlo "Comprado" en la pestaña Producción de la cotización —
+pero eso también generaba un movimiento de gasto en Finanzas, como si se
+hubiera pagado al instante y aparte. En el taller real ese pago no existe: se
+paga vía nómina, después, junto con el resto del sueldo. Dejarlo sin marcar
+evitaba el gasto falso, pero entonces esa línea quedaba "pendiente" para
+siempre y no había forma de saber cuánto había que apartar para cuando
+llegara la nómina.
+
+**La solución: un tercer estado, "Servicio".** La casilla "Comprado" de cada
+línea de "Compras del pedido" pasó a ser una lista de tres opciones:
+
+- **No** — nada registrado todavía (como antes, sin marcar).
+- **Sí** — se pagó de verdad y aparte (tercerizado): crea el movimiento de
+  gasto en Finanzas, igual que antes.
+- **Servicio** — mano de obra propia (corte, confección): cuenta como costo
+  real para la ganancia (no se infla el margen por no haberla "pagado"), pero
+  **no** genera ningún movimiento en Finanzas — no hubo un pago instantáneo
+  que registrar. El resumen de la cotización ahora distingue "pagado" de "en
+  servicio (para apartar)", así queda claro cuánto hay que reservar para la
+  próxima nómina sin fingir una transacción que no ocurrió.
+
+**Quién decide qué es "servicio": una categoría del catálogo, no el código.**
+Antes lo único que marcaba un insumo como servicio era escribir la palabra
+"servicio" en su campo Unidad — una convención del código, no algo que el
+usuario pudiera controlar directamente. Ahora cualquier CATEGORÍA de Insumos
+se puede marcar con una casilla "Servicio" (en "⚙ Categorías"): todo insumo
+que viva ahí (corte, confección, lo que sea) cuenta como servicio
+automáticamente, sin tocar su Unidad. Una línea de "Compras del pedido" cuyo
+insumo es de servicio nace directo en el estado "Servicio" — no hay que
+tocarla a mano en cada pedido, que es el caso normal.
+
+Ese resultado ("es servicio") se resuelve UNA sola vez, al copiar el insumo
+del catálogo a una plantilla, un producto o una referencia de cotización —
+igual que ya se hacía con el costo, para que una cotización ya armada no
+cambie de número sola si después se edita la categoría en el catálogo. Los
+cuatro lugares donde un insumo se copia desde el catálogo (referencia directa,
+plantilla de prenda, producto del catálogo, y de ahí a una referencia) quedan
+así cubiertos por el mismo criterio, cada uno con su propia prueba en
+`test/smoke.mjs` (antes solo el primero tenía una prueba real).
+
+**Dos fallas encontradas en revisión adversarial sobre la primera versión de
+esta ronda, ya corregidas:**
+
+- **[REGRESIÓN] Un costo global del pedido (domicilio) o un servicio cobrado
+  al cliente (diseño facturado aparte) nacían en "Servicio" por defecto, sin
+  que nadie lo pidiera.** La causa: esos dos SIEMPRE traen `esServicio: true`,
+  pero ahí ese campo significa otra cosa — "no se compra por cantidad", no
+  "es mano de obra de nómina" (ver `UNIDAD_SERVICIO` en `constants.js`). Un
+  domicilio casi siempre SÍ es un pago instantáneo real al mensajero. Se
+  corrigió para que el default nuevo solo aplique a insumos de una
+  referencia, nunca a costos globales ni servicios cobrados — esos siguen
+  naciendo neutrales ("No"), como antes de esta ronda.
+- **[REGRESIÓN] Cambiar el "Tipo de costo" de un insumo hacia/desde "Costo
+  global" o "Se cobra aparte al cliente", dentro de la misma cotización,
+  perdía la marca de servicio en silencio** (si venía de una categoría, no de
+  la Unidad) — las cinco funciones que mueven un insumo entre esas tres
+  formas no copiaban `esServicio`. Se corrigió en las cinco.
+- **[menor]** Un `costoReal` de exactamente `0` escrito a propósito en una
+  línea de servicio se sustituía por el estimado en el resumen (`0` es
+  falsy) — se corrigió para distinguir "no se escribió nada" de "se escribió
+  cero". El mismo ajuste se aplicó al PDF interno de "Compras del pedido",
+  que además ahora muestra el estimado (marcado "(servicio, estimado)") en
+  vez de "—" para una línea de servicio que nadie tocó todavía, coherente con
+  lo que ya mostraba el resumen en pantalla.
+
 ## Registro de cambios — agosto 2026 (octava ronda: dos ajustes puntuales)
 
 **No hay un botón general de "+ Nuevo insumo".** Hubo dos pasos intermedios

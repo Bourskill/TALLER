@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, compraDeLinea } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, compraDeLinea, estadoLineaCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -769,11 +769,24 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // cantidad: decir "11 UND de confección" no le sirve a nadie.
           var cantEst = c.esServicio ? "servicio" : (numFmt(c.cantidadFisica) + (c.unidad ? " " + c.unidad : ""));
           var cantReal = c.esServicio ? "—" : (compra.cantidadReal !== undefined && compra.cantidadReal !== "" ? numFmt(compra.cantidadReal) : "—");
+          var estado = estadoLineaCompra(cot, c);
+          // Una línea de servicio SIN costoReal escrito (nadie la tocó
+          // todavía) igual cuenta como costo real en el resumen en pantalla
+          // (ver calcResumenCompras) — acá se muestra igual, con el
+          // estimado, para no decir "—" cuando la pantalla ya dice cuánto
+          // hay que apartar.
+          var costoRealTxt = "—";
+          if (estado === "si" && num(compra.costoReal)) {
+            costoRealTxt = money(compra.costoReal);
+          } else if (estado === "servicio") {
+            var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
+            costoRealTxt = money(hayCostoReal ? compra.costoReal : c.costoTotal) + (hayCostoReal ? " (servicio)" : " (servicio, estimado)");
+          }
           return [
             (c.esGlobal ? "[Pedido] " : "") + c.nombre,
             cantEst, money(c.costoTotal),
             cantReal,
-            compra.comprado && num(compra.costoReal) ? money(compra.costoReal) : "—",
+            costoRealTxt,
             prov ? prov.nombre : "—",
             compra.observaciones || ""
           ];

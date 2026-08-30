@@ -26,6 +26,12 @@
   .guardado-chip.ok::before{content:"●";font-size:11px;}
   .guardado-chip.guardando{font-size:0;padding:5px;gap:0;}
   .guardado-chip.guardando::before{content:"●";font-size:11px;}
+  /* Sin esto el chip "Sin conexión" (a diferencia de sus hermanos .ok/
+     .guardando de arriba) se queda con su texto completo en celular: junto
+     al chip "Sin guardar (N)" desborda la topbar y empuja fuera de la
+     pantalla la campanita, el tema y CERRAR SESIÓN, sin scroll disponible. */
+  .guardado-chip.offline{font-size:0;padding:5px;gap:0;}
+  .guardado-chip.offline::before{content:"📶";font-size:11px;}
 
   .aviso-barra{flex-direction:column;align-items:stretch;padding:var(--sp-3);}
   .aviso-barra .btn{width:100%;}

@@ -15,8 +15,10 @@
 //   - Se intenta SIEMPRE la red primero (así con conexión se sirve lo más
 //     reciente — coherente con el `Cache-Control: no-cache` que el propio
 //     hosting ya manda para todo, ver _headers).
-//   - Si la red falla (sin conexión) o tarda, se responde con la última
-//     copia que se guardó en caché la vez anterior que sí hubo red.
+//   - Si la red falla (sin conexión, DNS, etc.) se responde con la última
+//     copia que se guardó en caché la vez anterior que sí hubo red. No hay
+//     carrera contra un timeout: una red presente pero muy lenta espera a la
+//     respuesta completa en vez de usar la copia rápida en caché.
 //   - Nunca se toca nada que no sea de este sitio o de los CDN whitelisted
 //     abajo: las llamadas a la API de Google Sheets/OAuth pasan de largo,
 //     sin intervención — su manejo de fallas ya vive en la app (arriba).

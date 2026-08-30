@@ -1551,6 +1551,279 @@ window.localStorage.setItem("taller_espejo_v1:tx", JSON.stringify([
 await loadAll();
 assert(state.tx.some(t => t.id === "tx-espejo-1"), "la tabla de movimientos también cae a su copia local cuando su lectura falla");
 
+// Si SOLO se pudo leer "kv" pero una clave puntual no tiene fila (la Sheet
+// respondió bien, simplemente no hay nada guardado ahí — no es un fallo de
+// red), no debe tratarse como si la lectura hubiera fallado: no debe
+// resucitar una copia local vieja encima de lo que ya hay en memoria (antes
+// este caso entraba por la misma rama del "else" que un fallo de red real).
+// Nota: en este entorno de prueba tx/clientes SIEMPRE fallan de verdad (sin
+// credenciales), así que huboFalloDeRed/el toast ya no sirven acá como señal
+// aislada — se verifica directo sobre el dato, que si es más específico.
+window.localStorage.setItem("taller_espejo_v1:catalogoPropuestas", JSON.stringify([{ id: "propuesta-vieja-y-obsoleta" }]));
+const propuestaEnMemoria = [{ id: "en-memoria-actual" }];
+state.catalogoPropuestas = propuestaEnMemoria;
+window.storage.get = async function (key, arg2) {
+  if (key === constantsMod.KEYS.catalogoPropuestas) return null; // fulfilled, sin fila — no es un error
+  return getOriginal(key, arg2);
+};
+await loadAll();
+assert(state.catalogoPropuestas === propuestaEnMemoria, "una clave sin fila en la Sheet (lectura OK, sin dato) no resucita una copia local vieja encima de lo que ya había en memoria");
+window.storage.get = getOriginal;
+
+// La migración de "detalle de tallas" (pedido → referencia de cotización) NO
+// debe correr sobre pedidos/cotizaciones que cayeron al espejo local: esa
+// copia puede ser más vieja que lo que YA está en la Sheet real desde otro
+// dispositivo, y migrar + persistir escribiría ese dato viejo ENCIMA de lo
+// real en cuanto vuelva la señal — justo lo que la red de seguridad de
+// core/guardado.js existe para evitar.
+window.localStorage.setItem("taller_espejo_v1:pedidos", JSON.stringify([
+  { id: "ped-espejo-migra", numeroOp: "OP-M", cotizacionId: "cot-espejo-migra", detalle: ["S", "M"] }
+]));
+window.localStorage.setItem("taller_espejo_v1:cotizaciones", JSON.stringify([
+  { id: "cot-espejo-migra", referencias: [{ id: "ref-1", detalle: [] }] }
+]));
+window.storage.get = async function (key, arg2) {
+  if (key === constantsMod.KEYS.pedidos || key === constantsMod.KEYS.cotizaciones) throw new Error("Failed to fetch");
+  return getOriginal(key, arg2);
+};
+const guardadoMod = await import("../js/core/guardado.js");
+const pendientesAntes = guardadoMod.estadoGuardado().cantidad;
+await loadAll();
+const pedM = state.pedidos.find(p => p.id === "ped-espejo-migra");
+const cotM = state.cotizaciones.find(c => c.id === "cot-espejo-migra");
+assert(!!pedM.detalle, "si pedidos/cotizaciones vinieron del espejo (offline), la migración de tallas NO corre: el pedido conserva su 'detalle' propio");
+assert(!cotM.referencias[0].detalle || !cotM.referencias[0].detalle.length, "y la cotización NO recibe el detalle migrado desde ese espejo, que podía estar desactualizado frente a la Sheet real");
+assert(guardadoMod.estadoGuardado().cantidad === pendientesAntes, "y no se intenta persistir nada nuevo a la Sheet (la migración saltada no dispara ningún guardado)");
+window.storage.get = getOriginal;
+
+// Contraprueba: si pedidos/cotizaciones SÍ se pudieron leer de la red (no
+// vinieron del espejo), la migración sigue funcionando exactamente igual que
+// antes — el fix de arriba es específico a la copia local, no rompe el
+// camino normal.
+window.storage.get = async function (key, arg2) {
+  if (key === constantsMod.KEYS.pedidos) return { value: JSON.stringify([{ id: "ped-red-migra", numeroOp: "OP-R", cotizacionId: "cot-red-migra", detalle: ["L", "XL"] }]) };
+  if (key === constantsMod.KEYS.cotizaciones) return { value: JSON.stringify([{ id: "cot-red-migra", referencias: [{ id: "ref-1", detalle: [] }] }]) };
+  return getOriginal(key, arg2);
+};
+await loadAll();
+const pedR = state.pedidos.find(p => p.id === "ped-red-migra");
+const cotR = state.cotizaciones.find(c => c.id === "cot-red-migra");
+assert(!pedR.detalle, "si pedidos/cotizaciones SÍ se leyeron de la red, la migración de tallas sigue corriendo normal: se borra el detalle del pedido...");
+assert(cotR.referencias[0].detalle && cotR.referencias[0].detalle.length === 2, "...y se traslada a la referencia de la cotización, como siempre");
+window.storage.get = getOriginal;
+
+// ---------------------------------------------------------------------------
+// "Servicio" en Producción: corte/confección hechos en el taller se pagan vía
+// nómina (no al instante), así que necesitan un tercer estado además de
+// "comprado sí/no" — uno que cuente como costo real (para que la ganancia no
+// se infle) pero que NO cree un movimiento en Finanzas (no hubo pago
+// instantáneo que registrar). Controlado por una categoría de insumos
+// marcada "de servicio", no por escribir "servicio" a mano en cada insumo.
+// ---------------------------------------------------------------------------
+loginComo("admin", "Admin de prueba", "admin@taller.test");
+const calcMod2 = await import("../js/core/calc.js");
+
+// Categoría marcada como servicio: sus insumos cuentan como servicio aunque
+// su Unidad sea una medida real (UND), no el texto "servicio". "catalogo" es
+// la clave interna de la pestaña "Insumos" (ver dom.js). El filtro se fuerza
+// a "todos": es lo que activa la vista agrupada por categoría (con su propio
+// "+" por grupo) — un filtro de una prueba anterior podría haber dejado
+// activa la vista plana de una sola categoría.
+state.tab = "catalogo";
+state.filtroCatalogoCategoria = "todos";
+render();
+click('[data-action="toggle-admin-categorias"]');
+setInput("#inp-nueva-categoria", "Producción");
+click('[data-action="add-cat-categoria"]');
+const catProduccion = state.catalogoCategorias.find(c => c.nombre === "Producción");
+assert(!!catProduccion, "se crea la categoría Producción");
+assert(!catProduccion.esServicio, "nace sin marcar como servicio (no cambia nada existente por sorpresa)");
+const checkCatServicio = document.querySelector('[data-action-change="toggle-cat-categoria-servicio"][data-id="' + catProduccion.id + '"]');
+checkCatServicio.checked = true;
+checkCatServicio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.catalogoCategorias.find(c => c.id === catProduccion.id).esServicio === true, "marcar la casilla de la categoría la deja como 'de servicio'");
+
+// Insumo NUEVO en esa categoría, con Unidad "UND" (no "servicio") a
+// propósito. Una categoría recién creada no tiene su propia sección en la
+// vista "Todas" (un grupo vacío ahí no se dibuja, es solo ruido — ver
+// renderGrupos): hay que filtrar por ELLA primero para que aparezca su "+".
+click('[data-action="filtro-cat-categoria"][data-val="' + catProduccion.id + '"]');
+click('[data-action="add-cat-item"][data-categoria="' + catProduccion.id + '"]');
+const insConfeccion = state.catalogoInsumos[state.catalogoInsumos.length - 1];
+setChange('#ins-nombre-' + insConfeccion.id, "Confección");
+setChange('.insumo-costo[data-id="' + insConfeccion.id + '"]', "3000");
+render();
+assert(insConfeccion.unidad !== "servicio", "sanity: el insumo NO usa la unidad especial servicio");
+assert(calcMod2.esInsumoServicio(state.catalogoInsumos.find(i => i.id === insConfeccion.id)), "esInsumoServicio() lo reconoce como servicio por vivir en una categoría marcada así, sin tocar Unidad");
+assert(!!document.querySelector('#ins-nombre-' + insConfeccion.id).closest(".insumo-nombre-cell").querySelector(".insumo-tag-servicio"), "y el catálogo le muestra la etiqueta 'servicio' en su fila");
+
+// Insumo en una categoría SIN marcar: no debe contar como servicio.
+click('[data-action="add-cat-categoria"]');
+document.getElementById("inp-nueva-categoria").value = "Telas";
+click('[data-action="add-cat-categoria"]');
+const catTelas = state.catalogoCategorias.find(c => c.nombre === "Telas");
+click('[data-action="filtro-cat-categoria"][data-val="' + catTelas.id + '"]');
+click('[data-action="add-cat-item"][data-categoria="' + catTelas.id + '"]');
+const insTela = state.catalogoInsumos[state.catalogoInsumos.length - 1];
+assert(!calcMod2.esInsumoServicio(state.catalogoInsumos.find(i => i.id === insTela.id)), "un insumo en una categoría NO marcada como servicio sigue sin serlo");
+
+// La cotización: la referencia hereda "servicio" al copiar el insumo desde
+// el catálogo (por el picker), aunque la copia no guarde categoriaId.
+state.tab = "cotizaciones";
+state.cotizacionEditando = "";
+render();
+setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Servicio");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba de servicio en producción");
+click('[data-action="add-cotizacion"]');
+const cotServ = state.cotizaciones.find(c => c.descripcion === "Prueba de servicio en producción");
+const refServ = cotServ.referencias[0];
+click('[data-action="abrir-insumo-picker"][data-cot="' + cotServ.id + '"][data-ref="' + refServ.id + '"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="' + insConfeccion.id + '"]');
+click('[data-action="confirmar-insumo-picker"][data-cot="' + cotServ.id + '"][data-ref="' + refServ.id + '"]');
+let refServAhora = state.cotizaciones.find(c => c.id === cotServ.id).referencias[0];
+assert(refServAhora.insumos[0].esServicio === true, "al copiar el insumo a la referencia, hereda 'servicio' ya resuelto (no depende de categoriaId, que la copia no guarda)");
+
+click('[data-action="set-cot-tab"][data-id="' + cotServ.id + '"][data-val="produccion"]');
+render();
+const lineaConfeccion = calcMod2.calcListaCompras(state.cotizaciones.find(c => c.id === cotServ.id)).filter(l => l.nombre === "Confección")[0];
+const lineaServClave = lineaConfeccion.clave;
+const selectEstado = document.querySelector('select[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"]');
+assert(!!selectEstado, "la línea de Confección en Producción tiene el selector de 3 estados");
+assert(selectEstado.value === "servicio", "nace en 'Servicio' sin que nadie la toque, porque el insumo ya viene marcado como tal");
+
+let resumenServ = calcMod2.calcResumenCompras(state.cotizaciones.find(c => c.id === cotServ.id));
+assert(resumenServ.servicio === 1 && resumenServ.compradas === 0 && resumenServ.pendientes === 0, "para el resumen ya cuenta como resuelta (ni pagada en Finanzas ni pendiente)");
+
+// "Servicio" cuenta como costo real (no infla la ganancia) pero NO crea
+// movimiento en Finanzas — justo lo que se pidió: se sabe cuánto entra pero
+// no es ganancia, sin fingir un pago instantáneo que no ocurrió. El costo
+// estimado de la LÍNEA (no el del insumo suelto) ya multiplica por la
+// cantidad pedida de la referencia (10 por defecto) — se parte de ese número
+// real, no de los $3.000 del catálogo, para no dar por hecho el multiplicador.
+const costoRealServ = lineaConfeccion.costoTotal + 200; // la operaria cobró un poco más de lo catalogado
+const costoRealInput = document.querySelector('input[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"][data-campo="costoReal"]');
+costoRealInput.value = String(costoRealServ);
+costoRealInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const txAntesServ = state.tx.length;
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotServ.id + '"]');
+assert(state.tx.length === txAntesServ, "sincronizar NO crea ningún movimiento en Finanzas para una línea 'servicio'");
+const realServ = calcMod2.calcCotResultadoReal(state.cotizaciones.find(c => c.id === cotServ.id));
+const estimadoServ = calcMod2.calcCotizacionTotales(state.cotizaciones.find(c => c.id === cotServ.id));
+assert(realServ.costoTotal === estimadoServ.costoTotal + 200, "pero SÍ ajusta el costo/ganancia real: la diferencia contra lo catalogado se refleja igual que si hubiera sido 'Sí'");
+
+// Cambiar a "Sí" (se terceriza esta vez, pago real y aparte): ahora sí debe
+// generar el movimiento en Finanzas.
+const selectEstado2 = document.querySelector('select[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"]');
+selectEstado2.value = "si";
+selectEstado2.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotServ.id + '"]');
+assert(state.tx.length === txAntesServ + 1, "cambiar a 'Sí' y sincronizar SÍ crea el movimiento de gasto en Finanzas");
+
+// Y si se vuelve a "Servicio" (era un error, en realidad se hizo en el
+// taller), el movimiento que ya no corresponde se retira al sincronizar.
+const selectEstado3 = document.querySelector('select[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"]');
+selectEstado3.value = "servicio";
+selectEstado3.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotServ.id + '"]');
+assert(state.tx.length === txAntesServ, "y volver a 'Servicio' retira el movimiento que ya no aplica, sin dejarlo huérfano en Finanzas");
+
+// Compatibilidad: una cotización vieja con el "comprado" booleano de antes
+// (sin el campo `estado` nuevo) se sigue leyendo igual que siempre.
+assert(calcMod2.estadoCompra({ comprado: true }) === "si", "comprado:true (formato viejo) se lee como 'si'");
+assert(calcMod2.estadoCompra({ comprado: false }) === "no", "comprado:false (formato viejo) se lee como 'no'");
+assert(calcMod2.estadoCompra(null) === "no", "sin ningún registro, se lee como 'no'");
+// Caso cruzado: un registro VIEJO explícito sobre una línea que hoy por
+// defecto caería en 'servicio' — el registro real siempre gana sobre el
+// default nuevo, nunca al revés.
+assert(calcMod2.estadoLineaCompra({ compras: [{ clave: "x", comprado: true }] }, { clave: "x", esServicio: true }) === "si", "un 'comprado:true' viejo sobre una línea de servicio se lee como 'si', no como 'servicio'");
+
+// Un costo GLOBAL del pedido (domicilio) trae esServicio:true por diseño —
+// significa "no se compra por cantidad", NO "es mano de obra de nómina": un
+// domicilio casi siempre SÍ es un pago instantáneo real al mensajero. No debe
+// heredar el default 'servicio' que sí aplica a insumos de una referencia
+// (ver el comentario junto a estadoLineaCompra en core/calc.js).
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotServ.id
+  ? Object.assign({}, c, { costosGlobales: (c.costosGlobales || []).concat([{ id: "domicilio-test", nombre: "Domicilio", costo: 15000, proveedorId: "", esServicio: true }]) })
+  : c);
+render();
+const lineaDomicilio = calcMod2.calcListaCompras(state.cotizaciones.find(c => c.id === cotServ.id)).filter(l => l.nombre === "Domicilio")[0];
+assert(lineaDomicilio.esGlobal === true, "sanity: la línea de domicilio es un costo global, igual que confección es un insumo de referencia");
+assert(calcMod2.estadoLineaCompra(state.cotizaciones.find(c => c.id === cotServ.id), lineaDomicilio) === "no", "un costo global (domicilio) NO nace en 'Servicio' por defecto: sigue neutral, como cualquier pago que sí puede ser real y aparte");
+const selectDomicilio = document.querySelector('select[data-action-change="set-cot-compra"][data-clave="' + lineaDomicilio.clave + '"]');
+assert(selectDomicilio.value === "no", "y la pantalla lo confirma: el selector nace en 'No', no en 'Servicio'");
+selectDomicilio.value = "si";
+selectDomicilio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const txAntesDomicilio = state.tx.length;
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotServ.id + '"]');
+assert(state.tx.length === txAntesDomicilio + 1, "y marcarlo 'Sí' y sincronizar SÍ crea su movimiento de gasto, como cualquier pago real al mensajero");
+
+// calcResumenCompras: un costoReal de 0 escrito A PROPÓSITO en una línea de
+// servicio no debe leerse como "no se escribió nada" y sustituirse por el
+// estimado — 0 es una respuesta real ("no costó nada"), no un vacío.
+const costoRealInputCero = document.querySelector('input[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"][data-campo="costoReal"]');
+const selectVolverServicio = document.querySelector('select[data-action-change="set-cot-compra"][data-clave="' + lineaServClave + '"]');
+selectVolverServicio.value = "servicio";
+selectVolverServicio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+costoRealInputCero.value = "0";
+costoRealInputCero.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const resumenTrasCero = calcMod2.calcResumenCompras(state.cotizaciones.find(c => c.id === cotServ.id));
+assert(resumenTrasCero.realServicio === 0, "un costoReal de 0 escrito a propósito en una línea de servicio se respeta (no se reemplaza por el estimado)");
+
+// ---------------------------------------------------------------------------
+// Los otros 3 sitios donde un insumo del catálogo se copia a otra estructura
+// (plantilla, producto, y de ahí a una referencia) deben resolver "servicio"
+// igual que el picker de una referencia directa — no basta con que el
+// comentario del código lo diga, tiene que quedar demostrado corriendo el
+// flujo real.
+// ---------------------------------------------------------------------------
+// state.plantillasVista puede haber quedado en "flujos" (de las pruebas de
+// flujos de producción, más arriba en este archivo): esa vista no tiene
+// botón "+ Nueva plantilla", así que se fuerza de vuelta a "plantillas".
+state.tab = "plantillas";
+state.plantillasVista = "plantillas";
+state.plantillaEditando = "";
+render();
+const plantillasAntesServ = state.plantillasPrendas.length;
+click('[data-action="add-plantilla"]');
+const plaServId = state.plantillasPrendas[state.plantillasPrendas.length - 1].id;
+assert(state.plantillasPrendas.length === plantillasAntesServ + 1, "sanity: se crea la plantilla de prueba");
+const plaCardServ = document.querySelector('[data-plantilla-id="' + plaServId + '"]');
+const plaSelectServ = plaCardServ.querySelector('select[data-action-change="add-pla-insumo-catalogo"]');
+plaSelectServ.value = insConfeccion.id;
+plaSelectServ.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const plaInsServ = state.plantillasPrendas.find(p => p.id === plaServId).insumos[0];
+assert(plaInsServ.esServicio === true, "add-pla-insumo-catalogo (plantillas.js) también resuelve 'servicio' al copiar del catálogo, no solo el picker de una referencia");
+
+state.tab = "productos";
+state.productosVista = "nueva";
+state.productoEditando = "";
+render();
+setInput('[data-form="producto"][data-field="nombre"]', "Producto de prueba servicio");
+click('[data-action="add-producto"]');
+const proServId = state.productos[state.productos.length - 1].id;
+click('[data-action="toggle-producto-costeo"][data-id="' + proServId + '"]'); // la sección de insumos nace colapsada
+click('[data-action="abrir-insumo-picker-producto"][data-pro="' + proServId + '"]');
+click('[data-action="toggle-insumo-picker-producto-item"][data-id="' + insConfeccion.id + '"]');
+click('[data-action="confirmar-insumo-picker-producto"][data-pro="' + proServId + '"]');
+const proInsServ = state.productos.find(p => p.id === proServId).insumos[0];
+assert(proInsServ.esServicio === true, "confirmar-insumo-picker-producto (productos.js) también resuelve 'servicio' al copiar del catálogo");
+
+// Y de la plantilla/producto hacia una referencia nueva (aplicar-plantilla /
+// aplicar-producto), la marca ya resuelta se hereda tal cual.
+state.tab = "cotizaciones";
+state.cotizacionEditando = "";
+render();
+setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Servicio 2");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba plantilla/producto servicio");
+click('[data-action="add-cotizacion"]');
+const cotServ2 = state.cotizaciones.find(c => c.descripcion === "Prueba plantilla/producto servicio");
+const refServ2 = cotServ2.referencias[0];
+const plaSelectEnRef = document.querySelector('[data-ref-id="' + refServ2.id + '"] select[data-action-change="aplicar-plantilla"]');
+plaSelectEnRef.value = plaServId;
+plaSelectEnRef.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const refConPla = state.cotizaciones.find(c => c.id === cotServ2.id).referencias[0];
+assert(refConPla.insumos.some(i => i.esServicio === true), "aplicar-plantilla hereda 'servicio' ya resuelto desde la plantilla hacia la referencia");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

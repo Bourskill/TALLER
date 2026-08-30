@@ -1,17 +1,8 @@
-
 -agregar estimacion de tiempos de produccion
 -mejorar los campos de pedido, mas lógica
--la notificación de guardar cambios en cotización es muy invasiva
--como en algún momento se van a crear muchas plantillas y variaciones, implementar un mejor sistema de separación, también de experiencia, pueden ser tarjetas con vista previa y adentro toda su info 
--hice un pedido rápido , pero me salió con estados de producción, porque? (ni siquiera tiene la estética actualizada como cuando se hace desde cotizacion)
--a la hora de agregar insumos a la cotización, el campo de nombre deje de ser editable, si se quiere algo personalizado que sea desde el botón "insumo personalizado" para eso es
 -mejorar apariencia de graficas en resumen, no tienen mucho estilo  inpacto
--separar bien los campos de contactos
 -agregar un campo en contactos, como algún distintivo, para recordarlo, por ejemplo poder poner el nombre del equipo al que pertenece
--guardar en memoria que hay que reutizar elementos, funciones, todo, no estar haciendo redundancias, por ejemplo como lo que pasò con pedidos y sus estados de producción, en una parte se actualizò y en la otra se quedó viejo, cuando debería ser el mismo elemento reutilizable para ambos casos, pedido rápido o desde cotización 
--pedido/dinero/abono corregir texto y jerarquita, mal css, todo amontonado
 -lector de facturas
--converirlo en descargable como extension
 
 
 
@@ -19,39 +10,4 @@
 
 
 
--mejorar apariencia y metodo de categorias en insumos:
-puedes darle mas estilo y jerarquía a todo el aparatado de insumos, principalmente su funcionalidad, opta porque sea fácil
-r: mejorò bastante, solo haria unos ajustes:
-- los titulos de las categorias se confunden mucho con los nombres de los insumos, tienen como el mismo grosor/color lo que causa un poco de fatiga visual, corrigelo, creo que opacando un poco el nombre de los insumos basta, bueno lo dejo a tu criterio
-- la forma de agregar el insumo, por cada sesion deberia de haber un botonsito de "+" para añadir un nuevo insumo, creo que es mas rapido sutil e intuitivo 
--que las und sean una lista, que el campo siga siendo para escribir, pero como tambien tiene una flechita para desplegar, que ahi se guarde lo que se haya escrito antes en otros campos, para reitilizar la unidad de medicion (parece que ya hay la intencion, pero creo que no està muy bien inplementada funcional y visualmente hablando )
--al actualizarce valores de insumos, que estos se reflejen en la cotizacion, no de manera inmediata o automatica, sino una pequeña y sutil notificacion, o cambiandole el color al campo, bueno comunicarlo de alguna manera que el insumo sufrio un cambio , que haya la posibilidad de actualizarlo o dejarlo asi (por si depronto es una cotizacion vieja )
 
--la notificación de guardar cambios en cotización es muy invasiva:
-puedes corregir este caso?
-r: ok
-
--como en algún momento se van a crear muchas plantillas y variaciones, implementar un mejor sistema de separación, también de experiencia, pueden ser tarjetas con vista previa y adentro toda su info 
-r: ok
-
-mejorar apariencia de graficas en resumen, no tienen mucho estilo inpacto
-r: siento que no hay mucho cambio, en pocas palabras quiero que se vea mas tipo "dashboard de pinterest", aunque bueno sin exagerar tanto, pero dejemoslo mejor para mas adelante
-
--guardar en memoria que hay que reutizar elementos, funciones, todo, no estar haciendo redundancias, por ejemplo como lo que pasò con pedidos y sus estados de producción, en una parte se actualizò y en la otra se quedó viejo, cuando debería ser el mismo elemento reutilizable para ambos casos, pedido rápido o desde cotización 
-r: en el apartado de pedidos,en el historial, hubo/hay pedidos que se quedaron con una version pasada de la visualizacion de los estados de produccion, antes todos los estados eran visibles, ahora se maneja con flechitas y numeracion, lo que quiero que hagas es:
-1, deja solo el actual, ese componene/funcion lo que sea, pero no quiero volver a ver ese funcionamiento pasado (actualmente creo que se estan mezclando, conserva aun los encabezados del viejo metodo)
-2, sale esa version vieja en un pedido rapido, lo raro es que al ser un pedido rapido pues no se le agrego flujo de produccion, no era necesario en el momento  y tampoco estaba la opcion para agregarlo, se agregò porque si, corrijelo
-
-
--pedido/dinero/abono corregir texto y jerarquita, mal css, todo amontonado
-r: ok
-
-reglas generales, procura guardarlas en la memoria:
--en cuestión de funcionalidad interna reutiliza mucho, elementos botones etc, evita crear variaciones innecesarias, por ejemplo diferenes barras de búsqueda, o diferentes exploradores de archivos,  que la base sea la misma, que solo cambien en momentos epecificos y por petición mia
-r: aparentemente ok, vi que lo aplicaste precisamente a la barra de busqueda
-
--ui/ux es super importante por que la hora del te, llenar tantos campos, formularios etc, en horas pico o con muchos pedidos puede ser tedioso, y difícil de sostener a largo plazo, entonces todo tiene que ser intuitivo y entendese a la primera, toda la info, paneles, formualrios etc, priorizar la facilidad para el ususario 
-r: ok..
-
--documenta bien los errores o fallas o correcciones para que nose repitan en futuros, del porquè y todo eso
-r: ok..
