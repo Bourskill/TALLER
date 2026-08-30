@@ -93,6 +93,19 @@ function almacen() {
   try { return window.localStorage; } catch (e) { return null; }
 }
 
+// El mensaje que ve el usuario cuando algo no se pudo guardar. Sin conexión,
+// el error crudo del navegador es del tipo "Failed to fetch" / "NetworkError"
+// — jerga técnica que no ayuda y suena a que algo se rompió. Estar sin
+// conexión es un estado NORMAL y esperable (por eso existe todo este
+// archivo): se reemplaza por un mensaje que dice justo eso, con la misma
+// calma con la que ya se anuncia en el resto de la app.
+function mensajeDeError(e) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return "Sin conexión — se reintenta solo en cuanto vuelva.";
+  }
+  return (e && e.message) ? e.message : String(e);
+}
+
 // ---------- espejo local ----------
 export function espejar(clave, json) {
   var ls = almacen();
@@ -201,7 +214,7 @@ export async function guardarClave(clave, json) {
     ultimoOkEl = Date.now();
   } catch (e) {
     pendientes[clave] = true; // recién ahora es noticia
-    ultimoError = (e && e.message) ? e.message : String(e);
+    ultimoError = mensajeDeError(e);
     console.error("No se pudo guardar", clave, e);
     programarReintento();
   } finally {
@@ -227,7 +240,7 @@ export async function reintentarPendientes() {
         ultimoOkEl = Date.now();
       })
       .catch(function (e) {
-        ultimoError = (e && e.message) ? e.message : String(e);
+        ultimoError = mensajeDeError(e);
       })
       .finally(function () { enVuelo--; });
   }));

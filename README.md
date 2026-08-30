@@ -78,21 +78,115 @@ Un arreglo sin su porqué es indistinguible de una preferencia arbitraria: el
 siguiente que pase por ahí lo "simplifica" y reintroduce el bug. Y se suma una
 prueba en `test/smoke.mjs`, que es la documentación que no se puede ignorar.
 
+## Modo sin conexión + app instalable (PWA)
+
+La app se puede "instalar" (el navegador ofrece un botón, queda como un ícono
+propio, sin barra de direcciones — igual que Facebook o Gmail en el celular),
+y sigue funcionando si se corta la conexión a mitad de una sesión: lo que se
+haga se guarda en el dispositivo y se sube solo a la Sheet en cuanto vuelva la
+señal. Esto tiene DOS partes bien separadas, y conviene no confundirlas:
+
+**1. Que la app ABRA sin internet** (`manifest.json` + `sw.js`, nuevos). Un
+service worker cachea el "cascarón" — el HTML/CSS/JS de la app en sí — la
+primera vez que se usa con conexión, y lo sirve desde ahí si no hay red. Sin
+esto, estar sin conexión significaba ni siquiera poder abrir la página: el
+navegador muestra su propio error antes de que cualquier línea de JS de la
+app llegue a ejecutarse.
+
+Estrategia: red primero, con reserva en caché — se intenta SIEMPRE la red
+primero (coherente con el `Cache-Control: no-cache` que `_headers` ya manda
+para todo), y solo si falla se responde con la última copia guardada. No hay
+una lista de archivos que mantener a mano (sería ~60 entre `css/` y
+`js/modules/`, y crecería con cada pestaña nueva — justo el tipo de
+redundancia que hay que evitar): el caché se llena SOLO, con cada archivo que
+la app pide la primera vez que hay conexión. Verificado apagando el servidor
+por completo y recargando: la app abre completa, navega entre pestañas, y
+todo sigue interactivo — el único límite real es que Google Sheets (los
+datos) sigue necesitando red, que es exactamente lo que resuelve la parte 2.
+
+**2. Que los DATOS sigan funcionando sin internet** (`core/guardado.js` +
+`core/store.js`). Acá NO hubo que construir un sistema nuevo — ya existía uno
+bueno (la "red de seguridad del guardado": espejo local + cola de reintento,
+ver el comentario al inicio de `core/guardado.js`) que resolvía la mitad del
+problema: si un guardado fallaba, quedaba en una copia local y se reintentaba
+solo. Lo que faltaba era la mitad de LECTURA — si se recarga la página estando
+sin conexión, `loadAll()` no tenía de dónde traer los datos y la app se veía
+como recién instalada, vacía, así hubiera pedidos y cotizaciones reales
+esperando en la Sheet.
+
+- **`store.js`: `loadAll()` ahora cae al mismo espejo local** cuando la
+  lectura de una clave falla — antes solo lo usaba `guardarClave()` (para
+  reintentar una escritura), ahora también lo alimenta y lo consulta la
+  LECTURA. Cada clave que se lee con éxito refresca su copia local (así una
+  clave que solo se MIRA, nunca se edita, igual queda disponible para el
+  próximo arranque sin conexión); cada clave que falla al leer usa la copia
+  más reciente en vez de quedar en su valor de fábrica. Con eso, recargar la
+  app sin conexión muestra la última foto real de los datos, no una pantalla
+  vacía. Se avisa con un toast breve y no bloqueante ("mostrando la última
+  copia guardada…") — no hace falta ninguna acción, solo es bueno saberlo.
+- **`sheetsStorage.js`: se corrigió un bug real, no cosmético.** La primera
+  lectura de la Sheet ("kv", donde vive la mayoría de las claves) cacheaba la
+  PROMESA de esa lectura para no repetirla en cada `get()`/`set()`. El
+  problema: si esa primera lectura fallaba (exactamente el caso de abrir la
+  app sin conexión), la promesa quedaba cacheada EN RECHAZADO para siempre —
+  y como todo `get()`/`set()` futuro espera esa misma promesa, TODO el
+  guardado basado en "kv" (pedidos, cotizaciones, config, casi todo salvo
+  movimientos/contactos) quedaba roto por el resto de la sesión, aunque la
+  conexión volviera. El reintento automático habría llamado a `set()` una y
+  otra vez sin que ninguno pudiera funcionar jamás — hasta recargar la página
+  a mano. Se corrigió para que un fallo resetee la promesa cacheada, así el
+  siguiente intento (típicamente el reintento automático al recuperar señal)
+  arranca de cero en vez de repetir el mismo rechazo. Sin este arreglo, todo
+  lo demás de este apartado quedaba con un hueco serio en el caso de uso más
+  probable — abrir la app justo sin conexión.
+- **Mensajes de error más calmados.** Un fallo de red decía literalmente
+  "Failed to fetch" en el chip de guardado — jerga de navegador, no algo que
+  el usuario del taller tenga que interpretar. Cuando la causa es
+  específicamente estar sin conexión (`navigator.onLine === false`), el
+  mensaje pasa a ser "Sin conexión — se reintenta solo en cuanto vuelva".
+- **Un chip nuevo en la barra superior** (`renderIndicadorConexion` en
+  `core/dom.js`) avisa PROACTIVAMENTE al perder la señal, antes de que
+  cualquier guardado llegue a fallar — así no hay que descubrirlo por
+  sorpresa a mitad de un formulario. Tono informativo, no de alerta: estar
+  sin conexión acá es un estado normal y previsto, no un error. Aparece y
+  desaparece solo (escucha `online`/`offline` del navegador).
+
+**Lo que esto sigue sin resolver, a propósito** (mismo límite que ya tenía el
+guardado): no es sincronización entre dispositivos. Si el mismo taller se usa
+sin conexión desde dos equipos a la vez, cada uno sube su propia versión al
+reconectar y gana la última escritura que llegue — para más que eso haría
+falta versionado por fila en la Sheet, otro proyecto. Tampoco se puede iniciar
+sesión por primera vez sin conexión (el login con Google es, por naturaleza,
+un ida y vuelta con los servidores de Google) — lo que sí funciona sin red es
+RESTAURAR una sesión ya iniciada (`restaurarSesion()` solo mira un token
+guardado localmente, sin llamar a ningún servidor) y seguir trabajando desde
+ahí.
+
 ## Registro de cambios — agosto 2026 (octava ronda: dos ajustes puntuales)
 
-**El botón "+ Nuevo insumo" se movió de la cabecera (arriba a la derecha) al
-final de la lista (abajo a la izquierda).** Es donde en verdad se está
-mirando después de recorrer la tabla, y queda alineado con la columna del
-nombre — el primer campo que hay que llenar en la fila que va a aparecer. De
-paso se pudo quitar el forzado de orden "Recientes" que la acción hacía antes
-(saltaba el insumo al principio de la lista para que quedara visible): con el
-botón abajo, forzar "Recientes" lo habría alejado del lugar donde se acababa
-de hacer clic, justo al revés de la intención. Ahora se respeta el orden que
-el usuario ya tenía elegido, y como el nombre nace vacío, el orden A–Z (el que
-viene por defecto) necesitó un ajuste — antes un nombre en blanco comparaba
-como "menor que cualquier letra" y saltaba al PRINCIPIO de la lista; ahora un
-nombre vacío se ordena al final, no al frente (ver `ordenarInsumos` en
-`modules/catalogo.js`).
+**No hay un botón general de "+ Nuevo insumo".** Hubo dos pasos intermedios
+antes de llegar acá (uno en la cabecera arriba a la derecha, otro grande al
+final de toda la lista) y ninguno era lo que hacía falta: un botón grande y
+genérico, lejos de casi todas las secciones excepto la que estuviera al lado.
+La versión final vuelve a lo que ya existía —un "+" chico, sin color de
+acento, dentro de cada sección— y lo corrige de posición: vive al final de la
+tabla de SU sección (antes estaba en el encabezado, arriba). Ahí es donde en
+verdad se está mirando después de recorrerla, y queda alineado con la columna
+del nombre — el primer campo que hay que llenar en la fila que va a aparecer.
+Se reutiliza el MISMO "+" (`renderAgregarInsumoMini` en `modules/catalogo.js`)
+en las cuatro situaciones donde hace falta agregar: cada sección de la vista
+"Todas", la lista plana de un chip filtrado o una búsqueda, el catálogo vacío,
+y una búsqueda sin resultados — nunca un botón aparte inventado para el caso.
+
+De paso se pudo quitar el forzado de orden "Recientes" que la acción hacía
+antes (saltaba el insumo al principio de la lista para que quedara visible):
+con el "+" ya dentro de cada sección, no hace falta — se respeta el orden que
+el usuario ya tenía elegido. Y como el nombre nace vacío, el orden A–Z (el
+que viene por defecto) necesitó un ajuste aparte: antes un nombre en blanco
+comparaba como "menor que cualquier letra" y saltaba al PRINCIPIO de la
+lista; ahora un nombre vacío se ordena al final, no al frente (ver
+`ordenarInsumos` en `modules/catalogo.js`) — importa para cuando el "+" cae en
+una vista plana (no agrupada), donde también hay que quedar cerca de él.
 
 **Un pedido rápido puede marcarse "sin flujo de producción".** No todo pedido
 pasa por cortado/confección/etc.: algo ya hecho, un servicio, una reventa. El
@@ -1336,6 +1430,10 @@ generaba confusión real:
 
 ```
 index.html
+manifest.json        PWA: nombre, ícono, colores — lo que hace aparecer "Instalar app"
+sw.js                 service worker: cachea el cascarón (html/css/js) para abrir sin internet
+icons/                iconos de la PWA (192/512/512-maskable/apple-touch/favicon)
+_headers              cabeceras del hosting (Cache-Control: no-cache en todo)
 css/
   variables.css      tokens de color/radios — cambia el tema completo
   base.css            reset + contenedor
@@ -1468,6 +1566,18 @@ Cada área de negocio vive en su propia clave de `window.storage`
 (`finanzas:transacciones`, `pedidos:lista`, etc. — ver `core/constants.js`).
 Esto ya estaba así en el original y se mantuvo: significa que una escritura
 en Pedidos nunca puede corromper los datos de Finanzas.
+
+### Instalar la app
+
+En Chrome/Edge (computador): ícono "Instalar" en la barra de direcciones, o
+menú ⋮ → "Instalar Panel del Taller". En Android: menú ⋮ → "Instalar app" (o
+el banner que Chrome ofrece solo). En iPhone/iPad: Safari → botón compartir →
+"Agregar a inicio" (iOS no ofrece un botón de instalar como tal para sitios
+web; este camino hace lo mismo — un ícono propio, sin barra de Safari).
+
+Nada de esto depende de tener SPREADSHEET_ID/GOOGLE_CLIENT_ID configurados —
+`manifest.json` y `sw.js` son independientes del resto del setup, así que se
+puede instalar la app incluso antes de terminar de configurarla.
 
 ## Test de humo
 

@@ -23,6 +23,19 @@ function cargar() {
         rowByKey[key] = i + 2; // la fila 1 de la pestaña es el encabezado
         valueByKey[key] = fila[1] || "";
       });
+    }).catch(function (e) {
+      // Si esta lectura falla (sin conexión, token vencido sin poder
+      // renovar), NO se deja la promesa en rechazado para siempre: sin este
+      // reseteo, un solo fallo en la PRIMERA lectura de toda la sesión
+      // (ej. se abre la app ya sin señal) dejaba cargaPendiente atascada en
+      // "rechazada" — y como get()/set() siempre esperan esta MISMA
+      // promesa, TODO guardado basado en "kv" (la mayoría de las claves:
+      // pedidos, cotizaciones, config...) quedaba roto hasta recargar la
+      // página a mano, aunque la conexión volviera. El reintento automático
+      // de core/guardado.js habría llamado a set() una y otra vez sin que
+      // ninguno pudiera funcionar jamás.
+      cargaPendiente = null;
+      throw e;
     });
   }
   return cargaPendiente;

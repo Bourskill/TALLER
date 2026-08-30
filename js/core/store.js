@@ -12,7 +12,7 @@ import { todayStr, uid } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
-import { configurarGuardado, guardarClave, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior } from "./guardado.js";
+import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
 // pestaña con columnas reales (ver core/sheetsTabular.js) — Fase 1 de la
@@ -349,12 +349,39 @@ export async function loadAll() {
     ui: KEYS.ui
   };
   var nombres = Object.keys(claves);
+  // Se pone en true si ALGUNA clave tuvo que caer a la copia local (ver
+  // abajo) — es lo que decide, al final de loadAll(), si avisar que lo que
+  // se ve pudo no ser lo más reciente.
+  var huboFalloDeRed = false;
   try {
     var resultados = await Promise.allSettled(nombres.map(function (n) { return window.storage.get(claves[n], false); }));
     var datos = {};
     nombres.forEach(function (n, i) {
       var r = resultados[i];
-      datos[n] = (r.status === "fulfilled" && r.value) ? safeParse(r.value.value, undefined) : undefined;
+      if (r.status === "fulfilled" && r.value) {
+        datos[n] = safeParse(r.value.value, undefined);
+        // Copia local de lo que SÍ se pudo leer — es lo único de donde puede
+        // salir algo la próxima vez que esto falle (ver el "else" de abajo).
+        // "configNombreLegacy" no es una clave real de `state` (es solo un
+        // campo viejo que se lee una vez para migrar el nombre del taller),
+        // así que no tiene sentido guardarle copia.
+        if (n !== "configNombreLegacy") espejar(n, r.value.value);
+      } else {
+        // No se pudo leer de la Sheet (sin conexión, o el token no se pudo
+        // renovar). Antes esto dejaba la clave en su valor SEMILLA de
+        // fábrica — lo que borraba de la pantalla datos reales que sí
+        // existen, solo porque no se pudieron alcanzar justo ahora. Se cae a
+        // la última copia que este mismo dispositivo guardó localmente (ver
+        // core/guardado.js) en vez de mostrar la app como si estuviera recién
+        // instalada.
+        var espejo = n !== "configNombreLegacy" ? leerEspejo(n) : null;
+        if (espejo != null) {
+          datos[n] = safeParse(espejo, undefined);
+          huboFalloDeRed = true;
+        } else {
+          datos[n] = undefined;
+        }
+      }
     });
 
     state.config = Object.assign({}, DEFAULT_CONFIG, datos.config || {});
@@ -388,11 +415,16 @@ export async function loadAll() {
 
     // Fase 1 de la reorganización de la Sheet: "tx" y "clientes" ya viven en
     // su propia pestaña con columnas reales (ver TABLAS_SHEET arriba), no en
-    // el blob de "kv" leído justo arriba. state.tx/state.clientes YA quedaron
-    // asignados desde "kv" (líneas de arriba) como piso de seguridad: si algo
-    // falla acá (sin conexión, la pestaña nueva no se pudo crear por
-    // permisos, etc.), la app sigue funcionando con lo último guardado en
-    // "kv" en vez de romperse o quedar vacía.
+    // el blob de "kv" leído justo arriba. Si la lectura de acá abajo falla
+    // (sin conexión, la pestaña nueva no se pudo crear por permisos, etc.),
+    // hay DOS redes de seguridad, en este orden de preferencia:
+    //   1. el ESPEJO de tx/clientes específicamente (ver el catch de abajo) —
+    //      la copia MÁS RECIENTE que este dispositivo haya leído o guardado
+    //      de esta pestaña puntual;
+    //   2. si no hay espejo, state.tx/state.clientes ya quedaron asignados
+    //      desde el blob de "kv" (líneas de arriba) — más viejo (esa pestaña
+    //      dejó de actualizarse desde que esto se migró), pero mejor que
+    //      nada.
     await Promise.allSettled(Object.keys(TABLAS_SHEET).map(function (key) {
       return TABLAS_SHEET[key].leer().then(function (items) {
         if (items.length === 0 && state[key] && state[key].length) {
@@ -402,7 +434,22 @@ export async function loadAll() {
           return TABLAS_SHEET[key].escribir(state[key]);
         }
         state[key] = items;
-      }).catch(function (e) { console.error("No se pudo leer la hoja estructurada de " + key + " — se sigue usando lo último guardado en kv", e); });
+        // Copia local, igual que con las claves de "kv" arriba — esta es la
+        // que se usa si el próximo intento de leer esta pestaña falla.
+        espejar(key, JSON.stringify(items));
+      }).catch(function (e) {
+        console.error("No se pudo leer la hoja estructurada de " + key + " — se intenta con la última copia local", e);
+        // "Lo último guardado en kv" ya no es del todo cierto para tx/clientes
+        // desde que viven en su propia pestaña (ver el comentario grande más
+        // abajo): ese blob puede llevar meses sin actualizarse. Se prefiere
+        // el ESPEJO —si hay uno, es de la última vez que ESTE dispositivo
+        // leyó o guardó tx/clientes de verdad— por encima del blob viejo de
+        // "kv" que `state[key]` ya trae como piso de seguridad.
+        var espejo = leerEspejo(key);
+        if (espejo == null) return;
+        var parsed = safeParse(espejo, undefined);
+        if (parsed !== undefined) { state[key] = parsed; huboFalloDeRed = true; }
+      });
     }));
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora
@@ -428,6 +475,16 @@ export async function loadAll() {
     }
 
     detectarRecuperacion();
+
+    // Un aviso breve, no una barra fija: haber caído a la copia local no es
+    // un problema que resolver (no hace falta ninguna acción), es solo un
+    // dato que conviene saber al entrar — igual de sutil que el resto de los
+    // avisos "informativos" de la app (ver mostrarToast). Se calla solo a
+    // los pocos segundos; si la próxima recarga sí tiene conexión, no vuelve
+    // a aparecer.
+    if (huboFalloDeRed) {
+      mostrarToast("📶 Sin conexión: mostrando la última copia guardada en este dispositivo. Se actualiza sola en cuanto vuelva la señal.");
+    }
   } catch (e) {
     console.error("Error cargando datos", e);
   }

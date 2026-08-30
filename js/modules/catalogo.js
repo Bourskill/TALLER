@@ -77,13 +77,6 @@ export function render() {
   html += renderBarraFiltros(todos, visibles, categorias);
   html += renderAdminCategorias(categorias, todos);
   html += renderGrupos(visibles, categorias, todos);
-  // El botón principal de agregar vive ABAJO, a la izquierda — no arriba a la
-  // derecha, lejos de la lista. Dos razones: es donde en verdad se está
-  // mirando después de recorrer la tabla, y es lo más cerca que puede estar
-  // del primer campo que hay que llenar (el nombre, la columna más a la
-  // izquierda de la fila que va a aparecer). Se ve también con el catálogo
-  // vacío — el mensaje de "aún no tienes insumos" apunta para acá.
-  html += '<div class="cat-agregar-abajo"><button class="btn" data-action="add-cat-item">+ Nuevo insumo</button></div>';
   html += "</div>";
   return html;
 }
@@ -248,16 +241,18 @@ function renderAdminCategorias(categorias, todos) {
 // nombre de la categoría por la que se acaba de filtrar no aporta nada.
 function renderGrupos(visibles, categorias, todos) {
   if (!todos.length) {
-    return '<div class="empty" style="padding:26px 10px;">Aún no tienes insumos.<br><b>Agrega el primero</b> con el botón de abajo — por ejemplo una tela, con su costo por metro.</div>';
+    return '<div class="empty" style="padding:26px 10px;">Aún no tienes insumos.<br><b>Agrega el primero</b> — por ejemplo una tela, con su costo por metro.</div>' +
+      renderAgregarInsumoMini();
   }
   if (!visibles.length) {
     return '<div class="empty" style="padding:26px 10px;">Ningún insumo coincide con lo que buscas.' +
       (state.buscarCatalogo ? ' <button class="btn ghost small" data-action="limpiar-buscador" data-filtro="buscarCatalogo" data-input="inp-buscar-catalogo">Limpiar búsqueda</button>' : "") +
-      "</div>";
+      "</div>" +
+      renderAgregarInsumoMini(categoriaDelFiltroActivo(categorias));
   }
 
   var agrupar = state.filtroCatalogoCategoria === "todos" && !(state.buscarCatalogo || "").trim();
-  if (!agrupar) return renderTablaInsumos(visibles, categorias);
+  if (!agrupar) return renderTablaInsumos(visibles, categorias) + renderAgregarInsumoMini(categoriaDelFiltroActivo(categorias));
 
   var html = "";
   var grupos = categorias.map(function (cat) {
@@ -272,18 +267,45 @@ function renderGrupos(visibles, categorias, todos) {
     if (!g.items.length) return; // un grupo vacío en la vista "Todas" es solo ruido
     html += '<div class="cat-grupo">' +
       '<div class="cat-grupo-head"><span class="cat-grupo-nombre">' + esc(g.nombre) + "</span>" +
-      '<span class="cat-grupo-head-right"><span class="cat-grupo-meta">' + g.items.length + (g.items.length === 1 ? " insumo" : " insumos") + "</span>" +
-      // Botón "+" propio de la sección: crea el insumo YA CLASIFICADO en esta
-      // categoría, sin pasar por el botón general de arriba (que solo sabe
-      // heredar la categoría del chip activo) ni tener que elegirla después.
-      // Más rápido cuando se están cargando varios insumos seguidos de la
-      // misma categoría, que es el caso más común.
-      '<button class="btn ghost small cat-grupo-add" data-action="add-cat-item" data-categoria="' + esc(g.categoriaId) + '" title="Agregar un insumo en ' + esc(g.nombre) + '" aria-label="Agregar insumo en ' + esc(g.nombre) + '">+</button>' +
-      "</span></div>" +
+      '<span class="cat-grupo-meta">' + g.items.length + (g.items.length === 1 ? " insumo" : " insumos") + "</span></div>" +
       renderTablaInsumos(g.items, categorias) +
+      // El "+" de la sección va AL FINAL de su tabla, no en el encabezado:
+      // ahí es donde en verdad se está mirando después de recorrerla, y es
+      // lo más cerca que puede estar del primer campo que hay que llenar (el
+      // nombre, la columna más a la izquierda de la fila que va a aparecer).
+      renderAgregarInsumoMini(g.categoriaId, g.nombre) +
       "</div>";
   });
   return html;
+}
+
+// Botón "+" chico para agregar un insumo directo donde se está mirando — sin
+// texto, sin color de acento: no es LA acción principal de la pantalla (no
+// hay una sola), es una salida rápida dentro de cada tabla. Se reutiliza en
+// las cuatro situaciones donde hace falta un "agregar" (cada sección de la
+// vista "Todas", la lista plana de un chip filtrado o una búsqueda, el
+// catálogo vacío, y una búsqueda sin resultados) — nunca un botón grande
+// aparte que duplique lo mismo con otro aspecto.
+//
+// categoriaId: a qué categoría cae el insumo nuevo ("" = Sin categoría). Se
+// omite (undefined/null) cuando no hay una sección concreta a la vista —
+// entonces la acción decide sola según el chip activo (ver "add-cat-item").
+function renderAgregarInsumoMini(categoriaId, etiqueta) {
+  var attr = categoriaId == null ? "" : ' data-categoria="' + esc(categoriaId) + '"';
+  var titulo = "Agregar un insumo" + (etiqueta ? " en " + etiqueta : "");
+  return '<div class="cat-agregar-mini">' +
+    '<button class="btn ghost small cat-grupo-add" data-action="add-cat-item"' + attr + ' title="' + esc(titulo) + '" aria-label="' + esc(titulo) + '">+</button>' +
+    "</div>";
+}
+
+// Categoría del chip activo, en el mismo formato que espera "add-cat-item":
+// null si está en "Todas" (sin sección concreta a la vista — la acción cae al
+// mismo fallback de siempre), "" si es "Sin categoría", o el id del chip.
+function categoriaDelFiltroActivo(categorias) {
+  var f = state.filtroCatalogoCategoria;
+  if (f === "todos") return null;
+  if (f === "sin") return "";
+  return categorias.some(function (c) { return c.id === f; }) ? f : null;
 }
 
 // Fila de insumo. Se apoya en `.tx-row` —la misma fila de grilla que usan

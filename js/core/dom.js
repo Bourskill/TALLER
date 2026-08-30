@@ -89,6 +89,18 @@ function pestanasVisibles() {
 }
 var TAB_LABEL = TABS.reduce(function (acc, t) { acc[t[0]] = t[1]; return acc; }, {});
 
+// Pone el tema en el <html> (lo que activa las variables de color.css) y de
+// paso el color de la barra del sistema en móvil (<meta name="theme-color">,
+// ver index.html) — que un navegador instalado como PWA muestre esa franja
+// del color del taller, no de un gris genérico. Estaba duplicado dos veces
+// (acá y en render()); un solo sitio evita que se desincronicen.
+function aplicarTema() {
+  var esClaro = state.ui.tema === "claro";
+  document.documentElement.setAttribute("data-theme", esClaro ? "light" : "dark");
+  var meta = document.getElementById("meta-theme-color");
+  if (meta) meta.setAttribute("content", esClaro ? "#f4f5f8" : "#0e1015");
+}
+
 // Timers de debounce por campo de búsqueda en vivo (ver bindEvents). Vive a nivel
 // de módulo, no dentro de bindEvents, para que sobreviva entre renders sucesivos.
 var liveFilterTimers = {};
@@ -152,7 +164,7 @@ var coreActions = {
   },
   "toggle-tema": function () {
     state.ui.tema = state.ui.tema === "claro" ? "oscuro" : "claro";
-    document.documentElement.setAttribute("data-theme", state.ui.tema === "claro" ? "light" : "dark");
+    aplicarTema();
     persist("ui");
     notify();
   },
@@ -302,7 +314,7 @@ export function render() {
   if (rendering) { pendingRerender = true; return; }
   rendering = true;
 
-  document.documentElement.setAttribute("data-theme", state.ui.tema === "claro" ? "light" : "dark");
+  aplicarTema();
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
   var selStart = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
@@ -495,6 +507,7 @@ function renderTopbar() {
     '<button class="sidebar-mobile-toggle" data-action="toggle-sidebar-mobile" aria-label="Abrir menú">' + menuIcon() + "</button>" +
     '<div class="topbar-title">' + esc(titulo) + "</div>" +
     '<div class="topbar-date">' + esc(fecha) + "</div>" +
+    renderIndicadorConexion() +
     renderIndicadorGuardado() +
     renderCampanita() +
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
@@ -502,6 +515,29 @@ function renderTopbar() {
     '<button class="theme-toggle-btn" data-action="toggle-tema" title="' + (esClaro ? "Cambiar a modo oscuro" : "Cambiar a modo claro") + '" aria-label="Cambiar tema">' + (esClaro ? moonIcon() : sunIcon()) + "</button>" +
     '<button class="theme-toggle-btn" data-action="logout" title="Cerrar sesión" aria-label="Cerrar sesión">' + logoutIcon() + "</button>" +
     "</div>";
+}
+
+// ---------- conexión ----------
+// navigator.onLine NO es 100% confiable para afirmar "sí hay internet" (una
+// wifi conectada pero sin salida real igual puede decir true) — pero SÍ es
+// confiable para "no hay ninguna red", que es justo lo único que hace falta
+// saber acá. Por eso el chip solo aparece cuando dice explícitamente false;
+// nunca se afirma "en línea", solo se calla cuando no hay evidencia de lo
+// contrario. Si el navegador no expone el API (entornos viejos, jsdom en las
+// pruebas) se asume conectado — más vale no molestar de más que mostrar un
+// "sin conexión" falso.
+function sinConexion() {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+// Aviso PROACTIVO, antes de que nada falle: sin esto, quien se queda sin
+// señal a mitad de una tarea solo se enteraba cuando el próximo guardado
+// fallaba (el chip de abajo). Deliberadamente en tono neutro/informativo, no
+// de alerta — estar sin conexión acá es un estado normal y previsto (ver
+// core/guardado.js), no un error.
+function renderIndicadorConexion() {
+  if (!sinConexion()) return "";
+  return '<span class="guardado-chip offline" title="Sin conexión a internet. Podés seguir trabajando: lo que hagas se guarda en este dispositivo y se sube solo en cuanto vuelva la señal.">📶 Sin conexión</span>';
 }
 
 // ---------- estado del guardado ----------
@@ -740,6 +776,16 @@ function dispatch(action, el) {
 // Cualquier notify() de cualquier módulo termina aquí, sin que ese módulo
 // necesite importar este archivo.
 document.addEventListener("app:render", render);
+
+// El chip "Sin conexión" (ver renderIndicadorConexion) se lee de
+// navigator.onLine en cada render, no de `state` — así que lo único que hace
+// falta acá es forzar un render cuando ese valor CAMBIA, para que el chip
+// aparezca/desaparezca solo, sin esperar a que el usuario haga algo que
+// dispare un render por otra razón.
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("online", notify);
+  window.addEventListener("offline", notify);
+}
 
 // Navegación por teclado de toda la app (Enter entre campos, Esc para cerrar,
 // Alt+número para saltar de sección, flechas en el menú…): vive en

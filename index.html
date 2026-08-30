@@ -4,6 +4,37 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Panel del Taller</title>
+
+<!-- PWA: hace que el navegador ofrezca "Instalar app" (queda como un ícono
+     propio, sin barra de direcciones, como Gmail o Facebook en el celular).
+     Ver manifest.json y sw.js — este último es lo que además permite que la
+     app ABRA sin conexión en vez de mostrar el error del navegador; el
+     manejo de que los DATOS sigan funcionando sin red vive aparte, en
+     core/guardado.js y core/store.js (ver el comentario al inicio de sw.js). -->
+<link rel="manifest" href="manifest.json">
+<!-- Sin "media": se actualiza a mano según el tema que la app tenga activo
+     (ver render()/"toggle-tema" en core/dom.js) — así el color de la barra
+     del sistema sigue al tema que el usuario ELIGIÓ adentro, no al del
+     sistema operativo, que puede no coincidir. -->
+<meta name="theme-color" id="meta-theme-color" content="#0e1015">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<!-- iOS no lee el manifest para el ícono de "Agregar a inicio": necesita este
+     link aparte, en PNG (no sirve un SVG ni el manifest.json de arriba). -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script>
+  // Registro del service worker: aislado, sin dependencias de core/app.js —
+  // si falla (navegador viejo, bloqueado por una extensión) no afecta en
+  // nada al resto de la app, solo se queda sin caché offline.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function (e) {
+        console.error("No se pudo activar el modo sin conexión (la app sigue funcionando igual, solo sin caché offline)", e);
+      });
+    });
+  }
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 

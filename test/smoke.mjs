@@ -1424,9 +1424,8 @@ assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "solo la 
 // puede marcarse "sin flujo de producción".
 // ---------------------------------------------------------------------------
 
-// El insumo nuevo, con nombre vacío, no puede saltar al PRINCIPIO de la lista
-// bajo el orden A–Z: el botón vive abajo, y el insumo tiene que aparecer
-// cerca de él, no al otro extremo de la página.
+// No hay un botón general de "agregar" aparte: el "+" vive DENTRO de cada
+// sección, al final de su tabla — nunca uno grande y genérico en la cabecera.
 state.catalogoCategorias = [];
 state.catalogoInsumos = [
   { id: "za1", nombre: "Zíper", unidad: "UND", costo: 100, tipo: "por_prenda", categoriaId: "", proveedorId: "" },
@@ -1437,8 +1436,11 @@ state.filtroCatalogoCategoria = "todos";
 state.buscarCatalogo = "";
 state.tab = "catalogo";
 render();
-assert(!!document.querySelector(".cat-agregar-abajo [data-action=\"add-cat-item\"]"), "el botón de agregar insumo vive al final de la lista, no en la cabecera");
-click(".cat-agregar-abajo [data-action=\"add-cat-item\"]");
+assert(!document.querySelector(".cat-head [data-action=\"add-cat-item\"]"), "no hay ningún botón de agregar en la cabecera");
+const botonMini = document.querySelector(".cat-grupo .cat-agregar-mini [data-action=\"add-cat-item\"]");
+assert(!!botonMini, "el botón de agregar vive DENTRO de la sección, al final de su tabla");
+assert(botonMini.closest(".cat-grupo").querySelector(".ins-table, .tx-row") !== null, "y no antes de la tabla, sino después de ella");
+click(".cat-grupo .cat-agregar-mini [data-action=\"add-cat-item\"]");
 const nombresOrdenados = state.catalogoInsumos.map(i => i.id);
 assert(nombresOrdenados[nombresOrdenados.length - 1] !== nombresOrdenados[0], "sanity: hay más de un insumo");
 const filasTrasAgregar = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
@@ -1501,6 +1503,53 @@ assert(!!cardConFlujo.querySelector(".pedido-ref-progreso"), "y su tarjeta sí m
 state.formPedido.esConsignacion = true;
 render();
 assert(!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "en consignación la casilla no se muestra: ese tipo de pedido ya es 'sin flujo' de por sí");
+
+// ---------------------------------------------------------------------------
+// Modo sin conexión: instalar la app (PWA) + que siga funcionando y suba todo
+// solo al volver la señal.
+// ---------------------------------------------------------------------------
+
+// El chip "Sin conexión" sigue a navigator.onLine, y los eventos
+// online/offline lo actualizan SOLOS, sin que el usuario haga nada.
+state.tab = "resumen";
+render();
+assert(!document.querySelector(".guardado-chip.offline"), "con conexión, el chip de conexión no aparece");
+navigator.onLine = false;
+window.dispatchEvent(new dom.window.Event("offline"));
+assert(!!document.querySelector(".guardado-chip.offline"), "al perder la señal, el chip aparece SOLO — sin ninguna acción del usuario");
+navigator.onLine = true;
+window.dispatchEvent(new dom.window.Event("online"));
+assert(!document.querySelector(".guardado-chip.offline"), "y desaparece solo al volver la señal");
+
+// loadAll(): si la lectura de una clave falla, se usa la copia local (el
+// "espejo" de core/guardado.js) en vez de dejar la pantalla con los datos de
+// fábrica — que borraría de encima algo real que sí existe, solo por no
+// poder alcanzarlo justo en este momento.
+const constantsMod = await import("../js/core/constants.js");
+window.localStorage.setItem("taller_espejo_v1:pedidos", JSON.stringify([
+  { id: "espejo-1", numeroOp: "OP-ESPEJO", cliente: "Desde el espejo", descripcion: "d", cantidad: "1", total: 1, costo: 0, abono: 0, estado: "nuevo", abonos: [], lineas: [], stockConsumido: [] }
+]));
+const getOriginal = window.storage.get;
+window.storage.get = async function (key, arg2) {
+  if (key === constantsMod.KEYS.pedidos) throw new Error("Failed to fetch"); // simula sin conexión SOLO para esta clave
+  return getOriginal(key, arg2);
+};
+state.pedidos = [{ id: "lo-que-habia-en-memoria", numeroOp: "OP-VIEJO" }]; // lo que loadAll() reemplazaría de haber podido leer
+state.toast = null;
+await loadAll();
+assert(state.pedidos.length === 1 && state.pedidos[0].id === "espejo-1", "si la lectura de red de una clave falla, loadAll() usa la copia local de ESA clave en vez de vaciarla o dejarla como estaba");
+assert(!!state.toast && state.toast.msg.indexOf("Sin conexión") !== -1, "y avisa con un toast discreto — no bloquea nada, solo informa");
+window.storage.get = getOriginal; // se restaura: las pruebas de abajo (si las hay) no deben heredar esta falla simulada
+
+// Las tablas "tx"/"clientes" (su propia pestaña, no el blob de "kv") tienen el
+// MISMO fallback. En este entorno de prueba esa lectura YA falla de verdad
+// (no hay credenciales reales de Google) en cada loadAll(), así que sirve
+// para probar el camino real sin tener que simular nada más.
+window.localStorage.setItem("taller_espejo_v1:tx", JSON.stringify([
+  { id: "tx-espejo-1", tipo: "ingreso", concepto: "Desde el espejo", monto: 1000, fecha: "2026-08-30" }
+]));
+await loadAll();
+assert(state.tx.some(t => t.id === "tx-espejo-1"), "la tabla de movimientos también cae a su copia local cuando su lectura falla");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

@@ -24,6 +24,9 @@
 .guardado-chip.guardando{color:var(--ink-faint);background:var(--surface-2);}
 .guardado-chip.malo{color:var(--danger-ink);background:var(--danger-soft);border-color:var(--danger);cursor:pointer;}
 .guardado-chip.malo:hover{filter:brightness(1.12);}
+/* Tono informativo, no de alerta: estar sin conexión es un estado normal y
+   previsto (ver core/guardado.js), no un problema que resolver. */
+.guardado-chip.offline{color:var(--info-ink);background:var(--info-soft);}
 
 /* Barra de aviso a lo ancho (guardado fallido, recuperación al arrancar).
    Distinta de .save-bar de Cotizaciones: esa es por documento, esta es del
