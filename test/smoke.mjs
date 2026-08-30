@@ -1129,7 +1129,11 @@ assert(filasProgreso.length === cotEscalada.referencias.length, "el pedido desde
 state.pedidos[0].cotizacionId = "";
 render();
 assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "y el pedido rápido usa EXACTAMENTE la misma fila, una sola vez");
-assert(!!document.querySelector(".tape-track"), "con la barra de etapas encima, que es lo único que los diferencia");
+// La barra vieja con TODAS las etapas escritas (.tape-labels) existió, se
+// quitó, y volvió a aparecer MEZCLADA con la fila compacta en un pedido
+// rápido — el usuario lo reportó dos veces. No debe quedar ni rastro de ella,
+// en ningún camino.
+assert(!document.querySelector(".tape-labels"), "el pedido rápido no muestra la barra vieja con todas las etapas: solo la fila compacta");
 
 // ---------------------------------------------------------------------------
 // La serie de movimientos es una LÍNEA DE TIEMPO, no una lista de fechas con
@@ -1323,6 +1327,97 @@ assert(document.body.textContent.includes("IVA cobrado"), "el Resumen avisa cuá
 state.pedidos = [];
 render();
 assert(!document.body.textContent.includes("IVA cobrado"), "y si no se factura IVA, esa tarjeta no aparece: no estorba a quien no lo usa");
+
+// ---------------------------------------------------------------------------
+// Ajustes de feedback (Insumos + estados de producción).
+// ---------------------------------------------------------------------------
+
+// Unidad "conocida": el datalist compartido ya no es una lista fija — aprende
+// de lo que se escribe en cualquier campo de unidad de la app.
+state.catalogoInsumos = [{ id: "iu1", nombre: "Cinta rara", unidad: "rollo-40m", costo: 1000, tipo: "por_prenda", categoriaId: "", proveedorId: "" }];
+assert(calcMod.unidadesConocidas().includes("rollo-40m"), "una unidad escrita en cualquier insumo queda disponible como sugerencia para los demás campos");
+assert(calcMod.unidadesConocidas().includes("UND"), "las sugerencias de base (UND, MT…) siguen ahí aunque no se hayan usado todavía");
+
+// "+" por categoría en Insumos: agrega YA CLASIFICADO en esa sección, sin
+// tener que elegirle la categoría después ni saltar de filtro para verlo.
+state.catalogoCategorias = [{ id: "ci1", nombre: "Telas" }, { id: "ci2", nombre: "Hilos" }];
+state.catalogoInsumos = [
+  { id: "i1", nombre: "Tela A", unidad: "MT", costo: 1000, tipo: "tela", categoriaId: "ci1", proveedorId: "" },
+  { id: "i2", nombre: "Hilo A", unidad: "UND", costo: 500, tipo: "por_prenda", categoriaId: "ci2", proveedorId: "" }
+];
+state.filtroCatalogoCategoria = "todos";
+state.buscarCatalogo = "";
+state.tab = "catalogo";
+render();
+const botonGrupoHilos = document.querySelector('.cat-grupo-add[data-categoria="ci2"]');
+assert(!!botonGrupoHilos, "cada grupo de categoría tiene su propio botón + (ver renderGrupos en catalogo.js)");
+click('.cat-grupo-add[data-categoria="ci2"]');
+const insumoNuevoDeGrupo = state.catalogoInsumos[state.catalogoInsumos.length - 1];
+assert(insumoNuevoDeGrupo.categoriaId === "ci2", "el insumo nace clasificado en la categoría de SU botón, no en la del filtro activo");
+assert(state.filtroCatalogoCategoria === "todos", "y la vista NO salta a otro filtro para mostrarlo: ya es visible donde se está");
+
+// El aviso de "insumo cambió en el catálogo" — la pieza más delicada: no
+// puede aparecer donde no corresponde, tiene que desaparecer al actualizar, y
+// "mantener" tiene que dejar de insistir con ESE mismo valor sin taparle la
+// puerta a un cambio futuro.
+state.catalogoInsumos = [{ id: "cat-1", nombre: "Tela premium", unidad: "MT", costo: 15000, tipo: "tela", categoriaId: "", proveedorId: "" }];
+state.cotizaciones = [{
+  id: "cot-cambio", cliente: "Cliente", descripcion: "d", fecha: "2026-08-29", estado: "borrador",
+  pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "C1",
+  costosGlobales: [], serviciosCobrados: [],
+  referencias: [{
+    id: "ref-cambio", nombre: "Camisa", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 40000,
+    origen: "taller", costoCompra: 0, proveedorId: "", detalle: [],
+    // Recién copiado del catálogo: el mismo costo que tiene ahí (15.000).
+    insumos: [{ id: "ins-cambio", nombre: "Tela premium", unidad: "MT", costo: 15000, tipo: "tela", cantidad: 1, proveedorId: "", origenCatalogoId: "cat-1" }]
+  }]
+}];
+state.tab = "cotizaciones";
+state.cotizacionesVista = "nueva";
+state.cotizacionEditando = "cot-cambio";
+render();
+assert(!document.querySelector(".ins-aviso-cambio"), "recién copiado, el insumo todavía coincide con el catálogo: no hay nada que avisar");
+
+// El catálogo sube de precio DESPUÉS de haberlo copiado a la cotización — el
+// caso real que describió el usuario.
+state.catalogoInsumos[0].costo = 20000;
+render();
+assert(!!document.querySelector(".ins-row.cambio-catalogo"), "ahora sí: la fila se marca porque el catálogo cambió después de copiarla");
+assert(document.querySelector(".ins-aviso-cambio-msg").textContent.includes("15.000") && document.querySelector(".ins-aviso-cambio-msg").textContent.includes("20.000"), "el aviso dice los dos números: el que quedó guardado y el vigente");
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 15000, "y mientras tanto la cotización sigue funcionando con SU número: nada se actualiza solo");
+
+// "Mantener": decisión consciente de seguir con el valor viejo.
+click('[data-action="descartar-aviso-insumo-cambio"][data-ins="ins-cambio"]');
+assert(!document.querySelector(".ins-aviso-cambio"), "tras 'Mantener', el aviso se apaga para ESTE cambio puntual");
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 15000, "sin tocar el costo: seguir viendo $15.000 fue la decisión");
+state.catalogoInsumos[0].costo = 22000;
+render();
+assert(!!document.querySelector(".ins-aviso-cambio"), "pero si el catálogo cambia OTRA VEZ después, vuelve a avisar — 'mantener' no calla el aviso para siempre");
+
+// "Actualizar": trae el número vigente y limpia cualquier 'mantener' previo.
+click('[data-action="actualizar-insumo-catalogo"][data-ins="ins-cambio"]');
+assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 22000, "'Actualizar' copia el costo vigente del catálogo a la cotización");
+assert(!state.cotizaciones[0].referencias[0].insumos[0].avisoInsumoDescartado, "y limpia el 'mantener' anterior, para no arrastrar una decisión que ya no aplica");
+render();
+assert(!document.querySelector(".ins-aviso-cambio"), "ya actualizado, el aviso desaparece");
+
+// Un insumo escrito a mano en la cotización (no viene del catálogo) nunca
+// avisa: no hay con qué compararlo.
+click('[data-action="add-insumo-personalizado"][data-cot="cot-cambio"][data-ref="ref-cambio"]');
+const insumoManual = state.cotizaciones[0].referencias[0].insumos.find(i => i.id !== "ins-cambio");
+assert(!insumoManual.origenCatalogoId, "un insumo agregado a mano no queda vinculado a ningún insumo del catálogo");
+assert(calcMod.insumoCambioDeCatalogo(insumoManual) === null, "y por lo tanto nunca dispara el aviso de cambio");
+
+// Estados de producción: la barra vieja con todas las etapas visibles no
+// vuelve a aparecer, ni sola ni mezclada con la fila compacta.
+state.pedidos = [{ id: "prod-1", numeroOp: "OP-1", cliente: "C", descripcion: "d", cantidad: "1", total: 1, costo: 0,
+  abono: 0, estado: "confeccion", estadosDef: null, fechaCreacion: "2026-08-29", fechaEntrega: "",
+  tipoCliente: "propio", cotizacionId: "", abonos: [], lineas: [], stockConsumido: [], vendedor: null }];
+state.tab = "pedidos";
+state.pedidosVista = "historial";
+render();
+assert(!document.querySelector(".tape-labels"), "un pedido rápido ya no dibuja la barra vieja de etapas");
+assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "solo la fila compacta de siempre, la misma que usa un pedido desde cotización");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

@@ -10,10 +10,9 @@
 // si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
-import { UNIDADES_SUGERIDAS } from "./constants.js";
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion } from "./store.js";
 import { esc } from "./utils.js";
-import { clienteById, calcNotificaciones } from "./calc.js";
+import { clienteById, calcNotificaciones, unidadesConocidas } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
@@ -629,11 +628,17 @@ function campanaIcon() {
 // Sugerencias compartidas por todos los campos "Unidad" de la app (catálogo
 // de insumos, referencias de cotización, plantillas, productos). Va una sola
 // vez al final del documento: un <datalist> se referencia por id desde
-// cualquier input, no hace falta repetirlo en cada tabla. Incluye "servicio",
-// que es cómo se marca lo que se paga pero no se compra en ningún lado.
+// cualquier input, no hace falta repetirlo en cada tabla.
+//
+// Se repinta en CADA render con lo que unidadesConocidas() (core/calc.js)
+// encuentra escrito en ese momento en toda la app — no es una lista fija:
+// cualquier unidad que se escriba una vez (así sea "docena" o algo raro de un
+// solo insumo) queda disponible como sugerencia para el resto, en cualquier
+// campo. Incluye "servicio", que es cómo se marca lo que se paga pero no se
+// compra en ningún lado.
 function renderDatalists() {
   return '<datalist id="dl-unidades">' +
-    UNIDADES_SUGERIDAS.map(function (u) { return '<option value="' + esc(u) + '">'; }).join("") +
+    unidadesConocidas().map(function (u) { return '<option value="' + esc(u) + '">'; }).join("") +
     "</datalist>";
 }
 

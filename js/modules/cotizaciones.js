@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo } from "../core/calc.js";
 import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -26,7 +26,14 @@ function nuevoInsumo(fuente) {
     // "servicio" en vez de pedir N unidades de algo que no se mide.
     esServicio: !!(fuente && fuente.esServicio),
     proveedorId: (fuente && fuente.proveedorId) || "",
-    cantidad: 1
+    cantidad: 1,
+    // Vínculo con el insumo del catálogo del que salió esta copia — no con su
+    // costo, con el INSUMO. Es lo que permite, más adelante, avisar si el
+    // catálogo cambió de precio y esta cotización se quedó con el viejo (ver
+    // insumoCambioDeCatalogo en core/calc.js). Un insumo escrito a mano
+    // directo en la cotización (sin pasar por el catálogo) no trae vínculo:
+    // no hay con qué compararlo, y no debe avisar de nada.
+    origenCatalogoId: fuente ? fuente.id : ""
   };
 }
 
@@ -723,6 +730,25 @@ function renderRefProveedorResumen(ref, calc) {
 
 var INS_COLS_REF = "1fr 90px 90px 165px 70px 90px 30px";
 
+// Aviso de que un insumo cambió en el catálogo desde que se copió a esta
+// referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
+// un banner ni una ventana: una franja angosta justo debajo de SU fila, del
+// mismo color de advertencia que ya usa la app para "esto no bloquea nada,
+// pero conviene mirarlo" — se lee de un vistazo y no interrumpe editar el
+// resto de la referencia. Las dos salidas quedan una al lado de la otra:
+// traer el número nuevo, o decir explícitamente que este, por ahora, se
+// queda como está (útil en una cotización vieja que no tiene sentido
+// repretinar).
+function renderAvisoInsumoCambio(cotId, refId, insId, cambio) {
+  var attrs = ' data-cot="' + cotId + '" data-ref="' + refId + '" data-ins="' + insId + '"';
+  return '<div class="ins-aviso-cambio">' +
+    '<span class="ins-aviso-cambio-msg">⚠ Este insumo cambió en el catálogo — antes ' + fmt(cambio.costoLinea) + ", ahora " + fmt(cambio.costoCatalogo) + "</span>" +
+    '<span class="ins-aviso-cambio-acciones">' +
+    '<button class="btn ghost small" data-action="actualizar-insumo-catalogo"' + attrs + '>Actualizar a ' + fmt(cambio.costoCatalogo) + "</button>" +
+    '<button class="btn ghost small" data-action="descartar-aviso-insumo-cambio"' + attrs + '>Mantener ' + fmt(cambio.costoLinea) + "</button>" +
+    "</span></div>";
+}
+
 // Los costos globales del pedido (domicilio, diseño, un envío a sublimar) se
 // ven al final de la tabla de insumos de TODAS las referencias, separados por
 // una línea intermitente: no pertenecen a ninguna en particular, aplican a
@@ -856,15 +882,24 @@ function renderRefCard(cotId, ref) {
   html += '<div class="ins-table">' +
     '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
-    html += '<div class="ins-row" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;">' +
+    // El insumo se copió del catálogo al agregarlo (costo incluido) para que
+    // esta cotización no cambie de precio sola si el catálogo se repone más
+    // caro después. Pero esa copia puede quedar vieja sin que nadie se entere
+    // — esto compara la copia contra el catálogo VIGENTE (ver
+    // insumoCambioDeCatalogo en core/calc.js) y avisa, sin bloquear nada: la
+    // cotización sigue funcionando igual con el número que tenía, hasta que
+    // alguien decida actualizarla.
+    var cambio = insumoCambioDeCatalogo(i);
+    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
-      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";
+    if (cambio) html += renderAvisoInsumoCambio(cotId, ref.id, i.id, cambio);
   });
   if ((ref.insumos || []).length === 0) { html += '<div class="empty" style="padding:8px 0;">Sin insumos aún.</div>'; }
   html += renderFilasGlobales(cotId, ref);
@@ -1406,6 +1441,40 @@ export var actions = {
   "remove-insumo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-insumo");
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).filter(function (i) { return i.id !== insId; }) }); });
+  },
+  // Trae a esta cotización el costo que el insumo tiene HOY en el catálogo.
+  // Limpia cualquier "mantener" anterior (avisoInsumoDescartado): si el
+  // catálogo vuelve a cambiar más adelante, tiene que poder avisar de nuevo.
+  "actualizar-insumo-catalogo": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
+    mapRef(cotId, refId, function (r) {
+      return Object.assign({}, r, {
+        insumos: (r.insumos || []).map(function (i) {
+          if (i.id !== insId) return i;
+          var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
+          if (!actual) return i;
+          return Object.assign({}, i, { costo: num(actual.costo), avisoInsumoDescartado: undefined });
+        })
+      });
+    });
+  },
+  // "Mantener": el usuario ya vio que el catálogo cambió y decide, a
+  // conciencia, seguir con el número que ya tenía la cotización — típico de
+  // una cotización vieja que no tiene sentido repretinar. No borra el aviso
+  // para siempre: guarda CONTRA QUÉ costo del catálogo se decidió esto, así
+  // que si el catálogo cambia OTRA vez después, vuelve a avisar.
+  "descartar-aviso-insumo-cambio": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
+    mapRef(cotId, refId, function (r) {
+      return Object.assign({}, r, {
+        insumos: (r.insumos || []).map(function (i) {
+          if (i.id !== insId) return i;
+          var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
+          if (!actual) return i;
+          return Object.assign({}, i, { avisoInsumoDescartado: num(actual.costo) });
+        })
+      });
+    });
   },
   "set-ins-campo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins"), campo = el.getAttribute("data-campo");
@@ -2390,7 +2459,8 @@ function moverInsumoAGlobal(cotId, refId, insId) {
       }),
       costosGlobales: (c.costosGlobales || []).concat([{
         id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
-        costo: num(insumo.costo), proveedorId: insumo.proveedorId || ""
+        costo: num(insumo.costo), proveedorId: insumo.proveedorId || "",
+        origenCatalogoId: insumo.origenCatalogoId || ""
       }])
     });
   });
@@ -2418,7 +2488,8 @@ function moverInsumoAServicio(cotId, refId, insId) {
       }),
       serviciosCobrados: (c.serviciosCobrados || []).concat([{
         id: insumo.id, nombre: insumo.nombre, unidad: insumo.unidad || "",
-        costo: num(insumo.costo), precio: 0, proveedorId: insumo.proveedorId || ""
+        costo: num(insumo.costo), precio: 0, proveedorId: insumo.proveedorId || "",
+        origenCatalogoId: insumo.origenCatalogoId || ""
       }])
     });
   });
@@ -2438,7 +2509,8 @@ function moverGlobalAServicio(cotId, gId) {
       costosGlobales: (c.costosGlobales || []).filter(function (g) { return g.id !== gId; }),
       serviciosCobrados: (c.serviciosCobrados || []).concat([{
         id: global.id, nombre: global.nombre, unidad: global.unidad || "",
-        costo: num(global.costo), precio: 0, proveedorId: global.proveedorId || ""
+        costo: num(global.costo), precio: 0, proveedorId: global.proveedorId || "",
+        origenCatalogoId: global.origenCatalogoId || ""
       }])
     });
   });
@@ -2468,7 +2540,8 @@ function moverServicioACosto(cotId, sId, tipo) {
     if (tipo === "global") {
       base.costosGlobales = (c.costosGlobales || []).concat([{
         id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "",
-        costo: num(serv.costo), proveedorId: serv.proveedorId || ""
+        costo: num(serv.costo), proveedorId: serv.proveedorId || "",
+        origenCatalogoId: serv.origenCatalogoId || ""
       }]);
       return base;
     }
@@ -2477,7 +2550,8 @@ function moverServicioACosto(cotId, sId, tipo) {
       return Object.assign({}, r, {
         insumos: (r.insumos || []).concat([{
           id: serv.id, nombre: serv.nombre, unidad: serv.unidad || "UND",
-          costo: num(serv.costo), tipo: tipo, cantidad: 1, proveedorId: serv.proveedorId || ""
+          costo: num(serv.costo), tipo: tipo, cantidad: 1, proveedorId: serv.proveedorId || "",
+          origenCatalogoId: serv.origenCatalogoId || ""
         }])
       });
     });
@@ -2507,7 +2581,8 @@ function moverGlobalAInsumo(cotId, gId, tipo) {
         return Object.assign({}, r, {
           insumos: (r.insumos || []).concat([{
             id: global.id, nombre: global.nombre, unidad: global.unidad || "UND",
-            costo: num(global.costo), tipo: tipo, cantidad: 1, proveedorId: global.proveedorId || ""
+            costo: num(global.costo), tipo: tipo, cantidad: 1, proveedorId: global.proveedorId || "",
+            origenCatalogoId: global.origenCatalogoId || ""
           }])
         });
       })

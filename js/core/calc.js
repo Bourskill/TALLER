@@ -5,7 +5,7 @@
 
 import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe } from "./utils.js";
-import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
+import { ESTADOS_DEFAULT, UNIDAD_SERVICIO, UNIDADES_SUGERIDAS } from "./constants.js";
 
 // Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
 // producción propias en el taller) — a diferencia de ESTADOS_DEFAULT (5
@@ -1350,6 +1350,65 @@ export function esInsumoServicio(ins) {
   if (!ins) return false;
   if (norm(ins.unidad || "") === UNIDAD_SERVICIO) return true;
   return !!ins.esServicio;
+}
+
+// Todas las unidades de medida que ya se han escrito en algún lugar de la
+// app, para que el campo "Unidad" (un <input list="dl-unidades">, ver
+// core/dom.js: renderDatalists) las ofrezca como sugerencia — así "MT",
+// "docena" o cualquier cosa rara que se haya usado antes se reutiliza en vez
+// de volver a escribirla.
+//
+// POR QUÉ CAMBIÓ: el datalist existía, pero su lista de opciones era la
+// constante fija UNIDADES_SUGERIDAS (9 valores) — nunca aprendía nada de lo
+// que el usuario en verdad escribía. La intención (un campo con memoria)
+// estaba, la implementación no: escribir "docena" una vez no la dejaba
+// disponible la próxima vez, en ningún campo de la app.
+//
+// Recorre TODO lugar donde se escribe una unidad a mano, no solo el catálogo:
+// un insumo suelto agregado directo en una cotización, un costo global
+// ("domicilio", sin unidad casi siempre pero a veces sí), un servicio
+// cobrado, un insumo de plantilla o de producto — todos alimentan la misma
+// memoria compartida, porque son el mismo campo visto desde pantallas
+// distintas.
+export function unidadesConocidas() {
+  var set = {};
+  UNIDADES_SUGERIDAS.forEach(function (u) { set[u] = true; });
+  function agregar(u) { if (u && String(u).trim()) set[String(u).trim()] = true; }
+  (state.catalogoInsumos || []).forEach(function (i) { agregar(i.unidad); });
+  (state.productos || []).forEach(function (p) { (p.insumos || []).forEach(function (i) { agregar(i.unidad); }); });
+  (state.plantillasPrendas || []).forEach(function (p) { (p.insumos || []).forEach(function (i) { agregar(i.unidad); }); });
+  (state.cotizaciones || []).forEach(function (c) {
+    (c.referencias || []).forEach(function (r) { (r.insumos || []).forEach(function (i) { agregar(i.unidad); }); });
+    (c.costosGlobales || []).forEach(function (g) { agregar(g.unidad); });
+    (c.serviciosCobrados || []).forEach(function (s) { agregar(s.unidad); });
+  });
+  return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, "es"); });
+}
+
+// Un insumo agregado a una referencia desde el catálogo (ver "Insumos
+// predeterminados" en cotizaciones.js) guarda una COPIA de su costo en el
+// momento de agregarlo — es justamente lo que evita que una cotización vieja
+// cambie de precio sola porque el insumo se repuso más caro después. Pero esa
+// copia puede quedar desactualizada sin que nadie se entere: nada avisaba
+// cuando el catálogo seguía de largo y la cotización se quedó con el número
+// viejo.
+//
+// Compara la copia contra el catálogo VIGENTE y dice si divergieron. Solo
+// mira el costo — es el número que mueve la plata; que cambien el nombre o la
+// unidad no altera ningún cálculo y no vale la pena interrumpir por eso.
+// Devuelve null si no hay nada que avisar: el insumo no vino del catálogo (se
+// escribió a mano en la cotización), el insumo de origen ya no existe (se
+// borró del catálogo — no hay con qué comparar), el costo sigue igual, o el
+// usuario ya vio este cambio puntual y decidió mantener el valor de la
+// cotización (ver "descartar-aviso-insumo-cambio" en cotizaciones.js).
+export function insumoCambioDeCatalogo(linea) {
+  if (!linea || !linea.origenCatalogoId) return null;
+  var actual = (state.catalogoInsumos || []).filter(function (i) { return i.id === linea.origenCatalogoId; })[0];
+  if (!actual) return null;
+  var costoActual = num(actual.costo);
+  if (costoActual === num(linea.costo)) return null;
+  if (linea.avisoInsumoDescartado === costoActual) return null;
+  return { costoCatalogo: costoActual, costoLinea: num(linea.costo) };
 }
 
 // Total de prendas del pedido, sumando todas las referencias. Es el divisor

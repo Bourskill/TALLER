@@ -32,10 +32,27 @@
 
 /* ---------- grupos por categoría ---------- */
 .cat-grupo{margin-bottom:var(--sp-5);}
-.cat-grupo-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-2);
+.cat-grupo-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);
   padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--border);}
-.cat-grupo-nombre{font-size:13px;font-weight:700;color:var(--ink);letter-spacing:-0.01em;}
+/* El título de la categoría y el nombre del insumo llevaban el MISMO peso
+   (13px/13.5px, negrita, --ink los dos): a simple vista se confundían y
+   costaba saber qué era encabezado y qué era una fila más — la fatiga de
+   escanear la lista que reportó el usuario. La corrección es de TIPO, no de
+   opacidad: el título pasa a leerse como una etiqueta de sección (mayúsculas,
+   espaciado, tenue), el mismo idioma que ya usa el resto de la app para esto
+   — `.nav-group-title` en la barra lateral, `.cat-admin-titulo` acá mismo —
+   en vez de inventar un tercer estilo de "encabezado de grupo". El nombre del
+   insumo se queda tal como está: es el dato principal de la fila y tiene que
+   seguir siendo lo más prominente que hay.*/
+.cat-grupo-nombre{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);}
+.cat-grupo-head-right{display:flex;align-items:center;gap:8px;}
 .cat-grupo-meta{font-size:11px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+/* Botón "+" por categoría (ver renderGrupos en catalogo.js): agregar un
+   insumo directo en su sección, sin pasar por el botón general de arriba ni
+   tener que elegirle la categoría después. Reutiliza .btn.ghost.small tal
+   cual — solo se lo hace más compacto y redondo, un "+" no necesita el
+   padding de un botón con texto. */
+.cat-grupo-add{padding:1px 8px;font-size:14px;font-weight:800;line-height:1.6;border-radius:999px;}
 
 /* ==========================================================================
    Fila de insumo: modificador de .tx-row, no una fila nueva.
@@ -69,6 +86,15 @@
 /* Lo accesorio se atenúa: sigue siendo editable, pero deja de competir. */
 .tx-row.insumo select, .tx-row.insumo input[data-campo="unidad"]{font-size:12px;color:var(--ink-soft);}
 .tx-row.insumo select:focus, .tx-row.insumo input:focus{color:var(--ink);}
+
+/* La flechita del campo Unidad: mismo truco que `.buscador-icono` (un ícono
+   superpuesto, sin robarle el clic al input de abajo) — reutilizado, no
+   reinventado. Le da al datalist nativo una señal visible de "esto tiene
+   sugerencias" que algunos navegadores no dibujan por su cuenta. */
+.insumo-unidad-cell{position:relative;}
+.insumo-unidad-cell .insumo-unidad{padding-right:20px;}
+.insumo-unidad-flecha{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  font-size:9px;line-height:1;color:var(--ink-faint);pointer-events:none;}
 .insumo-sin-proveedores{font-size:11px;color:var(--ink-faint);cursor:help;}
 
 /* La cabecera de la tabla alinea "Costo" con su columna, que está a la

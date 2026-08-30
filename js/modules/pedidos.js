@@ -566,19 +566,20 @@ function renderHistorialPedidos() {
 // (pedidos rápidos creados directo en esta pestaña, sin pasar por una
 // cotización). El avance/retroceso es del pedido completo.
 function renderProgresoTape(p) {
-  // Un pedido rápido es UNA cosa que avanza, así que lleva la barra con todas
-  // las etapas; una cotización con seis referencias usa el mismo componente
-  // seis veces, en su forma compacta. Ver renderProgresoEtapas en
-  // core/components.js: antes esto eran dos implementaciones paralelas y por
-  // eso se desincronizaban.
+  // Mismo componente, misma forma, para un pedido rápido y para cada
+  // referencia de una cotización — ver renderProgresoEtapas en
+  // core/components.js. Ya no lleva una barra propia con todas las etapas
+  // visibles: esa versión existió y volvió a filtrarse mezclada con la fila
+  // compacta en un pedido rápido (el usuario la reportó dos veces). No
+  // reintroducir una variante "con barra" para este caso — es justo lo que
+  // causó la mezcla.
   return renderProgresoEtapas({
     etapas: etapasDe(p),
     estado: p.estado,
     nombre: "Producción",
     accionAvanzar: "advance",
     accionRetroceder: "retreat",
-    datos: { id: p.id },
-    conBarra: true
+    datos: { id: p.id }
   });
 }
 

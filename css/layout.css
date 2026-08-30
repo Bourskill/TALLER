@@ -116,10 +116,15 @@
    Antes cada camino tenia su propio renderizador y su propio markup, y por
    eso se desincronizaban. Vive aca y no en pedidos.css justamente porque ya
    no es de una sola pestana. */
+/* .tape-track/.tape-fill siguen en pie: los reutiliza la barra de "% cobrado"
+   del panel de dinero de un pedido (.tape-track.cobro, ver pedidos.js). Lo
+   que se eliminó es `.tape-labels` — la barra con TODAS las etapas escritas
+   encima, que era la visualización vieja del progreso de producción. Volvía
+   a aparecer mezclada con la fila compacta en un pedido rápido; no
+   reintroducirla para ese ni ningún otro caso, ver renderProgresoEtapas en
+   core/components.js. */
 .tape-track{height:5px;background:var(--surface-3);border-radius:3px;position:relative;margin:14px 0 6px;overflow:hidden;}
 .tape-fill{height:100%;background:var(--accent);border-radius:3px;}
-.tape-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--ink-faint);font-weight:600;text-transform:uppercase;letter-spacing:.02em;}
-.tape-labels span.current{color:var(--accent);}
 
 /* Progreso por referencia (pedidos que vienen de una cotización con varias
    piezas, cada una a su propio ritmo) — reemplaza el "tape" único cuando

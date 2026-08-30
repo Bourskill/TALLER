@@ -243,17 +243,25 @@ function renderGrupos(visibles, categorias, todos) {
 
   var html = "";
   var grupos = categorias.map(function (cat) {
-    return { nombre: cat.nombre, items: visibles.filter(function (i) { return i.categoriaId === cat.id; }) };
+    return { nombre: cat.nombre, categoriaId: cat.id, items: visibles.filter(function (i) { return i.categoriaId === cat.id; }) };
   });
   grupos.push({
     nombre: "Sin categoría",
+    categoriaId: "",
     items: visibles.filter(function (i) { return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; }); })
   });
   grupos.forEach(function (g) {
     if (!g.items.length) return; // un grupo vacío en la vista "Todas" es solo ruido
     html += '<div class="cat-grupo">' +
       '<div class="cat-grupo-head"><span class="cat-grupo-nombre">' + esc(g.nombre) + "</span>" +
-      '<span class="cat-grupo-meta">' + g.items.length + (g.items.length === 1 ? " insumo" : " insumos") + "</span></div>" +
+      '<span class="cat-grupo-head-right"><span class="cat-grupo-meta">' + g.items.length + (g.items.length === 1 ? " insumo" : " insumos") + "</span>" +
+      // Botón "+" propio de la sección: crea el insumo YA CLASIFICADO en esta
+      // categoría, sin pasar por el botón general de arriba (que solo sabe
+      // heredar la categoría del chip activo) ni tener que elegirla después.
+      // Más rápido cuando se están cargando varios insumos seguidos de la
+      // misma categoría, que es el caso más común.
+      '<button class="btn ghost small cat-grupo-add" data-action="add-cat-item" data-categoria="' + esc(g.categoriaId) + '" title="Agregar un insumo en ' + esc(g.nombre) + '" aria-label="Agregar insumo en ' + esc(g.nombre) + '">+</button>' +
+      "</span></div>" +
       renderTablaInsumos(g.items, categorias) +
       "</div>";
   });
@@ -295,7 +303,18 @@ function renderFilaInsumo(c, categorias) {
 
     // La unidad es también lo que marca un intangible: si dice "servicio", la
     // lista de compras deja de pedir N unidades de algo que no se compra.
-    '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)."' + attrs + ' data-campo="unidad" />' +
+    //
+    // La flechita es a propósito, no decorativa: el campo sigue siendo de
+    // texto libre (se puede escribir cualquier cosa), pero el "list=" que lo
+    // conecta al <datalist> compartido (ver renderDatalists en core/dom.js,
+    // ahora alimentado por unidadesConocidas() en core/calc.js) es invisible
+    // en algunos navegadores sin este indicador — sin él, nada avisaba que
+    // ese campo tenía sugerencias para reutilizar.
+    '<span class="mobile-th">Unidad</span>' +
+    '<span class="insumo-unidad-cell">' +
+    '<input class="mini-input insumo-unidad" list="dl-unidades" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)."' + attrs + ' data-campo="unidad" />' +
+    '<span class="insumo-unidad-flecha" aria-hidden="true">▾</span>' +
+    "</span>" +
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
 
@@ -326,29 +345,32 @@ function renderSelectorProveedorInsumo(c) {
 }
 
 export var actions = {
-  // Agregar deja el insumo nuevo LISTO PARA ESCRIBIR: nace vacio (no con el
-  // texto "Nuevo insumo", que habia que borrar a mano), hereda la categoria
-  // que se este viendo, y el cursor queda en su campo de nombre. Antes el
-  // insumo aparecia al final de la lista, fuera de pantalla si el catalogo
-  // era largo, y habia que ir a buscarlo.
-  "add-cat-item": function () {
-    var catActiva = state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "";
-    var nuevo = { id: uid(), nombre: "", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: catActiva, proveedorId: "" };
+  // Agregar deja el insumo nuevo LISTO PARA ESCRIBIR: nace vacío (no con el
+  // texto "Nuevo insumo", que había que borrar a mano) y el cursor queda en su
+  // campo de nombre. Antes el insumo aparecía al final de la lista, fuera de
+  // pantalla si el catálogo era largo, y había que ir a buscarlo.
+  //
+  // Dos entradas al mismo botón, mismo cuerpo: el "+" de arriba (general, usa
+  // la categoría del chip activo) y el "+" de cada sección en la vista "Todas"
+  // (ver renderGrupos) — este último trae `data-categoria` con el id exacto
+  // de SU grupo, así que el insumo cae directo ahí sin tener que elegirle la
+  // categoría después. `hasAttribute` y no `getAttribute` porque el botón de
+  // "Sin categoría" pasa `data-categoria=""` a propósito — un atributo vacío
+  // sigue siendo "sé exactamente dónde va", distinto de "no sé, usa el filtro".
+  "add-cat-item": function (el) {
+    var categoriaId = el && el.hasAttribute("data-categoria")
+      ? el.getAttribute("data-categoria")
+      : (state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "");
+    var nuevo = { id: uid(), nombre: "", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: categoriaId, proveedorId: "" };
     state.catalogoInsumos = (state.catalogoInsumos || []).concat([nuevo]);
-    // Tres cosas para que el insumo nuevo quede DE PRIMERO y a la vista:
-    //   - orden "Recientes", que lo pone arriba dentro de su lista;
-    //   - filtro puesto en SU categoría, porque en la vista "Todas" la lista se
-    //     agrupa y el orden solo actúa dentro de cada grupo: un insumo sin
-    //     categoría caía en el grupo "Sin categoría", que se pinta de último,
-    //     o sea al final de toda la página — justo lo contrario de lo que
-    //     decía este comentario antes;
-    //   - buscador limpio, para que no quede escondido detrás de una búsqueda
-    //     vieja.
-    // El chip se enciende solo, así que se ve por qué cambió la lista.
+    // "Recientes" lo pone primero DENTRO de su lista (o de su grupo, en la
+    // vista "Todas"); como ya se sabe con certeza en qué categoría cae —ya
+    // sea la del botón de sección o la del chip activo—, no hace falta saltar
+    // de filtro para que sea visible: siempre aparece dentro de lo que ya se
+    // está viendo.
     state.ordenCatalogo = "nuevos";
-    state.filtroCatalogoCategoria = catActiva || "sin";
-    // Un insumo a medio escribir no deberia quedar escondido detras de una
-    // busqueda vieja.
+    // Un insumo a medio escribir no debería quedar escondido detrás de una
+    // búsqueda vieja.
     state.buscarCatalogo = "";
     persist("catalogoInsumos");
     notify();

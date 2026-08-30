@@ -256,6 +256,20 @@
    por el borde izquierdo para que se lea de un vistazo que esa fila entra
    plata, a diferencia de las de arriba, que la sacan. */
 .ins-row.servicio{border-left:2.5px solid var(--success);padding-left:8px;}
+/* Un insumo cuyo costo cambió en el catálogo desde que se copió acá (ver
+   insumoCambioDeCatalogo en core/calc.js): el mismo truco de borde que ya
+   usan .global/.servicio arriba, esta vez en el color de advertencia — no
+   bloquea nada, solo se nota al pasar la vista por la tabla. */
+.ins-row.cambio-catalogo{border-left:2.5px solid var(--warning);padding-left:8px;}
+.ins-row.cambio-catalogo input[data-campo="costo"]{border-color:var(--warning);}
+/* La franja del aviso, pegada justo debajo de SU fila (no un banner aparte):
+   angosta, con las dos salidas —actualizar o mantener— una al lado de la
+   otra, para decidir sin salir de la tabla. */
+.ins-aviso-cambio{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  background:var(--warning-soft);border-radius:var(--radius-sm);padding:6px 10px;margin:2px 0 8px;}
+.ins-aviso-cambio-msg{font-size:11.5px;color:var(--warning-ink);line-height:1.4;}
+.ins-aviso-cambio-acciones{display:flex;gap:6px;flex-shrink:0;}
+.ins-aviso-cambio-acciones .btn{padding:3px 9px;font-size:11px;}
 /* La nota del separador va discreta y a la derecha: un rótulo corto con su
    "?" en vez de una línea de texto bajo la tabla. */
 .ins-row-separador{border-top:1px dashed var(--border);margin:8px 0 6px;display:flex;justify-content:flex-end;}

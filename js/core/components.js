@@ -146,10 +146,13 @@ export function renderTarjetaMini(o) {
 // cuando se arregló una la otra se quedó vieja — literalmente lo que reportó
 // el usuario: "en una parte se actualizó y en la otra se quedó viejo".
 //
-// Ahora hay una sola pieza. Lo único que cambia entre los dos casos es si
-// lleva la barra con todas las etapas (`conBarra`), porque un pedido rápido
-// es UNA cosa que avanza y vale la pena verla completa, mientras que una
-// cotización con seis referencias necesita seis filas compactas.
+// Primera unificación: una sola pieza con una bandera `conBarra` que, para un
+// pedido rápido, dibujaba ADEMÁS la barra vieja con todas las etiquetas
+// visibles encima de la fila compacta. El usuario volvió a reportarlo: seguía
+// viendo las dos versiones MEZCLADAS en el mismo pedido — la barra vieja no
+// se había ido, solo se le había pegado la fila nueva al lado. La barra no
+// vuelve a existir: acá solo hay UNA forma de mostrar esto, sin excepciones
+// por camino.
 //
 // o = {
 //   etapas:  [{id,label}]  el flujo, resuelto SIEMPRE con etapasDe() de core/calc.js
@@ -157,7 +160,6 @@ export function renderTarjetaMini(o) {
 //   nombre:  qué avanza ("Producción", o el nombre de la referencia)
 //   accionAvanzar / accionRetroceder: nombres de acción
 //   datos:   { atributo: valor } que se emiten como data-* en los dos botones
-//   conBarra: barra de progreso + todas las etiquetas encima de la fila
 // }
 export function renderProgresoEtapas(o) {
   var etapas = (o.etapas && o.etapas.length) ? o.etapas : [];
@@ -167,19 +169,7 @@ export function renderProgresoEtapas(o) {
   var datos = "";
   Object.keys(o.datos || {}).forEach(function (k) { datos += ' data-' + k + '="' + esc(o.datos[k]) + '"'; });
 
-  var html = "";
-  if (o.conBarra) {
-    // Un flujo de UNA sola etapa (posible con un flujo personalizado de
-    // Plantillas) dividía por cero y dejaba la barra con un ancho inválido:
-    // estando en la única etapa, el avance es del 100%.
-    var pct = etapas.length > 1 ? (idx / (etapas.length - 1) * 100) : 100;
-    html += '<div class="tape-track"><div class="tape-fill" style="width:' + pct + '%;"></div></div>' +
-      '<div class="tape-labels">' + etapas.map(function (e, i) {
-        return '<span class="' + (i <= idx ? "current" : "") + '">' + esc(e.label) + "</span>";
-      }).join("") + "</div>";
-  }
-
-  html += '<div class="pedido-ref-progreso">' +
+  var html = '<div class="pedido-ref-progreso">' +
     '<span class="pedido-ref-nombre">' + esc(o.nombre || "Producción") + "</span>" +
     '<span class="pedido-ref-etapa">' + esc(etapas[idx].label) + "</span>" +
     '<span class="pedido-ref-frac" title="Etapa ' + (idx + 1) + " de " + etapas.length + '">' + (idx + 1) + "/" + etapas.length + "</span>" +

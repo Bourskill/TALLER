@@ -78,6 +78,71 @@ Un arreglo sin su porqué es indistinguible de una preferencia arbitraria: el
 siguiente que pase por ahí lo "simplifica" y reintroduce el bug. Y se suma una
 prueba en `test/smoke.mjs`, que es la documentación que no se puede ignorar.
 
+## Registro de cambios — agosto 2026 (séptima ronda: ajustes sobre la sexta ronda)
+
+Correcciones puntuales sobre lo que se acababa de construir, a partir de usar
+la app de verdad — algunas son pulido, una es una regresión real.
+
+**Insumos, cuatro ajustes:**
+
+- **Contraste entre el título de la categoría y el nombre del insumo.** Los
+  dos usaban casi el mismo tamaño, peso y color (`--ink`, negrita, ~13px), así
+  que a simple vista costaba saber cuál era el encabezado y cuál una fila más
+  — la fatiga de escanear la lista que se reportó. La corrección es de TIPO,
+  no de opacidad: el título de la categoría pasa a leerse como una etiqueta de
+  sección (mayúsculas, espaciado, `--ink-faint`) — el mismo idioma que ya usa
+  el resto de la app para esto (`.nav-group-title` en la barra lateral,
+  `.cat-admin-titulo` en el mismo Insumos), no un tercer estilo inventado. El
+  nombre del insumo se queda igual de prominente: sigue siendo el dato
+  principal de la fila.
+- **Botón "+" por categoría.** Antes solo existía el botón general de arriba,
+  que heredaba la categoría del chip activo (o ninguna, si se estaba viendo
+  "Todas"). Ahora cada sección de la vista agrupada tiene su propio "+" que
+  agrega el insumo YA CLASIFICADO ahí, sin tener que elegirle la categoría
+  después — más directo cuando se cargan varios insumos seguidos de la misma
+  categoría. De paso se pudo quitar el salto de filtro que la acción hacía
+  antes para que el insumo nuevo quedara visible (ver `add-cat-item` en
+  `modules/catalogo.js`): con la categoría conocida de antemano, el insumo
+  siempre aparece dentro de lo que ya se está viendo.
+- **La lista de unidades ("UND", "MT"…) ahora tiene memoria.** El campo ya
+  tenía un `<datalist>` con sugerencias, pero era una lista FIJA de 9 valores
+  que nunca aprendía nada de lo que el usuario escribía — la intención estaba,
+  la implementación no. `unidadesConocidas()` (`core/calc.js`) recorre todo
+  insumo/costo/servicio de la app y arma la lista con lo que de verdad se ha
+  escrito, así que una unidad rara escrita una sola vez queda disponible en
+  cualquier otro campo de unidad de la app. Se agregó también una flechita
+  visible sobre el campo (mismo truco que `.buscador-icono`): el indicador
+  nativo del navegador para un `<input list>` no se ve igual —o no se ve— en
+  todos los navegadores.
+- **Aviso cuando un insumo cambió en el catálogo.** Un insumo agregado desde
+  "Insumos predeterminados" copia el costo del catálogo al momento de
+  agregarlo — a propósito, para que una cotización no cambie de precio sola si
+  el catálogo se repone más caro después. El problema era que esa copia podía
+  quedar vieja sin que nadie se enterara. Ahora `insumoCambioDeCatalogo()`
+  (`core/calc.js`) compara la copia contra el catálogo vigente, y si
+  divergieron, la fila se marca (borde de advertencia) y aparece una franja
+  angosta debajo con los dos números y dos salidas: **Actualizar** (trae el
+  costo vigente) o **Mantener** (decisión consciente de seguir con el viejo —
+  útil en una cotización que no tiene sentido repretinar). "Mantener" no
+  apaga el aviso para siempre: si el catálogo vuelve a cambiar después, avisa
+  de nuevo. No es un banner ni bloquea nada — la cotización sigue funcionando
+  con su propio número hasta que alguien decida qué hacer. Solo compara el
+  costo (el número que mueve la plata); un insumo escrito a mano en la
+  cotización, sin pasar por el catálogo, no tiene con qué compararse y nunca
+  avisa.
+
+**Estados de producción: la regresión.** La unificación de la ronda anterior
+tenía una bandera `conBarra` que, para un pedido rápido, dibujaba ADEMÁS la
+barra vieja con todas las etapas escritas — la versión que se suponía
+reemplazada. El resultado: un pedido rápido mostraba la barra vieja y la fila
+compacta nueva AL MISMO TIEMPO, mezcladas. Se reportó dos veces porque son la
+misma causa vista desde dos ángulos ("veo la versión pasada" / "aparece en un
+pedido rápido sin que nadie la haya pedido"). La bandera `conBarra` se quitó
+por completo — `renderProgresoEtapas` (`core/components.js`) ya no tiene dos
+formas de mostrar esto, tiene una sola, sin excepción por camino. `.tape-labels`
+(el CSS de la barra vieja) se eliminó; `.tape-track`/`.tape-fill` se quedan,
+porque los sigue usando la barra de "% cobrado" del panel de dinero.
+
 ## Registro de cambios — agosto 2026 (sexta ronda: jerarquía, reutilización y teclado)
 
 **Navegación por teclado en toda la app** — ver la sección "Navegación por
