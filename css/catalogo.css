@@ -12,9 +12,15 @@
    modificadores de jerarquía, no una fila nueva.
    ========================================================================== */
 
-/* ---------- cabecera: qué es, cuánto hay, y la acción primaria ---------- */
-.cat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-4);}
+/* ---------- cabecera: qué es y cuánto hay (la acción primaria vive abajo) ---------- */
+.cat-head{margin-bottom:var(--sp-4);}
 .cat-sin-clasificar{color:var(--warning-ink);}
+
+/* El botón de agregar, abajo a la izquierda: al final de la lista que se
+   acaba de recorrer, no arriba a la derecha y lejos de ella. Alineado a la
+   izquierda a propósito — es la misma columna donde está el primer campo que
+   hay que llenar (el nombre) en la fila que va a aparecer. */
+.cat-agregar-abajo{margin-top:var(--sp-4);}
 
 /* ---------- buscador + orden ---------- */
 .cat-toolbar{display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-3);}
@@ -107,8 +113,7 @@
      borde deja de leerse como editable. */
   .tx-row.insumo .insumo-nombre,
   .tx-row.insumo .insumo-costo{background:var(--surface-3);border-color:var(--border);text-align:left;}
-  .cat-head{flex-direction:column;align-items:stretch;}
-  .cat-head .btn{width:100%;}
+  .cat-agregar-abajo .btn{width:100%;}
   .cat-toolbar{flex-direction:column;align-items:stretch;}
   .chip.chip-accion{margin-left:0;}
 }

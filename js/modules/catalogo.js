@@ -77,6 +77,13 @@ export function render() {
   html += renderBarraFiltros(todos, visibles, categorias);
   html += renderAdminCategorias(categorias, todos);
   html += renderGrupos(visibles, categorias, todos);
+  // El botón principal de agregar vive ABAJO, a la izquierda — no arriba a la
+  // derecha, lejos de la lista. Dos razones: es donde en verdad se está
+  // mirando después de recorrer la tabla, y es lo más cerca que puede estar
+  // del primer campo que hay que llenar (el nombre, la columna más a la
+  // izquierda de la fila que va a aparecer). Se ve también con el catálogo
+  // vacío — el mensaje de "aún no tienes insumos" apunta para acá.
+  html += '<div class="cat-agregar-abajo"><button class="btn" data-action="add-cat-item">+ Nuevo insumo</button></div>';
   html += "</div>";
   return html;
 }
@@ -121,7 +128,19 @@ function ordenarInsumos(lista) {
   // insumo, pero el orden del array YA es cronológico (siempre se agrega al
   // final), así que invertirlo es exactamente eso, sin inventar un campo.
   if (state.ordenCatalogo === "nuevos") return copia.reverse();
-  return copia.sort(function (a, b) { return String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"); });
+  // A–Z (el orden por defecto): un nombre VACÍO no alfabetiza a nada — dejar
+  // que "" gane por comparar antes que cualquier letra lo mandaba al PRINCIPIO
+  // de la lista. Importa porque el insumo recién creado nace sin nombre, y el
+  // botón de agregar vive ABAJO (ver "add-cat-item"): si el insumo saltara al
+  // principio, aparecería lejos de donde se acaba de hacer clic. Un nombre en
+  // blanco va al final, no al frente.
+  return copia.sort(function (a, b) {
+    var an = String(a.nombre || "").trim(), bn = String(b.nombre || "").trim();
+    if (!an && !bn) return 0;
+    if (!an) return 1;
+    if (!bn) return -1;
+    return an.localeCompare(bn, "es");
+  });
 }
 
 // Cabecera: qué es esto, cuánto hay, y la única acción primaria. El botón de
@@ -149,7 +168,6 @@ function renderCabecera(todos, categorias) {
     (sinCategoria ? ' · <b class="cat-sin-clasificar">' + sinCategoria + " sin clasificar</b>" : "") +
     "</div>" +
     "</div>" +
-    '<button class="btn" data-action="add-cat-item">+ Nuevo insumo</button>' +
     "</div>";
 }
 
@@ -230,7 +248,7 @@ function renderAdminCategorias(categorias, todos) {
 // nombre de la categoría por la que se acaba de filtrar no aporta nada.
 function renderGrupos(visibles, categorias, todos) {
   if (!todos.length) {
-    return '<div class="empty" style="padding:26px 10px;">Aún no tienes insumos.<br><b>Agrega el primero</b> con el botón de arriba — por ejemplo una tela, con su costo por metro.</div>';
+    return '<div class="empty" style="padding:26px 10px;">Aún no tienes insumos.<br><b>Agrega el primero</b> con el botón de abajo — por ejemplo una tela, con su costo por metro.</div>';
   }
   if (!visibles.length) {
     return '<div class="empty" style="padding:26px 10px;">Ningún insumo coincide con lo que buscas.' +
@@ -363,12 +381,12 @@ export var actions = {
       : (state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "");
     var nuevo = { id: uid(), nombre: "", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: categoriaId, proveedorId: "" };
     state.catalogoInsumos = (state.catalogoInsumos || []).concat([nuevo]);
-    // "Recientes" lo pone primero DENTRO de su lista (o de su grupo, en la
-    // vista "Todas"); como ya se sabe con certeza en qué categoría cae —ya
-    // sea la del botón de sección o la del chip activo—, no hace falta saltar
-    // de filtro para que sea visible: siempre aparece dentro de lo que ya se
-    // está viendo.
-    state.ordenCatalogo = "nuevos";
+    // No se fuerza el orden a "Recientes": el botón vive ABAJO, así que
+    // saltar el insumo nuevo al TOPE de la lista lo alejaría del lugar donde
+    // se acaba de hacer clic — justo lo contrario de "cerca del primer campo
+    // a rellenar". Se deja el orden que el usuario ya tenía elegido, y el
+    // focus()+scrollIntoView de abajo lo alcanza esté donde esté.
+    //
     // Un insumo a medio escribir no debería quedar escondido detrás de una
     // búsqueda vieja.
     state.buscarCatalogo = "";

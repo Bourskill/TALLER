@@ -94,7 +94,7 @@ function renderFormMovimiento() {
 
   // ---- 3. Compra de insumo (recogido) ----
   html += '<hr class="stitch" />';
-  html += '<label class="tx-form-insumo-toggle">' +
+  html += '<label class="toggle-card">' +
     '<input type="checkbox" ' + (f.esInsumo ? "checked" : "") + ' data-action-change="toggle-tx-insumo" /> ' +
     "<span><b>📦 Es una compra de insumo</b>" +
     '<small>Márcalo si este gasto es material real (tela, hilo, botones). Así cuenta aparte en "Gasto en insumos" del reporte.</small></span>' +

@@ -116,6 +116,18 @@ function renderFormNuevoPedido() {
     '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
     "</div>";
 
+  // No todo pedido rápido pasa por producción: algo ya hecho, un servicio, una
+  // reventa. No se ofrece en consignación porque esa ya nace sin flujo por su
+  // cuenta (ver "add-pedido": nace directo como "entregado", como cualquier
+  // mercancía que ya está lista para salir).
+  if (!f.esConsignacion) {
+    html += '<label class="toggle-card" style="margin-top:10px;">' +
+      '<input type="checkbox" ' + (f.conFlujoProduccion ? "checked" : "") + ' data-action-change="toggle-pedido-flujo" />' +
+      "<span><b>🧵 Este pedido pasa por producción</b>" +
+      '<small>Muestra el seguimiento por etapas (cortado, confección…) en la tarjeta del pedido. Desmárcalo si ya está listo, es un servicio, o no tiene sentido llevarle etapas — el pedido se crea directo como terminado.</small></span>' +
+      "</label>";
+  }
+
   html += '<div class="form-grid" style="margin-top:14px;">' +
     renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
     '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
@@ -544,8 +556,11 @@ function renderHistorialPedidos() {
       "</div>" +
       renderDetalleLineasPedido(p) +
       // Un pedido cancelado no está "en producción": mostrarle la barra de
-      // etapas invitaría a avanzarlo, que es justo lo contrario de lo que pasó.
-      (cancelado ? "" : (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p))) +
+      // etapas invitaría a avanzarlo, que es justo lo contrario de lo que
+      // pasó. Y uno marcado "sin flujo de producción" (ver la casilla del
+      // formulario) directamente no lleva seguimiento por etapas — no es que
+      // esté en la última, es que nunca hubo ninguna que seguir.
+      (cancelado || (p.sinFlujoProduccion && !refsProduccion) ? "" : (refsProduccion ? renderProgresoPorReferencia(p, cotRelacionada, refsProduccion) : renderProgresoTape(p))) +
       '<div class="pedido-actions">' +
       '<span class="accion-grupo">' +
       (cancelado
@@ -1252,6 +1267,10 @@ export var actions = {
     }
     notify();
   },
+  "toggle-pedido-flujo": function (el) {
+    state.formPedido.conFlujoProduccion = !!el.checked;
+    notify();
+  },
   // Campos del borrador que, al cambiar, tienen que redibujar el formulario
   // porque de ellos dependen indicadores en pantalla (saldo por cobrar,
   // comisión estimada, ganancia del envío). Los campos que no alimentan
@@ -1496,8 +1515,16 @@ export var actions = {
       stockConsumido: [], // se completa abajo con lo que en verdad se descontó (ver ajustarStockProducto)
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
-      // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta).
-      estado: esConsignacion ? "entregado" : "nuevo",
+      // renderPedidoConsignacion, que reemplaza esa parte de la tarjeta). Un
+      // pedido "sin flujo de producción" (ver la casilla del formulario) es
+      // el mismo caso: algo ya listo, un servicio, una reventa — nace
+      // terminado igual, y `sinFlujoProduccion` es lo que además le apaga el
+      // widget de progreso en la tarjeta (ver el render de la lista, más
+      // abajo): sin esa bandera explícita, un pedido "ya entregado" seguiría
+      // mostrando la fila de progreso en su última etapa con la flecha de
+      // retroceder activa, como si sí llevara seguimiento.
+      sinFlujoProduccion: !esConsignacion && !fp.conFlujoProduccion,
+      estado: (esConsignacion || !fp.conFlujoProduccion) ? "entregado" : "nuevo",
       numeroOp: generarNumeroOp(todosNumerosOp()),
       vendedor: (!esConsignacion && fp.vendedorNombre) ? { nombre: fp.vendedorNombre, tipo: fp.vendedorTipo || "porcentaje", valor: num(fp.vendedorValor), estado: "pendiente" } : null,
       consignacion: esConsignacion ? {
@@ -1552,6 +1579,7 @@ export var actions = {
     state.formPedido = {
       clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
+      conFlujoProduccion: true,
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
       lineas: []
     };

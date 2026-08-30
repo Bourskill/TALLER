@@ -1419,6 +1419,89 @@ render();
 assert(!document.querySelector(".tape-labels"), "un pedido rápido ya no dibuja la barra vieja de etapas");
 assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "solo la fila compacta de siempre, la misma que usa un pedido desde cotización");
 
+// ---------------------------------------------------------------------------
+// Segunda ronda de ajustes: botón de agregar insumo abajo, y el pedido rápido
+// puede marcarse "sin flujo de producción".
+// ---------------------------------------------------------------------------
+
+// El insumo nuevo, con nombre vacío, no puede saltar al PRINCIPIO de la lista
+// bajo el orden A–Z: el botón vive abajo, y el insumo tiene que aparecer
+// cerca de él, no al otro extremo de la página.
+state.catalogoCategorias = [];
+state.catalogoInsumos = [
+  { id: "za1", nombre: "Zíper", unidad: "UND", costo: 100, tipo: "por_prenda", categoriaId: "", proveedorId: "" },
+  { id: "aa1", nombre: "Algodón", unidad: "MT", costo: 100, tipo: "tela", categoriaId: "", proveedorId: "" }
+];
+state.ordenCatalogo = "abc";
+state.filtroCatalogoCategoria = "todos";
+state.buscarCatalogo = "";
+state.tab = "catalogo";
+render();
+assert(!!document.querySelector(".cat-agregar-abajo [data-action=\"add-cat-item\"]"), "el botón de agregar insumo vive al final de la lista, no en la cabecera");
+click(".cat-agregar-abajo [data-action=\"add-cat-item\"]");
+const nombresOrdenados = state.catalogoInsumos.map(i => i.id);
+assert(nombresOrdenados[nombresOrdenados.length - 1] !== nombresOrdenados[0], "sanity: hay más de un insumo");
+const filasTrasAgregar = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
+assert(filasTrasAgregar[filasTrasAgregar.length - 1].includes(state.catalogoInsumos[state.catalogoInsumos.length - 1].id), "bajo A–Z, un insumo sin nombre todavía se dibuja AL FINAL — cerca del botón que se acaba de pulsar, no al principio");
+
+// El toggle "pasa por producción" del formulario de pedido rápido.
+state.tab = "pedidos";
+state.pedidosVista = "nueva";
+state.formPedido = { clienteId: "", cliente: "Cliente Sin Flujo", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+render();
+assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "el formulario de pedido rápido ofrece elegir si lleva flujo de producción");
+click('[data-action="add-pedido-linea-libre"]');
+const lineaSinFlujoId = state.formPedido.lineas[0].id;
+setLinea(lineaSinFlujoId, "productoNombre", "Arreglo");
+setLinea(lineaSinFlujoId, "cantidad", "1");
+setLinea(lineaSinFlujoId, "precioUnitario", "50000");
+setLinea(lineaSinFlujoId, "costoUnitario", "10000");
+// Se desmarca: este pedido no pasa por producción.
+const checkFlujo = document.querySelector('[data-action-change="toggle-pedido-flujo"]');
+checkFlujo.checked = false;
+checkFlujo.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.formPedido.conFlujoProduccion === false, "desmarcar la casilla queda en el borrador del formulario");
+click('[data-action="add-pedido"]');
+const pedidoSinFlujo = state.pedidos.find(p => p.cliente === "Cliente Sin Flujo");
+assert(!!pedidoSinFlujo, "el pedido se crea igual, con la casilla desmarcada");
+assert(pedidoSinFlujo.sinFlujoProduccion === true, "queda marcado como sin flujo de producción");
+assert(pedidoSinFlujo.estado === "entregado", "nace directo como terminado — no hay etapas que seguir");
+assert(calcMod.pedidoTerminado(pedidoSinFlujo), "y por lo tanto cuenta como terminado, no como un pedido activo eterno");
+state.pedidosVista = "historial";
+state.pedidoPanelAbierto = {};
+render();
+const cardSinFlujo = document.querySelector('[data-pedido-id="' + pedidoSinFlujo.id + '"]');
+assert(!cardSinFlujo.querySelector(".pedido-ref-progreso"), "su tarjeta NO muestra ningún widget de progreso");
+
+// El caso contrario: casilla marcada (el valor por defecto) sigue creando un
+// pedido con su flujo de producción normal, igual que siempre.
+state.formPedido = { clienteId: "", cliente: "Cliente Con Flujo", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+state.pedidosVista = "nueva";
+render();
+click('[data-action="add-pedido-linea-libre"]');
+const lineaConFlujoId = state.formPedido.lineas[0].id;
+setLinea(lineaConFlujoId, "productoNombre", "Camisetas");
+setLinea(lineaConFlujoId, "cantidad", "5");
+setLinea(lineaConFlujoId, "precioUnitario", "20000");
+setLinea(lineaConFlujoId, "costoUnitario", "8000");
+click('[data-action="add-pedido"]');
+const pedidoConFlujo = state.pedidos.find(p => p.cliente === "Cliente Con Flujo");
+assert(pedidoConFlujo.sinFlujoProduccion === false, "con la casilla marcada, el pedido SÍ lleva flujo");
+assert(pedidoConFlujo.estado === "nuevo", "y arranca en la primera etapa, como cualquier pedido rápido de siempre");
+state.pedidosVista = "historial";
+render();
+const cardConFlujo = document.querySelector('[data-pedido-id="' + pedidoConFlujo.id + '"]');
+assert(!!cardConFlujo.querySelector(".pedido-ref-progreso"), "y su tarjeta sí muestra el progreso, como antes de este cambio");
+
+// La casilla no se ofrece en consignación: ya nace sin flujo por su cuenta.
+state.formPedido.esConsignacion = true;
+render();
+assert(!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "en consignación la casilla no se muestra: ese tipo de pedido ya es 'sin flujo' de por sí");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

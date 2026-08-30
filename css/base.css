@@ -77,16 +77,20 @@ input:focus-visible, select:focus-visible, textarea:focus-visible{outline:none;}
 .tx-form .tx-form-monto input{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:700;
   padding:12px 14px;letter-spacing:-0.01em;}
 
-/* La casilla de compra de insumo es una fila propia con su explicación, no una
-   etiqueta suelta perdida entre campos. */
-.tx-form-insumo-toggle{display:flex;align-items:flex-start;gap:11px;cursor:pointer;
+/* Casilla con su explicación debajo, en vez de una etiqueta suelta perdida
+   entre campos — para cualquier casilla que cambie el COMPORTAMIENTO de un
+   formulario, no solo un dato suelto (ej. "es compra de insumo" en Finanzas,
+   "lleva flujo de producción" en Pedidos). Nació como `.tx-form-insumo-toggle`
+   —solo de Finanzas— y se generalizó acá para no repetir la misma tarjetita
+   con otro nombre cada vez que otra pestaña necesite lo mismo. */
+.toggle-card{display:flex;align-items:flex-start;gap:11px;cursor:pointer;
   padding:13px 15px;border:1px solid var(--border-soft);border-radius:var(--radius-sm);
   background:var(--surface-2);}
-.tx-form-insumo-toggle:hover{border-color:var(--border-strong);}
-.tx-form-insumo-toggle input{margin-top:2px;flex-shrink:0;}
-.tx-form-insumo-toggle span{display:flex;flex-direction:column;gap:3px;min-width:0;}
-.tx-form-insumo-toggle b{font-size:13px;font-weight:600;color:var(--ink);}
-.tx-form-insumo-toggle small{font-size:11.5px;color:var(--ink-faint);line-height:1.5;}
+.toggle-card:hover{border-color:var(--border-strong);}
+.toggle-card input{margin-top:2px;flex-shrink:0;}
+.toggle-card span{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.toggle-card b{font-size:13px;font-weight:600;color:var(--ink);}
+.toggle-card small{font-size:11.5px;color:var(--ink-faint);line-height:1.5;}
 
 @media (max-width:600px){
   .tx-form-principal{grid-template-columns:1fr;}

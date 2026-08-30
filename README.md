@@ -78,6 +78,42 @@ Un arreglo sin su porqué es indistinguible de una preferencia arbitraria: el
 siguiente que pase por ahí lo "simplifica" y reintroduce el bug. Y se suma una
 prueba en `test/smoke.mjs`, que es la documentación que no se puede ignorar.
 
+## Registro de cambios — agosto 2026 (octava ronda: dos ajustes puntuales)
+
+**El botón "+ Nuevo insumo" se movió de la cabecera (arriba a la derecha) al
+final de la lista (abajo a la izquierda).** Es donde en verdad se está
+mirando después de recorrer la tabla, y queda alineado con la columna del
+nombre — el primer campo que hay que llenar en la fila que va a aparecer. De
+paso se pudo quitar el forzado de orden "Recientes" que la acción hacía antes
+(saltaba el insumo al principio de la lista para que quedara visible): con el
+botón abajo, forzar "Recientes" lo habría alejado del lugar donde se acababa
+de hacer clic, justo al revés de la intención. Ahora se respeta el orden que
+el usuario ya tenía elegido, y como el nombre nace vacío, el orden A–Z (el que
+viene por defecto) necesitó un ajuste — antes un nombre en blanco comparaba
+como "menor que cualquier letra" y saltaba al PRINCIPIO de la lista; ahora un
+nombre vacío se ordena al final, no al frente (ver `ordenarInsumos` en
+`modules/catalogo.js`).
+
+**Un pedido rápido puede marcarse "sin flujo de producción".** No todo pedido
+pasa por cortado/confección/etc.: algo ya hecho, un servicio, una reventa. El
+formulario de "Nuevo pedido rápido" tiene ahora una casilla —marcada por
+defecto, para no cambiarle el comportamiento a nadie que no la toque— justo
+después de elegir "Venta directa / Consignación" (no se ofrece en
+consignación: ese tipo de pedido ya nace sin flujo por su cuenta, mismo
+mecanismo). Al desmarcarla, el pedido nace directo con `estado: "entregado"`
+—el mismo truco que ya usaba consignación— y con la bandera explícita
+`sinFlujoProduccion: true`, que es lo que además le apaga el widget de
+progreso en la tarjeta. La bandera existe aparte del `estado` a propósito: sin
+ella, un pedido "ya entregado" seguiría mostrando la fila de progreso en su
+última etapa con la flecha de retroceder activa, como si sí llevara
+seguimiento y solo estuviera terminado — que no es lo mismo que "nunca hubo
+etapas que seguir".
+
+De paso, el checkbox-con-descripción de Finanzas ("¿Es una compra de
+insumo?") se generalizó: era `.tx-form-insumo-toggle`, solo suyo; ahora es
+`.toggle-card` en `base.css`, y la casilla nueva de Pedidos la reutiliza tal
+cual — la misma pieza, no una copiada con otro nombre.
+
 ## Registro de cambios — agosto 2026 (séptima ronda: ajustes sobre la sexta ronda)
 
 Correcciones puntuales sobre lo que se acababa de construir, a partir de usar

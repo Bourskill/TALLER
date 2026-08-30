@@ -168,6 +168,11 @@ export const state = {
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
+    // No todo pedido rápido pasa por producción (cortado, confección…): algo
+    // ya listo, un servicio, una reventa. En `true` por defecto para no
+    // cambiarle el comportamiento a nadie que no toque esta casilla — ver
+    // renderFormNuevoPedido/"add-pedido" en modules/pedidos.js.
+    conFlujoProduccion: true,
     // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
     esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
     // Líneas del pedido: cada una es { id, tipo:"catalogo"|"libre",
