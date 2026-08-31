@@ -222,6 +222,53 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (decimotercera ronda: movimientos sueltos de un pedido escalado)
+
+**Bug propio, reportado por el usuario:** *"creé un pedido rápido, luego lo
+pasé a cotización, generé movimientos, pero ahora esos movimientos quedaron
+como 'Movimientos sueltos (sin pedido)'"*.
+
+**Causa.** "Escalar" un pedido rápido a cotización (`pedidos.js`:
+`escalar-a-cotizacion`) crea una cotización que apunta al pedido original con
+`pedidoOrigenId` — pero la cotización sigue siendo un BORRADOR: no tiene
+`pedidoId` hasta que se pulsa "Aplicar a pedido". Eso es correcto para todo lo
+que decide qué NÚMEROS manda (`calcDesfaseCotizacionPedido`, la fecha de
+entrega) — el borrador no debe pisar al pedido real hasta que se aplique, a
+propósito. Pero **no es correcto para los movimientos de Finanzas**: un
+"Actualizar movimientos financieros" (compra real) o pagar la comisión del
+vendedor SÍ están disponibles desde el día uno, sin esperar a "Aplicar", y
+esos movimientos armaban su `pedidoId` mirando solo `cot.pedidoId` (vacío en
+ese momento) en vez de también `pedidoOrigenId`. El resultado: un movimiento
+de caja real, ya ligado a un pedido real que existe desde antes, aparecía como
+si no tuviera pedido — exactamente el descuadre visual que reportó el usuario,
+aunque el vínculo (`pedidoOrigenId` ↔ `cotizacionId`) seguía ahí los dos.
+
+**La corrección, en dos partes:**
+
+1. **En el origen** (`modules/cotizaciones.js`): los tres sitios que crean un
+   tx desde una cotización (comisión de vendedor, compra real, estimado
+   completo) ahora arman su `pedidoId` con `pedidoIdDeCotParaTx(cot)` —
+   `cot.pedidoId || cot.pedidoOrigenId || ""` —, una sola función en vez de
+   tres copias del mismo criterio.
+2. **Reparación de lo que ya había quedado huérfano** (`core/store.js`):
+   `repararTxHuerfanosDeCotEscalada()` corre una vez por cada `loadAll()` y
+   rellena el `pedidoId` de cualquier tx viejo que tenga `cotizacionId` pero
+   no `pedidoId`, si su cotización sabe a qué pedido pertenece
+   (`pedidoId`/`pedidoOrigenId`) y ese pedido todavía existe — así el usuario
+   no tiene que corregir a mano lo que el bug ya dejó mal en su Sheet. Mismo
+   cuidado que la migración de tallas de la reorganización anterior: se salta
+   por completo si alguna clave cayó al espejo local esta carga (podría estar
+   vieja frente a otro dispositivo) y se repite sola en la próxima carga con
+   conexión real, en vez de arriesgarse a reparar sobre un dato desactualizado.
+
+Cubierto en `test/smoke.mjs`: pagar la comisión y sincronizar una compra real
+desde una cotización escalada-sin-aplicar quedan ligados al pedido original en
+vez de sueltos, Finanzas los agrupa bajo su OP en vez de listarlos en
+"Movimientos sueltos (sin pedido)", y `repararTxHuerfanosDeCotEscalada` se
+prueba también en aislamiento: repara lo reparable y no toca un tx que ya
+estaba ligado, uno sin cotización, uno cuya cotización ya no existe, ni uno
+cuyo pedido de destino tampoco existe ya.
+
 ## Registro de cambios — agosto 2026 (duodécima ronda: los PDF se abren dentro de la app)
 
 **El pedido:** en la versión instalada como PWA, generar un PDF (cotización,

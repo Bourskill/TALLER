@@ -323,6 +323,37 @@ function safeParse(raw, fallback) {
   }
 }
 
+// Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin
+// `pedidoId` cuya cotización SÍ tiene a dónde apuntar (pedidoId, o
+// pedidoOrigenId si es un borrador "escalado" desde un pedido rápido — ver
+// pedidos.js: escalar-a-cotizacion). Devuelve true si reparó algo.
+//
+// Por qué existía el hueco: un borrador escalado arranca apuntando al pedido
+// original con `pedidoOrigenId`, no con `pedidoId` (ese solo se llena al
+// pulsar "Aplicar a pedido" — ver aplicar-cotizacion-a-pedido en
+// modules/cotizaciones.js). Pero SÍ se le pueden registrar movimientos reales
+// antes de eso (compra real, comisión de vendedor...), y esos armaban su
+// `pedidoId` mirando solo `cot.pedidoId` (la misma regla que
+// pedidoIdDeCotParaTx en modules/cotizaciones.js, que ya corrige el punto
+// donde se CREAN esos tx). Esta función solo repara los que ya habían
+// quedado huérfanos con datos viejos: en Finanzas se veían como "Movimientos
+// sueltos (sin pedido)" aunque el pedido y el vínculo (pedidoOrigenId ↔
+// cotizacionId) seguían existiendo los dos. Se llama desde loadAll(), nunca
+// sobre un espejo local que pudiera estar desactualizado frente a otro
+// dispositivo (ver el llamado, más abajo).
+export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
+  var huboReparacion = false;
+  (tx || []).forEach(function (t) {
+    if (t.pedidoId || !t.cotizacionId) return;
+    var cot = (cotizaciones || []).filter(function (c) { return c.id === t.cotizacionId; })[0];
+    var pedidoId = cot && (cot.pedidoId || cot.pedidoOrigenId);
+    if (!pedidoId || !(pedidos || []).some(function (p) { return p.id === pedidoId; })) return;
+    t.pedidoId = pedidoId;
+    huboReparacion = true;
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -519,6 +550,28 @@ export async function loadAll() {
         huboMigracion = true;
       });
       if (huboMigracion) { persist("cotizaciones"); persist("pedidos"); }
+    }
+
+    // Auto-reparación: un movimiento (tx) generado DESDE una cotización
+    // "escalada" desde un pedido rápido (pedidoOrigenId, ver pedidos.js:
+    // escalar-a-cotizacion) podía quedar con pedidoId VACÍO si se registró
+    // (compra real, costo estimado, comisión de vendedor) antes de pulsar
+    // "Aplicar a pedido" — en ese momento la cotización solo sabe
+    // `pedidoOrigenId`, y modules/cotizaciones.js armaba esos tx mirando
+    // solo `cot.pedidoId`. El bug de origen ya está corregido ahí (ver
+    // pedidoIdDeCotParaTx, misma regla que acá abajo), pero esto repara los
+    // tx que ya habían quedado huérfanos: en Finanzas se veían como
+    // "Movimientos sueltos (sin pedido)" aunque el pedido y el vínculo
+    // (pedidoOrigenId ↔ cotizacionId) seguían existiendo los dos.
+    //
+    // Solo corre si NINGUNA clave cayó al espejo local esta carga (no solo
+    // tx/cotizaciones: tx vive en su propia pestaña — ver TABLAS_SHEET arriba
+    // — y no tiene una bandera propia como clavesDeEspejo). Mismo criterio
+    // de la migración de tallas: mejor saltarla y repetirla en la próxima
+    // carga con conexión real que reparar sobre una copia que podría estar
+    // vieja frente a otro dispositivo.
+    if (!huboFalloDeRed && repararTxHuerfanosDeCotEscalada(state.tx, state.cotizaciones, state.pedidos)) {
+      persist("tx");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"

@@ -27,7 +27,7 @@ global.window.storage = {
 };
 
 const { render } = await import("../js/core/dom.js");
-const { loadAll, state } = await import("../js/core/store.js");
+const { loadAll, state, repararTxHuerfanosDeCotEscalada } = await import("../js/core/store.js");
 const auth = await import("../js/core/auth.js");
 function loginComo(rol, nombre, email) {
   sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
@@ -1180,6 +1180,85 @@ assert(document.querySelectorAll(".pedido-ref-progreso").length === 1, "y el ped
 // rápido — el usuario lo reportó dos veces. No debe quedar ni rastro de ella,
 // en ningún camino.
 assert(!document.querySelector(".tape-labels"), "el pedido rápido no muestra la barra vieja con todas las etapas: solo la fila compacta");
+
+// ---------------------------------------------------------------------------
+// El bug reportado: "creé un pedido rápido, luego lo pasé a cotización,
+// generé movimientos, pero quedaron como Movimientos sueltos (sin pedido)".
+// Causa: una cotización "escalada" desde un pedido rápido (pedidoOrigenId)
+// sigue siendo un BORRADOR — no tiene `pedidoId` hasta pulsar "Aplicar a
+// pedido" — pero sí puede generar movimientos reales (comisión, costo
+// estimado, compras) antes de eso. Esos movimientos armaban su `pedidoId`
+// mirando solo `cot.pedidoId` (vacío en ese momento), así que quedaban sin
+// pedido aunque el vínculo con el pedido real (pedidoOrigenId) siguiera ahí.
+// ---------------------------------------------------------------------------
+cotEscalada.vendedor = { nombre: "Vendedor Escalado", tipo: "fijo", valor: 30000, estado: "pendiente" };
+state.cotVendedorEditando = cotEscalada.id;
+state.tab = "cotizaciones";
+state.cotizacionesVista = "nueva";
+state.cotizacionEditando = cotEscalada.id;
+render();
+click('[data-action="toggle-comision-cot"][data-id="' + cotEscalada.id + '"]');
+const txComisionEscalada = state.tx.find(t => t.origenComisionCotId === cotEscalada.id);
+assert(!!txComisionEscalada, "pagar la comisión de una cotización escalada (sin aplicar aún) sí crea el movimiento");
+assert(txComisionEscalada.pedidoId === "ped-esc", "y queda ligado al pedido rápido original (vía pedidoOrigenId), no huérfano");
+
+// "sincronizar-compras-finanzas" (a diferencia del estimado completo, que
+// exige la cotización ya convertida) está disponible desde el día uno, así
+// que es el camino más típico para "generar movimientos" sobre un borrador
+// escalado todavía sin aplicar — justo lo que reportó el usuario.
+// Ojo: "toggle-comision-cot" ya reemplazó el objeto cotización en state (ver
+// su handler, que usa Object.assign para devolver uno nuevo) — hay que
+// tomarlo de nuevo del state en vez de seguir mutando la referencia vieja.
+const cotEscaladaV2 = state.cotizaciones.find(c => c.id === cotEscalada.id);
+cotEscaladaV2.costosGlobales = [{ id: "cg1", nombre: "Domicilio", costo: 20000, proveedorId: "", esServicio: false }];
+cotEscaladaV2.compras = [{ clave: "global|cg1", estado: "si", costoReal: 20000 }];
+render();
+click('[data-action="set-cot-tab"][data-id="' + cotEscalada.id + '"][data-val="produccion"]');
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotEscalada.id + '"]');
+const txCompraEscalada = state.tx.find(t => t.origenCompraClave === "global|cg1");
+assert(!!txCompraEscalada, "registrar una compra real también funciona antes de aplicar la cotización");
+assert(txCompraEscalada.pedidoId === "ped-esc", "y también queda agrupado bajo el pedido rápido en vez de aparecer como suelto");
+
+state.tab = "finanzas";
+state.finanzasVista = "historial";
+state.filtroTx = "todos"; state.filtroTxPeriodo = "todos";
+render();
+const cards = [...document.querySelectorAll(".card")];
+const cardOp = cards.find(c => c.textContent.includes("OP-9999"));
+const cardSueltos = cards.find(c => c.textContent.includes("Movimientos sueltos"));
+assert(!!cardOp && cardOp.textContent.includes("Vendedor Escalado") && cardOp.textContent.includes("Compra — Domicilio"), "en Finanzas, los dos movimientos aparecen agrupados bajo el pedido OP-9999");
+assert(!cardSueltos || (!cardSueltos.textContent.includes("Vendedor Escalado") && !cardSueltos.textContent.includes("Compra — Domicilio")), "y NINGUNO de los dos cae en \"Movimientos sueltos (sin pedido)\"");
+
+// La reparación de arriba corre en vivo (al registrar el movimiento), pero
+// quien reportó el bug ya tenía tx VIEJOS quedados huérfanos en su Sheet real
+// desde antes de este fix. repararTxHuerfanosDeCotEscalada (store.js) es la
+// auto-reparación que corre una vez en loadAll() para esos casos ya
+// existentes — se prueba aparte, en aislamiento, porque loadAll() completo
+// necesita una sesión de Google real.
+const txViejoHuerfano = { id: "tx-viejo-huerfano", tipo: "gasto", concepto: "Compra vieja", cotizacionId: "cot-vieja-esc", pedidoId: "" };
+const cotViejaEscalada = { id: "cot-vieja-esc", pedidoOrigenId: "ped-viejo", pedidoId: "" };
+const pedOrigenViejo = { id: "ped-viejo", numeroOp: "OP-0001" };
+let reparoAlgo = repararTxHuerfanosDeCotEscalada([txViejoHuerfano], [cotViejaEscalada], [pedOrigenViejo]);
+assert(reparoAlgo === true, "repararTxHuerfanosDeCotEscalada avisa que sí reparó algo");
+assert(txViejoHuerfano.pedidoId === "ped-viejo", "y le rellena el pedidoId huérfano usando pedidoOrigenId de su cotización");
+
+// No toca nada que no deba: un tx ya ligado, uno sin cotización, uno cuya
+// cotización ya no existe, y uno cuyo pedido de destino ya no existe tampoco.
+const txYaLigado = { id: "tx-ok", cotizacionId: "cot-vieja-esc", pedidoId: "ya-tenia" };
+const txSinCot = { id: "tx-suelto-real", cotizacionId: "", pedidoId: "" };
+const txCotBorrada = { id: "tx-cot-borrada", cotizacionId: "no-existe", pedidoId: "" };
+const txPedidoBorrado = { id: "tx-pedido-borrado", cotizacionId: "cot-pedido-borrado", pedidoId: "" };
+const cotPedidoBorrado = { id: "cot-pedido-borrado", pedidoOrigenId: "pedido-que-ya-no-existe", pedidoId: "" };
+reparoAlgo = repararTxHuerfanosDeCotEscalada(
+  [txYaLigado, txSinCot, txCotBorrada, txPedidoBorrado],
+  [cotViejaEscalada, cotPedidoBorrado],
+  [pedOrigenViejo]
+);
+assert(reparoAlgo === false, "y si no hay nada reparable, lo dice (no queda tocando cosas sin necesidad)");
+assert(txYaLigado.pedidoId === "ya-tenia", "un tx que ya tenía pedidoId no se toca");
+assert(txSinCot.pedidoId === "", "uno sin cotizacionId (huérfano de verdad, sin pedido de origen) se deja para la papelera/filtro de \"Sueltos\", no se inventa un pedido");
+assert(txCotBorrada.pedidoId === "", "uno cuya cotización ya no existe tampoco se toca: no hay de dónde sacar el pedido");
+assert(txPedidoBorrado.pedidoId === "", "y si el pedido de destino también fue eliminado, no se resucita un pedidoId que apunta a la nada");
 
 // ---------------------------------------------------------------------------
 // La serie de movimientos es una LÍNEA DE TIEMPO, no una lista de fechas con

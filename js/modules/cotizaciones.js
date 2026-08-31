@@ -1725,7 +1725,7 @@ export var actions = {
         monto: monto,
         contraparte: proveedor ? proveedor.nombre : "",
         fecha: compra.fecha || todayStr(),
-        pedidoId: cot.pedidoId || "",
+        pedidoId: pedidoIdDeCotParaTx(cot),
         cotizacionId: cot.id,
         // Una compra de la lista es, por definición, insumo/material del
         // pedido — de acá sale el desglose "Gasto en insumos" del reporte.
@@ -1962,7 +1962,7 @@ export var actions = {
     var pagando = cot.vendedor.estado !== "pagado";
     if (pagando) {
       var valor = calcComisionValorCot(cot);
-      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: cot.pedidoId || "", cotizacionId: cot.id, origenComisionCotId: id });
+      state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: pedidoIdDeCotParaTx(cot), cotizacionId: cot.id, origenComisionCotId: id });
     } else {
       state.tx = state.tx.filter(function (t) { return t.origenComisionCotId !== id; });
     }
@@ -2008,7 +2008,7 @@ export var actions = {
     state.tx.unshift({
       id: txId, tipo: "gasto", concepto: "Estimado completo del pedido — " + cot.descripcion,
       monto: totales.costoTotal, contraparte: cot.cliente, fecha: todayStr(),
-      pedidoId: cot.pedidoId || "", cotizacionId: cot.id
+      pedidoId: pedidoIdDeCotParaTx(cot), cotizacionId: cot.id
     });
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estimadoTxId: txId }) : c; });
     guardarCotizaciones(); persist("tx"); notify();
@@ -2320,6 +2320,22 @@ function repartirCostosGlobales(cot, lineas) {
     l.costoIndirectoUnitario = porUnidad;
     acumulado += deLaLinea;
   });
+}
+
+// A qué pedido pertenece un movimiento de Finanzas generado DESDE una
+// cotización (compra real, costo estimado, comisión de vendedor...). Usa
+// `pedidoOrigenId` como respaldo cuando todavía no hay `pedidoId`: una
+// cotización "escalada" desde un pedido rápido (ver pedidos.js:
+// escalar-a-cotizacion) sigue siendo un borrador — sus NÚMEROS no mandan
+// sobre el pedido hasta "Aplicar a pedido" (ver calcDesfaseCotizacionPedido,
+// que por eso solo mira pedidoId) — pero un movimiento de caja que ya se
+// registró ahí es plata real, ya ligada a un pedido real que existe desde
+// antes. Sin este respaldo, cualquier compra/estimado/comisión registrado en
+// ese borrador quedaba con pedidoId vacío: no aparecía agrupado bajo su
+// pedido en Finanzas, sino como "Movimientos sueltos (sin pedido)", aunque el
+// pedido siguiera ahí y el vínculo (pedidoOrigenId ↔ cotizacionId) también.
+function pedidoIdDeCotParaTx(cot) {
+  return (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
 }
 
 // ---------- El pedido como espejo de su cotización ----------
