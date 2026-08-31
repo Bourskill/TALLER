@@ -20,7 +20,10 @@ global.sessionStorage = dom.window.sessionStorage; // para simular login de vend
 const _memStorage = {};
 global.window.storage = {
   get: async function (key) { return _memStorage[key] !== undefined ? { value: _memStorage[key] } : null; },
-  set: async function (key, value) { _memStorage[key] = value; return true; }
+  set: async function (key, value) { _memStorage[key] = value; return true; },
+  keysConPrefijo: async function (prefijo) {
+    return Object.keys(_memStorage).filter(function (k) { return k.indexOf(prefijo) === 0 && _memStorage[k]; });
+  }
 };
 
 const { render } = await import("../js/core/dom.js");
@@ -1882,6 +1885,213 @@ assert(colEstimado.textContent.indexOf(fmt(45000)) !== -1, "en Producción, 'Est
 assert(colEstimado.textContent.indexOf("comisión del vendedor") !== -1, "'Estimado' explica con la misma nota cuánto se le descontó");
 assert(colReal.textContent.indexOf(fmt(45000)) !== -1, "'Real' coincide con 'Estimado' cuando no hay sobrecosto (los dos ya restan la misma comisión)");
 assert(colReal.textContent.indexOf("comisión del vendedor") !== -1, "'Real' también trae la nota, no solo 'Estimado'");
+
+// ---------------------------------------------------------------------------
+// Borradores sin guardar: una cotización en modo "guardado explícito" (o un
+// "Nuevo pedido rápido" a medio llenar) vivía SOLO en memoria hasta pulsar
+// Guardar/Crear — si la pestaña se cerraba antes (se actualizó el navegador,
+// se recargó por accidente, se cayó), esas horas de trabajo desaparecían sin
+// ningún aviso ni forma de recuperarlas. Se prueba: (1) el aviso de "¿seguro
+// que sales?" ahora sí se dispara, (2) el espejo local se refresca solo
+// mientras se edita, (3) al "reabrir la app" se ofrece recuperar el
+// borrador, y (4) recuperarlo nunca intenta guardar en la Sheet una clave
+// que no tiene fila propia ahí (formPedido) — eso corrompería la pestaña "kv".
+// ---------------------------------------------------------------------------
+const storeMod2 = await import("../js/core/store.js");
+
+// (1) beforeunload: antes solo miraba si había un guardado FALLIDO
+// (hayPendientes) — una edición que nunca se INTENTÓ guardar no pasaba por
+// ahí y se podía cerrar sin ningún aviso.
+// (nota: esta sesión de pruebas ya dejó un guardado fallido real colgado más
+// arriba — simula sesión de Google vencida a propósito — así que
+// hayPendientes() por sí solo ya dispara la advertencia de aquí en adelante.
+// Por eso solo se puede probar la mitad "con borrador SÍ advierte", que es
+// justamente la que antes NO existía; la mitad "sin nada, no advierte" ya
+// estaba cubierta por el hayPendientes() original y no cambió con este fix.)
+guardadoMod.marcarBorrador("cotizaciones", () => JSON.stringify(state.cotizaciones));
+const evtConBorrador = new dom.window.Event("beforeunload", { cancelable: true });
+window.dispatchEvent(evtConBorrador);
+assert(evtConBorrador.defaultPrevented, "cerrar la pestaña con una edición sin guardar (sin ningún intento de guardado fallido de por medio) SÍ dispara la advertencia del navegador");
+guardadoMod.olvidarBorrador("cotizaciones");
+
+// (2) el espejo se refresca solo mientras se edita, sin que nadie pulse
+// Guardar — reutiliza la cotización de la prueba de comisión de arriba.
+state.cotSucia = cotCom.id;
+render(); // dispara revisarBorradoresSinGuardar() -> marcarBorrador("cotizaciones", ...)
+assert(guardadoMod.hayBorradores(), "editar una cotización marca de inmediato que hay un borrador sin guardar (sin esperar el debounce del espejo)");
+const descripcionOriginalCotCom = state.cotizaciones.find(c => c.id === cotCom.id).descripcion;
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotCom.id ? Object.assign({}, c, { descripcion: "Editado justo antes de que se cerrara sola" }) : c);
+render();
+await new Promise(r => setTimeout(r, 2500)); // pasa el tiempo de espera del espejo de borradores (1500ms) con margen de sobra
+const espejoTrasEspera = guardadoMod.leerEspejo("cotizaciones");
+assert(!!espejoTrasEspera && espejoTrasEspera.indexOf("Editado justo antes de que se cerrara sola") !== -1, "y unos segundos después (sin que nadie pulse Guardar) esa edición ya quedó en el espejo local, lista para recuperarse si la pestaña se cierra sola");
+
+// (3) al "reabrir la app" (loadAll de nuevo) con el borrador todavía
+// marcado, se ofrece recuperarlo — simulando que la Sheet real SIGUE con la
+// versión de antes (nadie guardó todavía) mientras el espejo de este
+// navegador ya tiene el cambio.
+const cotizacionesComoEnLaSheet = state.cotizaciones.map(c => c.id === cotCom.id ? Object.assign({}, c, { descripcion: descripcionOriginalCotCom }) : c);
+const getOriginalRecup = window.storage.get;
+window.storage.get = async function (key, arg2) {
+  if (key === constantsMod.KEYS.cotizaciones) return { value: JSON.stringify(cotizacionesComoEnLaSheet) };
+  return getOriginalRecup(key, arg2);
+};
+state.recuperacion = null;
+await loadAll();
+window.storage.get = getOriginalRecup;
+assert(!!state.recuperacion, "al 'reabrir la app' con un borrador de cotización todavía marcado, se ofrece recuperarlo — antes esto NUNCA pasaba para una edición que nunca se intentó guardar");
+assert(state.recuperacion.claves.indexOf("cotizaciones") !== -1, "...específicamente señalando la clave 'cotizaciones'");
+assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === descripcionOriginalCotCom, "sanity: justo después del 'reinicio', la pantalla muestra la versión SIN el cambio (la que ya estaba guardada)");
+
+await storeMod2.recuperarDelEspejo();
+assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === "Editado justo antes de que se cerrara sola", "restaurar el borrador SÍ trae de vuelta la edición que nunca se guardó");
+assert(state.recuperacion === null, "y cierra el aviso de recuperación");
+state.cotSucia = "";
+render();
+
+// (4) el caso más delicado: un borrador de "Nuevo pedido rápido" (formPedido)
+// NUNCA tuvo una fila propia en la Sheet — recuperarlo debe restaurarlo EN
+// PANTALLA, pero jamás intentar escribirlo (eso mandaría una clave
+// inventada a la pestaña "kv" y la corrompería).
+guardadoMod.espejar("formPedido", JSON.stringify({
+  clienteId: "", cliente: "Cliente Recuperado", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+  lineas: [{ id: "lx", productoNombre: "Prueba recuperación", cantidad: 2 }]
+}));
+state.recuperacion = { claves: ["formPedido"], etiquetas: [storeMod2.ETIQUETA_CLAVE.formPedido] };
+const setCallsRecup = [];
+const originalSetRecup = window.storage.set;
+window.storage.set = async function (key, value, arg2) { setCallsRecup.push(key); return originalSetRecup(key, value, arg2); };
+await storeMod2.recuperarDelEspejo();
+window.storage.set = originalSetRecup;
+assert(state.formPedido.cliente === "Cliente Recuperado" && state.formPedido.lineas.length === 1, "recuperarDelEspejo restaura un borrador de 'Nuevo pedido rápido' EN PANTALLA...");
+// Esta recuperación viene del espejo LOCAL (state.recuperacion no lleva
+// .nube), así que no hay ninguna limpieza en la nube que hacer — pero pase
+// lo que pase, JAMÁS debe escribirse con una clave inventada o vacía
+// (KEYS.formPedido ni siquiera existe: sería `undefined` como clave), que
+// es lo que de verdad corrompería la pestaña "kv".
+assert(setCallsRecup.indexOf(undefined) === -1 && setCallsRecup.indexOf(constantsMod.KEYS.formPedido) === -1, "...y jamás con una clave inventada o vacía que corrompería la pestaña 'kv'");
+assert(setCallsRecup.length === 0, "...de hecho, al venir del espejo local (no de la nube), no hay ninguna limpieza de nube que hacer: cero escrituras");
+assert(state.recuperacion === null, "y también cierra el aviso de recuperación para este caso");
+
+// ---------------------------------------------------------------------------
+// Borrador EN LA NUBE: el espejo local de arriba resuelve "se me cerró la
+// pestaña sola" en ESTE navegador, pero vive en localStorage — abrir desde
+// otro computador, otro navegador, o después de borrar datos de navegación
+// no tiene nada local de dónde recuperar. Por eso la misma edición también
+// se manda —mejor esfuerzo, como mucho cada 4s— a su propia fila de la
+// pestaña "kv", separada por correo Y por cotización. Se prueba: (1) que de
+// verdad se manda mientras se edita, con la versión más reciente aunque se
+// siga editando mientras la cuenta regresiva corre, y con `basadaEn`
+// incluido; (2) que recuperar desde la nube funciona con CERO rastro local
+// (la prueba real de "otro dispositivo"), tanto para una cotización
+// (fusionada por id, sin pisar las demás) como para un pedido rápido a
+// medio llenar; (3) que un borrador VIEJO (cuya `basadaEn` ya no coincide
+// con lo guardado de verdad — ej. la limpieza tras Guardar falló en
+// silencio) NO se ofrece, porque restaurarlo regresaría la cotización a una
+// versión vieja; y (4) que dos borradores de cotizaciones DISTINTAS en la
+// nube a la vez (dos pestañas o dos dispositivos) ya no se pisan entre sí.
+// ---------------------------------------------------------------------------
+const claveNubeCot = "borrador:cotizaciones:admin@taller.test:" + cotCom.id;
+const claveNubeFp = "borrador:formPedido:admin@taller.test";
+
+// (1) se manda mientras se edita, respetando el tope de "como mucho cada 4s"
+// (no un debounce que se reinicia con cada tecla y nunca llega a mandar
+// nada si alguien escribe sin parar) — y cuando por fin manda, va con la
+// versión MÁS RECIENTE, no la que había cuando arrancó la cuenta regresiva.
+state.cotSucia = cotCom.id;
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotCom.id ? Object.assign({}, c, { descripcion: "Borrador en la nube v1" }) : c);
+render(); // arranca la cuenta regresiva de 4s
+
+const enviosNube = [];
+const origSetNube = window.storage.set;
+window.storage.set = async function (key, value, arg2) {
+  if (key === claveNubeCot) enviosNube.push(value);
+  return origSetNube(key, value, arg2);
+};
+
+await new Promise(r => setTimeout(r, 1800)); // menos de 4s: todavía no debería haber mandado nada
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotCom.id ? Object.assign({}, c, { descripcion: "Borrador en la nube v2 (la más reciente)" }) : c);
+render(); // sigue "escribiendo" — esto NO debe reprogramar la cuenta regresiva
+await new Promise(r => setTimeout(r, 2700)); // total ~4.5s desde el primer render: ya debió mandar
+
+window.storage.set = origSetNube;
+assert(enviosNube.length >= 1, "mientras se edita una cotización, el borrador también se manda a la nube (no solo al espejo local) — como mucho cada 4 segundos, en su propia clave con el id de la cotización");
+const payloadNube = JSON.parse(enviosNube[enviosNube.length - 1]);
+assert(payloadNube.cotizacionId === cotCom.id && payloadNube.cotizacion.descripcion === "Borrador en la nube v2 (la más reciente)", "y cuando manda, va con la versión más reciente — no la que había cuando arrancó la cuenta regresiva, aunque se haya seguido editando mientras tanto");
+assert(!!payloadNube.basadaEn && payloadNube.basadaEn.id === cotCom.id, "y guarda de qué versión partió (basadaEn), para poder distinguir después un borrador todavía vigente de uno que ya quedó viejo");
+
+state.cotSucia = "";
+render(); // limpia el borrador local Y en la nube antes de seguir
+
+// (2) recuperar desde CERO rastro local — la prueba real de "otro
+// dispositivo": se borra el rastro local de "cotizaciones" (como si nunca
+// hubiera pasado por este navegador) y solo queda la versión "ya guardada"
+// (como si viniera de la Sheet real) más el borrador que sí quedó en la nube.
+guardadoMod.olvidarBorrador("cotizaciones");
+window.localStorage.removeItem("taller_espejo_v1:cotizaciones");
+const cotBaseGuardada = Object.assign({}, state.cotizaciones.find(c => c.id === cotCom.id), { descripcion: "Descripción ya guardada de verdad (sin el cambio del otro dispositivo)" });
+const cantidadCotizacionesAntes = state.cotizaciones.length;
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotCom.id ? cotBaseGuardada : c);
+await window.storage.set(constantsMod.KEYS.cotizaciones, JSON.stringify(state.cotizaciones), false); // fija "lo que de verdad está en la Sheet"
+const cotDesdeOtroDispositivo = Object.assign({}, cotBaseGuardada, { descripcion: "Cambio hecho desde el celular, nunca guardado" });
+await window.storage.set(claveNubeCot, JSON.stringify({ cotizacionId: cotCom.id, cotizacion: cotDesdeOtroDispositivo, basadaEn: cotBaseGuardada }), false);
+state.recuperacion = null;
+
+await loadAll();
+assert(!!state.recuperacion, "abrir la app SIN NINGÚN rastro local (como si fuera otro dispositivo o navegador distinto) igual ofrece recuperar, porque el borrador quedó guardado también en la nube");
+assert(state.recuperacion.claves.indexOf("cotizaciones") !== -1, "...con la clave correcta");
+assert(state.recuperacion.nube && Array.isArray(state.recuperacion.nube.cotizaciones) && state.recuperacion.nube.cotizaciones.some(d => d.cotizacionId === cotCom.id), "...y sabe que viene de la nube, no de un espejo local que acá no existe");
+
+await storeMod2.recuperarDelEspejo();
+assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === "Cambio hecho desde el celular, nunca guardado", "restaurar desde la nube trae de vuelta ese cambio, aunque ESTE navegador nunca lo haya visto");
+assert(state.cotizaciones.length === cantidadCotizacionesAntes, "...fusionando solo esa cotización por id, sin pisar ni perder ninguna otra del arreglo completo");
+
+// (3) un borrador VIEJO en la nube — su `basadaEn` ya NO coincide con lo que
+// hay guardado de verdad (como si esta edición ya se hubiera guardado por
+// otro lado, o la limpieza tras Guardar hubiera fallado en silencio) — NO
+// se ofrece: ofrecerlo regresaría la cotización a una versión vieja.
+const cotYaGuardadaDeVerdad = state.cotizaciones.find(c => c.id === cotCom.id);
+const basadaEnVieja = Object.assign({}, cotYaGuardadaDeVerdad, { descripcion: "Versión de hace rato, de la que partió un borrador que nunca se limpió" });
+await window.storage.set(claveNubeCot, JSON.stringify({
+  cotizacionId: cotCom.id,
+  cotizacion: Object.assign({}, cotYaGuardadaDeVerdad, { descripcion: "Cambio de un borrador viejo que ya no aplica" }),
+  basadaEn: basadaEnVieja
+}), false);
+state.recuperacion = null;
+await loadAll();
+assert(!state.recuperacion, "un borrador en la nube cuya base (basadaEn) YA NO coincide con lo guardado de verdad no se ofrece — ofrecerlo regresaría la cotización a una versión vieja, aunque el 'borrador' en sí sea distinto de lo actual");
+await window.storage.set(claveNubeCot, "", false); // limpio para no interferir con lo que sigue
+
+// (4) dos borradores de cotizaciones DISTINTAS en la nube a la vez (dos
+// pestañas, o dos dispositivos, cada uno editando la suya): antes se pisaban
+// entre sí (una sola clave sin id — "el último que escribe gana"); ahora
+// cada una tiene su propia clave con id y las dos se ofrecen y se restauran.
+const cotBaseB = Object.assign({}, state.cotizaciones.find(c => c.descripcion === "Prueba de servicio en producción"));
+await window.storage.set(constantsMod.KEYS.cotizaciones, JSON.stringify(state.cotizaciones), false); // fija la Sheet real con ambas tal como están
+const cotEditadaA = Object.assign({}, cotYaGuardadaDeVerdad, { descripcion: "Editada en la pestaña 1" });
+const cotEditadaB = Object.assign({}, cotBaseB, { descripcion: "Editada en la pestaña 2" });
+await window.storage.set("borrador:cotizaciones:admin@taller.test:" + cotYaGuardadaDeVerdad.id, JSON.stringify({ cotizacionId: cotYaGuardadaDeVerdad.id, cotizacion: cotEditadaA, basadaEn: cotYaGuardadaDeVerdad }), false);
+await window.storage.set("borrador:cotizaciones:admin@taller.test:" + cotBaseB.id, JSON.stringify({ cotizacionId: cotBaseB.id, cotizacion: cotEditadaB, basadaEn: cotBaseB }), false);
+state.recuperacion = null;
+await loadAll();
+assert(!!state.recuperacion && state.recuperacion.nube && state.recuperacion.nube.cotizaciones.length === 2, "dos pestañas/dispositivos editando cotizaciones DISTINTAS a la vez ya no se pisan el borrador en la nube: las dos se ofrecen juntas");
+await storeMod2.recuperarDelEspejo();
+assert(state.cotizaciones.find(c => c.id === cotYaGuardadaDeVerdad.id).descripcion === "Editada en la pestaña 1", "...y restaurar trae de vuelta la primera...");
+assert(state.cotizaciones.find(c => c.id === cotBaseB.id).descripcion === "Editada en la pestaña 2", "...y también la segunda, sin que ninguna se perdiera por compartir la misma fila de la nube");
+
+// Lo mismo para "Nuevo pedido rápido": sin rastro local, con un borrador en
+// la nube — se restaura EN PANTALLA igual que el caso local ya probado
+// arriba, sin escribir nada a KEYS.formPedido (que no existe).
+window.localStorage.removeItem("taller_espejo_v1:formPedido");
+await window.storage.set(claveNubeFp, JSON.stringify({ formPedido: { cliente: "Cliente desde otro navegador", lineas: [{ id: "y1", productoNombre: "Otra prueba", cantidad: 3 }] } }), false);
+state.recuperacion = null;
+await loadAll();
+assert(!!state.recuperacion && state.recuperacion.claves.indexOf("formPedido") !== -1, "un pedido rápido a medio llenar también se ofrece recuperar desde la nube sin ningún rastro local");
+await storeMod2.recuperarDelEspejo();
+assert(state.formPedido.cliente === "Cliente desde otro navegador" && state.formPedido.lineas.length === 1, "y restaurarlo trae de vuelta exactamente lo que había en la nube");
+assert(state.recuperacion === null, "y cierra el aviso");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

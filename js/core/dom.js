@@ -10,7 +10,7 @@
 // si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
-import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion } from "./store.js";
+import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar } from "./store.js";
 import { esc } from "./utils.js";
 import { clienteById, calcNotificaciones, unidadesConocidas } from "./calc.js";
 import { ICONS } from "./icons.js";
@@ -314,6 +314,13 @@ export function render() {
   if (rendering) { pendingRerender = true; return; }
   rendering = true;
 
+  // Se revisa en CADA render (no en cada acción de edición suelta) si hay una
+  // cotización en modo "guardado explícito" o un pedido rápido a medio
+  // llenar — es lo que hace que cerrar la pestaña con eso a medias avise y,
+  // si aun así se pierde, se pueda recuperar al volver a abrir (ver
+  // revisarBorradoresSinGuardar en core/store.js).
+  revisarBorradoresSinGuardar();
+
   aplicarTema();
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
@@ -576,10 +583,22 @@ function renderAvisoSinGuardar() {
 function renderAvisoRecuperacion() {
   var r = state.recuperacion;
   if (!r) return "";
+  // "Este navegador tiene una copia" es cierto para el espejo local, pero NO
+  // para un borrador que llegó de la nube (ver core/store.js: recuperación
+  // desde otro dispositivo/navegador, donde este navegador no tiene nada
+  // local) — decirlo igual sería confuso justo en el caso para el que existe
+  // esa vía (abriste desde OTRO sitio y acá no hay ningún rastro).
+  var hayNube = !!(r.nube && Object.keys(r.nube).length);
+  var todoNube = hayNube && r.claves.every(function (c) { return r.nube[c]; });
+  var origen = todoNube
+    ? "Encontramos, guardada en la nube, una copia sin guardar de: "
+    : hayNube
+      ? "Este navegador (o la nube, si la edición viene de otro dispositivo) tiene una copia sin guardar de: "
+      : "Este navegador tiene una copia de: ";
   return '<div class="aviso-barra recuperar">' +
     "<div><b>Quedaron cambios sin guardar de la última vez que usaste la app.</b>" +
-    '<div class="aviso-barra-sub">Este navegador tiene una copia de: ' + esc(r.etiquetas.join(", ")) + ". " +
-    "Si fuiste tú y no los guardaste, restaurálos. Si mientras tanto trabajaste desde otro dispositivo, descartálos para no pisar lo de allá.</div></div>" +
+    '<div class="aviso-barra-sub">' + origen + esc(r.etiquetas.join(", ")) + ". " +
+    "Si fuiste tú y no los guardaste, restaurálos. Si mientras tanto trabajaste desde otro dispositivo con una versión más nueva, descartálos para no pisar lo de allá.</div></div>" +
     '<span style="display:flex;gap:8px;flex-wrap:wrap;">' +
     '<button class="btn ghost small" data-action="descartar-recuperacion">Descartar</button>' +
     '<button class="btn" data-action="recuperar-espejo">Restaurar</button>' +

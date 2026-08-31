@@ -120,6 +120,75 @@ export function leerEspejo(clave) {
   try { return ls.getItem(ESPEJO_PREFIX + clave); } catch (e) { return null; }
 }
 
+// ---------- borradores: edición en curso que NUNCA se intentó guardar ----------
+// Distinto de `pendientes`/`enCola` de arriba (que son intentos de escritura
+// que fallaron o quedaron a medias): una cotización en modo "guardado
+// explícito" (ver marcarSucia en modules/cotizaciones.js) o un "Nuevo pedido
+// rápido" a medio llenar viven SOLO en `state`, en memoria — nadie llamó
+// jamás a guardarClave() para ellos, así que `pendientes`/`enCola` nunca se
+// enteran de que existen. Si la pestaña se cierra sola (se actualizó el
+// navegador, se cayó, se recargó por accidente) esas horas de trabajo
+// desaparecían sin ningún aviso ni forma de recuperarlas — justo lo que este
+// archivo existe para evitar en el resto de los casos. `borradores` cierra
+// ese hueco: se anota qué claves tienen edición sin guardar (para el aviso de
+// "¿seguro que quieres salir?" de abajo) y, con calma unos segundos después
+// del último cambio, se refresca su copia en el espejo (para poder
+// recuperarla al volver a abrir la app — ver detectarRecuperacion en
+// core/store.js, que ya sabía leer el espejo, solo no sabía de este motivo
+// nuevo para que hubiera uno que recuperar).
+var borradores = {}; // { [clave]: true } — hay edición sin guardar para esta clave, ahora mismo
+var BORRADORES_KEY = "taller_borradores_v1";
+var TIEMPO_ESPEJO_BORRADOR_MS = 1500; // se espera una pausa en la escritura antes de mirar el estado completo
+var timersBorrador = {};
+
+function anotarBorradoresEnDisco() {
+  var ls = almacen();
+  if (!ls) return;
+  try {
+    var claves = Object.keys(borradores);
+    if (claves.length) ls.setItem(BORRADORES_KEY, JSON.stringify(claves));
+    else ls.removeItem(BORRADORES_KEY);
+  } catch (e) { /* cuota llena */ }
+}
+
+// `obtenerJson` es una FUNCIÓN, no el JSON ya armado: como esto se llama en
+// cada render mientras se edita (ver revisarBorradoresSinGuardar en
+// core/store.js), armar el JSON del estado completo en cada tecla sería
+// carísimo para nada — solo se paga ese costo cuando de verdad pasa el
+// tiempo de espera sin que haya un cambio más reciente.
+export function marcarBorrador(clave, obtenerJson) {
+  if (!borradores[clave]) {
+    borradores[clave] = true;
+    anotarBorradoresEnDisco();
+  }
+  clearTimeout(timersBorrador[clave]);
+  timersBorrador[clave] = setTimeout(function () {
+    espejar(clave, obtenerJson());
+  }, TIEMPO_ESPEJO_BORRADOR_MS);
+}
+export function olvidarBorrador(clave) {
+  clearTimeout(timersBorrador[clave]);
+  delete timersBorrador[clave];
+  if (!borradores[clave]) return;
+  delete borradores[clave];
+  anotarBorradoresEnDisco();
+}
+// Claves con un borrador anotado en disco de una sesión ANTERIOR — mismo
+// papel que pendientesDeSesionAnterior() de abajo, pero para este motivo
+// nuevo. Vive en su propia clave de localStorage (no mezclada con
+// PENDIENTES_KEY) porque conceptualmente son cosas distintas: un intento de
+// guardado que falló vs. una edición que nunca se intentó guardar.
+export function borradoresDeSesionAnterior() {
+  var ls = almacen();
+  if (!ls) return [];
+  try {
+    var raw = ls.getItem(BORRADORES_KEY);
+    var lista = raw ? JSON.parse(raw) : [];
+    return Array.isArray(lista) ? lista : [];
+  } catch (e) { return []; }
+}
+export function hayBorradores() { return Object.keys(borradores).length > 0; }
+
 function anotarEnDisco() {
   var ls = almacen();
   if (!ls) return;
@@ -172,7 +241,12 @@ export function configurarGuardado(opts) {
   if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener("online", function () { reintentarPendientes(); });
     window.addEventListener("beforeunload", function (e) {
-      if (!hayPendientes()) return;
+      // Antes solo miraba hayPendientes() (intentos de guardado fallidos) —
+      // una cotización a medio armar en modo "guardado explícito", o un
+      // pedido rápido a medio llenar, nunca pasan por ahí (nadie intentó
+      // guardarlos todavía), así que se podían cerrar sin ningún aviso y
+      // perderse enteros. Ver "borradores" más arriba.
+      if (!hayPendientes() && !hayBorradores()) return;
       // El texto lo decide el navegador (hace años que ignoran el nuestro);
       // lo que importa es que NO se pueda cerrar sin ver la advertencia.
       e.preventDefault();

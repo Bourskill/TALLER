@@ -222,6 +222,156 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (undécima ronda: se perdía trabajo sin guardar)
+
+**El problema:** una cotización en modo "guardado explícito" (los cambios se
+aplican en memoria de inmediato, pero solo se escriben a la Sheet cuando se
+pulsa "Guardar") y el formulario de "Nuevo pedido rápido" vivían SOLO en
+memoria hasta ese clic final. La red de seguridad de guardado
+(`core/guardado.js`: espejo local + cola de reintento + aviso al cerrar la
+pestaña) existe desde antes, pero está enganchada a que se haya INTENTADO
+guardar al menos una vez — una edición que nunca llegó a ese punto le era
+invisible por completo. Si la pestaña se cerraba sola en el medio (se
+actualizó el navegador, se recargó por accidente, se cayó), esas horas de
+trabajo desaparecían sin ningún aviso previo ni forma de recuperarlas después.
+
+**La solución: un sistema paralelo de "borradores" que reutiliza toda la
+infraestructura de recuperación que ya existía**, en vez de construir un
+aviso o una pantalla nuevos:
+
+- `core/guardado.js` gana `marcarBorrador`/`olvidarBorrador`: además del
+  espejo que ya se escribía en cada intento de guardado, ahora también se
+  espeja (con medio segundo de debounce) cualquier edición en modo
+  "guardado explícito" mientras se está editando, sin esperar a que alguien
+  pulse Guardar. El aviso de "¿seguro que sales?" al cerrar la pestaña ahora
+  mira tanto los guardados fallidos de siempre como estos borradores nuevos.
+- `core/store.js` gana `revisarBorradoresSinGuardar()`, que se llama una vez
+  por cada `render()` (no en cada sitio que edita una cotización o el
+  formulario — son decenas, y fácil olvidar alguno) y marca o desmarca el
+  borrador mirando el estado mismo (`state.cotSucia`, si el formulario de
+  pedido tiene contenido). Si algo nuevo empieza a usar "guardado explícito"
+  en el futuro, basta con sumarlo ahí una vez.
+- La detección y el aviso de recuperación al reabrir la app (que ya existían
+  para guardados fallidos) ahora también consideran estos borradores — la
+  misma barra, el mismo botón "Restaurar", sin pantalla nueva.
+
+**El descuadre que casi pasa desapercibido:** al escribir las pruebas se
+encontró que la recuperación, tal como quedó armada al principio, JAMÁS se
+iba a ofrecer con la conexión funcionando — que es el caso más común (abrir
+la app al otro día con wifi bien), no el raro. La razón: `loadAll()`, al leer
+cada clave de la Sheet con éxito, reescribe el espejo local con lo recién
+leído (para tener algo reciente si la PRÓXIMA carga falla) — y esa reescritura
+corría ANTES de que la detección de recuperación alcanzara a comparar,
+borrando la evidencia del borrador en el propio proceso de buscarla. Con la
+red caída nunca se notaba (esa reescritura no llega a correr), pero con red
+sí — que es la inmensa mayoría de las veces — la recuperación se apagaba
+sola. Se corrigió tomando una foto del espejo ANTES de tocar la red y
+comparando (y, al restaurar, restaurando) contra esa foto, no contra el
+espejo en vivo — así ninguna lectura posterior puede pisar la evidencia
+mientras el aviso sigue en pantalla.
+
+**El resguardo contra corromper la Sheet:** `formPedido` (el borrador de
+"Nuevo pedido rápido") nunca tuvo una fila propia en la hoja "kv" — es
+puramente un formulario en memoria hasta que se pulsa "Crear pedido". Si
+`recuperarDelEspejo()` intentara guardarlo igual que cualquier otra clave
+recuperada, escribiría con una clave `undefined` en esa pestaña. Se agregó
+`CLAVES_PERSISTIBLES` (la lista de claves que sí tienen fila real, tomada de
+`KEYS`) como filtro explícito antes de cualquier `persist()` en ese flujo:
+un borrador de `formPedido` se restaura en pantalla, nunca se manda a
+guardar.
+
+Cubierto en `test/smoke.mjs`: el aviso de cierre se dispara con un borrador
+sin guardar de por medio, el espejo se actualiza solo mientras se edita, la
+recuperación se ofrece de verdad al "reabrir" con la red funcionando (el caso
+que se estuvo a punto de dejar roto), restaurar trae de vuelta la edición
+perdida, y — el más delicado — restaurar un borrador de `formPedido` nunca
+dispara una escritura a la Sheet.
+
+### Extensión: borrador también en la nube (recuperar desde OTRO dispositivo)
+
+El sistema de arriba resuelve "se me cerró la pestaña sola" — pero el espejo
+vive en `localStorage`, así que abrir desde otro computador, otro navegador,
+o después de borrar datos de navegación no tenía nada local de dónde
+recuperar. El usuario preguntó explícitamente si esto quedaba cubierto en
+*cualquier* situación (dispositivo distinto incluido) y pidió que sí.
+
+**La solución:** la misma edición que ya se espeja localmente también se
+manda —mejor esfuerzo, como mucho cada 4 segundos, sin cola de reintento— a
+su propia fila en la pestaña "kv" de la Sheet, con una clave dinámica
+separada por correo Y por cotización (`borrador:cotizaciones:<email>:<id>`,
+`borrador:formPedido:<email>`) para que dos pestañas o dos dispositivos de
+la misma persona, editando cotizaciones distintas a la vez, no se pisen el
+borrador entre sí. Si esta escritura falla (sin red, token vencido) no pasa
+nada grave: el espejo local sigue siendo la red de seguridad principal, y el
+siguiente cambio programa otro intento en unos segundos igual.
+
+Piezas nuevas en `core/store.js`: `programarBorradorNube` es a propósito un
+TOPE ("como mucho cada 4s"), no un debounce — un debounce se reprogramaría
+en cada tecla y, con alguien escribiendo sin parar, nunca llegaría a mandar
+nada. Lee el estado más reciente al disparar (no el de cuando se programó),
+así que siempre manda la última versión aunque se haya seguido editando
+mientras la cuenta regresiva corría. `detectarRecuperacion()` ahora también
+revisa estos borradores de la nube (puede haber más de uno a la vez — una
+cotización distinta por pestaña/dispositivo, ver `sheetsStorage.keysConPrefijo`
+para listarlos sin gastar una lectura de red aparte), pero SOLO para un área
+que el espejo LOCAL no cubra ya (el local es más fresco — 1.5s contra 4s —
+así que gana cuando hay de los dos). Para `cotizaciones` compara y restaura
+por id, cada referencia dentro del arreglo completo, nunca el arreglo entero.
+
+**El descuadre que encontró una revisión adversarial antes de darlo por
+cerrado:** un borrador en la nube no llevaba ninguna marca de versión, así
+que un fallo silencioso en su limpieza (la misma clase de fallo que motivó
+todo este sistema: red caída justo en ese instante) lo dejaba viviendo para
+siempre — y en la próxima carga, `detectarRecuperacion()` lo comparaba contra
+lo que hay guardado HOY, no contra qué tan viejo era el borrador en sí. Un
+borrador de hace semanas, ya completamente superado por ediciones reales
+posteriores, se ofrecía igual como "recuperación" — y restaurarlo habría
+**regresado una cotización ya guardada a una versión vieja**, el tipo de daño
+que este sistema entero existe para evitar. Se corrigió agregando `basadaEn`
+al borrador: una foto de la cotización TAL COMO ESTABA GUARDADA cuando ese
+borrador arrancó (el mismo dato que ya guarda `state.cotSnapshot`). Si lo que
+hay guardado de verdad hoy ya no es eso, el borrador quedó viejo y se
+descarta sin ofrecerlo, sin importar qué tan distinto sea su contenido.
+
+La misma revisión encontró que la clave original (`borrador:cotizaciones:<email>`,
+sin el id) hacía que dos pestañas o dispositivos de la MISMA persona editando
+cotizaciones DISTINTAS se pisaran el borrador — el último en escribir se
+comía al otro. Se corrigió agregando el id de la cotización a la clave, lo
+que a su vez obligó a poder LISTAR borradores por prefijo (no se sabe de
+antemano cuál cotización tiene uno pendiente en otro dispositivo) —
+`sheetsStorage.js` ganó `keysConPrefijo`, que no cuesta ninguna lectura de
+red aparte porque la pestaña "kv" completa ya vive en caché para cualquier
+`get`/`set` normal.
+
+**Por qué esto sigue sin ser un "100% garantizado" absoluto, y se le dijo así
+al usuario:** ningún borrador —local o en la nube— puede salvar los
+segundos justo antes de un corte de luz o un cierre forzado del navegador
+(el tope de la nube es de 4s; el debounce local, 1.5s). Tampoco sustituye una
+sincronización real entre dispositivos: si el mismo usuario edita la misma
+cotización desde dos sitios a la vez sin guardar, gana el último borrador que
+llegue a la nube, igual que ya aceptaba el espejo local (ver la nota grande
+al principio de `core/guardado.js`). Lo que sí queda cerrado es la brecha que
+más importaba: cambiar de computador, de navegador, o perder los datos
+locales del navegador ya no significa perder la edición.
+
+Otro límite, menor, que quedó documentado en vez de resuelto: si una
+cotización se crea y se edita ENTERAMENTE sin conexión (ni su guardado
+inicial llegó nunca a la Sheet), ningún otro dispositivo puede ofrecer
+recuperarla — la comparación necesita que la cotización ya exista en lo que
+la Sheet real reporta como guardado. Ventana angosta (hace falta que la red
+alcance para el borrador pero no para el guardado real) y sin riesgo de
+corrupción, solo de una recuperación que no se puede ofrecer.
+
+Cubierto en `test/smoke.mjs`: el borrador se manda a la nube mientras se
+edita (respetando el tope de 4s, con la versión más reciente, con `basadaEn`
+incluido), y —la prueba real de "otro dispositivo"— recuperar funciona con
+CERO rastro local, tanto para una cotización (fusionada por id, sin tocar las
+demás) como para un pedido rápido a medio llenar. Además: un borrador cuya
+`basadaEn` ya no coincide con lo guardado de verdad NO se ofrece (la prueba
+que hubiera fallado con el diseño original, antes de la revisión
+adversarial), y dos borradores de cotizaciones distintas en la nube a la vez
+se ofrecen y restauran los dos, sin pisarse.
+
 ## Registro de cambios — agosto 2026 (décima ronda: estética de los PDF)
 
 **El problema:** los 10 documentos que genera la app (cotización, factura,

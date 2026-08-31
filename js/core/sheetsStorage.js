@@ -58,5 +58,16 @@ export var sheetsStorage = {
     var rango = res && res.updates && res.updates.updatedRange; // ej. "kv!A5:B5"
     var m = rango && /![A-Z]+(\d+):/.exec(rango);
     if (m) rowByKey[key] = Number(m[1]);
+  },
+  // Claves de "kv" que empiezan con un prefijo dado. No cuesta ninguna
+  // lectura de red aparte: cargar() ya trae TODA la pestaña "kv" a memoria
+  // para cualquier get/set normal, esto solo filtra lo que ya está en
+  // caché. Lo usan los borradores en la nube de core/store.js: al recuperar
+  // desde OTRO dispositivo no se sabe de antemano cuál cotización tiene un
+  // borrador pendiente ahí (cada una tiene su propia clave), así que hace
+  // falta poder listarlas por prefijo en vez de pedirlas una por una.
+  keysConPrefijo: async function (prefijo) {
+    await cargar();
+    return Object.keys(valueByKey).filter(function (k) { return k.indexOf(prefijo) === 0 && valueByKey[k]; });
   }
 };

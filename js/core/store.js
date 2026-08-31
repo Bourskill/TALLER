@@ -12,7 +12,7 @@ import { todayStr, uid } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
-import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior } from "./guardado.js";
+import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
 // pestaña con columnas reales (ver core/sheetsTabular.js) — Fase 1 de la
@@ -327,6 +327,20 @@ function safeParse(raw, fallback) {
 // sin tener que recontar posiciones en todo el resto de la función.
 export async function loadAll() {
   if (!STORAGE_OK) return;
+  // Se toma ANTES de leer nada de la red: más abajo, cada lectura que SÍ
+  // tiene éxito reescribe el espejo local con lo recién leído (para que la
+  // PRÓXIMA caída de red tenga algo reciente de dónde caer). Si
+  // detectarRecuperacion() comparara contra el espejo EN VIVO, esa
+  // reescritura borraría la evidencia del borrador antes de que la
+  // recuperación alcance a compararla — y nunca se ofrecería recuperar nada
+  // con la red andando, que es justo el caso más común (abrir la app al otro
+  // día con wifi bien). Por eso se congela una foto de "cómo estaba el
+  // espejo AL ENTRAR" y se compara contra esa foto, no contra el espejo que
+  // este mismo loadAll() está a punto de pisar.
+  var candidatasRecuperacion = pendientesDeSesionAnterior().concat(borradoresDeSesionAnterior())
+    .filter(function (c, i, arr) { return arr.indexOf(c) === i; });
+  var espejoAntesDeCargar = {};
+  candidatasRecuperacion.forEach(function (c) { espejoAntesDeCargar[c] = leerEspejo(c); });
   var claves = {
     config: KEYS.config,
     configNombreLegacy: KEYS.configNombreLegacy,
@@ -503,7 +517,20 @@ export async function loadAll() {
       if (huboMigracion) { persist("cotizaciones"); persist("pedidos"); }
     }
 
-    detectarRecuperacion();
+    // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"
+    // (las dos únicas áreas en "guardado explícito" / formulario a medio
+    // llenar — ver revisarBorradoresSinGuardar). Mejor esfuerzo: si esto
+    // falla, la recuperación local (de este mismo dispositivo) sigue
+    // funcionando igual, así que no bloquea nada del resto de loadAll().
+    var borradoresNube = {};
+    try {
+      var draftsCot = await leerBorradoresNubeCotizaciones();
+      if (draftsCot.length) borradoresNube.cotizaciones = draftsCot;
+      var draftFp = await leerBorradorNubeFormPedido();
+      if (draftFp) borradoresNube.formPedido = draftFp;
+    } catch (e) { /* mejor esfuerzo, ver arriba */ }
+
+    detectarRecuperacion(espejoAntesDeCargar, borradoresNube);
 
     // Un aviso breve, no una barra fija: haber caído a la copia local no es
     // un problema que resolver (no hace falta ninguna acción), es solo un
@@ -529,49 +556,308 @@ export var ETIQUETA_CLAVE = {
   pendientes: "notas", deudas: "deudas", deudasHistorial: "historial de deudas",
   config: "configuración del taller", ui: "preferencias de interfaz",
   txPapelera: "papelera de movimientos", pedidosPapelera: "papelera de pedidos",
-  catalogoPropuestas: "cambios propuestos del catálogo", productoPropuestas: "cambios propuestos de productos"
+  catalogoPropuestas: "cambios propuestos del catálogo", productoPropuestas: "cambios propuestos de productos",
+  // No es una clave que se guarde en la Sheet (ver CLAVES_PERSISTIBLES más
+  // abajo) — es el formulario de "Nuevo pedido rápido" a medio llenar. Se
+  // recupera igual que cualquier otra, solo que sin volver a escribirla a la
+  // Sheet (recuperarDelEspejo lo sabe).
+  formPedido: "un pedido rápido a medio llenar"
 };
+
+// Únicas claves que de verdad viven en la Sheet (ver KEYS en constants.js).
+// recuperarDelEspejo() la usa para no intentar guardar un borrador que nunca
+// tuvo una fila propia ahí (ej. formPedido) — eso escribiría con una clave
+// inventada en la pestaña "kv" en vez de fallar en silencio.
+var CLAVES_PERSISTIBLES = Object.keys(KEYS);
+
+// ---------- borradores en la nube (recuperar desde OTRO dispositivo) ----------
+// El espejo local (core/guardado.js) resuelve "se me cerró la pestaña sola"
+// en ESTE mismo navegador — pero vive en localStorage, así que abrir desde
+// otro computador, otro navegador, o después de borrar datos de navegación
+// no tiene nada de dónde recuperar. Para esos casos, la MISMA edición que ya
+// se espeja localmente también se manda —cada pocos segundos, mejor
+// esfuerzo, sin cola de reintento— a su propia fila en la pestaña "kv",
+// separada por correo Y por cotización (cada una la suya: si la misma
+// persona tiene dos pestañas o dos dispositivos editando cotizaciones
+// DISTINTAS a la vez, no se pisan el borrador — antes de esto, las dos
+// mandaban a la MISMA fila y la última en escribir se comía a la otra).
+//
+// "formPedido" no lleva id propio (hay un solo formulario de "Nuevo pedido
+// rápido" por sesión, no una lista): sigue siendo una clave por correo.
+var TIEMPO_BORRADOR_NUBE_MS = 4000;
+var timersBorradorNube = {}; // clave completa -> timer
+var idBorradorNubeActivo = {}; // area -> sufijo (id) actualmente programado, o null
+
+function claveBorradorNube(area, sufijo) {
+  var session = getSession();
+  var email = session && session.email;
+  if (!email) return null;
+  var base = "borrador:" + area + ":" + email.toLowerCase();
+  return sufijo != null ? base + ":" + sufijo : base;
+}
+
+function guardarBorradorNubeAhora(clave, obtenerPayload) {
+  if (!clave || !STORAGE_OK) return;
+  var payload = obtenerPayload();
+  if (!payload) return;
+  try { window.storage.set(clave, JSON.stringify(payload), false).catch(function () {}); }
+  catch (e) { /* mejor esfuerzo: si falla, se reintenta con el próximo cambio */ }
+}
+
+// A propósito NO es un debounce (que se reprogramaría en cada tecla y, con
+// alguien escribiendo sin parar, nunca llegaría a mandar nada): es un tope
+// de "como mucho cada X segundos" — la primera vez que hay algo que mandar
+// programa un envío; mientras ese envío sigue pendiente, más cambios no
+// reprograman nada; al disparar, toma el estado MÁS RECIENTE (no el de
+// cuando se programó) y queda libre para programar el siguiente.
+function programarBorradorNube(clave, obtenerPayload) {
+  if (!clave || timersBorradorNube[clave]) return;
+  timersBorradorNube[clave] = setTimeout(function () {
+    timersBorradorNube[clave] = null;
+    guardarBorradorNubeAhora(clave, obtenerPayload);
+  }, TIEMPO_BORRADOR_NUBE_MS);
+}
+
+function borrarBorradorNube(clave) {
+  if (!clave) return;
+  clearTimeout(timersBorradorNube[clave]);
+  timersBorradorNube[clave] = null;
+  if (!STORAGE_OK) return;
+  try { window.storage.set(clave, "", false).catch(function () {}); } catch (e) {}
+}
+
+// Puede haber MÁS de un borrador de cotización en la nube a la vez (dos
+// pestañas, dos dispositivos, cada uno con la suya) — por eso se listan por
+// prefijo en vez de leer una sola clave fija. `basadaEn` es la cotización
+// TAL COMO ESTABA GUARDADA cuando este borrador arrancó (el mismo dato que
+// ya guarda state.cotSnapshot, ver modules/cotizaciones.js): si lo que hay
+// guardado de verdad HOY ya no es eso, es porque esta edición ya se guardó
+// (acá o desde otro lado) o alguien guardó algo más nuevo encima — el
+// borrador quedó viejo y NO debe ofrecerse (ver detectarRecuperacion).
+async function leerBorradoresNubeCotizaciones() {
+  var prefijo = claveBorradorNube("cotizaciones");
+  if (!prefijo || !STORAGE_OK || !window.storage.keysConPrefijo) return [];
+  try {
+    var claves = await window.storage.keysConPrefijo(prefijo + ":");
+    var resultados = await Promise.all(claves.map(function (k) {
+      return window.storage.get(k, false).then(function (r) {
+        if (!r || !r.value) return null;
+        try {
+          var d = JSON.parse(r.value);
+          return d && d.cotizacionId && d.cotizacion ? d : null;
+        } catch (e) { return null; }
+      }).catch(function () { return null; });
+    }));
+    return resultados.filter(Boolean);
+  } catch (e) { return []; }
+}
+
+async function leerBorradorNubeFormPedido() {
+  var clave = claveBorradorNube("formPedido");
+  if (!clave || !STORAGE_OK) return null;
+  try {
+    var r = await window.storage.get(clave, false);
+    if (!r || !r.value) return null;
+    var d = JSON.parse(r.value);
+    return d && d.formPedido ? d : null;
+  } catch (e) { return null; }
+}
 
 // ¿La sesión anterior se cerró con cambios que nunca llegaron a la Sheet?
 // El espejo local los tiene; se comparan contra lo que sí está guardado y, si
 // difieren, se ofrece recuperarlos. NUNCA se restaura solo: el espejo es de
 // ESTE navegador, y restaurarlo a ciegas podría pisar algo hecho después
 // desde otro dispositivo (ver la nota final de core/guardado.js).
-function detectarRecuperacion() {
-  var claves = pendientesDeSesionAnterior();
-  if (!claves.length) return;
+function detectarRecuperacion(espejoAntesDeCargar, borradoresNube) {
+  // Dos motivos por los que una clave puede tener algo que recuperar: un
+  // intento de guardado que quedó a medias (pendientesDeSesionAnterior, de
+  // siempre) o una edición que nunca se intentó guardar — una cotización en
+  // modo "guardado explícito", un pedido rápido a medio llenar
+  // (borradoresDeSesionAnterior, ver core/guardado.js). Se juntan en una sola
+  // lista: al usuario no le importa POR QUÉ quedó algo sin guardar, solo que
+  // hay algo que ofrecerle recuperar.
+  var claves = pendientesDeSesionAnterior().concat(borradoresDeSesionAnterior())
+    .filter(function (c, i, arr) { return arr.indexOf(c) === i; });
   var recuperables = claves.filter(function (clave) {
     if (!(clave in state)) return false;
-    var espejo = leerEspejo(clave);
+    // Se usa la foto de ANTES de leer la red (ver loadAll) y no el espejo en
+    // vivo: para cuando esto corre, loadAll ya pudo haber reescrito el
+    // espejo con lo recién leído de la Sheet, y comparar contra eso siempre
+    // daría "igual" (ver el comentario grande en loadAll).
+    var espejo = (espejoAntesDeCargar && clave in espejoAntesDeCargar) ? espejoAntesDeCargar[clave] : leerEspejo(clave);
     if (!espejo) return false;
     try { return espejo !== JSON.stringify(state[clave]); } catch (e) { return false; }
   });
-  if (!recuperables.length) { olvidarPendientesDeSesionAnterior(); return; }
+
+  // Borradores en la nube (ver más arriba): solo se ofrecen para un área que
+  // el espejo LOCAL no cubra ya — si este mismo dispositivo tiene una
+  // versión (se actualiza cada 1.5s, la nube cada 4s como mucho), esa es la
+  // que se ofrece; la nube es el respaldo para cuando NO hay nada local
+  // (otro dispositivo, otro navegador, se borraron los datos de navegación)
+  // — es lo único que hace posible recuperar algo sin depender de QUE
+  // pendientesDeSesionAnterior()/borradoresDeSesionAnterior() (ambas leen
+  // localStorage de ESTE navegador) tengan algo que decir.
+  var nube = {};
+  if (borradoresNube) {
+    if (borradoresNube.cotizaciones && borradoresNube.cotizaciones.length && recuperables.indexOf("cotizaciones") === -1) {
+      // Puede haber varios (una pestaña/dispositivo por cotización distinta,
+      // ver leerBorradoresNubeCotizaciones) — se ofrecen TODOS los que sigan
+      // siendo válidos, no solo el primero.
+      var validos = borradoresNube.cotizaciones.filter(function (d) {
+        var actual = state.cotizaciones.filter(function (c) { return c.id === d.cotizacionId; })[0];
+        if (!actual) return false;
+        // Descarta un borrador VIEJO: si `basadaEn` no coincide con lo que
+        // hay guardado de verdad HOY, esta edición ya se guardó (por acá o
+        // por otro lado) o alguien más guardó algo más nuevo encima —
+        // ofrecerlo igual regresaría la cotización a una versión vieja.
+        if (d.basadaEn !== undefined && JSON.stringify(actual) !== JSON.stringify(d.basadaEn)) return false;
+        return JSON.stringify(actual) !== JSON.stringify(d.cotizacion);
+      });
+      if (validos.length) nube.cotizaciones = validos;
+    }
+    if (borradoresNube.formPedido && recuperables.indexOf("formPedido") === -1) {
+      nube.formPedido = borradoresNube.formPedido;
+    }
+  }
+
+  var todasLasClaves = recuperables.concat(Object.keys(nube));
+  if (!todasLasClaves.length) { olvidarPendientesDeSesionAnterior(); claves.forEach(olvidarBorrador); return; }
   state.recuperacion = {
-    claves: recuperables,
-    etiquetas: recuperables.map(function (c) { return ETIQUETA_CLAVE[c] || c; })
+    claves: todasLasClaves,
+    etiquetas: todasLasClaves.map(function (c) { return ETIQUETA_CLAVE[c] || c; }),
+    // La misma foto con la que se detectó, no el espejo en vivo: entre que
+    // se muestra el aviso y que el usuario pulsa "Restaurar" puede correr
+    // otro loadAll() (cambio de pestaña, "online") que vuelva a pisar el
+    // espejo con lo recién leído — recuperarDelEspejo() debe restaurar
+    // exactamente lo que se prometió mostrar, no lo que haya en el espejo
+    // en ese momento posterior.
+    espejo: espejoAntesDeCargar,
+    nube: Object.keys(nube).length ? nube : undefined
   };
 }
 
-// Vuelca el espejo local sobre el estado y lo manda a guardar de nuevo.
+// Vuelca el espejo local sobre el estado. Las claves que de verdad viven en
+// la Sheet (CLAVES_PERSISTIBLES) se mandan a guardar de nuevo, como siempre;
+// un borrador que nunca tuvo fila propia ahí (ej. formPedido) solo se
+// restaura EN PANTALLA — no hay a dónde guardarlo todavía, eso lo decide el
+// usuario terminando de llenarlo y pulsando el botón de siempre ("Crear
+// pedido"), igual que si nunca se hubiera ido.
 export async function recuperarDelEspejo() {
   var pendiente = state.recuperacion;
   if (!pendiente) return;
   pendiente.claves.forEach(function (clave) {
-    var espejo = leerEspejo(clave);
+    // Borrador que vino de la nube (otro dispositivo/navegador, ver más
+    // arriba): merge puntual, NO se pisa el área entera — "cotizaciones" es
+    // una LISTA de cotizaciones editadas (puede haber más de una, cada una
+    // fusionada por su propio id dentro del arreglo completo que sí está al
+    // día); "formPedido" sí se reemplaza entero porque es un formulario
+    // propio, no un arreglo compartido.
+    var deNube = pendiente.nube && pendiente.nube[clave];
+    if (deNube) {
+      if (clave === "cotizaciones") {
+        deNube.forEach(function (d) {
+          var yaEsta = state.cotizaciones.some(function (c) { return c.id === d.cotizacionId; });
+          state.cotizaciones = yaEsta
+            ? state.cotizaciones.map(function (c) { return c.id === d.cotizacionId ? d.cotizacion : c; })
+            : state.cotizaciones.concat([d.cotizacion]);
+        });
+      } else if (clave === "formPedido") {
+        state.formPedido = deNube.formPedido;
+      }
+      return;
+    }
+    // Misma foto que detectarRecuperacion() usó para decidir que esto SÍ
+    // difería (ver esa función) — no una relectura en vivo, que ya pudo
+    // haber sido pisada por otro loadAll() de por medio.
+    var espejo = (pendiente.espejo && clave in pendiente.espejo) ? pendiente.espejo[clave] : leerEspejo(clave);
     if (!espejo) return;
     try { state[clave] = JSON.parse(espejo); } catch (e) { /* espejo corrupto: se ignora esa clave */ }
   });
   state.recuperacion = null;
   olvidarPendientesDeSesionAnterior();
+  pendiente.claves.forEach(olvidarBorrador);
+  limpiarBorradoresNubeDe(pendiente);
   notify();
-  for (var i = 0; i < pendiente.claves.length; i++) await persist(pendiente.claves[i]);
+  for (var i = 0; i < pendiente.claves.length; i++) {
+    var clave = pendiente.claves[i];
+    if (CLAVES_PERSISTIBLES.indexOf(clave) !== -1) await persist(clave);
+  }
+}
+
+// Limpia en la nube justo lo que se acaba de restaurar (o descartar): cada
+// cotización recuperada, por su propia clave con id — a propósito NO toca
+// idBorradorNubeActivo (el borrador de una edición que pueda estar EN CURSO
+// ahora mismo en esta pestaña, si el usuario se puso a editar algo distinto
+// mientras el aviso seguía en pantalla): ese es un borrador legítimo y
+// aparte, no el que se está resolviendo acá.
+function limpiarBorradoresNubeDe(pendiente) {
+  pendiente.claves.forEach(function (c) {
+    if (c === "cotizaciones") {
+      (pendiente.nube && pendiente.nube.cotizaciones || []).forEach(function (d) {
+        borrarBorradorNube(claveBorradorNube("cotizaciones", d.cotizacionId));
+      });
+    } else if (c === "formPedido" && pendiente.nube && pendiente.nube.formPedido) {
+      borrarBorradorNube(claveBorradorNube("formPedido"));
+    }
+  });
 }
 
 export function descartarRecuperacion() {
+  var pendiente = state.recuperacion;
+  var claves = (pendiente && pendiente.claves) || [];
   state.recuperacion = null;
   olvidarPendientesDeSesionAnterior();
+  claves.forEach(olvidarBorrador);
+  if (pendiente) limpiarBorradoresNubeDe(pendiente);
   notify();
+}
+
+// Se llama en CADA render (ver core/dom.js) — no en cada acción de edición
+// una por una, que son decenas de sitios distintos y fácil olvidar alguno.
+// Mirando el estado mismo en vez de instrumentar cada mutación, esto no
+// puede quedar desactualizado: si algo nuevo empieza a usar "guardado
+// explícito" en el futuro, basta con agregarlo acá una vez.
+//
+// Es lo que cierra el hueco real: antes de esto, "guardado explícito"
+// (cotizaciones) y el formulario de pedido rápido vivían SOLO en memoria
+// hasta que alguien pulsara Guardar/Crear — si la pestaña se cerraba antes
+// (se actualizó el navegador, se recargó sin querer, se cayó), esas horas de
+// trabajo desaparecían sin ningún aviso ni forma de recuperarlas.
+export function revisarBorradoresSinGuardar() {
+  if (state.cotSucia) {
+    marcarBorrador("cotizaciones", function () { return JSON.stringify(state.cotizaciones); });
+    // Si se saltó de editar OTRA cotización a esta sin pasar por "no sucia"
+    // (cotSucia cambió de id directamente), el borrador en la nube de la
+    // anterior ya no aplica — se limpia antes de programar el de esta.
+    if (idBorradorNubeActivo.cotizaciones && idBorradorNubeActivo.cotizaciones !== state.cotSucia) {
+      borrarBorradorNube(claveBorradorNube("cotizaciones", idBorradorNubeActivo.cotizaciones));
+    }
+    idBorradorNubeActivo.cotizaciones = state.cotSucia;
+    programarBorradorNube(claveBorradorNube("cotizaciones", state.cotSucia), function () {
+      var cot = state.cotizaciones.filter(function (c) { return c.id === state.cotSucia; })[0];
+      return cot ? { cotizacionId: state.cotSucia, cotizacion: cot, basadaEn: state.cotSnapshot } : null;
+    });
+  } else {
+    olvidarBorrador("cotizaciones");
+    if (idBorradorNubeActivo.cotizaciones) {
+      borrarBorradorNube(claveBorradorNube("cotizaciones", idBorradorNubeActivo.cotizaciones));
+      idBorradorNubeActivo.cotizaciones = null;
+    }
+  }
+
+  var fp = state.formPedido;
+  var fpTieneContenido = !!(fp && ((fp.cliente || "").trim() || (fp.lineas || []).length));
+  if (fpTieneContenido) {
+    marcarBorrador("formPedido", function () { return JSON.stringify(state.formPedido); });
+    idBorradorNubeActivo.formPedido = true;
+    programarBorradorNube(claveBorradorNube("formPedido"), function () { return { formPedido: state.formPedido }; });
+  } else {
+    olvidarBorrador("formPedido");
+    if (idBorradorNubeActivo.formPedido) {
+      borrarBorradorNube(claveBorradorNube("formPedido"));
+      idBorradorNubeActivo.formPedido = false;
+    }
+  }
 }
 
 // La escritura de verdad de UNA clave. Se pasa a core/guardado.js, que se
