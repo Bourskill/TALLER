@@ -520,7 +520,15 @@ const aplicarProductoSelect = document.querySelector('select[data-action-change=
 aplicarProductoSelect.value = productoId;
 aplicarProductoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 assert(state.cotizaciones[0].referencias[0].productoId === productoId, "vincula la referencia al producto del catálogo");
+// Abrir/cerrar "Opciones adicionales" es solo una preferencia de vista (¿se
+// ve expandida o no?), no una edición real — no debe hacer aparecer el botón
+// flotante de "Guardar" por sí sola. Se limpia cotSucia antes (ya estaba
+// sucia por el aplicar-producto de arriba) para aislar el efecto de ESTE
+// clic puntual.
+state.cotSucia = "";
 click('[data-action="toggle-ref-seccion"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+assert(state.cotizaciones[0].referencias[0].seccionOpcionalesAbierta === true, "el clic sí abre la sección de verdad");
+assert(state.cotSucia === "", "pero abrirla NO marca la cotización como 'cambios sin guardar' — antes sí, y aparecía el botón de Guardar solo con mirar");
 document.querySelector('[data-role="det-nombre-' + refProdId + '"]').value = "Talla M unidad 1";
 document.querySelector('[data-role="det-talla-' + refProdId + '"]').value = "M";
 click('[data-action="add-ref-detalle"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');

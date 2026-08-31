@@ -222,6 +222,49 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (décima ronda: estética de los PDF)
+
+**El problema:** los 10 documentos que genera la app (cotización, factura,
+recibo, remisión, orden de producción, cotización interna, y los reportes)
+eran funcionales pero visualmente genéricos — texto suelto sobre una hoja en
+blanco, sin nada que los distinguiera de cualquier PDF hecho a las carreras.
+El usuario compartió una factura de referencia (bandas de color de borde a
+borde, panel de datos, columna de totales resaltada, caja de TOTAL, franja de
+cierre) y dos órdenes de producción de referencia (tabla completamente
+recuadrada, casilla amarilla para la fecha de entrega, encabezado con
+metadatos) para guiar el rediseño.
+
+**La solución: tres piezas reutilizables en `core/pdf.js`, no un rediseño
+suelto por cada función.** Igual que la cotización ya tenía su color de
+acento (Configuración → color de marca), estas piezas lo usan también — no se
+copió el negro de la referencia, porque ese negro es SU marca, no una regla
+general:
+
+- `drawHeaderBasic` — ahora pinta una franja de color de borde a borde (antes
+  era solo texto en el color de acento), con el logo del taller a la
+  izquierda si hay uno configurado. La usan los 10 documentos.
+- `drawTotalBox` — una caja rellena de acento con la cifra que de verdad
+  importa (TOTAL, VALOR RECIBIDO, VALOR DE REFERENCIA TOTAL), en vez de una
+  línea de texto más entre otras.
+- `drawFooterBand` — la misma franja del encabezado, angosta, cerrando el
+  documento ("Gracias por su confianza", o el aviso de uso interno según el
+  documento).
+
+Además: la columna de "total de línea" de las tablas de cliente (cotización,
+factura, remisión) lleva un tinte gris parejo — no la fila entera — igual que
+la factura de referencia, para que el ojo pueda seguir bajando esa columna
+sin que compita con el resto de la tabla. Las tablas de compras/reportes que
+resumen con una fila de "TOTAL" ahora la resaltan con el acento oscuro y
+texto blanco, en vez de dejarla mezclada con las demás filas. La orden de
+producción (`generarPDFPedido`) ganó una casilla amarilla para la fecha de
+entrega — mismo criterio que la orden de producción de referencia: es el dato
+que más le importa a quien está cosiendo, y no debe perderse en el resto de
+metadatos — y sus tablas pasaron a `theme: "grid"` (recuadro en cada celda),
+más cerca de cómo se lee un formulario de taller que una hoja de cálculo.
+Factura, recibo y remisión, que antes no llevaban logo (solo la cotización lo
+tenía), ahora también lo muestran — mismo criterio para los cuatro documentos
+que le llegan al cliente.
+
 ## Registro de cambios — agosto 2026 (novena ronda: "servicio" en Producción)
 
 **El problema de fondo:** corte y confección casi siempre se hacen en el

@@ -42,6 +42,111 @@ function textoSobreAcento() {
   return luminancia > 0.6 ? [20, 20, 20] : [255, 255, 255];
 }
 
+// ---------- "banda": el bloque visual que se repite en todo documento ----------
+// Antes cada PDF era texto suelto sobre la hoja en blanco — funcional, pero
+// se leía genérico (cualquier cosa podía haber salido de cualquier programa).
+// Estas tres piezas (encabezado, total, pie) son las que le dan a un
+// documento la cara de "esto lo hizo un taller de verdad": una franja de color
+// llena de borde a borde (no solo texto en el color de acento), un total que
+// pesa visualmente lo que pesa en la plata, y un cierre con la misma franja.
+// Las tres reutilizan colorAcento()/textoSobreAcento() — el color de marca de
+// Configuración — así que un taller con su propio acento ve SU color acá, no
+// uno fijo copiado de la factura de referencia (que era negro porque negro es
+// SU marca, no una regla general).
+var BANDA_H = 60;
+
+// Encabezado: franja de color de borde a borde, título en grande, N.º/fecha
+// a la derecha, logo opcional a la izquierda del título. Reemplaza al viejo
+// drawHeaderBasic (mismo nombre y misma forma de retorno: {pageW, marginX,
+// y}) para no tener que tocar cada uno de sus ocho llamados.
+function drawHeaderBasic(doc, titulo, docNum, logoDataUrl) {
+  var pageW = doc.internal.pageSize.getWidth();
+  var marginX = 42;
+  var acento = colorAcento();
+  var sobre = textoSobreAcento();
+
+  doc.setFillColor(acento[0], acento[1], acento[2]);
+  doc.rect(0, 0, pageW, BANDA_H, "F");
+
+  var tituloX = marginX;
+  if (logoDataUrl) {
+    // Chip blanco detrás del logo: si el acento es oscuro, un PNG con fondo
+    // transparente se vería "flotando" sin ese respaldo — y si el acento es
+    // claro, el chip casi no se nota, así que no perjudica a nadie.
+    var logoLado = 34;
+    var logoY = (BANDA_H - logoLado) / 2;
+    try {
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(marginX, logoY, logoLado, logoLado, 4, 4, "F");
+      doc.addImage(logoDataUrl, formatoImagen(logoDataUrl), marginX + 3, logoY + 3, logoLado - 6, logoLado - 6);
+      tituloX = marginX + logoLado + 12;
+    } catch (e) { /* si falla, el título se queda donde siempre */ }
+  }
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(19);
+  doc.setTextColor(sobre[0], sobre[1], sobre[2]);
+  doc.text(titulo, tituloX, BANDA_H / 2 + 7);
+
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  var fecha = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
+  doc.text("N.º " + docNum, pageW - marginX, BANDA_H / 2 - 5, { align: "right" });
+  doc.text(fecha, pageW - marginX, BANDA_H / 2 + 10, { align: "right" });
+
+  return { pageW: pageW, marginX: marginX, y: BANDA_H + 34 };
+}
+
+// Total: caja rellena de acento, con la etiqueta y la cifra en el color que
+// se lea encima — el número que de verdad importa deja de ser una línea de
+// texto más entre otras y pasa a pesar lo que pesa. `y` es el tope de la caja
+// (no la línea de base del texto, como en doc.text) para que se pueda
+// encadenar contra lastAutoTable.finalY sin hacer cuentas en cada llamado.
+function drawTotalBox(doc, x, y, ancho, etiqueta, valorTxt) {
+  var alto = 30;
+  var acento = colorAcento();
+  var sobre = textoSobreAcento();
+  doc.setFillColor(acento[0], acento[1], acento[2]);
+  doc.rect(x, y, ancho, alto, "F");
+  doc.setTextColor(sobre[0], sobre[1], sobre[2]);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+  doc.text(etiqueta, x + 12, y + alto / 2 + 4);
+  doc.setFontSize(14);
+  doc.text(valorTxt, x + ancho - 12, y + alto / 2 + 4, { align: "right" });
+  return y + alto;
+}
+
+// Pie: la misma franja del encabezado, angosta, con una línea centrada — el
+// documento se cierra con la misma marca con la que abrió. Salta de página
+// si no cabe entera (una franja partida por la mitad entre dos hojas se ve
+// como un error de impresión, no como diseño).
+function drawFooterBand(doc, y, marginX, pageW, texto) {
+  var alto = 28;
+  var pageH = doc.internal.pageSize.getHeight();
+  if (y + alto > pageH - 20) { doc.addPage(); y = 54; }
+  var acento = colorAcento();
+  var sobre = textoSobreAcento();
+  doc.setFillColor(acento[0], acento[1], acento[2]);
+  doc.rect(0, y, pageW, alto, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10.5);
+  doc.setTextColor(sobre[0], sobre[1], sobre[2]);
+  doc.text(String(texto || "").toUpperCase(), pageW / 2, y + alto / 2 + 4, { align: "center" });
+  return y + alto;
+}
+
+// Para pasarle a `didParseCell` en las tablas de reporte cuyo último renglón
+// del cuerpo es un TOTAL acumulado (concat([[...total]]) — ver las funciones
+// seccionDesglose* más abajo): le da al total el mismo peso visual que
+// drawTotalBox, dentro de la tabla en vez de aparte, porque acá el total es
+// una fila más de la misma tabla, no un bloque suelto al final del documento.
+function resaltarFilaTotal(totalFilas) {
+  return function (data) {
+    if (data.section === "body" && data.row.index === totalFilas - 1) {
+      data.cell.styles.fillColor = colorAcentoOscuro();
+      data.cell.styles.textColor = textoSobreAcento();
+      data.cell.styles.fontStyle = "bold";
+    }
+  };
+}
+
 // Los PDF que le van al cliente (cotización, factura, recibo — no los
 // internos ni los reportes) terminan acá: por defecto se descargan como
 // siempre, pero con opts.enviarPorCorreo devuelven los bytes en vez de
@@ -152,9 +257,6 @@ export async function generarPDFCotizacion(cot, opts) {
   }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
-  var pageW = doc.internal.pageSize.getWidth();
-  var marginX = 42;
-  var y = 54;
 
   var codigo = await asegurarCodigoPublico(cot, "cotizaciones");
 
@@ -162,33 +264,8 @@ export async function generarPDFCotizacion(cot, opts) {
   var logo = (cfg.logoUrl || "").trim();
   var logoEsImagen = /^(https?:|data:)/.test(logo);
   var logoDataUrl = logoEsImagen ? await cargarImagenDataUrl(logo) : null;
-  var tituloX = marginX;
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, formatoImagen(logoDataUrl), marginX, y - 24, 30, 30);
-      tituloX = marginX + 40;
-    } catch (e) { /* si falla, se omite el logo sin bloquear el PDF */ }
-  }
-
-  var acentoCot = colorAcento();
-  doc.setFont("helvetica", "bold"); doc.setFontSize(21);
-  doc.setTextColor(acentoCot[0], acentoCot[1], acentoCot[2]);
-  doc.text("COTIZACIÓN", tituloX, y);
-
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
-  doc.text("N.º " + codigo, pageW - marginX, y - 13, { align: "right" });
-  var fecha = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
-  doc.text("Fecha  " + fecha, pageW - marginX, y, { align: "right" });
-
-  y += 22;
-  doc.setDrawColor(acentoCot[0], acentoCot[1], acentoCot[2]); doc.setLineWidth(1.6);
-  doc.line(marginX, y, pageW - marginX, y);
-  y += 24;
-
-  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
-  doc.text("DE", marginX, y);
-  doc.text("PARA", pageW / 2 + 14, y);
-  y += 14;
+  var head = drawHeaderBasic(doc, "COTIZACIÓN", codigo, logoDataUrl);
+  var pageW = head.pageW, marginX = head.marginX, y = head.y;
 
   var clienteInfo = cot.clienteId ? clienteById(cot.clienteId) : null;
   var nombreConIcono = (logo && !logoEsImagen ? logo + " " : "") + cfg.nombre;
@@ -200,12 +277,7 @@ export async function generarPDFCotizacion(cot, opts) {
     clienteInfo && clienteInfo.ciudad,
     clienteInfo && clienteInfo.telefono
   ].filter(Boolean);
-
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 36, 32);
-  var yA = y, yB = y;
-  (negocioLines.length ? negocioLines : ["—"]).forEach(function (l) { doc.text(String(l), marginX, yA); yA += 14; });
-  (clienteLines.length ? clienteLines : ["—"]).forEach(function (l) { doc.text(String(l), pageW / 2 + 14, yB); yB += 14; });
-  y = Math.max(yA, yB) + 14;
+  y = drawParties(doc, y, marginX, pageW, negocioLines, clienteLines, "PARA");
 
   var refs = (cot.referencias || []).map(function (ref) { return { ref: ref, calc: calcRefTotales(ref) }; });
   var totales = calcCotizacionTotales(cot);
@@ -229,9 +301,19 @@ export async function generarPDFCotizacion(cot, opts) {
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7, minCellHeight: 32, valign: "middle" },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
     columnStyles: { 0: { cellWidth: 34 }, 1: { halign: "center", cellWidth: 60 }, 3: { halign: "right" }, 4: { halign: "right" } },
+    // "plain": sin el rayado gris automático que trae 'striped' por defecto
+    // — si se deja, se suma al tinte de la columna 4 de abajo y el total
+    // queda con dos grises distintos pisándose en vez de uno solo, parejo.
+    theme: "plain",
+    // Solo la columna del total de línea lleva el tinte gris, y solo en el
+    // cuerpo (columnStyles pisaría el color de acento del encabezado si el
+    // tinte se pusiera ahí): es la columna que responde "¿cuánto vale esto?",
+    // así que es la que conviene que el ojo siga bajando de fila en fila.
+    didParseCell: function (data) {
+      if (data.section === "body" && data.column.index === 4) data.cell.styles.fillColor = [242, 242, 242];
+    },
     didDrawCell: function (data) {
       if (data.section === "body" && data.column.index === 0) {
         var durl = imagenes[data.row.index];
@@ -258,18 +340,12 @@ export async function generarPDFCotizacion(cot, opts) {
   finalY += 16;
   doc.text(ivaActivo ? ("IVA " + ivaPct + "%") : "IVA (no aplica)", pageW - marginX - 160, finalY);
   doc.text(money(ivaMonto), pageW - marginX, finalY, { align: "right" });
-  finalY += 6;
-  doc.setDrawColor(190, 190, 190);
-  doc.line(pageW - marginX - 160, finalY + 6, pageW - marginX, finalY + 6);
-  finalY += 24;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
-  doc.text("TOTAL", pageW - marginX - 160, finalY);
-  doc.text(money(totalConIva), pageW - marginX, finalY, { align: "right" });
+  finalY += 14;
+  finalY = drawTotalBox(doc, pageW - marginX - 190, finalY, 190, "TOTAL", money(totalConIva));
 
-  finalY += 60;
-  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
-  doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
-  await drawPiePagina(doc, finalY, marginX, pageW);
+  finalY += 46;
+  finalY = drawFooterBand(doc, finalY, marginX, pageW, "Gracias por su confianza");
+  await drawPiePagina(doc, finalY + 14, marginX, pageW);
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
   return finalizarPDF(doc, codigo.replace("#", "") + "-" + nombreSeguro + ".pdf", opts);
@@ -277,35 +353,22 @@ export async function generarPDFCotizacion(cot, opts) {
 
 // ---------- helpers compartidos por los demás PDFs (pedido, recibo, factura, interno) ----------
 
-function drawHeaderBasic(doc, titulo, docNum) {
-  var pageW = doc.internal.pageSize.getWidth();
-  var marginX = 42;
-  var y = 54;
-  var acento = colorAcento();
-  doc.setFont("helvetica", "bold"); doc.setFontSize(21);
-  doc.setTextColor(acento[0], acento[1], acento[2]);
-  doc.text(titulo, marginX, y);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
-  doc.text("N.º " + docNum, pageW - marginX, y - 13, { align: "right" });
-  var fecha = new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
-  doc.text("Fecha  " + fecha, pageW - marginX, y, { align: "right" });
-  y += 22;
-  // La línea bajo el encabezado toma el acento (más gruesa) en vez del gris
-  // suelto de antes: es lo que hace que la hoja se lea como del taller.
-  doc.setDrawColor(acento[0], acento[1], acento[2]); doc.setLineWidth(1.6);
-  doc.line(marginX, y, pageW - marginX, y);
-  y += 24;
-  return { pageW: pageW, marginX: marginX, y: y };
-}
-
+// DE/PARA: dos columnas dentro de un panel gris clarito (antes flotaban
+// directo sobre la hoja en blanco) — el mismo truco de agrupar visualmente
+// que un ".card" en pantalla, para que se lea como UN bloque de datos y no
+// como texto suelto que quedó cerca por casualidad.
 function drawParties(doc, y, marginX, pageW, negocioLines, otherLines, otherTitle) {
+  var lineas = Math.max(negocioLines.length, otherLines.length, 1);
+  var altoPanel = 18 + lineas * 14 + 8;
+  doc.setFillColor(246, 246, 248);
+  doc.rect(marginX, y - 14, pageW - marginX * 2, altoPanel, "F");
   doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
-  doc.text("DE", marginX, y);
+  doc.text("DE", marginX + 12, y);
   doc.text(otherTitle, pageW / 2 + 14, y);
   y += 14;
   doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 36, 32);
   var yA = y, yB = y;
-  (negocioLines.length ? negocioLines : ["—"]).forEach(function (l) { doc.text(String(l), marginX, yA); yA += 14; });
+  (negocioLines.length ? negocioLines : ["—"]).forEach(function (l) { doc.text(String(l), marginX + 12, yA); yA += 14; });
   (otherLines.length ? otherLines : ["—"]).forEach(function (l) { doc.text(String(l), pageW / 2 + 14, yB); yB += 14; });
   return Math.max(yA, yB) + 14;
 }
@@ -315,6 +378,13 @@ function negocioLinesFrom(cfg) {
   var logoEsImagen = /^(https?:|data:)/.test(logo);
   var nombreConIcono = (logo && !logoEsImagen ? logo + " " : "") + cfg.nombre;
   return [nombreConIcono, cfg.nit && ("NIT/CC " + cfg.nit), cfg.direccion, cfg.ciudad, cfg.telefono].filter(Boolean);
+}
+// Antes solo la cotización llevaba el logo en el encabezado — factura, recibo
+// y remisión (igual de documentos "de cara al cliente") se quedaban sin él.
+// Este helper es lo que ahora comparten los cuatro (ver drawHeaderBasic).
+function cargarLogoDataUrl(cfg) {
+  var logo = (cfg.logoUrl || "").trim();
+  return /^(https?:|data:)/.test(logo) ? cargarImagenDataUrl(logo) : Promise.resolve(null);
 }
 
 // Reporte financiero en PDF para un rango de fechas (fechas de corte, igual
@@ -447,6 +517,7 @@ function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos) {
     styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } },
+    didParseCell: pedidos.length ? resaltarFilaTotal(pedidos.length + 1) : undefined,
     theme: "grid"
   });
   return doc.lastAutoTable.finalY + 24;
@@ -470,6 +541,7 @@ function seccionDesgloseVendedores(doc, y, marginX, pageW, vendedores) {
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    didParseCell: vendedores.length ? resaltarFilaTotal(vendedores.length + 1) : undefined,
     theme: "grid"
   });
   return doc.lastAutoTable.finalY + 24;
@@ -505,6 +577,7 @@ function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos) {
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 2: { halign: "right" }, 4: { halign: "right" } },
+    didParseCell: insumos.length ? resaltarFilaTotal(insumos.length + 1) : undefined,
     theme: "grid"
   });
   return doc.lastAutoTable.finalY + 24;
@@ -528,6 +601,7 @@ function seccionDesgloseProductos(doc, y, marginX, pageW, productos) {
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
     columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+    didParseCell: productos.length ? resaltarFilaTotal(productos.length + 1) : undefined,
     theme: "grid"
   });
   return doc.lastAutoTable.finalY + 24;
@@ -726,7 +800,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
       body: filasRef,
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
-      margin: { left: marginX, right: marginX }
+      margin: { left: marginX, right: marginX },
+      theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 20;
   }
@@ -752,7 +827,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
       columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
-      margin: { left: marginX, right: marginX }
+      margin: { left: marginX, right: marginX },
+      theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 20;
   }
@@ -802,7 +878,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
         styles: { font: "helvetica", fontSize: 8, cellPadding: 4 },
         headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 7.5 },
         columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
-        margin: { left: marginX, right: marginX }
+        margin: { left: marginX, right: marginX },
+        theme: "grid"
       });
       y = doc.lastAutoTable.finalY + 20;
     }
@@ -826,7 +903,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
         }),
         styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
         headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
-        margin: { left: marginX, right: marginX }
+        margin: { left: marginX, right: marginX },
+        theme: "grid"
       });
       y = doc.lastAutoTable.finalY + 20;
     }
@@ -842,6 +920,9 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     doc.text(cot.vendedor.nombre + " — " + etiquetaCom + " = " + money(valorCom) + " (" + (cot.vendedor.estado === "pagado" ? "pagada" : "pendiente") + ")", marginX, y);
     y += 20;
   }
+
+  y += 10;
+  drawFooterBand(doc, y, marginX, pageW, "Documento de uso interno — no se le entrega al cliente");
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
   doc.save(docNum + "-interno-" + nombreSeguro + ".pdf");
@@ -870,7 +951,21 @@ export async function generarPDFPedido(p) {
   // el dato que de verdad le sirve a quien está en el piso de producción.
   var origen = p.tipoCliente === "tercero" ? "TERCERO" : "PRODUCCIÓN PROPIA";
   doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
-  doc.text("OP: " + (p.numeroOp || "—") + (p.fechaEntrega ? "   ·   ENTREGA: " + p.fechaEntrega : "") + "   ·   " + origen + "   ·   ETAPA: " + estadoLabelDe(p).toUpperCase(), marginX, y);
+  doc.text("OP: " + (p.numeroOp || "—") + "   ·   " + origen + "   ·   ETAPA: " + estadoLabelDe(p).toUpperCase(), marginX, y);
+  // La fecha de entrega es el dato que más le importa a quien está cosiendo
+  // — mismo criterio que la casilla amarilla de la orden de producción de
+  // referencia: se saca del texto corrido y se marca aparte, para que no se
+  // pierda entre el resto de metadatos.
+  if (p.fechaEntrega) {
+    var chipTxt = "ENTREGA: " + p.fechaEntrega;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+    var chipW = doc.getTextWidth(chipTxt) + 20;
+    var chipH = 18;
+    doc.setFillColor(255, 221, 87);
+    doc.roundedRect(pageW - marginX - chipW, y - chipH + 4, chipW, chipH, 3, 3, "F");
+    doc.setTextColor(60, 45, 0);
+    doc.text(chipTxt, pageW - marginX - chipW / 2, y - 1, { align: "center" });
+  }
   y += 22;
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
@@ -903,7 +998,8 @@ export async function generarPDFPedido(p) {
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
-      margin: { left: marginX, right: marginX }
+      margin: { left: marginX, right: marginX },
+      theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 24;
   } else if ((p.lineas || []).length) {
@@ -923,7 +1019,8 @@ export async function generarPDFPedido(p) {
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
       columnStyles: { 3: { halign: "right" } },
-      margin: { left: marginX, right: marginX }
+      margin: { left: marginX, right: marginX },
+      theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 24;
   } else {
@@ -969,9 +1066,8 @@ export async function generarPDFPedido(p) {
     }
   }
 
-  doc.setFont("helvetica", "italic"); doc.setFontSize(9.5); doc.setTextColor(150, 150, 150);
-  if (y + 14 > pageH - 30) { doc.addPage(); y = 54; }
-  doc.text("Documento de uso interno para producción — no incluye precios ni datos del cliente.", marginX, y);
+  y += 10;
+  y = drawFooterBand(doc, y, marginX, pageW, "Documento de uso interno para producción — no incluye precios ni datos del cliente");
   await drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.descripcion || "pedido");
@@ -984,9 +1080,10 @@ export async function generarPDFRecibo(p, abono, opts) {
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var codigo = await asegurarCodigoPublico(p, "pedidos");
-  var head = drawHeaderBasic(doc, "RECIBO DE ABONO", codigo);
-  var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var cfg = state.config;
+  var logoDataUrl = await cargarLogoDataUrl(cfg);
+  var head = drawHeaderBasic(doc, "RECIBO DE ABONO", codigo, logoDataUrl);
+  var pageW = head.pageW, marginX = head.marginX, y = head.y;
 
   y = drawParties(doc, y, marginX, pageW, negocioLinesFrom(cfg), [p.cliente].filter(Boolean), "RECIBIDO DE");
 
@@ -999,12 +1096,8 @@ export async function generarPDFRecibo(p, abono, opts) {
   ].forEach(function (l) { doc.text(l, marginX, y); y += 16; });
   y += 14;
 
-  doc.setDrawColor(210, 210, 210); doc.line(marginX, y, pageW - marginX, y); y += 24;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(80, 80, 80);
-  doc.text("VALOR RECIBIDO", marginX, y);
-  doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(20, 20, 20);
-  doc.text(money(abono.monto), pageW - marginX, y, { align: "right" });
-  y += 26;
+  y = drawTotalBox(doc, marginX, y, pageW - marginX * 2, "VALOR RECIBIDO", money(abono.monto));
+  y += 20;
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(80, 80, 80);
   doc.text("Total del pedido", marginX, y);
@@ -1013,9 +1106,8 @@ export async function generarPDFRecibo(p, abono, opts) {
   doc.text("Saldo pendiente", marginX, y);
   doc.text(money(saldoActual), pageW - marginX, y, { align: "right" });
 
-  y += 60;
-  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
-  doc.text("Gracias por su pago", pageW / 2, y, { align: "center" });
+  y += 46;
+  y = drawFooterBand(doc, y, marginX, pageW, "Gracias por su pago");
   await drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "recibo");
@@ -1029,9 +1121,10 @@ export async function generarPDFFactura(p, opts) {
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var codigo = await asegurarCodigoPublico(p, "pedidos");
-  var head = drawHeaderBasic(doc, "FACTURA", codigo);
-  var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var cfg = state.config;
+  var logoDataUrl = await cargarLogoDataUrl(cfg);
+  var head = drawHeaderBasic(doc, "FACTURA", codigo, logoDataUrl);
+  var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
   var clienteLines = [p.cliente, clienteInfo && clienteInfo.cedula && ("NIT/CC " + clienteInfo.cedula), clienteInfo && clienteInfo.direccion, clienteInfo && clienteInfo.ciudad].filter(Boolean);
 
@@ -1064,9 +1157,12 @@ export async function generarPDFFactura(p, opts) {
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
-    columnStyles: { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } }
+    columnStyles: { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } },
+    theme: "plain",
+    didParseCell: function (data) {
+      if (data.section === "body" && data.column.index === 3) data.cell.styles.fillColor = [242, 242, 242];
+    }
   });
 
   var ivaActivo = !!(p.iva && p.iva.activo);
@@ -1089,12 +1185,8 @@ export async function generarPDFFactura(p, opts) {
     doc.text(row[1], pageW - marginX, finalY, { align: "right" });
     finalY += 16;
   });
-  doc.setDrawColor(190, 190, 190);
-  doc.line(pageW - marginX - 160, finalY + 6, pageW - marginX, finalY + 6);
-  finalY += 24;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(20, 20, 20);
-  doc.text("TOTAL", pageW - marginX - 160, finalY);
-  doc.text(money(totalConIva), pageW - marginX, finalY, { align: "right" });
+  finalY += 8;
+  finalY = drawTotalBox(doc, pageW - marginX - 190, finalY, 190, "TOTAL", money(totalConIva));
   finalY += 22;
   doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(80, 80, 80);
   doc.text("Abonado", pageW - marginX - 160, finalY);
@@ -1110,9 +1202,8 @@ export async function generarPDFFactura(p, opts) {
   doc.text(etiquetaSaldo, pageW - marginX - 160, finalY);
   doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
 
-  finalY += 60;
-  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(120, 120, 120);
-  doc.text("Gracias por su confianza", pageW / 2, finalY, { align: "center" });
+  finalY += 46;
+  finalY = drawFooterBand(doc, finalY, marginX, pageW, "Gracias por su confianza");
   await drawPiePagina(doc, finalY, marginX, pageW);
 
   var nombreSeguro = slugify(p.cliente || "factura");
@@ -1131,9 +1222,10 @@ export async function generarPDFRemision(p, remision, opts) {
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var codigo = remision.codigoPublico || codigoPublico();
-  var head = drawHeaderBasic(doc, "REMISIÓN", codigo);
-  var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var cfg = state.config;
+  var logoDataUrl = await cargarLogoDataUrl(cfg);
+  var head = drawHeaderBasic(doc, "REMISIÓN", codigo, logoDataUrl);
+  var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
   var clienteLines = [p.cliente, clienteInfo && clienteInfo.direccion, clienteInfo && clienteInfo.ciudad, clienteInfo && clienteInfo.telefono].filter(Boolean);
 
@@ -1153,16 +1245,17 @@ export async function generarPDFRemision(p, remision, opts) {
     }),
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    alternateRowStyles: { fillColor: [242, 242, 242] },
     margin: { left: marginX, right: marginX },
-    columnStyles: { 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } }
+    columnStyles: { 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } },
+    theme: "plain",
+    didParseCell: function (data) {
+      if (data.section === "body" && data.column.index === 4) data.cell.styles.fillColor = [242, 242, 242];
+    }
   });
 
   var finalY = doc.lastAutoTable.finalY + 22;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
-  doc.text("VALOR DE REFERENCIA TOTAL", marginX, finalY);
-  doc.text(money(totalRef), pageW - marginX, finalY, { align: "right" });
-  finalY += 20;
+  finalY = drawTotalBox(doc, marginX, finalY, pageW - marginX * 2, "VALOR DE REFERENCIA TOTAL", money(totalRef));
+  finalY += 14;
   doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(140, 140, 140);
   var nota = doc.splitTextToSize("Documento de entrega en consignación — no es una factura. El cobro nace solo cuando el punto reporte ventas reales.", pageW - marginX * 2);
   nota.forEach(function (l) { finalY += 12; doc.text(l, marginX, finalY); });

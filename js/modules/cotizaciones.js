@@ -1002,8 +1002,14 @@ function renderDetalleReferencia(cotId, ref) {
   var abierta = state.detalleModoRefs === cotId
     ? true
     : (ref.seccionOpcionalesAbierta !== undefined ? !!ref.seccionOpcionalesAbierta : (detalle.length > 0 || tieneEstadosPersonalizados));
+  // Estilo propio (no el genérico .cot-col-title, gris y chico que usan
+  // todos los demás encabezados de esta tarjeta): acá vive el flujo de
+  // producción y el detalle de tallas/observaciones, lo que arma el PDF de
+  // producción de un uniforme completo — fácil de pasar por alto si se ve
+  // igual de discreto que "Costos globales del pedido". Con color de acento
+  // llama la atención de que hay algo que vale la pena abrir.
   var titulo = "Opciones adicionales" + (detalle.length ? " · tallas (" + detalle.length + ")" : "");
-  var html = '<div class="cot-col-title" style="margin-top:14px;cursor:pointer;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
+  var html = '<div class="cot-opciones-toggle" style="margin-top:14px;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
     "</div>";
   if (!abierta) return html;
@@ -1153,12 +1159,29 @@ export var actions = {
     state.refActiva = Object.assign({}, state.refActiva, { [cotId]: refId });
     notify();
   },
+  // Solo cambia cómo se VE la referencia (abierta/cerrada) — no es un dato
+  // que el usuario esté editando, así que NO debe marcar la cotización como
+  // "cambios sin guardar" (mapRef sí lo hace, vía conRef -> marcarSucia).
+  // Antes lo hacía, y con una referencia larga (roster de un uniforme
+  // completo) simplemente abrir "Opciones adicionales" para MIRARLA ya hacía
+  // aparecer el botón flotante de Guardar, sin que nada real hubiera
+  // cambiado — se sentía como si la pantalla "soltara" el botón de guardado
+  // sola. Muta `state.cotizaciones` directo (igual que mapRef) para que si
+  // MÁS ADELANTE sí hay un cambio real y se guarda, este toggle viaje con él;
+  // pero por sí solo no dispara ni el aviso ni una escritura a la Sheet.
   "toggle-ref-seccion": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
-    mapRef(cotId, refId, function (r) {
-      var abierta = r.seccionOpcionalesAbierta !== undefined ? !!r.seccionOpcionalesAbierta : (r.detalle || []).length > 0;
-      return Object.assign({}, r, { seccionOpcionalesAbierta: !abierta });
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (c.id !== cotId) return c;
+      return Object.assign({}, c, {
+        referencias: (c.referencias || []).map(function (r) {
+          if (r.id !== refId) return r;
+          var abierta = r.seccionOpcionalesAbierta !== undefined ? !!r.seccionOpcionalesAbierta : (r.detalle || []).length > 0;
+          return Object.assign({}, r, { seccionOpcionalesAbierta: !abierta });
+        })
+      });
     });
+    notify();
   },
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
