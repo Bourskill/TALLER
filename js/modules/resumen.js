@@ -8,10 +8,11 @@ import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
-  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal } from "../core/calc.js";
+  calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
+  calcGananciaDisponible, calcComposicionCaja } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import {
-  configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
+  configurarDefaults, crearBarrasIngresosGastos, crearLinea, crearDona, destruirGrafica, paletaGrafica
 } from "../core/graficas.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
@@ -41,6 +42,8 @@ export function render() {
   var html = renderKpis();
 
   html += renderAvisoPropuestasPendientes();
+
+  html += renderComposicionCaja();
 
   html += renderGraficaResumen();
 
@@ -135,10 +138,56 @@ function renderKpis() {
   return '<div class="kpis">' +
     renderKpiIvaCobrado() +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmt(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
+    renderKpiGananciaDisponible() +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmt(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
     renderKpiPorPagar(resumenPago) +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
     "</div>";
+}
+// De la caja actual, lo que de verdad es ganancia (ya restado lo que hay que
+// pagar y el IVA que no es del taller) — ver calcGananciaDisponible en
+// core/calc.js. El usuario lo pidió explícito: separar cuánto de la plata en
+// caja es suya de verdad vs. cuánto ya tiene destino. Un negativo (se debe
+// más de lo que hay hoy) se muestra tal cual, en rojo: es la alerta, no un
+// error de cálculo.
+function renderKpiGananciaDisponible() {
+  var g = calcGananciaDisponible();
+  // Mismo cuidado que renderKpiIvaCobrado: en un taller que no factura IVA,
+  // ese KPI ni siquiera existe (para no estorbar con algo que no le aplica) —
+  // el texto de ayuda de acá tampoco debe MENCIONARLO si no viene al caso,
+  // aunque la resta (calcGananciaDisponible ya incluye calcIvaCobradoTotal)
+  // sea correcta igual: restar 0 no cambia el número.
+  var hayIva = calcIvaCobradoTotal() > 0;
+  var ayuda = "Lo que queda de la caja actual después de descontar lo que el taller debe pagar (gastos fijos, nómina, comisiones, deudas)" +
+    (hayIva ? " y el IVA cobrado que le corresponde al Estado" : "") + ". Es la plata que de verdad es tuya hoy.";
+  return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Ganancia disponible' +
+    renderHelp(ayuda) +
+    '</div><div class="kpi-value ' + (g < 0 ? "danger" : "success") + '">' + fmt(g) + "</div><div class=\"kpi-note\">" + (g < 0 ? "Se debe más de lo que hay en caja" : "Caja actual menos lo que ya tiene destino") + "</div></div>";
+}
+
+// "Más gráficas, en pocas palabras" — de qué está hecha la caja actual, de un
+// vistazo: una dona en vez de otra fila de cifras, porque acá lo que importa
+// es la PROPORCIÓN (¿la mayoría de la caja es mía o ya tiene dueño?), no la
+// serie en el tiempo (esa es la gráfica de abajo, "Ingresos y gastos"). Solo
+// aparece si hay algo en caja: con todo en cero no hay nada que proporcionar.
+function renderComposicionCaja() {
+  var c = calcComposicionCaja();
+  if (!c.caja) return "";
+  // Mismo cuidado que renderKpiIvaCobrado: el IVA solo se menciona (acá y en
+  // la dona de abajo) si el taller de verdad factura IVA — si no, es una
+  // categoría vacía que no le aporta nada a quien nunca la usa.
+  var hayIva = c.iva > 0;
+  var cifras = [
+    { label: "Ganancia disponible", valor: fmt(c.ganancia), clase: c.ganancia >= 0 ? "pos" : "neg" },
+    { label: "Por pagar", valor: fmt(c.porPagar), clase: c.porPagar > 0 ? "neg" : "" }
+  ];
+  if (hayIva) cifras.push({ label: "IVA por girar", valor: fmt(c.iva), clase: "neg" });
+  var html = '<div class="card"><div class="section-title">De qué es la caja actual' +
+    renderHelp("Composición de \"Caja actual\": cuánto de esa plata es ganancia disponible y cuánto ya tiene destino (por pagar" + (hayIva ? " + IVA que le corresponde al Estado" : "") + "). Si \"Por pagar\" supera la caja, la ganancia disponible da negativa — no se dibuja una porción negativa, esa alerta ya la dice el KPI de arriba.") +
+    "</div>";
+  html += renderCifrasGrafica(cifras);
+  html += '<div style="position:relative;height:200px;"><canvas id="chart-composicion-caja"></canvas></div></div>';
+  return html;
 }
 // Parte de la caja que NO es del taller.
 //
@@ -297,18 +346,26 @@ function datosSerieMovimientos(s, extra) {
 }
 
 // "Rendimiento de planta": no cuánto stock hay (eso vive en Catálogo), sino
-// cuántas prendas SALIERON (ventas + remisiones de consignación) cada día —
-// un proxy directo de cuánto está produciendo/despachando el taller día a
-// día. Reutiliza movimientosStock (ver core/stock.js), que ya documenta cada
-// salida real de stock — no es un dato nuevo que haya que empezar a llevar.
+// cuántas prendas TERMINARON producción cada día — un proxy directo de cuánto
+// está produciendo/despachando el taller día a día.
+//
+// Antes contaba solo salidas de stock del Catálogo (ventas directas y
+// remisiones de consignación, vía movimientosStock — ver core/stock.js), lo
+// que solo existe para pedidos con un producto de catálogo asociado. Un
+// pedido a la medida sin esa referencia —la mayoría del negocio— avanzaba
+// sus etapas hasta "Entregado" y este gráfico jamás se enteraba: el usuario
+// reportó "ya despaché algo y no refleja nada". Ahora cuenta cualquier
+// pedido o referencia que haya llegado a la ÚLTIMA etapa de SU flujo de
+// producción (ver calcPrendasTerminadasPorDia en core/calc.js), sea o no de
+// catálogo — es lo que de verdad significa "salió de planta".
 function renderRendimientoPlanta() {
   var datos = datosPrendasPorDia();
   var html = '<div class="card"><div class="section-title">Rendimiento de planta' +
     '<span style="font-weight:400;font-size:12px;color:var(--ink-faint);margin-left:8px;">prendas producidas — últimos 30 días</span>' +
-    renderHelp("Cuenta las salidas de stock del Catálogo (ventas directas y remisiones de consignación) por día — cuántas prendas terminadas salieron de la planta cada día, no cuánto queda en stock.") +
+    renderHelp("Cuenta, por día, cuántas prendas llegaron a la ÚLTIMA etapa de su flujo de producción (ej. \"Entregado\") — de cualquier pedido, tenga o no un producto de catálogo asociado. No es cuánto stock queda, es cuánto salió terminado.") +
     "</div>";
   if (!datos.total) {
-    return html + '<div class="empty" style="padding:10px 0;">Sin salidas de stock registradas en este rango.</div></div>';
+    return html + '<div class="empty" style="padding:10px 0;">Ningún pedido llegó a su última etapa en este rango.</div></div>';
   }
   // Las cifras pasaron de debajo de la gráfica a arriba (mismo componente que
   // usa "Ingresos y gastos"): son el titular de la tarjeta, no un pie de foto.
@@ -328,15 +385,9 @@ function datosPrendasPorDia() {
     var d = new Date(hoy); d.setDate(d.getDate() - i);
     dias.push(isoDate(d));
   }
-  var porDia = {};
-  dias.forEach(function (k) { porDia[k] = 0; });
-  (state.productos || []).forEach(function (p) {
-    (p.movimientosStock || []).forEach(function (m) {
-      if (m.tipo === "salida" && porDia.hasOwnProperty(m.fecha)) porDia[m.fecha] += num(m.cantidad);
-    });
-  });
-  var total = dias.reduce(function (a, k) { return a + porDia[k]; }, 0);
-  return { labels: dias, valores: dias.map(function (k) { return porDia[k]; }), total: total };
+  var porDia = calcPrendasTerminadasPorDia(dias[0], dias[dias.length - 1]);
+  var total = dias.reduce(function (a, k) { return a + (porDia[k] || 0); }, 0);
+  return { labels: dias, valores: dias.map(function (k) { return porDia[k] || 0; }), total: total };
 }
 
 function etiquetaFechaCorta(iso) {
@@ -344,7 +395,7 @@ function etiquetaFechaCorta(iso) {
   return partes[2] + "/" + partes[1];
 }
 
-var chartIngresosGastos = null, chartPrendasDia = null, chartReportePeriodo = null;
+var chartIngresosGastos = null, chartPrendasDia = null, chartReportePeriodo = null, chartComposicionCaja = null;
 
 // Único punto imperativo de este módulo (todo lo demás es render() puro que
 // devuelve un string) — llamado por core/dom.js justo después de insertar el
@@ -359,6 +410,7 @@ export function afterRender() {
   dibujarChartIngresosGastos();
   dibujarChartPrendasDia();
   dibujarChartReportePeriodo();
+  dibujarChartComposicionCaja();
 }
 
 // Simétrico a afterRender (lo llama core/dom.js al salir de esta pestaña).
@@ -369,6 +421,21 @@ export function beforeUnmount() {
   chartIngresosGastos = destruirGrafica(chartIngresosGastos);
   chartPrendasDia = destruirGrafica(chartPrendasDia);
   chartReportePeriodo = destruirGrafica(chartReportePeriodo);
+  chartComposicionCaja = destruirGrafica(chartComposicionCaja);
+}
+
+function dibujarChartComposicionCaja() {
+  chartComposicionCaja = destruirGrafica(chartComposicionCaja);
+  var canvas = document.getElementById("chart-composicion-caja");
+  if (!canvas) return;
+  var c = calcComposicionCaja();
+  var p = paletaGrafica();
+  // Mismo criterio que renderComposicionCaja: sin IVA que facturar, esa
+  // porción ni se lista — una categoría en 0 seguiría apareciendo vacía en
+  // la leyenda, mencionando algo que a este taller no le aplica.
+  var labels = ["Ganancia disponible", "Por pagar"], valores = [c.gananciaGrafica, c.porPagar], colores = [p.exito, p.peligro];
+  if (c.iva > 0) { labels.push("IVA por girar"); valores.push(c.iva); colores.push(p.acento); }
+  chartComposicionCaja = crearDona(canvas, { labels: labels, valores: valores, colores: colores, formatoTooltip: fmt });
 }
 
 // Gráfica del rango elegido en el reporte (distinta de la de arriba, que son

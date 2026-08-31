@@ -3,7 +3,7 @@
 // en vez de duplicar el combobox.
 
 import { esc } from "./utils.js";
-import { clienteById, buscarClientesCombo } from "./calc.js";
+import { clienteById, buscarClientesCombo, unidadesConocidas } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -25,6 +25,53 @@ export function renderHelp(texto, alinear) {
 // Productos no hay a quién cobrarle, así que ahí se esconden. El valor actual
 // siempre se incluye aunque esté filtrado — si no, un insumo guardado con ese
 // tipo se vería en pantalla como si tuviera otro.
+// Encabezado plegable "con bulto" (fondo de acento, borde, texto en negrita)
+// para una sección de campos OPCIONALES que no toda fila/tarjeta necesita —a
+// diferencia del `.cot-col-title` gris genérico, que se confunde con
+// cualquier título de sección normal y es fácil de pasar por alto.
+// Nació en Cotizaciones ("Opciones adicionales"), pero Pedidos ("Vendedor a
+// comisión") y Productos ("Costeo y producción") son exactamente el mismo
+// patrón —un ▸/▾ que revela campos opcionales— solo que sin este estilo: se
+// veían tan discretos como cualquier título normal, y el usuario reportó que
+// le costaba encontrarlos. Un solo lugar para el estilo evita que un cuarto
+// caso futuro vuelva a nacer gris.
+export function renderToggleSeccion(o) {
+  return '<div class="cot-opciones-toggle"' + (o.margenSuperior ? ' style="margin-top:' + o.margenSuperior + ';"' : "") +
+    ' data-action="' + o.action + '"' + (o.attrs || "") + '>' +
+    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (o.abierta ? "▾" : "▸") + "</button> " + o.titulo +
+    (o.ayuda ? renderHelp(o.ayuda) : "") +
+    "</div>";
+}
+
+// Botón "▾" + panel de sugerencias para un campo "Unidad" (insumo, costo
+// global, servicio, movimiento de Finanzas...). Reemplaza al <input
+// list="dl-unidades"> nativo: el usuario pidió "un campo con una lista
+// desplegable, se puede escribir o escoger" y ya se le había dicho que
+// estaba — la MEMORIA (unidadesConocidas(), ver core/calc.js) sí aprende de
+// lo que se escribe en cualquier campo, pero el datalist nativo del
+// navegador solo ofrece sugerencias mientras se ESCRIBE: con el campo ya
+// lleno (el caso normal al editar), un clic no mostraba nada, así que nunca
+// se sintió como una lista desplegable de verdad.
+//
+// Clic en esta flecha SIEMPRE abre el panel completo, sea cual sea el valor
+// actual. Elegir una opción escribe sobre el <input> original (por su id,
+// vía `target`) y le dispara su evento normal (`input` o `change`, según
+// cómo esté enlazado ese campo) — así este componente no necesita saber
+// CÓMO se guarda cada campo (set-cat-campo, set-ins-campo, data-form...),
+// solo sirve la sugerencia. Ver las acciones "toggle-combo-unidad" y
+// "elegir-unidad" en core/dom.js.
+export function renderComboUnidad(o) {
+  var html = '<button type="button" class="combo-unidad-flecha" tabindex="-1" data-action="toggle-combo-unidad" data-clave="' + esc(o.clave) + '" aria-label="Ver unidades usadas antes" aria-expanded="' + (o.abierto ? "true" : "false") + '">▾</button>';
+  if (o.abierto) {
+    html += '<div class="combo-suggestions combo-unidad-suggestions">' +
+      unidadesConocidas().map(function (u) {
+        return '<div class="combo-item" data-action="elegir-unidad" data-target="' + esc(o.id) + '" data-valor="' + esc(u) + '">' + esc(u) + "</div>";
+      }).join("") +
+      "</div>";
+  }
+  return html;
+}
+
 export function renderTipoCostoOptions(current, enCotizacion) {
   return Object.keys(TIPOS_COSTO).filter(function (k) {
     return enCotizacion || k === current || !TIPOS_COSTO[k].soloCotizacion;

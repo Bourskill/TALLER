@@ -1,7 +1,7 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
 import { esc, num, uid } from "../core/utils.js";
 import { TIPOS_COSTO } from "../core/constants.js";
-import { renderTipoCostoOptions, renderHelp, renderBuscador } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
 
@@ -127,8 +127,15 @@ function ordenarInsumos(lista) {
   // botón de agregar vive ABAJO (ver "add-cat-item"): si el insumo saltara al
   // principio, aparecería lejos de donde se acaba de hacer clic. Un nombre en
   // blanco va al final, no al frente.
+  //
+  // Mientras ES el insumo recién creado y todavía no se pulsó "Guardar"
+  // (catalogoInsumoNuevoId), se ordena como si su nombre siguiera vacío, sin
+  // importar lo que ya se haya escrito — si no, escribir la primera letra ya
+  // lo mandaba a su lugar alfabético real, lejos de donde se seguía
+  // trabajando, y se sentía como si ya se hubiera guardado solo.
   return copia.sort(function (a, b) {
-    var an = String(a.nombre || "").trim(), bn = String(b.nombre || "").trim();
+    var an = a.id === state.catalogoInsumoNuevoId ? "" : String(a.nombre || "").trim();
+    var bn = b.id === state.catalogoInsumoNuevoId ? "" : String(b.nombre || "").trim();
     if (!an && !bn) return 0;
     if (!an) return 1;
     if (!bn) return -1;
@@ -324,8 +331,9 @@ function renderTablaInsumos(items, categorias) {
 
 function renderFilaInsumo(c, categorias) {
   var esServicio = esInsumoServicio(c);
+  var esNuevoSinGuardar = state.catalogoInsumoNuevoId === c.id;
   var attrs = ' data-action-change="set-cat-campo" data-id="' + c.id + '"';
-  return '<div class="tx-row insumo" style="grid-template-columns:' + COLS + ';">' +
+  return '<div class="tx-row insumo' + (esNuevoSinGuardar ? " nuevo-sin-guardar" : "") + '" style="grid-template-columns:' + COLS + ';">' +
     // El nombre es el dato por el que se reconoce la fila: se escribe con más
     // peso y sin caja, como texto, hasta que se hace clic para editarlo.
     '<span class="mobile-th">Insumo</span>' +
@@ -354,8 +362,8 @@ function renderFilaInsumo(c, categorias) {
     // ese campo tenía sugerencias para reutilizar.
     '<span class="mobile-th">Unidad</span>' +
     '<span class="insumo-unidad-cell">' +
-    '<input class="mini-input insumo-unidad" list="dl-unidades" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)."' + attrs + ' data-campo="unidad" />' +
-    '<span class="insumo-unidad-flecha" aria-hidden="true">▾</span>' +
+    '<input class="mini-input insumo-unidad" id="ins-unidad-' + c.id + '" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)."' + attrs + ' data-campo="unidad" />' +
+    renderComboUnidad({ id: "ins-unidad-" + c.id, clave: "ins-unidad-" + c.id, abierto: state.comboUnidadAbierto === "ins-unidad-" + c.id }) +
     "</span>" +
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
@@ -367,7 +375,15 @@ function renderFilaInsumo(c, categorias) {
     categorias.map(function (cat) { return '<option value="' + cat.id + '" ' + (c.categoriaId === cat.id ? "selected" : "") + ">" + esc(cat.nombre) + "</option>"; }).join("") +
     "</select>" +
 
-    '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>' +
+    // Un insumo recién creado no se guarda solo con escribir: se ve un botón
+    // "Guardar" explícito, y hasta que se pulse se queda quieto en su lugar
+    // (ver ordenarInsumos) en vez de saltar a su posición alfabética apenas
+    // se escribe la primera letra del nombre — eso se sentía como si ya se
+    // hubiera dado "guardar" sin haberlo pedido.
+    (esNuevoSinGuardar
+      ? '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '" title="' + (c.nombre.trim() ? "" : "Ponle un nombre primero") + '"' + (c.nombre.trim() ? "" : " disabled") + '>✓ Guardar</button>' +
+        '<button class="btn ghost small" data-action="remove-cat-item" data-id="' + c.id + '" title="Descartar, no se guarda" aria-label="Descartar insumo">Descartar</button>'
+      : '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>') +
     "</div>";
 }
 
@@ -405,6 +421,10 @@ export var actions = {
       : (state.filtroCatalogoCategoria !== "todos" && state.filtroCatalogoCategoria !== "sin" ? state.filtroCatalogoCategoria : "");
     var nuevo = { id: uid(), nombre: "", unidad: "UND", costo: 0, tipo: "por_prenda", categoriaId: categoriaId, proveedorId: "" };
     state.catalogoInsumos = (state.catalogoInsumos || []).concat([nuevo]);
+    // Hasta que se pulse "Guardar" en su fila, este insumo no participa del
+    // orden alfabético (ver ordenarInsumos): así escribir el nombre no lo
+    // hace saltar de posición como si ya se hubiera guardado solo.
+    state.catalogoInsumoNuevoId = nuevo.id;
     // No se fuerza el orden a "Recientes": el botón vive ABAJO, así que
     // saltar el insumo nuevo al TOPE de la lista lo alejaría del lugar donde
     // se acaba de hacer clic — justo lo contrario de "cerca del primer campo
@@ -423,6 +443,17 @@ export var actions = {
       input.focus();
       if (typeof input.scrollIntoView === "function") input.scrollIntoView({ block: "center" });
     }
+  },
+  // Confirma el insumo recién creado: de ahí en adelante SÍ entra al orden
+  // alfabético normal, como cualquier otro. No hace nada más — el nombre,
+  // costo, etc. ya se guardaron solos al escribirlos (mismo modelo de edición
+  // directa de siempre en Catálogo); esto solo suelta el "freno" de posición.
+  "guardar-cat-item-nuevo": function (el) {
+    var id = el.getAttribute("data-id");
+    var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === id; })[0];
+    if (!item || !item.nombre.trim()) return;
+    if (state.catalogoInsumoNuevoId === id) state.catalogoInsumoNuevoId = "";
+    notify();
   },
   "orden-catalogo": function (el) {
     state.ordenCatalogo = el.getAttribute("data-val");
@@ -461,7 +492,13 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === id; })[0];
     if (!item) return;
-    if (!window.confirm('¿Eliminar "' + item.nombre + '" del catálogo?\n\nLas cotizaciones y plantillas que ya lo usan no se ven afectadas (guardan su propia copia del costo); solo deja de estar disponible para agregarlo a nuevas.')) return;
+    // "Descartar" un insumo recién creado que ni siquiera se ha guardado
+    // (ver guardar-cat-item-nuevo) no necesita el confirm de "eliminar del
+    // catálogo": nunca llegó a estar guardado de verdad, no hay nada real que
+    // perder — y con el nombre todavía vacío ese mensaje ni siquiera se leería bien.
+    var esDescarteDeNuevo = state.catalogoInsumoNuevoId === id;
+    if (!esDescarteDeNuevo && !window.confirm('¿Eliminar "' + item.nombre + '" del catálogo?\n\nLas cotizaciones y plantillas que ya lo usan no se ven afectadas (guardan su propia copia del costo); solo deja de estar disponible para agregarlo a nuevas.')) return;
+    if (esDescarteDeNuevo) state.catalogoInsumoNuevoId = "";
     state.catalogoInsumos = (state.catalogoInsumos || []).filter(function (c) { return c.id !== id; });
     persist("catalogoInsumos"); notify();
   },

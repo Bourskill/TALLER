@@ -1,9 +1,9 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado } from "../core/calc.js";
+import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
-import { renderClienteCombo, renderHelp, renderBuscador, renderProgresoEtapas } from "../core/components.js";
+import { renderClienteCombo, renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
@@ -321,10 +321,10 @@ function renderVendedorPedido(f, totales) {
   var resumenV = f.vendedorNombre
     ? " · " + esc(f.vendedorNombre) + " (" + (f.vendedorTipo === "fijo" ? fmt(f.vendedorValor) : num(f.vendedorValor) + "%") + ")"
     : "";
-  var html = '<div class="cot-col-title" style="cursor:pointer;" data-action="toggle-pedido-vendedor">' +
-    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> Vendedor a comisión (opcional)" + resumenV +
-    renderHelp("Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar.") +
-    "</div>";
+  var html = renderToggleSeccion({
+    titulo: "Vendedor a comisión (opcional)" + resumenV, abierta: abierta, action: "toggle-pedido-vendedor",
+    ayuda: "Si vendió alguien a comisión, defínelo aquí: nombre y comisión (por % del total, o un valor fijo). El valor y su estado de pago se ven en la tarjeta del pedido, en Finanzas y en el KPI Por pagar."
+  });
   if (!abierta) return html;
   var comision = f.vendedorTipo === "fijo" ? num(f.vendedorValor) : totales.precioTotal * (num(f.vendedorValor) / 100);
   html += '<div class="form-grid" style="margin-top:8px;">' +
@@ -2369,6 +2369,13 @@ export var actions = {
   }
 };
 
+// `fechaTerminado` se estampa la primera vez que el pedido LLEGA a su última
+// etapa (no cada vez que se pulsa "avanzar" ya estando ahí, que es un no-op
+// de siguienteEtapa — si no, un clic de más semanas después movería la fecha
+// a hoy) y se borra si se retrocede desde ahí. La alimenta
+// "Rendimiento de planta" (resumen.js: datosPrendasPorDia) para saber CUÁNDO
+// se despachó cada pedido rápido (sin cotización) — ver moveEstadoRef abajo
+// para el caso de un pedido con referencias propias.
 function moveEstado(el, dir) {
   var id = el.getAttribute("data-id");
   state.pedidos = state.pedidos.map(function (p) {
@@ -2376,7 +2383,11 @@ function moveEstado(el, dir) {
     // La aritmética de "avanzar/retroceder acotado al flujo" vive en
     // core/calc.js y la comparten los dos caminos: acá solo se decide DÓNDE
     // se escribe el resultado.
-    return Object.assign({}, p, { estado: siguienteEtapa(etapasDe(p), p.estado, dir) });
+    var nuevoEstado = siguienteEtapa(etapasDe(p), p.estado, dir);
+    var yaEstaba = pedidoTerminado(p);
+    var terminaAhora = pedidoTerminado(Object.assign({}, p, { estado: nuevoEstado }));
+    var fechaTerminado = terminaAhora ? (yaEstaba ? p.fechaTerminado : todayStr()) : "";
+    return Object.assign({}, p, { estado: nuevoEstado, fechaTerminado: fechaTerminado });
   });
   persist("pedidos"); notify();
 }
@@ -2395,7 +2406,16 @@ function moveEstadoRef(el, dir) {
     if (c.id !== cotId) return c;
     var refs = (c.referencias || []).map(function (r) {
       if (r.id !== refId) return r;
-      return Object.assign({}, r, { estado: siguienteEtapa(etapasDe(r), r.estado, dir) });
+      var nuevoEstado = siguienteEtapa(etapasDe(r), r.estado, dir);
+      // Misma lógica y mismo motivo que moveEstado(): se estampa la fecha SOLO
+      // al llegar (no en cada clic ya estando en la última etapa), por
+      // referencia — cada una tiene su propia cantidad y puede terminar en un
+      // día distinto de las demás del mismo pedido. Alimenta "Rendimiento de
+      // planta" (resumen.js).
+      var yaEstaba = pedidoTerminado(r);
+      var terminaAhora = pedidoTerminado(Object.assign({}, r, { estado: nuevoEstado }));
+      var fechaTerminada = terminaAhora ? (yaEstaba ? r.fechaTerminada : todayStr()) : "";
+      return Object.assign({}, r, { estado: nuevoEstado, fechaTerminada: fechaTerminada });
     });
     cotActualizada = Object.assign({}, c, { referencias: refs });
     return cotActualizada;

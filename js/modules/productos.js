@@ -15,7 +15,7 @@
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
-import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderBuscador } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderBuscador, renderToggleSeccion } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
@@ -337,10 +337,10 @@ function renderCosteoProduccion(p) {
   var insumos = p.insumos || [];
   var abierta = p.seccionCosteoAbierta !== undefined ? !!p.seccionCosteoAbierta : insumos.length > 0;
   var titulo = "Costeo y producción" + (insumos.length ? " · " + insumos.length + (insumos.length === 1 ? " insumo" : " insumos") : "");
-  var html = '<div class="cot-col-title" style="cursor:pointer;" data-action="toggle-producto-costeo" data-id="' + p.id + '">' +
-    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
-    renderHelp("Insumos, consumo de tela y flujo de producción — de acá sale el costo/ganancia de arriba. No hace falta llenarlo para poder vender el producto ya mismo.") +
-    "</div>";
+  var html = renderToggleSeccion({
+    titulo: titulo, abierta: abierta, action: "toggle-producto-costeo", attrs: ' data-id="' + p.id + '"',
+    ayuda: "Insumos, consumo de tela y flujo de producción — de acá sale el costo/ganancia de arriba. No hace falta llenarlo para poder vender el producto ya mismo."
+  });
   if (!abierta) return html;
 
   html += '<div class="form-grid" style="margin-top:10px;">' +

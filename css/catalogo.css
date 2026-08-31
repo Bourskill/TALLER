@@ -65,6 +65,12 @@
    dato; unidad, tipo, proveedor y categoría son atributos de apoyo.
    ========================================================================== */
 
+/* Insumo recién creado, sin confirmar con "Guardar" todavía (ver
+   guardar-cat-item-nuevo en modules/catalogo.js) — mismo tratamiento de
+   "borrador" que usa el resto de la app (ver .cot-opciones-toggle), para que
+   se note que esta fila es distinta: no se guarda sola. */
+.tx-row.insumo.nuevo-sin-guardar{background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-sm);}
+
 /* El nombre se lee como texto, no como un campo más: sin caja hasta que se
    hace clic. Antes los seis campos de la fila competían por la atención con
    el mismo borde y el mismo tamaño. */
@@ -92,14 +98,16 @@
 .tx-row.insumo select, .tx-row.insumo input[data-campo="unidad"]{font-size:12px;color:var(--ink-soft);}
 .tx-row.insumo select:focus, .tx-row.insumo input:focus{color:var(--ink);}
 
-/* La flechita del campo Unidad: mismo truco que `.buscador-icono` (un ícono
-   superpuesto, sin robarle el clic al input de abajo) — reutilizado, no
-   reinventado. Le da al datalist nativo una señal visible de "esto tiene
-   sugerencias" que algunos navegadores no dibujan por su cuenta. */
+/* La flechita del campo Unidad ahora SÍ es clicable (ver renderComboUnidad en
+   core/components.js): a diferencia del datalist nativo que reemplazó, un
+   clic acá siempre abre el panel completo de unidades ya usadas, sea cual
+   sea el valor actual del campo. El panel en sí (.combo-unidad-suggestions)
+   reutiliza .combo-suggestions/.combo-item de clientes.css. */
 .insumo-unidad-cell{position:relative;}
 .insumo-unidad-cell .insumo-unidad{padding-right:20px;}
-.insumo-unidad-flecha{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  font-size:9px;line-height:1;color:var(--ink-faint);pointer-events:none;}
+.combo-unidad-flecha{position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  font-size:9px;line-height:1;color:var(--ink-faint);background:none;border:none;cursor:pointer;padding:6px 4px;}
+.combo-unidad-flecha:hover{color:var(--ink);}
 .insumo-sin-proveedores{font-size:11px;color:var(--ink-faint);cursor:help;}
 
 /* La cabecera de la tabla alinea "Costo" con su columna, que está a la

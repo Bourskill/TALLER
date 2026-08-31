@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra } from "../core/calc.js";
-import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador } from "../core/components.js";
+import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador, renderToggleSeccion, renderComboUnidad } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
@@ -818,7 +818,8 @@ function renderFilasGlobales(cotId, ref) {
     var attrs = ' data-action-change="set-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '"';
     html += '<div class="ins-row global" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotglobal-unidad-' + g.id + '" style="width:100%" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      renderComboUnidad({ id: "cotglobal-unidad-" + g.id, clave: "cotglobal-unidad-" + g.id, abierto: state.comboUnidadAbierto === "cotglobal-unidad-" + g.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global", true) + "</select>" +
       // La cantidad no aplica: se paga una vez, no por prenda.
@@ -862,7 +863,8 @@ function renderFilasServicios(cotId) {
     var ganancia = num(s.precio) - num(s.costo);
     html += '<div class="ins-row servicio" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Servicio</span><input class="mini-input" style="width:100%" placeholder="Ej. diseño" value="' + esc(s.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotserv-unidad-' + s.id + '" style="width:100%" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
+      renderComboUnidad({ id: "cotserv-unidad-" + s.id, clave: "cotserv-unidad-" + s.id, abierto: state.comboUnidadAbierto === "cotserv-unidad-" + s.id }) + "</span>" +
       '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0." />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
@@ -935,7 +937,8 @@ function renderRefCard(cotId, ref) {
     var cambio = insumoCambioDeCatalogo(i);
     html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" list="dl-unidades" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      renderComboUnidad({ id: "cotins-unidad-" + i.id, clave: "cotins-unidad-" + i.id, abierto: state.comboUnidadAbierto === "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
@@ -1009,9 +1012,10 @@ function renderDetalleReferencia(cotId, ref) {
   // igual de discreto que "Costos globales del pedido". Con color de acento
   // llama la atención de que hay algo que vale la pena abrir.
   var titulo = "Opciones adicionales" + (detalle.length ? " · tallas (" + detalle.length + ")" : "");
-  var html = '<div class="cot-opciones-toggle" style="margin-top:14px;" data-action="toggle-ref-seccion" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
-    '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (abierta ? "▾" : "▸") + "</button> " + titulo +
-    "</div>";
+  var html = renderToggleSeccion({
+    titulo: titulo, abierta: abierta, action: "toggle-ref-seccion",
+    attrs: ' data-cot="' + cotId + '" data-ref="' + ref.id + '"', margenSuperior: "14px"
+  });
   if (!abierta) return html;
 
   html += '<div class="cot-col-title" style="margin-top:0;text-transform:none;font-weight:600;font-size:12.5px;color:var(--ink-soft);">Etapas de producción' +

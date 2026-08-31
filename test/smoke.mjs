@@ -100,6 +100,30 @@ assert(state.clientes.length === 1, "agrega cliente");
 assert(state.clientesVista === "contactos", "tras crear el cliente salta a la lista de Contactos");
 assert(!!document.querySelector(".cliente-card"), "el cliente recién creado aparece en la lista");
 
+// El usuario reportó desorden al editar un contacto: "salen opciones como si
+// fuera vendedor, o cliente por consignación etc". Causa: el formulario de
+// ALTA (renderFormNuevoCliente) ya escondía comisión/proveedor según el tipo,
+// pero el de EDICIÓN (renderClienteEdit) los mostraba siempre los tres a la
+// vez, sin importar qué tipo de contacto se estuviera editando — recién se
+// filtraban al guardar, cuando el usuario ya los había visto y podido llenar.
+state.clientes.push({ id: "cli-punto", nombre: "Punto Test", tipoRelacion: "punto_consignacion", comisionDefault: { tipo: "porcentaje", valor: 15 }, cedula: "", telefono: "", correo: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", categoriasInsumo: [] });
+render();
+click('[data-action="editar-cliente"][data-id="cli-punto"]');
+let filaEdit = document.querySelector('[data-cliente-edit-row="cli-punto"]');
+assert(!!filaEdit.querySelector('[data-role="edit-comision-valor"]'), "editando un PUNTO DE CONSIGNACIÓN, sí se ve el campo de comisión");
+assert(!filaEdit.querySelector('[data-role="edit-descripcion"]'), "pero NO los campos de proveedor (categorías, descripción): no le aplican a un punto");
+setChange('[data-cliente-edit-row="cli-punto"] [data-role="edit-tipo-relacion"]', "cliente");
+filaEdit = document.querySelector('[data-cliente-edit-row="cli-punto"]');
+assert(!filaEdit.querySelector('[data-role="edit-comision-valor"]'), "cambiar el tipo a \"Cliente\" (sin guardar todavía) esconde la comisión DE INMEDIATO, no recién al guardar");
+setChange('[data-cliente-edit-row="cli-punto"] [data-role="edit-tipo-relacion"]', "proveedor");
+filaEdit = document.querySelector('[data-cliente-edit-row="cli-punto"]');
+assert(!filaEdit.querySelector('[data-role="edit-comision-valor"]') && !!filaEdit.querySelector('[data-role="edit-descripcion"]'), "y cambiarlo a \"Proveedor\" muestra sus campos (categorías/descripción/puntuación) en vez de los de comisión");
+click('[data-action="guardar-cliente-edit"][data-id="cli-punto"]');
+assert(state.clientes.find(c => c.id === "cli-punto").tipoRelacion === "proveedor", "guardar aplica el tipo elegido en el borrador reactivo");
+assert(state.clientes.find(c => c.id === "cli-punto").comisionDefault === null, "y como ya no es un punto, su comisión por defecto se limpia (no queda un dato huérfano de otro tipo)");
+state.clientes = state.clientes.filter(c => c.id !== "cli-punto");
+render();
+
 // --- pedidos: pestañas "+ Nuevo pedido" / "Historial" — mismo patrón ---
 click('[data-action="tab"][data-tab="pedidos"]');
 assert(state.pedidosVista === "nueva" && !!document.querySelector('[data-form="pedido"][data-field="cliente"]'), "Pedidos entra mostrando el formulario en blanco");
@@ -140,6 +164,25 @@ click('[data-action="tab"][data-tab="catalogo"]');
 click('[data-action="add-cat-item"]');
 assert(state.catalogoInsumos.length > 0, "el catálogo trae insumos semilla + el agregado");
 const catItemId = state.catalogoInsumos[state.catalogoInsumos.length - 1].id;
+
+// El usuario reportó: "apenas relleno el primer campo [del insumo nuevo] y lo
+// deselecciono, automáticamente se organiza donde cree que va, como si ya le
+// hubiera dado guardar". Causa: el orden A-Z se recalcula en cada tecla, así
+// que escribir la primera letra del nombre ya reubicaba la fila en su lugar
+// alfabético real, lejos de donde se seguía trabajando.
+assert(state.catalogoInsumoNuevoId === catItemId, "el insumo recién creado queda marcado como borrador sin guardar todavía");
+state.catalogoInsumos.unshift({ id: "ins-zzz-test", nombre: "Zíper", unidad: "UND", costo: 500, tipo: "por_prenda", categoriaId: "", proveedorId: "" });
+render();
+setChange("#ins-nombre-" + catItemId, "Algodón"); // alfabéticamente antes que "Zíper"
+let ordenNombres = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
+assert(ordenNombres.indexOf("ins-nombre-" + catItemId) > ordenNombres.indexOf("ins-nombre-ins-zzz-test"), "mientras no se guarda, escribir el nombre NO reubica la fila (sigue quieta, no salta a su lugar alfabético)");
+assert(!!document.querySelector('[data-action="guardar-cat-item-nuevo"][data-id="' + catItemId + '"]'), "aparece un botón explícito de Guardar para el insumo nuevo");
+click('[data-action="guardar-cat-item-nuevo"][data-id="' + catItemId + '"]');
+assert(!state.catalogoInsumoNuevoId, "Guardar confirma el insumo: deja de ser un borrador");
+ordenNombres = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
+assert(ordenNombres.indexOf("ins-nombre-" + catItemId) < ordenNombres.indexOf("ins-nombre-ins-zzz-test"), "y ahí SÍ toma su lugar alfabético real (Algodón antes que Zíper)");
+state.catalogoInsumos = state.catalogoInsumos.filter(c => c.id !== "ins-zzz-test");
+render();
 
 // --- plantillas: agrega una plantilla con un insumo desde el catálogo ---
 click('[data-action="tab"][data-tab="plantillas"]');
@@ -254,8 +297,15 @@ assert(state.insumoPickerAbierto === cotId, "el explorador de insumos se abre so
 assert(!!document.querySelector(".picker-modal"), "el modal del explorador se renderiza");
 assert(!!document.querySelector('[data-action="set-insumo-picker-categoria"][data-val="todos"]'), "el explorador lista las categorías en el panel lateral");
 assert(!!document.querySelector("#inp-insumo-picker-buscar"), "el explorador tiene barra de búsqueda");
+// El usuario reportó: "cada que selecciono uno, el explorador me lleva
+// devuelta al inicio de la lista" — marcar un insumo (checkbox) dispara un
+// re-render de TODA la app, y sin nada que lo evite eso reconstruye
+// ".picker-list" desde cero con scrollTop = 0. Se simula haber bajado en la
+// lista antes de marcar, para comprobar que el scroll sobrevive al re-render.
+document.querySelector(".picker-list").scrollTop = 234;
 click('[data-action="toggle-insumo-picker-item"][data-id="' + catItemId + '"]');
 assert(state.insumoPickerSeleccion.length === 1, "marcar un insumo lo agrega a la selección múltiple");
+assert(document.querySelector(".picker-list").scrollTop === 234, "y el explorador NO vuelve al inicio de la lista: conserva el scroll de antes de marcar");
 click('[data-action="confirmar-insumo-picker"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
 assert(state.insumoPickerAbierto === "", "confirmar cierra el explorador");
 ref = state.cotizaciones[0].referencias[0];
@@ -1454,6 +1504,38 @@ render();
 assert(!document.body.textContent.includes("IVA cobrado"), "y si no se factura IVA, esa tarjeta no aparece: no estorba a quien no lo usa");
 
 // ---------------------------------------------------------------------------
+// "Ganancia disponible" (Resumen): el usuario pidió separar, de la caja
+// actual, cuánto es ganancia de verdad y cuánto ya tiene destino (por pagar +
+// IVA) — "para saber qué servicio me toca pagar y cuánto". Reutiliza
+// calcCaja/calcPorPagar/calcIvaCobradoTotal ya existentes y ya probados: cero
+// fuentes paralelas, cero riesgo de doble conteo.
+// ---------------------------------------------------------------------------
+assert(calcMod.calcGananciaDisponible() === calcMod.calcCaja() - calcMod.calcPorPagar() - calcMod.calcIvaCobradoTotal(), "ganancia disponible es EXACTAMENTE caja menos por-pagar menos IVA — una sola fórmula");
+const composicionActual = calcMod.calcComposicionCaja();
+if (composicionActual.ganancia >= 0) {
+  assert(composicionActual.gananciaGrafica === composicionActual.ganancia, "con ganancia positiva, la porción de la dona es exactamente la ganancia");
+  assert(composicionActual.gananciaGrafica + composicionActual.porPagar + composicionActual.iva === composicionActual.caja, "las tres partes de la dona suman EXACTAMENTE la caja actual — cero descuadre");
+} else {
+  assert(composicionActual.gananciaGrafica === 0, "con ganancia negativa, la dona no dibuja una porción negativa (se recorta a 0; la alerta la da la cifra, no el gráfico)");
+}
+
+// Escenario aislado y determinista: sin nada pendiente por pagar ni IVA, la
+// ganancia disponible tiene que ser EXACTAMENTE la caja — nada más restando.
+const txPrevios = state.tx, pedidosPrevios = state.pedidos, cotizacionesPrevias = state.cotizaciones, deudasPrevias = state.deudas;
+const gastosFijosPrevios = state.config.gastosFijos, nominaPrevia = state.config.nomina;
+state.tx = [{ id: "tx-caja-test", tipo: "ingreso", monto: 500000, concepto: "Prueba caja", fecha: hoyStr(), contraparte: "" }];
+state.pedidos = []; state.cotizaciones = []; state.deudas = []; state.config.gastosFijos = []; state.config.nomina = [];
+assert(calcMod.calcPorPagar() === 0 && calcMod.calcIvaCobradoTotal() === 0, "escenario de prueba: nada pendiente por pagar, nada de IVA");
+assert(calcMod.calcGananciaDisponible() === 500000, "sin nada pendiente ni IVA, la ganancia disponible es EXACTAMENTE la caja");
+state.tab = "resumen";
+render();
+assert(document.body.textContent.includes("Ganancia disponible"), "el Resumen muestra el nuevo KPI de ganancia disponible");
+assert(!!document.querySelector("#chart-composicion-caja"), "y su gráfica de composición de la caja (\"De qué es la caja actual\")");
+state.tx = txPrevios; state.pedidos = pedidosPrevios; state.cotizaciones = cotizacionesPrevias; state.deudas = deudasPrevias;
+state.config.gastosFijos = gastosFijosPrevios; state.config.nomina = nominaPrevia;
+render();
+
+// ---------------------------------------------------------------------------
 // Ajustes de feedback (Insumos + estados de producción).
 // ---------------------------------------------------------------------------
 
@@ -2206,6 +2288,70 @@ assert(!!state.recuperacion && state.recuperacion.claves.indexOf("formPedido") !
 await storeMod2.recuperarDelEspejo();
 assert(state.formPedido.cliente === "Cliente desde otro navegador" && state.formPedido.lineas.length === 1, "y restaurarlo trae de vuelta exactamente lo que había en la nube");
 assert(state.recuperacion === null, "y cierra el aviso");
+
+// ---------------------------------------------------------------------------
+// "Rendimiento de planta" no reflejaba nada: el usuario reportó "ya despaché
+// algo y no refleja nada". Causa: solo contaba salidas de stock de Catálogo
+// (movimientosStock), que solo existen para pedidos con un producto de
+// catálogo asociado — un pedido a la medida nunca las genera, sin importar
+// cuántas etapas avance. Fix: moveEstado/moveEstadoRef (modules/pedidos.js)
+// estampan fechaTerminado/fechaTerminada al LLEGAR a la última etapa, y
+// calcPrendasTerminadasPorDia (core/calc.js) cuenta eso en vez de stock.
+// ---------------------------------------------------------------------------
+state.pedidos = [{
+  id: "ped-planta", numeroOp: "OP-7777", cliente: "Cliente Planta", descripcion: "Camisetas a la medida",
+  cantidad: "5", total: 250000, costo: 150000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-08-30", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [];
+state.tab = "pedidos";
+state.pedidosVista = "historial";
+render();
+click('[data-action="advance"][data-id="ped-planta"]'); // nuevo -> cortado
+click('[data-action="advance"][data-id="ped-planta"]'); // cortado -> confeccion
+click('[data-action="advance"][data-id="ped-planta"]'); // confeccion -> acabados
+assert(!state.pedidos.find(p => p.id === "ped-planta").fechaTerminado, "en una etapa intermedia todavía no hay fecha de terminado");
+click('[data-action="advance"][data-id="ped-planta"]'); // acabados -> entregado
+let pedPlanta = state.pedidos.find(p => p.id === "ped-planta");
+assert(pedPlanta.estado === "entregado", "avanza hasta la última etapa");
+assert(pedPlanta.fechaTerminado === hoyStr(), "y al LLEGAR ahí queda estampada la fecha de hoy");
+click('[data-action="retreat"][data-id="ped-planta"]');
+pedPlanta = state.pedidos.find(p => p.id === "ped-planta");
+assert(pedPlanta.estado === "acabados" && !pedPlanta.fechaTerminado, "retroceder desde la última etapa borra la fecha: ya no está \"terminado\"");
+click('[data-action="advance"][data-id="ped-planta"]');
+pedPlanta = state.pedidos.find(p => p.id === "ped-planta");
+assert(pedPlanta.fechaTerminado === hoyStr(), "y volver a llegar la vuelve a estampar");
+
+// Lo mismo por REFERENCIA en un pedido con cotización vinculada: cada una
+// puede terminar un día distinto de las demás del mismo pedido.
+state.cotizaciones = [{
+  id: "cot-planta", cliente: "Cliente Planta 2", descripcion: "Uniformes", pedidoId: "ped-planta-2",
+  estado: "convertida", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "cpx",
+  referencias: [
+    { id: "ref-a", nombre: "Camisetas", origen: "taller", estado: "acabados", estadosDef: null, cantidadPedida: 3, consumoAprox: 1, precioVenta: 20000, insumos: [], detalle: [], costoCompra: 0, proveedorId: "" },
+    { id: "ref-b", nombre: "Pantalones", origen: "taller", estado: "nuevo", estadosDef: null, cantidadPedida: 2, consumoAprox: 1, precioVenta: 30000, insumos: [], detalle: [], costoCompra: 0, proveedorId: "" }
+  ]
+}];
+state.pedidos = [Object.assign({}, pedPlanta, { id: "ped-planta-2", cotizacionId: "cot-planta", estado: "acabados", fechaTerminado: "" })];
+render();
+click('[data-action="advance-ref"][data-pedido="ped-planta-2"][data-cot="cot-planta"][data-ref="ref-a"]');
+let cotPlanta = state.cotizaciones.find(c => c.id === "cot-planta");
+let refA = cotPlanta.referencias.find(r => r.id === "ref-a");
+let refB = cotPlanta.referencias.find(r => r.id === "ref-b");
+assert(refA.estado === "entregado" && refA.fechaTerminada === hoyStr(), "la referencia A llega a su última etapa y queda estampada, sola");
+assert(!refB.fechaTerminada, "la referencia B, que sigue atrás en el flujo, no tiene fecha");
+
+// calcPrendasTerminadasPorDia: pedido rápido cuenta su cantidad completa,
+// pedido con cotización reparte por referencia, cancelado y sin fecha no cuentan.
+state.pedidos = [
+  pedPlanta, // sin cotización: cuenta p.cantidad (5) completa
+  { id: "ped-planta-2", cotizacionId: "cot-planta", estado: "acabados", estadosDef: null, cantidad: "5" }, // con cotización: se ignora p.cantidad, cuenta por referencia
+  { id: "ped-cancelado-planta", cotizacionId: "", estado: "entregado", estadosDef: null, cantidad: "99", fechaTerminado: hoyStr(), cancelado: true }
+];
+const porDiaHoy = calcMod.calcPrendasTerminadasPorDia(hoyStr(), hoyStr());
+assert(porDiaHoy[hoyStr()] === 8, "cuenta 5 del pedido rápido + 3 de la referencia A ya terminada = 8; la referencia B (atrás) y el pedido cancelado no suman");
+assert(!calcMod.calcPrendasTerminadasPorDia("2020-01-01", "2020-01-01")[hoyStr()], "y fuera del rango pedido no cuenta nada de hoy");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

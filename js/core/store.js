@@ -234,6 +234,10 @@ export const state = {
   // visor DENTRO de la app en vez de descargarlo directo — o null. Ver
   // mostrarPdfEnApp() en core/pdf.js. Nunca se persiste.
   pdfPreview: null,
+  // Clave (por id de fila) del campo "Unidad" que tiene abierto su panel de
+  // sugerencias — ver renderComboUnidad en core/components.js. Un solo campo
+  // a la vez en toda la app, nunca se persiste.
+  comboUnidadAbierto: "",
 
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
@@ -279,6 +283,13 @@ export const state = {
   clientesOrden: "abc", // "abc" | "recientes" | "categoria" (categoría solo aplica a proveedores)
   clienteEditando: "", // id del cliente actualmente en modo edición (o "")
   clienteEditCategorias: [], // borrador reactivo de categoriasInsumo mientras se edita un proveedor (ver renderCamposProveedorEdit)
+  // Borrador reactivo del <select> Tipo mientras se edita un contacto — sin
+  // esto, cambiar el tipo en modo edición no mostraba/escondía los campos de
+  // comisión o de proveedor hasta guardar (el resto del formulario es de
+  // solo lectura hasta "Guardar", pero ESTE campo decide qué otros campos
+  // tienen sentido mostrar, igual que ya hacía el formulario de alta). Ver
+  // renderClienteEdit.
+  clienteEditTipoRelacion: "",
   sincronizandoContactos: false, // true mientras se empujan todos los contactos a Google Contacts — nunca se persiste
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   clientePreciosAbierto: "", // id del proveedor con su panel de "Precios y compras" desplegado (o "")
@@ -295,6 +306,12 @@ export const state = {
   // única de las listas grandes de la app que no tenía uno.
   buscarCatalogo: "",
   ordenCatalogo: "abc", // "abc" | "caro" | "nuevos"
+  // Id del insumo recién creado con "+" que todavía no se confirma con
+  // "Guardar" (ver modules/catalogo.js: add-cat-item/guardar-cat-item-nuevo).
+  // Mientras coincide, ordenarInsumos lo trata como si su nombre siguiera
+  // vacío — así escribirlo no lo hace saltar de posición alfabética como si
+  // ya se hubiera guardado solo. Nunca se persiste.
+  catalogoInsumoNuevoId: "",
   // Panel para renombrar/eliminar categorías, plegado por defecto: se
   // administra de vez en cuando, no en el día a día.
   catalogoCategoriasAbierto: false,

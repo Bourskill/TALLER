@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
 import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos } from "../core/calc.js";
-import { renderHelp, renderBuscador } from "../core/components.js";
+import { renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -110,7 +110,8 @@ function renderFormMovimiento() {
       proveedoresDeContactos().map(function (p) { return '<option value="' + p.id + '" ' + (f.proveedorId === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
       "</select></div>" +
       '<div class="field"><label>Cantidad comprada</label><input type="number" data-form="tx" data-field="cantidad" value="' + esc(f.cantidad) + '" placeholder="Ej. 12" /></div>' +
-      '<div class="field"><label>Unidad</label><input list="dl-unidades" data-form="tx" data-field="unidad" value="' + esc(f.unidad) + '" placeholder="MT, UND…" /></div>' +
+      '<div class="field"><label>Unidad</label><span class="insumo-unidad-cell"><input class="insumo-unidad" id="tx-unidad" data-form="tx" data-field="unidad" value="' + esc(f.unidad) + '" placeholder="MT, UND…" />' +
+      renderComboUnidad({ id: "tx-unidad", clave: "tx-unidad", abierto: state.comboUnidadAbierto === "tx-unidad" }) + "</span></div>" +
       "</div>";
   }
 

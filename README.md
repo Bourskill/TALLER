@@ -222,6 +222,113 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (decimocuarta ronda: estética y varios pedidos del usuario)
+
+Nueve pedidos sueltos del usuario en un solo mensaje. Por orden de aparición:
+
+**1. Botón "Opciones adicionales" poco visible, en general.** Solo Cotizaciones
+tenía el estilo "con bulto" (fondo de acento) para este botón; Pedidos
+("Vendedor a comisión") y Productos ("Costeo y producción") usaban el mismo
+▸/▾ pero sin el fondo, tan discreto como cualquier título normal. Se extrajo
+`renderToggleSeccion()` a `core/components.js` y los tres puntos lo reutilizan
+ahora.
+
+**2. Unidad de medida: "lo pedí una vez y no quedó bien".** La MEMORIA sí
+funcionaba (`unidadesConocidas()` ya recorría toda la app), pero el campo
+seguía siendo un `<input list="dl-unidades">` nativo — ese datalist del
+navegador solo sugiere mientras se ESCRIBE; con el campo ya lleno (el caso
+normal al editar) un clic no mostraba nada. Se reemplazó por
+`renderComboUnidad()`: una flecha que SIEMPRE abre el panel completo de
+unidades ya usadas, se elija o se seleccione, en los 5 lugares donde aparece
+este campo (insumo, costo global, servicio, insumo de referencia, tx de
+Finanzas).
+
+**3. Cantidad real de una compra: sin escribirla, ahora se ve la estimada**
+(antes solo el costo real tenía ese respaldo para "servicio"; la cantidad
+real del PDF interno de cotización mostraba "—"). Ver `pdf.js`: la etiqueta
+dice "(estimado)" para que no se confunda con un dato realmente registrado.
+
+**4. Insumo nuevo que "se guardaba solo".** Escribir la primera letra del
+nombre ya reordenaba la fila a su lugar alfabético (el orden A–Z se
+recalcula en cada tecla) — se sentía como si ya se hubiera guardado sin
+pedirlo. Ahora un insumo recién creado (`state.catalogoInsumoNuevoId`) se
+ordena como si su nombre siguiera vacío mientras no se confirme, con un
+botón explícito **"✓ Guardar"** (y "Descartar", sin el confirm de borrado
+normal — nunca llegó a guardarse de verdad).
+
+**5. Explorador de insumos: "me devuelve al inicio de la lista".** Marcar un
+insumo dispara un re-render de TODA la app (esta app no tiene virtual DOM),
+así que `.picker-list` se reconstruía con `scrollTop = 0` en cada clic.
+`core/dom.js` ahora guarda el scroll del picker antes de tocar el DOM y lo
+repone después, igual que ya hacía con el foco/cursor de un input.
+
+**6. PDF: seis ajustes juntos.**
+- Se quitó el aviso "DOCUMENTO DE USO INTERNO PARA PRODUCCIÓN — NO INCLUYE
+  PRECIOS NI DATOS DEL CLIENTE" de la orden de producción.
+- El título de la orden ya no repite el detalle entre paréntesis que trae la
+  descripción del pedido convertido (ej. "Camisetas (T-shirt básica x3)") —
+  esa referencia ya sale desglosada en la tabla de abajo.
+- Se quitó "ETAPA: ..." de la orden de producción (cambia todo el tiempo; la
+  orden se imprime una vez y queda circulando en el taller).
+- La info del taller/cliente (DE/PARA) baja de tamaño (8.5→7.5 la etiqueta,
+  10.5→9 el dato): es de consulta, no el protagonista del documento.
+- **Encabezado y pie en TODAS las páginas, pie siempre pegado abajo.** Antes
+  el encabezado de marca solo existía en la página 1 (las siguientes nacían
+  en blanco, incluidas las que jsPDF-autotable crea solo por su cuenta para
+  una tabla larga) y el pie se pintaba una sola vez justo debajo del último
+  contenido — en un documento corto quedaba a mitad de hoja. Ahora
+  `opcionesPaginacion()` le da a cada `autoTable` un `margin.top` + un
+  `didDrawPage` que repite `drawHeaderBasic` en cada página que cree (propia
+  o de la tabla), y `pintarPieEnTodasLasPaginas()` corre una sola vez al
+  final y clava el pie en el mismo Y desde el fondo en TODAS las páginas que
+  el documento haya terminado teniendo.
+- **Comisión de vendedor en $0 "cuando en realidad está pendiente".** El
+  número no estaba mal: el tile de arriba (`calcResumenMovimientos`) SOLO
+  cuenta comisiones ya PAGADAS — se renombró a "Comisiones pagadas" para que
+  el $0 se lea como corresponde. Lo generado-pero-no-pagado ya se veía más
+  abajo, en "Ventas por vendedor" (columna renombrada a "Comisión
+  generada"). De paso se confirmó que cada documento SÍ trata a los
+  vendedores de forma independiente (ninguno asume un vendedor único ni un
+  mismo vendedor para todas las ventas) — no había tal bug.
+
+**7. Contactos: "salen opciones como si fuera vendedor, o cliente por
+consignación".** El formulario de ALTA (`renderFormNuevoCliente`) ya
+escondía comisión/proveedor según el tipo elegido; el de EDICIÓN
+(`renderClienteEdit`) los mostraba SIEMPRE los tres juntos, sin importar qué
+tipo de contacto se estuviera editando — recién se filtraban al guardar,
+cuando el usuario ya los había visto y podido llenar. Ahora un borrador
+reactivo (`state.clienteEditTipoRelacion`, actualizado por
+`set-cliente-edit-tipo`) hace que cambiar el `<select>` Tipo muestre/esconda
+esos campos de inmediato, igual que en el formulario de alta.
+
+**8. Finanzas: "quiero que también haya ganancia" separada de lo que no lo
+es.** Nuevo KPI **"Ganancia disponible"** = `calcCaja() - calcPorPagar() -
+calcIvaCobradoTotal()` — los tres ya existían y ya estaban probados por
+separado, así que no hay una fuente nueva que pueda descuadrarse. Nueva
+gráfica de dona **"De qué es la caja actual"** (`crearDona()` en
+`core/graficas.js`, nuevo tipo de gráfica) mostrando esa misma composición
+en proporción. Ninguno de los dos menciona el IVA si el taller no lo
+factura, mismo criterio que el KPI "IVA cobrado" de antes.
+
+**9. "Rendimiento de planta" no reflejaba nada.** Contaba solo salidas de
+stock del Catálogo (`movimientosStock`), que solo existen para pedidos con
+un producto de catálogo asociado — un pedido a la medida (la mayoría del
+negocio) avanzaba sus etapas hasta "Entregado" y esta gráfica nunca se
+enteraba. `moveEstado`/`moveEstadoRef` (`modules/pedidos.js`) ahora estampan
+`fechaTerminado`/`fechaTerminada` al LLEGAR a la última etapa (una vez, no en
+cada clic estando ya ahí — y se borra si se retrocede), y
+`calcPrendasTerminadasPorDia()` (`core/calc.js`) cuenta eso en vez de stock:
+cualquier pedido o referencia, tenga o no producto de catálogo.
+
+Cubierto en `test/smoke.mjs` con casos concretos para cada uno de los nueve
+(scroll del picker, borrador de insumo nuevo, combo de unidad, ganancia
+disponible con signo positivo y negativo, fechaTerminado/fechaTerminada,
+edición condicional de contacto). Los cambios de `core/pdf.js` (ítem 6) no
+tienen prueba automática — este proyecto no carga jsPDF en el entorno de
+`node` de las pruebas — y se verificaron generando los PDF reales en un
+navegador (cotización de 40 referencias para forzar 2 páginas, orden de
+producción, reporte financiero, recibo).
+
 ## Registro de cambios — agosto 2026 (decimotercera ronda: movimientos sueltos de un pedido escalado)
 
 **Bug propio, reportado por el usuario:** *"creé un pedido rápido, luego lo

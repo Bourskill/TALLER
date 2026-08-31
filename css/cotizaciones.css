@@ -22,11 +22,14 @@
 .cot-cliente-input:focus{outline:none;border-color:var(--accent);background:var(--surface-2);box-shadow:0 0 0 3px var(--accent-soft);}
 .cot-collapse-toggle{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;padding:0 2px;vertical-align:middle;}
 .cot-collapse-toggle:hover{color:var(--ink);}
-/* "Opciones adicionales" (flujo de producción + tallas/observaciones) es la
-   única sección de la tarjeta con estilo propio, no el .cot-col-title gris y
-   chico genérico: es fácil de pasar por alto y ahí vive el detalle que arma
-   el PDF de producción de un uniforme completo — vale la pena que llame la
-   atención en vez de mimetizarse con encabezados menos importantes. */
+/* Encabezado plegable "con bulto" para una sección de campos OPCIONALES —
+   nació acá para "Opciones adicionales" (flujo de producción +
+   tallas/observaciones de una referencia), pero es compartida: ver
+   renderToggleSeccion() en core/components.js, que también la usa en Pedidos
+   ("Vendedor a comisión") y Productos ("Costeo y producción"). El nombre de
+   la clase se quedó con el prefijo "cot-" por historia, aunque ya no es
+   exclusiva de Cotizaciones — vive acá porque este archivo se carga siempre,
+   sin importar la pestaña activa. */
 .cot-opciones-toggle{display:inline-flex;align-items:center;gap:5px;cursor:pointer;
   font-size:12px;font-weight:700;letter-spacing:.02em;
   color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent);

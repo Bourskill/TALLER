@@ -565,6 +565,39 @@ export function listaDeudores() {
 export function calcPorPagar() {
   return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes() + calcComisionesConsignacionPendientes();
 }
+
+// De la plata que hoy está en la caja (calcCaja, todo el histórico), cuánta
+// es ganancia de verdad y cuánta ya tiene dueño — el usuario lo pidió
+// explícito: "separa los montos de plata que hay en caja tanto la ganancia
+// como lo que no lo es, para saber qué servicio me toca pagar y cuánto".
+//
+// Ya existían, cada uno probado por separado, los dos números que faltaba
+// restar: calcPorPagar() (todo lo que el TALLER debe: gastos fijos, nómina,
+// comisiones, deudas) y calcIvaCobradoTotal() (lo que ya se cobró pero es
+// del Estado, no del taller — mismo criterio que ya usa el KPI "IVA
+// cobrado"). Ninguno de los dos se resta dos veces en ningún otro lado: ver
+// calcResumenPorPagar/calcPorPagarDesglose (una sola fuente para "por
+// pagar") y renderKpiIvaCobrado (una sola fuente para el IVA).
+//
+// Puede dar negativo (se debe más de lo que hay en caja hoy mismo: plata ya
+// cobrada por adelantado que en realidad está comprometida) — no se recorta
+// a 0, porque ocultar ese número sería ocultar justo la alerta que el KPI
+// existe para dar.
+export function calcGananciaDisponible() {
+  return calcCaja() - calcPorPagar() - calcIvaCobradoTotal();
+}
+
+// Desglose para la gráfica de composición de la caja (ver
+// renderGraficaCaja en modules/resumen.js): tres partes que suman
+// EXACTAMENTE calcCaja() — la misma garantía que ya exige README, "cero
+// descuadres entre apartados". Si la ganancia disponible da negativo, no
+// hay una "parte negativa" que graficar: se muestra en 0 en la dona (la
+// cifra de arriba, esa sí negativa, es la que avisa).
+export function calcComposicionCaja() {
+  var caja = calcCaja(), porPagar = calcPorPagar(), iva = calcIvaCobradoTotal();
+  var ganancia = caja - porPagar - iva;
+  return { caja: caja, porPagar: porPagar, iva: iva, ganancia: ganancia, gananciaGrafica: Math.max(0, ganancia) };
+}
 // Desglose de "Por pagar" por categoría, con el detalle de cada obligación
 // (concepto + monto + fecha si aplica) — para mostrar la lista resumida en
 // Pendientes en vez de solo el total.
@@ -1359,16 +1392,19 @@ export function esInsumoServicio(ins) {
 }
 
 // Todas las unidades de medida que ya se han escrito en algún lugar de la
-// app, para que el campo "Unidad" (un <input list="dl-unidades">, ver
-// core/dom.js: renderDatalists) las ofrezca como sugerencia — así "MT",
-// "docena" o cualquier cosa rara que se haya usado antes se reutiliza en vez
-// de volver a escribirla.
+// app, para que el campo "Unidad" (renderComboUnidad, ver core/components.js)
+// las ofrezca como sugerencia — así "MT", "docena" o cualquier cosa rara que
+// se haya usado antes se reutiliza en vez de volver a escribirla.
 //
-// POR QUÉ CAMBIÓ: el datalist existía, pero su lista de opciones era la
-// constante fija UNIDADES_SUGERIDAS (9 valores) — nunca aprendía nada de lo
-// que el usuario en verdad escribía. La intención (un campo con memoria)
-// estaba, la implementación no: escribir "docena" una vez no la dejaba
-// disponible la próxima vez, en ningún campo de la app.
+// POR QUÉ CAMBIÓ (dos veces): primero el campo usaba un <input
+// list="dl-unidades"> con la lista fija UNIDADES_SUGERIDAS (9 valores) —
+// nunca aprendía nada de lo que el usuario en verdad escribía. Se corrigió
+// para que esta función SÍ recorriera toda la app (ver abajo), pero el
+// datalist nativo del navegador solo muestra sugerencias mientras se
+// ESCRIBE: con el campo ya lleno —el caso normal al editar— un clic no
+// mostraba nada, así que seguía sin sentirse como una lista desplegable de
+// verdad pese a que la memoria ya funcionaba. Se reemplazó el <input list>
+// por renderComboUnidad, cuya flecha SIEMPRE abre el panel completo.
 //
 // Recorre TODO lugar donde se escribe una unidad a mano, no solo el catálogo:
 // un insumo suelto agregado directo en una cotización, un costo global
@@ -1915,6 +1951,42 @@ export function calcPedidosRango(desde, hasta) {
       };
     })
     .sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
+}
+
+// Cuántas prendas llegaron a su ÚLTIMA etapa de producción cada día — lo que
+// alimenta "Rendimiento de planta" en Resumen. Antes ese gráfico solo contaba
+// salidas de stock del Catálogo (ver core/stock.js), así que un pedido a la
+// medida sin producto de catálogo asociado —la mayoría del negocio— nunca
+// aparecía ahí sin importar cuántas veces se avanzara/despachara: el usuario
+// reportó "ya despaché algo y no refleja nada". Esto cuenta cualquier pedido
+// o referencia que haya llegado al final de SU flujo de etapas
+// (pedidoTerminado), sea o no de catálogo:
+// - Un pedido rápido (sin cotización vinculada) cuenta de una vez, con
+//   `p.cantidad`, el día que `moveEstado` lo dejó en su última etapa
+//   (`p.fechaTerminado`).
+// - Un pedido con cotización vinculada reparte por REFERENCIA: cada una
+//   puede terminar un día distinto de las demás (`moveEstadoRef`,
+//   `ref.fechaTerminada` + `ref.cantidadPedida`).
+// Pedidos/referencias que ya estaban en su última etapa ANTES de este cambio
+// no tienen esa fecha guardada (no existía el campo) — quedan fuera hasta
+// que se retroceda y se vuelva a avanzar; es una limitación aceptada, no un
+// error de cálculo.
+export function calcPrendasTerminadasPorDia(desde, hasta) {
+  var porDia = {};
+  function sumar(fecha, cantidad) {
+    if (!fecha || (desde && fecha < desde) || (hasta && fecha > hasta) || !cantidad) return;
+    porDia[fecha] = (porDia[fecha] || 0) + cantidad;
+  }
+  (state.pedidos || []).forEach(function (p) {
+    if (pedidoCancelado(p)) return;
+    if (p.cotizacionId) {
+      var cot = (state.cotizaciones || []).filter(function (c) { return c.id === p.cotizacionId; })[0];
+      ((cot && cot.referencias) || []).forEach(function (r) { sumar(r.fechaTerminada, num(r.cantidadPedida)); });
+    } else {
+      sumar(p.fechaTerminado, num(p.cantidad));
+    }
+  });
+  return porDia;
 }
 
 // Los totales del reporte cuentan solo lo que de verdad se vendió: un pedido

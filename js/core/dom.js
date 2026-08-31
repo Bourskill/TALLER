@@ -12,7 +12,7 @@
 
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar } from "./store.js";
 import { esc } from "./utils.js";
-import { clienteById, calcNotificaciones, unidadesConocidas } from "./calc.js";
+import { clienteById, calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
@@ -250,6 +250,31 @@ var coreActions = {
     a.click();
     document.body.removeChild(a);
   },
+  // Ver renderComboUnidad en core/components.js. Un solo panel abierto a la
+  // vez en toda la app (clave global, no por módulo): abrir otro cierra el
+  // anterior solo, sin necesitar un listener de "clic afuera cierra".
+  "toggle-combo-unidad": function (el) {
+    var clave = el.getAttribute("data-clave");
+    state.comboUnidadAbierto = state.comboUnidadAbierto === clave ? "" : clave;
+    notify();
+  },
+  // Escribe la unidad elegida sobre el <input> ORIGINAL (por su id) y le
+  // dispara su evento normal — "input" para un campo enlazado con
+  // data-form/data-field (ver handleFormInput), "change" para uno con
+  // data-action-change (el patrón genérico 3, más abajo). Se disparan los
+  // dos: cada input solo escucha el suyo, así que no hay doble efecto, y
+  // este componente no necesita saber cuál usa cada llamador.
+  "elegir-unidad": function (el) {
+    var targetId = el.getAttribute("data-target"), valor = el.getAttribute("data-valor");
+    state.comboUnidadAbierto = "";
+    var input = document.getElementById(targetId);
+    if (input) {
+      input.value = valor;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    notify();
+  },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
     // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.
@@ -343,6 +368,13 @@ export function render() {
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
   var selStart = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
+  // El explorador de insumos (ver renderInsumoPicker en modules/cotizaciones.js)
+  // se re-renderiza ENTERO con cada marca/desmarca (checkbox de selección) —
+  // sin esto, su scroll volvía al principio con cada clic, y bajar hasta el
+  // insumo #40 para marcarlo lo devolvía al insumo #1. Mismo patrón que el
+  // foco/cursor de arriba: se guarda antes de tocar el DOM, se repone después.
+  var listaPicker = document.querySelector(".picker-list");
+  var scrollPicker = listaPicker ? listaPicker.scrollTop : null;
 
   try {
     var app = document.getElementById("app");
@@ -372,8 +404,7 @@ export function render() {
       renderImagenPreview() +
       renderPdfPreview() +
       renderAtajos() +
-      renderToast() +
-      renderDatalists();
+      renderToast();
 
     // Blindaje contra un quirk de Chrome: si el elemento con foco (ej. un
     // <select> cuyo desplegable nativo seguía abierto) sigue activo justo
@@ -419,6 +450,10 @@ export function render() {
         el2.focus();
         if (selStart != null && el2.setSelectionRange) { try { el2.setSelectionRange(selStart, selStart); } catch (e) {} }
       }
+    }
+    if (scrollPicker != null) {
+      var listaPicker2 = document.querySelector(".picker-list");
+      if (listaPicker2) listaPicker2.scrollTop = scrollPicker;
     }
   } catch (e) {
     console.error(e);
@@ -699,23 +734,6 @@ function campanaIcon() {
 // Overlay a pantalla completa para ver en grande cualquier foto de la app
 // (referencia de cotización, plantilla de prenda, pie de página del PDF).
 // Vive fuera de ".shell" para no depender de qué pestaña esté activa.
-// Sugerencias compartidas por todos los campos "Unidad" de la app (catálogo
-// de insumos, referencias de cotización, plantillas, productos). Va una sola
-// vez al final del documento: un <datalist> se referencia por id desde
-// cualquier input, no hace falta repetirlo en cada tabla.
-//
-// Se repinta en CADA render con lo que unidadesConocidas() (core/calc.js)
-// encuentra escrito en ese momento en toda la app — no es una lista fija:
-// cualquier unidad que se escriba una vez (así sea "docena" o algo raro de un
-// solo insumo) queda disponible como sugerencia para el resto, en cualquier
-// campo. Incluye "servicio", que es cómo se marca lo que se paga pero no se
-// compra en ningún lado.
-function renderDatalists() {
-  return '<datalist id="dl-unidades">' +
-    unidadesConocidas().map(function (u) { return '<option value="' + esc(u) + '">'; }).join("") +
-    "</datalist>";
-}
-
 function renderImagenPreview() {
   if (!state.imagenPreview) return "";
   return '<div class="imgprev-overlay" data-action="cerrar-imagen-preview">' +

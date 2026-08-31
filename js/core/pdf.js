@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, compraDeLinea, estadoLineaCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -114,22 +114,61 @@ function drawTotalBox(doc, x, y, ancho, etiqueta, valorTxt) {
   return y + alto;
 }
 
+// Alto de la franja de cierre — la misma cifra la usa el pie fijo de abajo Y
+// el margen inferior que se les reserva a las tablas (ver opcionesPaginacion)
+// para que ninguna fila caiga ENCIMA del pie.
+var BANDA_PIE_H = 28;
+
 // Pie: la misma franja del encabezado, angosta, con una línea centrada — el
-// documento se cierra con la misma marca con la que abrió. Salta de página
-// si no cabe entera (una franja partida por la mitad entre dos hojas se ve
-// como un error de impresión, no como diseño).
+// documento se cierra con la misma marca con la que abrió.
+//
+// POR QUÉ CAMBIÓ: antes se pintaba UNA sola vez, justo debajo del último
+// contenido (el `y` de quien la llamaba) — en un documento corto eso la
+// dejaba flotando a mitad de la hoja en vez de al pie, y en uno de varias
+// páginas solo se veía en la última. Ahora se llama UNA vez al final de cada
+// generador (ver pintarPieEnTodasLasPaginas) y se repite, clavada abajo, en
+// TODAS las páginas que el documento haya terminado teniendo — incluidas las
+// que jsPDF-autotable haya creado por su cuenta para una tabla larga.
 function drawFooterBand(doc, y, marginX, pageW, texto) {
-  var alto = 28;
-  var pageH = doc.internal.pageSize.getHeight();
-  if (y + alto > pageH - 20) { doc.addPage(); y = 54; }
   var acento = colorAcento();
   var sobre = textoSobreAcento();
   doc.setFillColor(acento[0], acento[1], acento[2]);
-  doc.rect(0, y, pageW, alto, "F");
+  doc.rect(0, y, pageW, BANDA_PIE_H, "F");
   doc.setFont("helvetica", "bold"); doc.setFontSize(10.5);
   doc.setTextColor(sobre[0], sobre[1], sobre[2]);
-  doc.text(String(texto || "").toUpperCase(), pageW / 2, y + alto / 2 + 4, { align: "center" });
-  return y + alto;
+  doc.text(String(texto || "").toUpperCase(), pageW / 2, y + BANDA_PIE_H / 2 + 4, { align: "center" });
+  return y + BANDA_PIE_H;
+}
+
+// Único punto que pinta el pie: recorre TODAS las páginas que el documento
+// terminó teniendo (doc.internal.getNumberOfPages(), ya sean de un
+// doc.addPage() explícito o de la paginación automática de una tabla larga) y
+// clava la franja siempre en el mismo Y desde el fondo de la hoja — nunca "lo
+// que sobró después del contenido". Se llama UNA vez, al final del todo,
+// después de que se terminó de dibujar cualquier cosa.
+function pintarPieEnTodasLasPaginas(doc, marginX, pageW, texto) {
+  var pageH = doc.internal.pageSize.getHeight();
+  var total = doc.internal.getNumberOfPages();
+  for (var i = 1; i <= total; i++) {
+    doc.setPage(i);
+    drawFooterBand(doc, pageH - BANDA_PIE_H, marginX, pageW, texto);
+  }
+}
+
+// Repite el encabezado de marca (drawHeaderBasic) en cada página que
+// jsPDF-autotable cree POR SU CUENTA para una tabla que no cupo entera —
+// antes esas páginas nacían completamente en blanco, sin banda, sin título,
+// sin N.º de documento: el usuario pidió encabezado en TODAS las páginas, no
+// solo en la primera. `margin.top` le reserva a la tabla el mismo espacio
+// que ya deja drawHeaderBasic en la primera página (ver su `y` de retorno),
+// para que este encabezado repetido nunca quede encima de la primera fila de
+// la página. Se agrega a las opciones de CUALQUIER doc.autoTable(...) que
+// pueda llegar a partirse en dos páginas.
+function opcionesPaginacion(doc, titulo, docNum, logoDataUrl) {
+  return {
+    margin: { top: BANDA_H + 34 },
+    didDrawPage: function () { drawHeaderBasic(doc, titulo, docNum, logoDataUrl); }
+  };
 }
 
 // Para pasarle a `didParseCell` en las tablas de reporte cuyo último renglón
@@ -313,13 +352,15 @@ export async function generarPDFCotizacion(cot, opts) {
     filas.push(["", "1", s.nombre || "Servicio", money(num(s.precio)), money(num(s.precio))]);
   });
 
+  var paginacion = opcionesPaginacion(doc, "COTIZACIÓN", codigo, logoDataUrl);
   doc.autoTable({
     startY: y,
     head: [["", "CANTIDAD", "REFERENCIA", "PRECIO POR UNIDAD", "TOTAL DE LA LÍNEA"]],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7, minCellHeight: 32, valign: "middle" },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, paginacion.margin),
+    didDrawPage: paginacion.didDrawPage,
     columnStyles: { 0: { cellWidth: 34 }, 1: { halign: "center", cellWidth: 60 }, 3: { halign: "right" }, 4: { halign: "right" } },
     // "plain": sin el rayado gris automático que trae 'striped' por defecto
     // — si se deja, se suma al tinte de la columna 4 de abajo y el total
@@ -361,9 +402,9 @@ export async function generarPDFCotizacion(cot, opts) {
   finalY += 14;
   finalY = drawTotalBox(doc, pageW - marginX - 190, finalY, 190, "TOTAL", money(totalConIva));
 
-  finalY += 46;
-  finalY = drawFooterBand(doc, finalY, marginX, pageW, "Gracias por su confianza");
-  await drawPiePagina(doc, finalY + 14, marginX, pageW);
+  finalY += 24;
+  await drawPiePagina(doc, finalY, marginX, pageW);
+  pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su confianza");
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
   return finalizarPDF(doc, codigo.replace("#", "") + "-" + nombreSeguro + ".pdf", opts);
@@ -376,18 +417,22 @@ export async function generarPDFCotizacion(cot, opts) {
 // que un ".card" en pantalla, para que se lea como UN bloque de datos y no
 // como texto suelto que quedó cerca por casualidad.
 function drawParties(doc, y, marginX, pageW, negocioLines, otherLines, otherTitle) {
+  // Tamaño reducido a propósito: la info del taller/cliente es de CONSULTA
+  // (a quién le compro, a quién le vendo), no el protagonista del documento
+  // — el título y el total siguen siendo lo grande. Antes competía en tamaño
+  // casi con el cuerpo de la tabla de abajo.
   var lineas = Math.max(negocioLines.length, otherLines.length, 1);
-  var altoPanel = 18 + lineas * 14 + 8;
+  var altoPanel = 16 + lineas * 12 + 8;
   doc.setFillColor(246, 246, 248);
   doc.rect(marginX, y - 14, pageW - marginX * 2, altoPanel, "F");
-  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
   doc.text("DE", marginX + 12, y);
   doc.text(otherTitle, pageW / 2 + 14, y);
-  y += 14;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 36, 32);
+  y += 13;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(30, 36, 32);
   var yA = y, yB = y;
-  (negocioLines.length ? negocioLines : ["—"]).forEach(function (l) { doc.text(String(l), marginX + 12, yA); yA += 14; });
-  (otherLines.length ? otherLines : ["—"]).forEach(function (l) { doc.text(String(l), pageW / 2 + 14, yB); yB += 14; });
+  (negocioLines.length ? negocioLines : ["—"]).forEach(function (l) { doc.text(String(l), marginX + 12, yA); yA += 12; });
+  (otherLines.length ? otherLines : ["—"]).forEach(function (l) { doc.text(String(l), pageW / 2 + 14, yB); yB += 12; });
   return Math.max(yA, yB) + 14;
 }
 
@@ -436,7 +481,14 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
   var resumenY = y;
   // Grid de 3 columnas x 2 filas (parejo, en vez de 5 en una sola fila) —
   // mismo balance visual que el reporte en pantalla.
-  var tiles = [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Insumos", money(resumen.insumosReales)], ["Nómina", money(nomina)], ["Comisiones", money(comisiones)], ["Balance neto", money(balance)]];
+  // "Comisiones PAGADAS" (no solo "Comisiones"): calcResumenMovimientos solo
+  // cuenta comisiones ya marcadas como pagadas (un movimiento en Finanzas
+  // SIEMPRE es plata que ya se movió — ver el porqué grande junto a esa
+  // función). El usuario reportó ver $0 acá "cuando en realidad está
+  // pendiente" — el número estaba bien, pero el nombre genérico invitaba a
+  // leerlo como "no se debe nada". Lo pendiente de verdad sale más abajo, en
+  // "Ventas por vendedor" (ver seccionDesgloseVendedores).
+  var tiles = [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Insumos", money(resumen.insumosReales)], ["Nómina", money(nomina)], ["Comisiones pagadas", money(comisiones)], ["Balance neto", money(balance)]];
   var colW = (pageW - marginX * 2) / 3, rowH = 34;
   tiles.forEach(function (item, i) {
     var col = i % 3, row = Math.floor(i / 3);
@@ -467,16 +519,20 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
 
   var d = desgloses || {};
 
+  var TITULO_RF = "REPORTE FINANCIERO";
+
   // La gráfica va primero: es el panorama, y lo que sigue es el detalle.
   if (d.grafica && d.grafica.dataUrl) {
-    y = seccionGrafica(doc, y, marginX, pageW, d.grafica);
+    y = seccionGrafica(doc, y, marginX, pageW, d.grafica, TITULO_RF, docNum);
   }
 
   if (d.movimientos !== false) {
-    y = tituloSeccionReporte(doc, y, marginX, "Movimientos del periodo", "Cada ingreso y gasto registrado en el rango.");
+    y = tituloSeccionReporte(doc, y, marginX, "Movimientos del periodo", "Cada ingreso y gasto registrado en el rango.", TITULO_RF, docNum);
+    var pagMov = opcionesPaginacion(doc, TITULO_RF, docNum);
     doc.autoTable({
       startY: y,
-      margin: { left: marginX, right: marginX },
+      margin: Object.assign({ left: marginX, right: marginX }, pagMov.margin),
+      didDrawPage: pagMov.didDrawPage,
       head: [["Fecha", "Tipo", "Concepto", "Persona", "Monto"]],
       body: body.length ? body : [["—", "—", "Sin movimientos en este periodo", "—", "—"]],
       styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
@@ -490,10 +546,10 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
   // Cada apartado va solo si quien pidió el PDF lo marcó (null = no marcado).
   // Sus columnas son propias: lo que le sirve a insumos no es lo que le sirve
   // a productos ni a pedidos.
-  if (d.insumos) y = seccionDesgloseInsumos(doc, y, marginX, pageW, d.insumos);
-  if (d.productos) y = seccionDesgloseProductos(doc, y, marginX, pageW, d.productos);
-  if (d.pedidos) y = seccionDesglosePedidos(doc, y, marginX, pageW, d.pedidos);
-  if (d.vendedores) y = seccionDesgloseVendedores(doc, y, marginX, pageW, d.vendedores);
+  if (d.insumos) y = seccionDesgloseInsumos(doc, y, marginX, pageW, d.insumos, TITULO_RF, docNum);
+  if (d.productos) y = seccionDesgloseProductos(doc, y, marginX, pageW, d.productos, TITULO_RF, docNum);
+  if (d.pedidos) y = seccionDesglosePedidos(doc, y, marginX, pageW, d.pedidos, TITULO_RF, docNum);
+  if (d.vendedores) y = seccionDesgloseVendedores(doc, y, marginX, pageW, d.vendedores, TITULO_RF, docNum);
 
   mostrarPdfEnApp(doc, docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
 }
@@ -501,13 +557,13 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
 // Gráfica de ingresos/gastos: se incrusta como imagen del canvas que ya está
 // dibujado en pantalla (ver imagenGraficaPeriodo en modules/resumen.js), así
 // el PDF muestra exactamente la misma gráfica que se vio, sin redibujarla.
-function seccionGrafica(doc, y, marginX, pageW, grafica) {
-  y = tituloSeccionReporte(doc, y, marginX, "Ingresos y gastos del periodo", "");
+function seccionGrafica(doc, y, marginX, pageW, grafica, titulo, docNum) {
+  y = tituloSeccionReporte(doc, y, marginX, "Ingresos y gastos del periodo", "", titulo, docNum);
   var ancho = pageW - marginX * 2;
   var alto = grafica.alto && grafica.ancho ? ancho * (grafica.alto / grafica.ancho) : 200;
   if (alto > 260) alto = 260;
   var pageH = doc.internal.pageSize.getHeight();
-  if (y + alto > pageH - 40) { doc.addPage(); y = 54; }
+  if (y + alto > pageH - 40) { doc.addPage(); y = drawHeaderBasic(doc, titulo, docNum).y; }
   try {
     doc.addImage(grafica.dataUrl, "PNG", marginX, y, ancho, alto);
     y += alto + 24;
@@ -517,15 +573,17 @@ function seccionGrafica(doc, y, marginX, pageW, grafica) {
   return y;
 }
 
-function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos) {
-  y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado y lo que falta por cobrar de cada uno.");
+function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos, titulo, docNum) {
+  y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado y lo que falta por cobrar de cada uno.", titulo, docNum);
   var acc = pedidos.reduce(function (a, f) {
     a.total += num(f.total); a.abonado += num(f.abonado); a.saldo += num(f.saldo); a.ganancia += num(f.ganancia);
     return a;
   }, { total: 0, abonado: 0, saldo: 0, ganancia: 0 });
+  var pag = opcionesPaginacion(doc, titulo, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
+    didDrawPage: pag.didDrawPage,
     head: [["Fecha", "N.º OP", "Cliente", "Tipo", "Cant.", "Total", "Abonado", "Saldo"]],
     body: pedidos.length
       ? pedidos.map(function (f) {
@@ -541,16 +599,26 @@ function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos) {
   return doc.lastAutoTable.finalY + 24;
 }
 
-function seccionDesgloseVendedores(doc, y, marginX, pageW, vendedores) {
-  y = tituloSeccionReporte(doc, y, marginX, "Ventas por vendedor", "Cuánto vendió cada quien en el periodo y qué comisión generó.");
+function seccionDesgloseVendedores(doc, y, marginX, pageW, vendedores, titulo, docNum) {
+  // "Comisión generada" (no solo "Comisión"): es lo que cada vendedor causó
+  // en el periodo, esté pagada o no — a propósito distinto del tile
+  // "Comisiones pagadas" de arriba (calcResumenMovimientos, que SOLO cuenta
+  // lo que ya se marcó como pagado). Antes los dos se llamaban igual
+  // ("Comisiones"/"Comisión") y podían mostrar cifras distintas en el MISMO
+  // documento sin ninguna aclaración — el usuario reportó ver $0 arriba
+  // "cuando en realidad está pendiente": el $0 era correcto (nada pagado
+  // TODAVÍA), pero el nombre genérico no lo decía.
+  y = tituloSeccionReporte(doc, y, marginX, "Ventas por vendedor", "Cuánto vendió cada quien en el periodo y qué comisión generó (pagada o no).", titulo, docNum);
   var acc = vendedores.reduce(function (a, v) {
     a.total += num(v.total); a.ganancia += num(v.ganancia); a.comision += num(v.comision);
     return a;
   }, { total: 0, ganancia: 0, comision: 0 });
+  var pag = opcionesPaginacion(doc, titulo, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
-    head: [["Vendedor", "Pedidos", "Unidades", "Vendido", "Ganancia", "Comisión"]],
+    margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
+    didDrawPage: pag.didDrawPage,
+    head: [["Vendedor", "Pedidos", "Unidades", "Vendido", "Ganancia", "Comisión generada"]],
     body: vendedores.length
       ? vendedores.map(function (v) {
         return [v.vendedor, numFmt(v.pedidos), numFmt(v.unidades), money(v.total), money(v.ganancia), money(v.comision)];
@@ -567,9 +635,9 @@ function seccionDesgloseVendedores(doc, y, marginX, pageW, vendedores) {
 
 // Encabezado de sección con salto de página si ya no cabe — así una tabla
 // nunca arranca pegada al borde inferior de la hoja.
-function tituloSeccionReporte(doc, y, marginX, texto, subtitulo) {
+function tituloSeccionReporte(doc, y, marginX, texto, subtitulo, titulo, docNum) {
   var pageH = doc.internal.pageSize.getHeight();
-  if (y > pageH - 120) { doc.addPage(); y = 54; }
+  if (y > pageH - 120) { doc.addPage(); y = drawHeaderBasic(doc, titulo, docNum).y; }
   doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
   doc.text(texto, marginX, y);
   if (subtitulo) {
@@ -580,12 +648,14 @@ function tituloSeccionReporte(doc, y, marginX, texto, subtitulo) {
   return y + 8;
 }
 
-function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos) {
-  y = tituloSeccionReporte(doc, y, marginX, "Gasto en insumos", "Compras reales del periodo — no incluye nada cotizado ni estimado.");
+function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos, titulo, docNum) {
+  y = tituloSeccionReporte(doc, y, marginX, "Gasto en insumos", "Compras reales del periodo — no incluye nada cotizado ni estimado.", titulo, docNum);
   var total = insumos.reduce(function (a, c) { return a + num(c.monto); }, 0);
+  var pag = opcionesPaginacion(doc, titulo, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
+    didDrawPage: pag.didDrawPage,
     head: [["Fecha", "Concepto", "Cantidad", "Proveedor", "Monto"]],
     body: insumos.length
       ? insumos.map(function (c) {
@@ -601,15 +671,17 @@ function seccionDesgloseInsumos(doc, y, marginX, pageW, insumos) {
   return doc.lastAutoTable.finalY + 24;
 }
 
-function seccionDesgloseProductos(doc, y, marginX, pageW, productos) {
-  y = tituloSeccionReporte(doc, y, marginX, "Productos vendidos", "Ventas directas y ventas reportadas por puntos de consignación.");
+function seccionDesgloseProductos(doc, y, marginX, pageW, productos, titulo, docNum) {
+  y = tituloSeccionReporte(doc, y, marginX, "Productos vendidos", "Ventas directas y ventas reportadas por puntos de consignación.", titulo, docNum);
   var acc = productos.reduce(function (a, f) {
     a.cantidad += num(f.cantidad); a.costo += num(f.costoTotal); a.precio += num(f.precioTotal); a.ganancia += num(f.ganancia);
     return a;
   }, { cantidad: 0, costo: 0, precio: 0, ganancia: 0 });
+  var pag = opcionesPaginacion(doc, titulo, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
+    didDrawPage: pag.didDrawPage,
     head: [["Fecha", "Concepto", "Cant.", "Costo total", "Precio total", "Ganancia"]],
     body: productos.length
       ? productos.map(function (f) {
@@ -674,10 +746,13 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
   var consolidado = Object.keys(porProducto).map(function (k) { return porProducto[k]; })
     .sort(function (a, b) { return b.ganancia - a.ganancia; });
 
-  y = tituloSeccionReporte(doc, y, marginX, "Consolidado por producto", "Ordenado por la ganancia que dejó cada uno.");
+  var TITULO_RP = "REPORTE DE PRODUCTOS";
+  y = tituloSeccionReporte(doc, y, marginX, "Consolidado por producto", "Ordenado por la ganancia que dejó cada uno.", TITULO_RP, docNum);
+  var pagCons = opcionesPaginacion(doc, TITULO_RP, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pagCons.margin),
+    didDrawPage: pagCons.didDrawPage,
     head: [["Producto", "Unidades", "Costo", "Vendido", "Ganancia", "Margen"]],
     body: consolidado.map(function (c) {
       return [c.concepto, numFmt(c.cantidad), money(c.costo), money(c.precio), money(c.ganancia), (c.precio > 0 ? (c.ganancia / c.precio * 100).toFixed(1) : "0.0") + "%"];
@@ -690,10 +765,12 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
   y = doc.lastAutoTable.finalY + 24;
 
   // --- Detalle línea por línea ---
-  y = tituloSeccionReporte(doc, y, marginX, "Detalle de cada venta", "Una fila por línea vendida, con su talla, orden de producción y quién la vendió.");
+  y = tituloSeccionReporte(doc, y, marginX, "Detalle de cada venta", "Una fila por línea vendida, con su talla, orden de producción y quién la vendió.", TITULO_RP, docNum);
+  var pagDet = opcionesPaginacion(doc, TITULO_RP, docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pagDet.margin),
+    didDrawPage: pagDet.didDrawPage,
     head: [["Fecha", "N.º OP", "Producto", "Talla", "Cliente", "Vendedor", "Venta", "Cant.", "Costo x und", "Costo total", "Precio total", "Ganancia"]],
     body: filas.map(function (f) {
       return [
@@ -747,9 +824,11 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
     return [f.cliente || "—", f.descripcion || "—", money(f.total), money(f.comision), f.pagado ? "Pagada" : "Pendiente"];
   });
 
+  var pagVend = opcionesPaginacion(doc, "REPORTE DE VENTAS", docNum);
   doc.autoTable({
     startY: y,
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pagVend.margin),
+    didDrawPage: pagVend.didDrawPage,
     head: [["Cliente", "Descripción", "Total", "Comisión", "Estado"]],
     body: body.length ? body : [["—", "Sin pedidos ni cotizaciones registrados", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8.5, textColor: [40, 40, 40], cellPadding: 5 },
@@ -768,16 +847,19 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var n = await siguienteNumeroPdf();
   var docNum = "INT" + String(n).padStart(4, "0");
-  var head = drawHeaderBasic(doc, "COTIZACIÓN — USO INTERNO", docNum);
+  var TITULO_INT = "COTIZACIÓN — USO INTERNO";
+  var head = drawHeaderBasic(doc, TITULO_INT, docNum);
   var pageW = head.pageW, marginX = head.marginX, y = head.y;
 
   var totales = calcCotizacionTotales(cot);
   var real = calcCotResultadoReal(cot);
 
-  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
+  // Tamaño reducido, mismo criterio que drawParties: es info de consulta, no
+  // el protagonista del documento.
+  doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
   doc.text("CLIENTE", marginX, y);
-  y += 14;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 36, 32);
+  y += 13;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(30, 36, 32);
   doc.text(String(cot.cliente || "—"), marginX, y);
   y += 14;
   doc.text(String(cot.descripcion || ""), marginX, y);
@@ -812,13 +894,15 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     });
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
     doc.text("Referencias", marginX, y); y += 8;
+    var pagRef = opcionesPaginacion(doc, TITULO_INT, docNum);
     doc.autoTable({
       startY: y,
       head: [["Referencia", "Cant.", "Costo x1", "Precio x1", "Margen", "Costo total", "Precio total"]],
       body: filasRef,
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
-      margin: { left: marginX, right: marginX },
+      margin: Object.assign({ left: marginX, right: marginX }, pagRef.margin),
+      didDrawPage: pagRef.didDrawPage,
       theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 20;
@@ -829,9 +913,10 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   // (¿el diseño te está dejando algo, o lo estás cobrando al costo?), que es
   // una pregunta distinta de la del margen de una prenda.
   if (opts.referencias && (cot.serviciosCobrados || []).length) {
-    if (y > 640) { doc.addPage(); y = 54; }
+    if (y > 640) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_INT, docNum).y; }
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
     doc.text("Servicios cobrados aparte", marginX, y); y += 8;
+    var pagServ = opcionesPaginacion(doc, TITULO_INT, docNum);
     doc.autoTable({
       startY: y,
       head: [["Servicio", "Te cuesta", "Le cobras", "Ganancia", "Margen"]],
@@ -845,7 +930,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
       styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
       columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
-      margin: { left: marginX, right: marginX },
+      margin: Object.assign({ left: marginX, right: marginX }, pagServ.margin),
+      didDrawPage: pagServ.didDrawPage,
       theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 20;
@@ -858,9 +944,10 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   if (opts.compras) {
     var compras = calcListaCompras(cot);
     if (compras.length) {
-      if (y > 620) { doc.addPage(); y = 54; }
+      if (y > 620) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_INT, docNum).y; }
       doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
       doc.text("Compras del pedido", marginX, y); y += 8;
+      var pagCompras = opcionesPaginacion(doc, TITULO_INT, docNum);
       doc.autoTable({
         startY: y,
         head: [["Qué comprar", "Cant. est.", "Costo est.", "Cant. real", "Costo real", "Proveedor", "Observaciones"]],
@@ -870,7 +957,16 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // Un servicio (diseño, confección, domicilio) no se compra por
           // cantidad: decir "11 UND de confección" no le sirve a nadie.
           var cantEst = c.esServicio ? "servicio" : (numFmt(c.cantidadFisica) + (c.unidad ? " " + c.unidad : ""));
-          var cantReal = c.esServicio ? "—" : (compra.cantidadReal !== undefined && compra.cantidadReal !== "" ? numFmt(compra.cantidadReal) : "—");
+          // Igual que costoReal más abajo: sin cantidad real escrita todavía
+          // (nadie la tocó), se muestra la ESTIMADA en vez de "—" — a
+          // diferencia del dinero, asumir la cantidad estimada no compromete
+          // ningún movimiento en Finanzas, así que no hace falta esperar a
+          // que se marque "Sí" para mostrarla (ver el gate por `estado` de
+          // costoRealTxt, que sí exige un número real porque ESE sí crea un
+          // movimiento — ver sincronizar-compras-finanzas).
+          var hayCantReal = compra.cantidadReal !== undefined && compra.cantidadReal !== "" && compra.cantidadReal !== null;
+          var cantReal = c.esServicio ? "—" :
+            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst + " (estimado)");
           var estado = estadoLineaCompra(cot, c);
           // Una línea de servicio SIN costoReal escrito (nadie la tocó
           // todavía) igual cuenta como costo real en el resumen en pantalla
@@ -896,7 +992,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
         styles: { font: "helvetica", fontSize: 8, cellPadding: 4 },
         headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 7.5 },
         columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } },
-        margin: { left: marginX, right: marginX },
+        margin: Object.assign({ left: marginX, right: marginX }, pagCompras.margin),
+        didDrawPage: pagCompras.didDrawPage,
         theme: "grid"
       });
       y = doc.lastAutoTable.finalY + 20;
@@ -909,9 +1006,10 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   if (opts.reales) {
     var gastos = cot.gastosReales || [];
     if (gastos.length) {
-      if (y > 640) { doc.addPage(); y = 54; }
+      if (y > 640) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_INT, docNum).y; }
       doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
       doc.text("Costos reales registrados antes", marginX, y); y += 8;
+      var pagGastos = opcionesPaginacion(doc, TITULO_INT, docNum);
       doc.autoTable({
         startY: y,
         head: [["Concepto", "Fecha", "Monto", "Variación"]],
@@ -921,7 +1019,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
         }),
         styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5 },
         headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8 },
-        margin: { left: marginX, right: marginX },
+        margin: Object.assign({ left: marginX, right: marginX }, pagGastos.margin),
+        didDrawPage: pagGastos.didDrawPage,
         theme: "grid"
       });
       y = doc.lastAutoTable.finalY + 20;
@@ -929,7 +1028,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   }
 
   if (opts.vendedor && cot.vendedor && cot.vendedor.nombre) {
-    if (y > 700) { doc.addPage(); y = 54; }
+    if (y > 700) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_INT, docNum).y; }
     var valorCom = calcComisionValorCot(cot);
     doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
     doc.text("Comisión vendedor", marginX, y); y += 16;
@@ -939,8 +1038,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     y += 20;
   }
 
-  y += 10;
-  drawFooterBand(doc, y, marginX, pageW, "Documento de uso interno — no se le entrega al cliente");
+  pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Documento de uso interno — no se le entrega al cliente");
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
   mostrarPdfEnApp(doc, docNum + "-interno-" + nombreSeguro + ".pdf");
@@ -960,16 +1058,21 @@ export async function generarPDFPedido(p) {
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var n = await siguienteNumeroPdf();
   var docNum = "PED" + String(n).padStart(4, "0");
-  var head = drawHeaderBasic(doc, "ORDEN DE PRODUCCIÓN", docNum);
+  var TITULO_PED = "ORDEN DE PRODUCCIÓN";
+  var head = drawHeaderBasic(doc, TITULO_PED, docNum);
   var pageW = head.pageW, marginX = head.marginX, y = head.y, pageH = doc.internal.pageSize.getHeight();
 
   // Ya no se imprime "ESTADO: COTIZACIÓN" para pedidos que aún no avanzan de
   // etapa — ese id de estado ahora se llama "Nuevo" (ver constants.js), y en
   // su lugar se indica el origen (producción propia o de un tercero), que es
   // el dato que de verdad le sirve a quien está en el piso de producción.
+  // La etapa YA NO se imprime acá: es un dato que cambia todo el tiempo
+  // (la orden se reimprime una vez y queda circulando en el taller) y
+  // quien la pidió prefirió no verla en el papel — el resto del documento
+  // no depende de ella.
   var origen = p.tipoCliente === "tercero" ? "TERCERO" : "PRODUCCIÓN PROPIA";
   doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(140, 140, 140);
-  doc.text("OP: " + (p.numeroOp || "—") + "   ·   " + origen + "   ·   ETAPA: " + estadoLabelDe(p).toUpperCase(), marginX, y);
+  doc.text("OP: " + (p.numeroOp || "—") + "   ·   " + origen, marginX, y);
   // La fecha de entrega es el dato que más le importa a quien está cosiendo
   // — mismo criterio que la casilla amarilla de la orden de producción de
   // referencia: se saca del texto corrido y se marca aparte, para que no se
@@ -986,8 +1089,14 @@ export async function generarPDFPedido(p) {
   }
   y += 22;
 
+  // Un pedido convertido desde cotización guarda en su descripción el
+  // detalle entre paréntesis (ej. "Camisetas (T-shirt básica x3)") — útil en
+  // pantalla y en reportes, pero de sobra acá: esta orden ya trae esa misma
+  // referencia desglosada en la tabla de abajo, así que repetirla en el
+  // título es ruido, no información nueva.
+  var descripcionSinDetalle = String(p.descripcion || "").replace(/\s*\([^)]*\)\s*$/, "");
   doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
-  doc.text(p.descripcion || "", marginX, y); y += 16;
+  doc.text(descripcionSinDetalle, marginX, y); y += 16;
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(110, 110, 110);
   doc.text("Cantidad total: " + (p.cantidad || "—"), marginX, y);
   y += 24;
@@ -1004,6 +1113,7 @@ export async function generarPDFPedido(p) {
   });
 
   if (detalle.length) {
+    var pagDetPed = opcionesPaginacion(doc, TITULO_PED, docNum);
     doc.autoTable({
       startY: y,
       head: multiplesRefs
@@ -1016,7 +1126,8 @@ export async function generarPDFPedido(p) {
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
-      margin: { left: marginX, right: marginX },
+      margin: Object.assign({ left: marginX, right: marginX }, pagDetPed.margin),
+      didDrawPage: pagDetPed.didDrawPage,
       theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 24;
@@ -1024,6 +1135,7 @@ export async function generarPDFPedido(p) {
     // Pedido rápido (sin cotización de origen): el detalle son sus propias
     // líneas, con la observación y los campos propios que se les hayan puesto
     // al armarlo — es lo que hay que leer en el taller para producirlo bien.
+    var pagLineasPed = opcionesPaginacion(doc, TITULO_PED, docNum);
     doc.autoTable({
       startY: y,
       head: [["#", "Qué es", "Talla", "Cant.", "Detalle"]],
@@ -1037,7 +1149,8 @@ export async function generarPDFPedido(p) {
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
       columnStyles: { 3: { halign: "right" } },
-      margin: { left: marginX, right: marginX },
+      margin: Object.assign({ left: marginX, right: marginX }, pagLineasPed.margin),
+      didDrawPage: pagLineasPed.didDrawPage,
       theme: "grid"
     });
     y = doc.lastAutoTable.finalY + 24;
@@ -1062,7 +1175,7 @@ export async function generarPDFPedido(p) {
     var anchoImg = 141.73; // ~5cm de ancho; el alto se calcula según la proporción real de cada imagen
     var margenInferior = 50;
     doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
-    if (y + 20 > pageH - margenInferior) { doc.addPage(); y = 54; }
+    if (y + 20 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_PED, docNum).y; }
     doc.text("IMÁGENES DE REFERENCIA", marginX, y); y += 18;
     for (var i = 0; i < refsConImagen.length; i++) {
       var ref = refsConImagen[i];
@@ -1073,7 +1186,7 @@ export async function generarPDFPedido(p) {
         var props = doc.getImageProperties(durl);
         if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
       } catch (e) { /* se usa el alto por defecto */ }
-      if (y + 14 + altoImg > pageH - margenInferior) { doc.addPage(); y = 54; }
+      if (y + 14 + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_PED, docNum).y; }
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
       doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
       y += 8;
@@ -1084,9 +1197,10 @@ export async function generarPDFPedido(p) {
     }
   }
 
-  y += 10;
-  y = drawFooterBand(doc, y, marginX, pageW, "Documento de uso interno para producción — no incluye precios ni datos del cliente");
-  await drawPiePagina(doc, y, marginX, pageW);
+  // Sin el aviso "documento de uso interno" que llevaba antes (pedido
+  // explícito: no hacía falta) — el pie personalizado de Configuración, si
+  // hay uno, sigue apareciendo igual.
+  await drawPiePagina(doc, y + 10, marginX, pageW);
 
   var nombreSeguro = slugify(p.descripcion || "pedido");
   mostrarPdfEnApp(doc, docNum + "-orden-" + nombreSeguro + ".pdf");
@@ -1124,9 +1238,9 @@ export async function generarPDFRecibo(p, abono, opts) {
   doc.text("Saldo pendiente", marginX, y);
   doc.text(money(saldoActual), pageW - marginX, y, { align: "right" });
 
-  y += 46;
-  y = drawFooterBand(doc, y, marginX, pageW, "Gracias por su pago");
+  y += 24;
   await drawPiePagina(doc, y, marginX, pageW);
+  pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su pago");
 
   var nombreSeguro = slugify(p.cliente || "recibo");
   return finalizarPDF(doc, codigo.replace("#", "") + "-recibo-" + nombreSeguro + ".pdf", opts);
@@ -1169,13 +1283,15 @@ export async function generarPDFFactura(p, opts) {
     filas = [[String(p.cantidad || 1), p.descripcion || "Pedido", money(num(p.total) / (num(p.cantidad) || 1)), money(p.total)]];
   }
 
+  var pagFact = opcionesPaginacion(doc, "FACTURA", codigo, logoDataUrl);
   doc.autoTable({
     startY: y,
     head: [["CANTIDAD", "DESCRIPCIÓN", "VALOR UNITARIO", "TOTAL"]],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pagFact.margin),
+    didDrawPage: pagFact.didDrawPage,
     columnStyles: { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } },
     theme: "plain",
     didParseCell: function (data) {
@@ -1220,9 +1336,9 @@ export async function generarPDFFactura(p, opts) {
   doc.text(etiquetaSaldo, pageW - marginX - 160, finalY);
   doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
 
-  finalY += 46;
-  finalY = drawFooterBand(doc, finalY, marginX, pageW, "Gracias por su confianza");
+  finalY += 24;
   await drawPiePagina(doc, finalY, marginX, pageW);
+  pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su confianza");
 
   var nombreSeguro = slugify(p.cliente || "factura");
   return finalizarPDF(doc, codigo.replace("#", "") + "-factura-" + nombreSeguro + ".pdf", opts);
@@ -1255,6 +1371,7 @@ export async function generarPDFRemision(p, remision, opts) {
 
   var items = remision.items || [];
   var totalRef = items.reduce(function (a, it) { return a + num(it.cantidad) * num(it.precioUnitario); }, 0);
+  var pagRemision = opcionesPaginacion(doc, "REMISIÓN", codigo, logoDataUrl);
   doc.autoTable({
     startY: y,
     head: [["PRODUCTO", "TALLA", "CANTIDAD", "VALOR REF.", "SUBTOTAL"]],
@@ -1263,7 +1380,8 @@ export async function generarPDFRemision(p, remision, opts) {
     }),
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
-    margin: { left: marginX, right: marginX },
+    margin: Object.assign({ left: marginX, right: marginX }, pagRemision.margin),
+    didDrawPage: pagRemision.didDrawPage,
     columnStyles: { 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "right" }, 4: { halign: "right" } },
     theme: "plain",
     didParseCell: function (data) {
@@ -1280,7 +1398,7 @@ export async function generarPDFRemision(p, remision, opts) {
 
   finalY += 46;
   var pageH = doc.internal.pageSize.getHeight();
-  if (finalY + 60 > pageH - 60) { doc.addPage(); finalY = 54; }
+  if (finalY + 60 > pageH - 60) { doc.addPage(); finalY = drawHeaderBasic(doc, "REMISIÓN", codigo, logoDataUrl).y; }
   doc.setDrawColor(160, 160, 160);
   doc.line(marginX, finalY, marginX + 200, finalY);
   doc.line(pageW - marginX - 200, finalY, pageW - marginX, finalY);

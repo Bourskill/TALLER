@@ -427,11 +427,22 @@ function renderHistorialComprasProveedor(c) {
 // vez de inputs sueltos siempre activos en la tarjeta.
 function renderClienteEdit(c) {
   var comDefault = c.comisionDefault || { tipo: "porcentaje", valor: "" };
+  // Mismo criterio que renderFormNuevoCliente: el tipo decide qué otros
+  // campos tienen sentido. Se lee del borrador reactivo mientras se edita
+  // (state.clienteEditTipoRelacion, ver set-cliente-edit-tipo) para que
+  // cambiar el <select> Tipo muestre/esconda comisión y campos de proveedor
+  // DE INMEDIATO, no recién al guardar — antes se veían siempre los tres
+  // bloques (comisión, proveedor) sin importar el tipo, así que editar un
+  // cliente cualquiera mostraba "Comisión por defecto", "Qué insumos vende",
+  // etc. como si pudiera ser vendedor o punto de consignación.
+  var tipo = state.clienteEditTipoRelacion || c.tipoRelacion || "cliente";
+  var esPunto = tipo === "punto_consignacion";
+  var esProveedor = tipo === "proveedor";
   return '<div class="cliente-card" data-cliente-edit-row="' + c.id + '">' +
     '<div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input class="mini-input" data-role="edit-nombre" value="' + esc(c.nombre) + '" /></div>' +
-    '<div class="field"><label>Tipo</label><select class="mini-input" data-role="edit-tipo-relacion">' +
-    Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], c.tipoRelacion || "cliente"); }).join("") +
+    '<div class="field"><label>Tipo</label><select class="mini-input" data-role="edit-tipo-relacion" data-action-change="set-cliente-edit-tipo">' +
+    Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], tipo); }).join("") +
     "</select></div>" +
     '<div class="field"><label>Cédula / RUT / NIT</label><input class="mini-input" data-role="edit-cedula" value="' + esc(c.cedula || "") + '" /></div>' +
     '<div class="field"><label>Teléfono</label><input class="mini-input" data-role="edit-telefono" value="' + esc(c.telefono || "") + '" /></div>' +
@@ -442,12 +453,14 @@ function renderClienteEdit(c) {
     '<div class="field"><label>Código postal</label><input class="mini-input" data-role="edit-cp" value="' + esc(c.cp || "") + '" /></div>' +
     '<div class="field"><label>Cuenta bancaria</label><input class="mini-input" data-role="edit-cuenta" value="' + esc(c.cuenta || "") + '" /></div>' +
     '<div class="field"><label>Entidad</label><input class="mini-input" data-role="edit-entidad" value="' + esc(c.entidad || "") + '" /></div>' +
-    '<div class="field"><label>Comisión por defecto (si es punto)</label><select class="mini-input" data-role="edit-comision-tipo">' +
-    '<option value="porcentaje"' + (comDefault.tipo !== "fijo" ? " selected" : "") + '>% de cada venta</option>' +
-    '<option value="fijo"' + (comDefault.tipo === "fijo" ? " selected" : "") + '>$ fijo por unidad</option>' +
-    "</select></div>" +
-    '<div class="field"><label>Valor comisión</label><input type="number" class="mini-input" data-role="edit-comision-valor" value="' + esc(comDefault.valor || "") + '" /></div>' +
-    renderCamposProveedorEdit(c) +
+    (esPunto ?
+      '<div class="field"><label>Comisión por defecto</label><select class="mini-input" data-role="edit-comision-tipo">' +
+      '<option value="porcentaje"' + (comDefault.tipo !== "fijo" ? " selected" : "") + '>% de cada venta</option>' +
+      '<option value="fijo"' + (comDefault.tipo === "fijo" ? " selected" : "") + '>$ fijo por unidad</option>' +
+      "</select></div>" +
+      '<div class="field"><label>Valor comisión</label><input type="number" class="mini-input" data-role="edit-comision-valor" value="' + esc(comDefault.valor || "") + '" /></div>'
+      : "") +
+    (esProveedor ? renderCamposProveedorEdit(c) : "") +
     "</div>" +
     '<div class="pedido-actions" style="margin-top:10px;">' +
     '<button class="btn small" data-action="guardar-cliente-edit" data-id="' + c.id + '">Guardar</button>' +
@@ -596,11 +609,21 @@ export var actions = {
     var c = state.clientes.filter(function (c) { return c.id === id; })[0];
     state.clienteEditando = id;
     state.clienteEditCategorias = c ? (c.categoriasInsumo || []).slice() : [];
+    state.clienteEditTipoRelacion = (c && c.tipoRelacion) || "cliente";
     notify();
   },
   "cancelar-edicion-cliente": function () {
     state.clienteEditando = "";
     state.clienteEditCategorias = [];
+    state.clienteEditTipoRelacion = "";
+    notify();
+  },
+  // Vive aparte de "guardar-cliente-edit" (que sigue leyendo el <select> del
+  // DOM al guardar, como todo lo demás del formulario) solo para decidir QUÉ
+  // OTROS CAMPOS mostrar mientras se edita — sin esto, elegir "Punto de
+  // consignación" no hacía aparecer la comisión hasta después de guardar.
+  "set-cliente-edit-tipo": function (el) {
+    state.clienteEditTipoRelacion = el.value;
     notify();
   },
   "toggle-categoria-insumo-edit": function (el) {
@@ -641,6 +664,7 @@ export var actions = {
     });
     state.clienteEditando = "";
     state.clienteEditCategorias = [];
+    state.clienteEditTipoRelacion = "";
     persist("clientes"); notify();
     var actualizado = state.clientes.filter(function (c) { return c.id === id; })[0];
     if (actualizado) sincronizarClienteContacto(actualizado);
