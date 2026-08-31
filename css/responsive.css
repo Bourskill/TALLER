@@ -26,34 +26,46 @@
    más abajo) ANTES de llegar a ese punto lo evita de raíz: nunca se llega a
    pedirle a una columna que sea más angosta que su propio contenido. */
 @media (max-width: 1080px){
-  /* Cualquier fila tipo tabla (movimientos, insumos, tallas, nómina...) pasa
-     de columnas fijas en px a apilarse en una sola columna. El !important es
-     necesario: casi todas fijan su ancho con un style="grid-template-columns:
-     ...px..." inline por fila (para poder variar el layout entre pantallas),
-     y un estilo inline sin !important le gana a cualquier regla externa —
-     por eso un intento anterior de apilar sin !important quedaba inerte y la
-     tabla seguía desbordando con scroll horizontal.
+  /* Cualquier fila tipo tabla (movimientos, insumos, tallas, nómina...) deja
+     de fijar sus columnas en px (casi todas lo hacen con un style=
+     "grid-template-columns:...px..." inline por fila, para variar el layout
+     entre pantallas) y pasa a repetir un PAR "etiqueta + valor" tantas veces
+     como quepan — el !important es necesario porque un estilo inline sin él
+     le gana a cualquier regla externa.
 
-     CADA FILA ES SU PROPIA TARJETA. Antes se apilaban una tras otra separadas
-     solo por una línea de 1px: cinco movimientos seguidos se leían como un
-     único bloque de texto corrido donde no se veía dónde terminaba uno y
-     empezaba el siguiente (y en un teléfono, que es donde más se consulta,
-     eso es justo lo que uno necesita distinguir). Con fondo, borde y
-     separación propios, cada fila vuelve a ser una unidad.
+     GRADUAL, NO UN SALTO ÚNICO A 1 COLUMNA. La primera versión de esto iba
+     directo de "todas las columnas en una sola línea" a "una sola pareja
+     etiqueta/valor por línea" en cuanto no cabía la fila completa — el
+     usuario lo reportó: en una ventana de tamaño mediano una tabla de 6
+     campos se convertía de golpe en una ficha larguísima de 6 líneas, cuando
+     de sobra cabían 3 o 4 parejas por línea. `repeat(auto-fit, ...)` deja
+     que el navegador calcule cuántas parejas caben en el ancho real
+     disponible — 4, 3, 2 o 1 según el caso — y solo cuando de verdad no cabe
+     ni una pareja completa (pantalla muy angosta) queda una por línea. Es
+     continuo: no hay un segundo breakpoint "para tablas medianas" que
+     mantener sincronizado con este.
 
-     ETIQUETA A LA IZQUIERDA, VALOR A LA DERECHA, en dos columnas. Apilar
-     etiqueta sobre valor dejaba una fila de Finanzas (6 datos) en 282px: casi
-     media pantalla para UN movimiento. Pareados se leen como una ficha, que es
-     como se consulta un dato en un teléfono.
+     CÓMO QUEDAN EMPAREJADAS etiqueta+valor sin tocar el HTML: cada campo ya
+     nace como DOS elementos seguidos en el DOM — el .mobile-th (antes oculto)
+     y su valor (ver core/dom.js/cada módulo) — y `repeat(auto-fit, A B)`
+     define un patrón de DOS pistas por repetición. El acomodo automático de
+     grid coloca los elementos EN ORDEN, así que cada etiqueta cae siempre
+     justo antes que su valor, se repita la pareja 1, 2, 3 o 4 veces por
+     línea. Ya no hace falta forzar "toda etiqueta a la columna 1, todo valor
+     a la columna 2" a mano (así era antes, y por eso solo cabía una pareja).
 
-     El reparto es EXPLÍCITO (la etiqueta a la columna 1, todo lo demás a la 2)
-     y no por orden de aparición: así una celda que no traiga etiqueta delante
-     —la tira de botones del final, por ejemplo— cae igual en la columna del
-     valor, en vez de correr una posición y descolocar el resto de la fila.
-     Eso es lo que hace que funcione con tablas cuyo marcado no es uniforme. */
+     minmax() en las dos pistas es lo que impide el desborde bajo CUALQUIER
+     circunstancia: ninguna pareja se dibuja si no entra completa (esa es la
+     definición de auto-fit), así que un valor largo nunca queda apretado en
+     una columna más angosta que su propio contenido — el bug de "los
+     caracteres se apilan formando una columna" que se reportó antes.
+
+     CADA FILA ES SU PROPIA TARJETA (fondo, borde y separación propios): antes
+     se apilaban una tras otra separadas solo por una línea de 1px, y varios
+     movimientos seguidos se leían como un único bloque de texto corrido. */
   .tx-row, .ins-row, .det-row, .emp-row{
-    grid-template-columns:minmax(74px,31%) 1fr !important;
-    gap:8px 12px;
+    grid-template-columns:repeat(auto-fit, minmax(60px,84px) minmax(120px,1fr)) !important;
+    gap:6px 14px;
     align-items:baseline;
     padding:13px 14px;
     margin-bottom:var(--sp-2);
@@ -63,17 +75,18 @@
     font-size:13.5px;
     line-height:1.4;
   }
-  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{grid-column:2;}
-  .tx-row > .mobile-th, .ins-row > .mobile-th,
-  .det-row > .mobile-th, .emp-row > .mobile-th{grid-column:1;}
-  /* El encabezado de columnas no tiene sentido cuando no hay columnas: cada
-     valor ya lleva su propia etiqueta (.mobile-th). */
+  /* El encabezado de columnas no tiene sentido cuando el número de columnas
+     varía según el ancho: cada valor ya lleva su propia etiqueta
+     (.mobile-th) pegada al lado. */
   .tx-row.head, .ins-row.head, .det-row.head, .emp-row.head{display:none;}
-  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;}
+  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;min-width:0;}
 
   .mobile-th{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:700;line-height:1.5;}
-  /* La tira de acciones ocupa las dos columnas y sus botones se reparten el
-     ancho: son los que se van a tocar con el pulgar. */
+  /* La tira de acciones ocupa TODA la línea (cuantas parejas hayan quedado
+     esa vuelta) y sus botones se reparten el ancho: son los que se van a
+     tocar con el pulgar. Necesita su propio grid-column explícito porque no
+     tiene .mobile-th delante — sin esto, el auto-acomodo la trataría como
+     "una etiqueta más" y la emparejaría con lo que viniera después. */
   .tx-row > span:has(.btn), .det-row > span:has(.btn), .emp-row > span:has(.btn){
     grid-column:1/-1;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
   .tx-row > span:has(.btn) .btn, .emp-row > span:has(.btn) .btn{flex:1 1 auto;}
@@ -162,6 +175,20 @@
   .pedido-card{padding:var(--sp-3) var(--sp-3);}
   .cot-card{padding:var(--sp-3) var(--sp-3);}
   .ref-card{padding:var(--sp-3) var(--sp-3);}
+
+  /* La cifra de dinero de un pedido (.pedido-money) vive a la derecha,
+     al lado de cliente/descripción, mientras haya sitio (`.pedido-top` es un
+     flex con wrap). En una pantalla angosta esas dos cosas ya no caben en la
+     misma línea y el bloque de dinero cae solo, debajo — pero sin más
+     retoque queda alineado a la derecha DENTRO de esa línea propia, como si
+     hubiera quedado flotando sin conexión con el resto de la tarjeta (se
+     reportó "en pantalla pequeña no se ve tan bien"). Se le da el ancho
+     completo a propósito, alineado a la izquierda como todo lo demás de la
+     tarjeta, con una línea que lo separa — pasa de "flotando" a "la sección
+     de dinero de esta tarjeta", y la cifra grande baja un poco para no pesar
+     tanto en una columna angosta. */
+  .pedido-money{width:100%;text-align:left;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft);}
+  .pedido-money .pm-monto{font-size:22px;}
 
   /* En una pantalla angosta, dos columnas de campos dejan a cada uno con ~150px:
      no cabe una fecha, un correo ni un select con texto real. */

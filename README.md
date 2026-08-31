@@ -222,6 +222,50 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (decimosexta ronda: colapso gradual de tablas)
+
+El usuario señaló, con captura, que el apilado de tablas de la ronda anterior
+era demasiado brusco: pasaba de "todas las columnas en una línea" a "una
+pareja etiqueta/valor por línea" en cuanto no cabía la fila completa, sin
+ningún paso intermedio — pidió mantener al menos 4 (columnas/campos) hasta
+que la pantalla fuera de verdad muy angosta, ir dividiendo la fila grande en
+más pequeñas de forma gradual, y que bajo ninguna circunstancia un campo se
+desborde.
+
+**La solución no necesitó una segunda ronda de breakpoints a mano.** El
+`@media (max-width: 1080px)` de la ronda anterior forzaba "toda etiqueta a la
+columna 1, todo valor a la columna 2" (`grid-column` explícito) — por eso
+solo cabía UNA pareja por línea sin importar cuánto sobrara. Se quitó ese
+forzado y se cambió `grid-template-columns` a
+`repeat(auto-fit, minmax(60px,84px) minmax(120px,1fr))`:
+- Cada campo ya nacía como DOS elementos seguidos en el DOM (la etiqueta
+  `.mobile-th` y su valor) — no hizo falta tocar ni un solo render de ningún
+  módulo. El acomodo automático de CSS Grid coloca los elementos en orden, así
+  que cada etiqueta cae siempre junto a su valor, se repita la pareja 1, 2, 3
+  o 4 veces por línea según lo que quepa.
+- `auto-fit` hace que el NÚMERO de parejas por línea sea continuo y lo decida
+  el navegador según el ancho real disponible — no hay un segundo breakpoint
+  "para tablas medianas" que mantener sincronizado con este. Y como
+  `auto-fit` nunca dibuja una pareja que no entre completa, un valor largo
+  jamás vuelve a quedar en una columna más angosta que su propio contenido
+  (la garantía de "cero desborde", con `minmax()` haciendo el trabajo).
+
+**Tarjeta de pedido, dinero "flotando" en pantalla chica.** `.pedido-money`
+(el bloque "COBRADO COMPLETO / $X") vive al lado de cliente/descripción
+mientras cabe (`.pedido-top` es un flex con wrap); en una pantalla angosta
+caía a su propia línea pero seguía alineado a la derecha, como flotando sin
+conexión con el resto de la tarjeta. Ahora, en el breakpoint móvil de
+siempre (880px), ese bloque pasa a ocupar el ancho completo, alineado a la
+izquierda igual que todo lo demás, con una línea que lo separa como su propia
+sección — y la cifra grande baja un poco (25px → 22px) para pesar menos en
+una columna angosta.
+
+Verificado con capturas reales en 380px/750px/1000px/1080px de ancho — sin
+`smoke.mjs` (no hay layout real en ese entorno): a 1000px ya se ven 2 parejas
+por línea con textos largos (un correo, un concepto) envueltos por PALABRA,
+no por letra; a 380px cada campo cae solo, uno por línea, sin desborde en
+ningún punto intermedio.
+
 ## Registro de cambios — agosto 2026 (decimoquinta ronda: correcciones sobre la ronda anterior)
 
 El usuario revisó punto por punto la decimocuarta ronda y corrigió el rumbo en tres de nueve. Resumen de lo que cambió:
