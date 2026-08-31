@@ -32,12 +32,39 @@ var refrescoEnCurso = null; // promesa compartida mientras se renueva el token �
 export function getSession() { return session; }
 export function getAccessToken() { return accessToken; }
 
+// Refresco PROACTIVO del token, en vez de esperar a que una llamada real
+// falle con 401 a mitad de una acción del usuario (ej. justo al descargar un
+// PDF, que primero pide el siguiente número de documento a la Sheet — ver
+// core/pdf.js). Ese refresco REACTIVO sigue existiendo como red de
+// seguridad (fetchGoogleConReintento, más abajo), pero si Google no puede
+// renovar en silencio (cookies de terceros bloqueadas, ver la nota grande al
+// principio de este archivo), termina abriendo una ventana/pestaña de
+// Google — y que eso pase EN MEDIO de una acción, en la versión instalada
+// como PWA, rompe por completo la sensación de "app de escritorio" que se
+// busca. Renovando con margen, mientras la pestaña está en reposo, ese caso
+// se vuelve mucho menos frecuente en el uso normal.
+var MARGEN_REFRESCO_PROACTIVO_MS = 5 * 60 * 1000;
+var timerRefrescoProactivo = null;
+
+function programarRefrescoProactivo(msHastaVencer) {
+  clearTimeout(timerRefrescoProactivo);
+  var espera = Math.max(0, msHastaVencer - MARGEN_REFRESCO_PROACTIVO_MS);
+  timerRefrescoProactivo = setTimeout(function () {
+    // Si falla, no pasa nada grave: fetchGoogleConReintento sigue cubriendo
+    // el caso reactivo, y esta misma función se vuelve a llamar sola en el
+    // próximo login/refresco exitoso.
+    refrescarToken().catch(function () {});
+  }, espera);
+}
+
 function guardarSesion(expiraEn) {
+  var ms = (Number(expiraEn) || 3600) * 1000;
   try {
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-      session: session, accessToken: accessToken, expiraEl: Date.now() + (Number(expiraEn) || 3600) * 1000
+      session: session, accessToken: accessToken, expiraEl: Date.now() + ms
     }));
   } catch (e) { /* almacenamiento no disponible (modo privado, etc.) — no es crítico */ }
+  programarRefrescoProactivo(ms);
 }
 
 // Se llama al arrancar la app, ANTES de mostrar la pantalla de login: si hay
@@ -56,6 +83,7 @@ export function restaurarSesion() {
     }
     session = datos.session;
     accessToken = datos.accessToken;
+    programarRefrescoProactivo(datos.expiraEl - Date.now());
     return session;
   } catch (e) {
     return null;
@@ -149,6 +177,7 @@ export async function fetchGoogleConReintento(url, options, tokenInicial) {
 }
 
 export function logout() {
+  clearTimeout(timerRefrescoProactivo);
   if (accessToken && window.google && window.google.accounts && window.google.accounts.oauth2) {
     window.google.accounts.oauth2.revoke(accessToken, function () {});
   }

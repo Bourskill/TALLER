@@ -47,7 +47,7 @@ function escribiendo(el) {
 // estado a propósito: cada overlay ya lleva en su `data-action` la acción que
 // lo cierra bien (limpiando su selección, su búsqueda, etc.), así que un
 // picker nuevo que siga el mismo patrón queda cubierto sin tocar este archivo.
-var CAPAS = [".atajos-overlay", ".imgprev-overlay", ".picker-overlay", ".campanita-overlay"];
+var CAPAS = [".atajos-overlay", ".imgprev-overlay", ".pdfprev-overlay", ".picker-overlay", ".campanita-overlay"];
 
 function cerrarCapaSuperior() {
   for (var i = 0; i < CAPAS.length; i++) {

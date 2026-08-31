@@ -935,6 +935,41 @@ assert(state.notificacionesAbiertas, "y deja abierto el panel de avisos que esta
 tecla("Escape");
 assert(!state.notificacionesAbiertas, "el segundo Esc ya cierra el panel de avisos");
 
+// El visor de PDF (core/pdf.js: mostrarPdfEnApp) se abre DENTRO de la app —
+// ninguna pestaña ni ventana nueva, para que la versión instalada como PWA
+// se sienta como una app de escritorio — y encaja en la misma pila de capas
+// que se cierran con Esc, justo debajo de la imagen ampliada.
+state.pdfPreview = { url: "blob:mock-pdf", nombreArchivo: "reporte-prueba.pdf" };
+state.notificacionesAbiertas = true;
+state.imagenPreview = "https://example.com/foto.png";
+render();
+assert(!!document.querySelector(".pdfprev-overlay"), "el visor de PDF se muestra como una capa más de la app, no como una descarga o pestaña aparte");
+tecla("Escape");
+assert(!state.imagenPreview && !!state.pdfPreview, "Esc sigue cerrando primero la imagen ampliada, que va por encima del visor de PDF");
+tecla("Escape");
+assert(!state.pdfPreview && !document.querySelector(".pdfprev-overlay"), "el segundo Esc cierra el visor de PDF");
+assert(state.notificacionesAbiertas, "sin tocar el panel de avisos, que sigue debajo de todo");
+state.notificacionesAbiertas = false;
+render();
+
+// "Descargar" no debe navegar ni abrir nada — solo un <a download> sobre el
+// mismo blob: que ya se estaba mostrando en el visor.
+state.pdfPreview = { url: "blob:mock-pdf-2", nombreArchivo: "reporte-prueba-2.pdf" };
+render();
+let anchorCreado = null;
+const origCreateElement = document.createElement.bind(document);
+document.createElement = function (tag) {
+  const el = origCreateElement(tag);
+  if (tag === "a") { anchorCreado = el; el.click = () => {}; } // evita el intento de navegación real de jsdom
+  return el;
+};
+click('[data-action="descargar-pdf-preview"]');
+document.createElement = origCreateElement;
+assert(!!anchorCreado && anchorCreado.href.indexOf("blob:mock-pdf-2") !== -1 && anchorCreado.download === "reporte-prueba-2.pdf", "'Descargar' arma un <a download> sobre el mismo blob: que ya se estaba viendo, sin navegar a ningún lado ni abrir nada nuevo");
+assert(!!state.pdfPreview, "descargar NO cierra el visor: son dos acciones independientes");
+click('[data-action="cerrar-pdf-preview"]');
+assert(!state.pdfPreview, "'Cerrar' sí lo cierra");
+
 // Un vendedor solo salta con el teclado a las secciones que le tocan: los
 // atajos usan la misma lista filtrada por rol con la que se dibuja el menú.
 loginComo("vendedor", "Juana", "juana@taller.test");

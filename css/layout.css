@@ -200,3 +200,9 @@
 .imgprev-img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:var(--shadow-lg);cursor:default;}
 .imgprev-close{position:absolute;top:20px;right:24px;width:38px;height:38px;border-radius:999px;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .imgprev-close:hover{background:rgba(255,255,255,.22);}
+
+.pdfprev-overlay{position:fixed;inset:0;z-index:200;background:rgba(6,7,11,.86);display:flex;align-items:center;justify-content:center;padding:24px;}
+.pdfprev-panel{width:min(920px,100%);height:100%;background:var(--surface-1);border-radius:12px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden;}
+.pdfprev-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface-2);}
+.pdfprev-nombre{font-size:13px;font-weight:600;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pdfprev-frame{flex:1;border:none;width:100%;background:#fff;}

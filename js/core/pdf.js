@@ -2,7 +2,7 @@
 // (no como módulo ES) y quedan disponibles en window.jspdf. Este archivo solo
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
-import { state, persist } from "./store.js";
+import { state, persist, notify } from "./store.js";
 import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, estadoLabelDe, calcResumenMovimientos, compraDeLinea, estadoLineaCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
@@ -147,16 +147,34 @@ function resaltarFilaTotal(totalFilas) {
   };
 }
 
+// Muestra el PDF recién generado DENTRO de la app (un visor propio, igual
+// que la imagen ampliada — ver core/dom.js: renderPdfPreview) en vez de
+// descargarlo directo. En la versión instalada como PWA, doc.save() todavía
+// dispara la descarga normal del navegador, que ahí se siente como salirse
+// de la app; con esto, ver el documento pasa a ser una pantalla más DE la
+// app, y descargarlo (o imprimirlo, con los controles nativos del visor de
+// PDF del navegador dentro del iframe) queda como una acción aparte y
+// explícita, sin ninguna pestaña ni ventana nueva de por medio.
+function mostrarPdfEnApp(doc, nombreArchivo) {
+  var url = URL.createObjectURL(doc.output("blob"));
+  // Si ya había un preview abierto (generar un PDF nuevo sin cerrar el
+  // anterior), se libera su blob: URL — si no, cada PDF generado en la misma
+  // sesión se queda ocupando memoria hasta recargar la página.
+  if (state.pdfPreview && state.pdfPreview.url) URL.revokeObjectURL(state.pdfPreview.url);
+  state.pdfPreview = { url: url, nombreArchivo: nombreArchivo };
+  notify();
+}
+
 // Los PDF que le van al cliente (cotización, factura, recibo — no los
-// internos ni los reportes) terminan acá: por defecto se descargan como
-// siempre, pero con opts.enviarPorCorreo devuelven los bytes en vez de
-// descargar, para adjuntarlos a un correo (ver "Enviar por correo" en
+// internos ni los reportes) terminan acá: por defecto se muestran en el
+// visor de la app, pero con opts.enviarPorCorreo devuelven los bytes en vez
+// de eso, para adjuntarlos a un correo (ver "Enviar por correo" en
 // Cotizaciones/Pedidos y core/gmail.js).
 function finalizarPDF(doc, nombreArchivo, opts) {
   if (opts && opts.enviarPorCorreo) {
     return { bytes: doc.output("arraybuffer"), nombreArchivo: nombreArchivo };
   }
-  doc.save(nombreArchivo);
+  mostrarPdfEnApp(doc, nombreArchivo);
   return null;
 }
 
@@ -477,7 +495,7 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
   if (d.pedidos) y = seccionDesglosePedidos(doc, y, marginX, pageW, d.pedidos);
   if (d.vendedores) y = seccionDesgloseVendedores(doc, y, marginX, pageW, d.vendedores);
 
-  doc.save(docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
+  mostrarPdfEnApp(doc, docNum + "-reporte-financiero-" + slugify(etiquetaPeriodo) + ".pdf");
 }
 
 // Gráfica de ingresos/gastos: se incrusta como imagen del canvas que ya está
@@ -693,7 +711,7 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
     theme: "grid"
   });
 
-  doc.save(docNum + "-reporte-productos-" + slugify(etiquetaPeriodo) + ".pdf");
+  mostrarPdfEnApp(doc, docNum + "-reporte-productos-" + slugify(etiquetaPeriodo) + ".pdf");
 }
 
 
@@ -740,7 +758,7 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
     theme: "grid"
   });
 
-  doc.save(docNum + "-reporte-" + slugify(nombreVendedor) + ".pdf");
+  mostrarPdfEnApp(doc, docNum + "-reporte-" + slugify(nombreVendedor) + ".pdf");
 }
 
 export async function generarPDFInternoCotizacion(cot, opts) {
@@ -925,7 +943,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
   drawFooterBand(doc, y, marginX, pageW, "Documento de uso interno — no se le entrega al cliente");
 
   var nombreSeguro = slugify(cot.descripcion || "cotizacion");
-  doc.save(docNum + "-interno-" + nombreSeguro + ".pdf");
+  mostrarPdfEnApp(doc, docNum + "-interno-" + nombreSeguro + ".pdf");
 }
 
 // PDF de ORDEN DE PRODUCCIÓN: confirma lo que el cliente aceptó y sirve para
@@ -1071,7 +1089,7 @@ export async function generarPDFPedido(p) {
   await drawPiePagina(doc, y, marginX, pageW);
 
   var nombreSeguro = slugify(p.descripcion || "pedido");
-  doc.save(docNum + "-orden-" + nombreSeguro + ".pdf");
+  mostrarPdfEnApp(doc, docNum + "-orden-" + nombreSeguro + ".pdf");
 }
 
 // PDF de RECIBO DE ABONO: uno por cada abono registrado, para claridad con el cliente.

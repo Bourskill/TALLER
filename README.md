@@ -222,6 +222,52 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (duodécima ronda: los PDF se abren dentro de la app)
+
+**El pedido:** en la versión instalada como PWA, generar un PDF (cotización,
+factura, reporte, orden de producción...) lo descargaba de una y a veces
+—cuando el token de Google necesitaba renovarse y no podía hacerlo en
+silencio (ver la ronda anterior y la nota de auth.js)— llegaba a abrir una
+pestaña/ventana de Google en medio de la acción. El usuario lo pidió
+directo: que el PDF se pueda ver DENTRO de la app, o al menos que generar
+uno nunca abra nada aparte — el objetivo es que la versión instalada se
+sienta como una app de escritorio de verdad, no como una página web con
+pestañas sueltas.
+
+**La solución, en dos partes:**
+
+1. **Visor de PDF propio.** `core/pdf.js` gana `mostrarPdfEnApp(doc, nombre)`:
+   en vez de `doc.save(...)` (que dispara la descarga del navegador de una),
+   arma un `blob:` local con `doc.output("blob")` y lo muestra en un overlay
+   dentro de la app (`core/dom.js`: `renderPdfPreview`, `state.pdfPreview`) —
+   mismo patrón que ya existía para ampliar una foto (`imagenPreview`), con
+   su propio botón "Descargar" (un `<a download>` sobre ese mismo blob, sin
+   ninguna llamada de red) y "Cerrar". Se sumó a la pila de capas que cierra
+   Esc (`core/teclado.js`: `CAPAS`), justo debajo de la imagen ampliada. Los
+   9 generadores de PDF (`finalizarPDF` para los 4 que le llegan al cliente,
+   y los otros 5 directo) pasaron a usarlo — "Enviar por correo" no cambió:
+   sigue devolviendo los bytes sin mostrar nada, como siempre.
+2. **Refresco proactivo del token de Google**, para que ese problema de raíz
+   ocurra menos seguido. `core/auth.js` programa la renovación del token 5
+   minutos ANTES de que venza (con la pestaña en reposo), en vez de esperar
+   a que una llamada real falle con 401 a mitad de una acción del usuario —
+   que es cuando, si Google no puede renovar en silencio, se nota más
+   (justo abriendo un PDF, que primero pide el siguiente número de
+   documento a la Sheet). El refresco reactivo de siempre
+   (`fetchGoogleConReintento`) sigue como red de seguridad si el proactivo
+   falla o no alcanza a correr (pestaña en segundo plano, etc.).
+
+Esto no elimina la posibilidad de que Google necesite mostrar algo (si las
+cookies de terceros están bloqueadas del todo, ninguna renovación —proactiva
+o reactiva— puede ser silenciosa), pero sí saca ese riesgo de en medio de la
+acción de generar un PDF en el caso normal, y el PDF en sí ya nunca sale de
+la app.
+
+Cubierto en `test/smoke.mjs`: el visor se abre como una capa más (no una
+descarga aparte), encaja en el orden correcto de la pila de Esc, "Descargar"
+arma el `<a download>` sin navegar a ningún lado, y "Cerrar" sí lo cierra sin
+afectar la descarga (son dos acciones independientes).
+
 ## Registro de cambios — agosto 2026 (undécima ronda: se perdía trabajo sin guardar)
 
 **El problema:** una cotización en modo "guardado explícito" (los cambios se

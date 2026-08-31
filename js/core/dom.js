@@ -232,6 +232,24 @@ var coreActions = {
     state.imagenPreview = "";
     notify();
   },
+  "cerrar-pdf-preview": function () {
+    if (state.pdfPreview && state.pdfPreview.url) URL.revokeObjectURL(state.pdfPreview.url);
+    state.pdfPreview = null;
+    notify();
+  },
+  // La descarga de verdad queda como un paso aparte y explícito: un <a
+  // download> sobre el mismo blob: URL que ya se está mostrando — no hace
+  // ninguna llamada a Google ni abre nada nuevo, es puramente local.
+  "descargar-pdf-preview": function () {
+    var p = state.pdfPreview;
+    if (!p) return;
+    var a = document.createElement("a");
+    a.href = p.url;
+    a.download = p.nombreArchivo || "documento.pdf";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
     // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.
@@ -352,6 +370,7 @@ export function render() {
       '<main class="main"><div class="main-inner" id="contenido" tabindex="-1">' + mainInner + "</div></main>" +
       "</div>" +
       renderImagenPreview() +
+      renderPdfPreview() +
       renderAtajos() +
       renderToast() +
       renderDatalists();
@@ -703,6 +722,28 @@ function renderImagenPreview() {
     '<button class="imgprev-close" data-action="cerrar-imagen-preview" aria-label="Cerrar">✕</button>' +
     '<img class="imgprev-img" src="' + esc(state.imagenPreview) + '" alt="" />' +
     "</div>";
+}
+
+// Visor de PDF DENTRO de la app (ver mostrarPdfEnApp en core/pdf.js): en la
+// versión instalada como PWA, descargar de una vez con doc.save() se sentía
+// como salirse de la app hacia el navegador. Con esto, ver el documento es
+// una pantalla más de la app misma — data-action="pdfprev-stop" en el panel
+// interior es el mismo truco que ya usa picker-modal (ver core/dom.js más
+// abajo y core/teclado.js): cada [data-action] frena su propio clic antes de
+// que burbujee, así que clickear DENTRO del panel no cierra el overlay.
+function renderPdfPreview() {
+  var p = state.pdfPreview;
+  if (!p) return "";
+  return '<div class="pdfprev-overlay" data-action="cerrar-pdf-preview">' +
+    '<div class="pdfprev-panel" data-action="pdfprev-stop">' +
+    '<div class="pdfprev-bar">' +
+    '<span class="pdfprev-nombre">' + esc(p.nombreArchivo) + "</span>" +
+    '<span style="display:flex;gap:8px;">' +
+    '<button class="btn small" data-action="descargar-pdf-preview">⬇ Descargar</button>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-pdf-preview" aria-label="Cerrar">✕</button>' +
+    "</span></div>" +
+    '<iframe class="pdfprev-frame" src="' + esc(p.url) + '" title="' + esc(p.nombreArchivo) + '"></iframe>' +
+    "</div></div>";
 }
 
 function renderToast() {

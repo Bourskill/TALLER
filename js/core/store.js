@@ -230,6 +230,10 @@ export const state = {
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
+  // { url (blob:), nombreArchivo } del PDF recién generado, mostrado en un
+  // visor DENTRO de la app en vez de descargarlo directo — o null. Ver
+  // mostrarPdfEnApp() en core/pdf.js. Nunca se persiste.
+  pdfPreview: null,
 
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
