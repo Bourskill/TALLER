@@ -20,7 +20,7 @@ import { renderTipoCostoOptions, renderHelp, renderBuscador, renderTarjetaMini }
 import { subirImagenReferencia } from "../core/drive.js";
 import { calcCostoUnitarioRef, esInsumoServicio } from "../core/calc.js";
 
-var INS_COLS = "1fr 60px 90px 150px 70px 30px";
+var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 70px 30px";
 
 var AYUDA_PLANTILLAS = "Define de una vez los insumos típicos de cada tipo de prenda (t-shirt básica, polo, manga ranglán…) y aplícalos a cualquier referencia de una cotización con un clic. Si le asignas un \"Flujo de producción\" (ej. uno que incluya la etapa de sublimación), ese flujo de etapas se carga automáticamente junto con los insumos.";
 

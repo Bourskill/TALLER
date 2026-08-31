@@ -1,4 +1,11 @@
-.tx-row{display:grid;grid-template-columns:90px 1fr 110px 100px 100px 130px;gap:14px;align-items:center;padding:13px 10px;border-bottom:1px solid var(--border-soft);font-size:13px;border-radius:8px;}
+/* minmax(160px,1fr), no 1fr a secas: con las 5 columnas fijas de al lado ya
+   sumando ~530px + los 5 gaps, un contenedor apretado (sidebar de escritorio
+   + una ventana no maximizada) dejaba a esta columna calculando a 0px — y una
+   columna de 0px no tiene dónde poner ni una palabra completa, así que el
+   texto se veía obligado a partirse letra por letra. El breakpoint de
+   responsive.css (1080px) cubre el caso normal; este mínimo es el respaldo
+   para cuando ni eso alcanza. */
+.tx-row{display:grid;grid-template-columns:90px minmax(160px,1fr) 110px 100px 100px 130px;gap:14px;align-items:center;padding:13px 10px;border-bottom:1px solid var(--border-soft);font-size:13px;border-radius:8px;}
 .tx-row:not(.head):hover{background:var(--surface-2);}
 
 /* Una celda de grid trae `min-width:auto` por defecto, o sea que se NIEGA a

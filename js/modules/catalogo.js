@@ -10,7 +10,11 @@ import { proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
 // por el que se entra a esta pestana), y lo demas detras. Antes la categoria
 // iba segunda, ocupando el mejor lugar de la fila para algo que ahora ya se
 // ve en el encabezado del grupo.
-var COLS = "1.6fr 120px 88px 155px 150px 140px 32px";
+// minmax(150px, 1.6fr): con 685px repartidos entre las otras 6 columnas fijas,
+// el nombre (la columna que MÁS necesita espacio real) es la primera en
+// quedarse sin nada si el contenedor aprieta — ver el porqué grande junto a
+// ".tx-row" en css/tables.css.
+var COLS = "minmax(150px,1.6fr) 120px 88px 155px 150px 140px 32px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
 
 function renderPropuestasPendientes(session) {
@@ -380,9 +384,17 @@ function renderFilaInsumo(c, categorias) {
     // (ver ordenarInsumos) en vez de saltar a su posición alfabética apenas
     // se escribe la primera letra del nombre — eso se sentía como si ya se
     // hubiera dado "guardar" sin haberlo pedido.
+    //
+    // Dos botones CON TEXTO no caben en la columna de 32px reservada para el
+    // "✕" de siempre (se reportó el desborde) — en vez de forzarlos ahí, la
+    // barra de confirmación ocupa el ANCHO COMPLETO de la fila, en su propia
+    // línea debajo de los campos: cabe en cualquier tamaño de pantalla sin
+    // pelearle espacio a ninguna columna.
     (esNuevoSinGuardar
-      ? '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '" title="' + (c.nombre.trim() ? "" : "Ponle un nombre primero") + '"' + (c.nombre.trim() ? "" : " disabled") + '>✓ Guardar</button>' +
-        '<button class="btn ghost small" data-action="remove-cat-item" data-id="' + c.id + '" title="Descartar, no se guarda" aria-label="Descartar insumo">Descartar</button>'
+      ? '<div class="insumo-nuevo-acciones">' +
+        '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '" title="' + (c.nombre.trim() ? "" : "Ponle un nombre primero") + '"' + (c.nombre.trim() ? "" : " disabled") + '>✓ Guardar</button>' +
+        '<button class="btn ghost small" data-action="remove-cat-item" data-id="' + c.id + '" title="Descartar, no se guarda" aria-label="Descartar insumo">Descartar</button>' +
+        "</div>"
       : '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>') +
     "</div>";
 }

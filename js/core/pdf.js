@@ -488,7 +488,13 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
   // pendiente" — el número estaba bien, pero el nombre genérico invitaba a
   // leerlo como "no se debe nada". Lo pendiente de verdad sale más abajo, en
   // "Ventas por vendedor" (ver seccionDesgloseVendedores).
-  var tiles = [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Insumos", money(resumen.insumosReales)], ["Nómina", money(nomina)], ["Comisiones pagadas", money(comisiones)], ["Balance neto", money(balance)]];
+  // "Comisión generada" va INMEDIATAMENTE al lado de "Comisiones pagadas"
+  // (no al final de la tabla, en un apartado que ni siquiera se marca
+  // siempre) — es lo que faltaba pagar, generado en este mismo periodo, esté
+  // o no marcado el desglose completo de "Ventas por vendedor" más abajo. Se
+  // pasa siempre desde resumen.js (desgloses.comisionGeneradaTotal), no solo
+  // cuando ese apartado está tildado.
+  var tiles = [["Ingresos", money(ingresos)], ["Gastos", money(gastos)], ["Insumos", money(resumen.insumosReales)], ["Nómina", money(nomina)], ["Comisiones pagadas", money(comisiones)], ["Comisión generada", money(num(desgloses && desgloses.comisionGeneradaTotal))], ["Balance neto", money(balance)]];
   var colW = (pageW - marginX * 2) / 3, rowH = 34;
   tiles.forEach(function (item, i) {
     var col = i % 3, row = Math.floor(i / 3);
@@ -496,7 +502,7 @@ export async function generarPDFReporteFinanciero(movimientos, etiquetaPeriodo, 
     doc.setTextColor(140, 140, 140); doc.setFontSize(7.5); doc.text(item[0].toUpperCase(), x, yy);
     doc.setTextColor(20, 20, 20); doc.setFontSize(11); doc.text(item[1], x, yy + 15);
   });
-  y = resumenY + rowH * 2;
+  y = resumenY + Math.ceil(tiles.length / 3) * rowH;
   doc.setDrawColor(210, 210, 210); doc.setLineWidth(1);
   doc.line(marginX, y, pageW - marginX, y);
   y += 16;
@@ -573,8 +579,13 @@ function seccionGrafica(doc, y, marginX, pageW, grafica, titulo, docNum) {
   return y;
 }
 
+// Con columna "Vendedor" (antes no la traía, aunque calcPedidosRango ya
+// calculaba el dato): el usuario pidió poder ver quién vendió qué SIN tener
+// que abrir el apartado aparte de "Ventas por vendedor" — acá, en la tabla
+// que de todos modos se mira siempre, cada pedido ya dice de quién fue (o
+// "—" si no tuvo vendedor, que es válido: no todo pedido lo necesita).
 function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos, titulo, docNum) {
-  y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado y lo que falta por cobrar de cada uno.", titulo, docNum);
+  y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado, lo que falta por cobrar y quién vendió cada uno.", titulo, docNum);
   var acc = pedidos.reduce(function (a, f) {
     a.total += num(f.total); a.abonado += num(f.abonado); a.saldo += num(f.saldo); a.ganancia += num(f.ganancia);
     return a;
@@ -584,15 +595,15 @@ function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos, titulo, docNum)
     startY: y,
     margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
     didDrawPage: pag.didDrawPage,
-    head: [["Fecha", "N.º OP", "Cliente", "Tipo", "Cant.", "Total", "Abonado", "Saldo"]],
+    head: [["Fecha", "N.º OP", "Cliente", "Vendedor", "Tipo", "Cant.", "Total", "Abonado", "Saldo"]],
     body: pedidos.length
       ? pedidos.map(function (f) {
-        return [f.fecha, f.numeroOp, f.cliente, f.tipo, numFmt(f.cantidad), money(f.total), money(f.abonado), money(f.saldo)];
-      }).concat([["", "", "TOTAL", "", "", money(acc.total), money(acc.abonado), money(acc.saldo)]])
-      : [["—", "—", "Sin pedidos en este periodo", "—", "—", "—", "—", "—"]],
+        return [f.fecha, f.numeroOp, f.cliente, f.vendedor || "—", f.tipo, numFmt(f.cantidad), money(f.total), money(f.abonado), money(f.saldo)];
+      }).concat([["", "", "TOTAL", "", "", "", money(acc.total), money(acc.abonado), money(acc.saldo)]])
+      : [["—", "—", "Sin pedidos en este periodo", "—", "—", "—", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
-    columnStyles: { 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } },
+    columnStyles: { 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" } },
     didParseCell: pedidos.length ? resaltarFilaTotal(pedidos.length + 1) : undefined,
     theme: "grid"
   });
@@ -963,10 +974,11 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // ningún movimiento en Finanzas, así que no hace falta esperar a
           // que se marque "Sí" para mostrarla (ver el gate por `estado` de
           // costoRealTxt, que sí exige un número real porque ESE sí crea un
-          // movimiento — ver sincronizar-compras-finanzas).
+          // movimiento — ver sincronizar-compras-finanzas). Sin etiqueta
+          // "(estimado)": el usuario la pidió sin ese paréntesis.
           var hayCantReal = compra.cantidadReal !== undefined && compra.cantidadReal !== "" && compra.cantidadReal !== null;
           var cantReal = c.esServicio ? "—" :
-            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst + " (estimado)");
+            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst);
           var estado = estadoLineaCompra(cot, c);
           // Una línea de servicio SIN costoReal escrito (nadie la tocó
           // todavía) igual cuenta como costo real en el resumen en pantalla

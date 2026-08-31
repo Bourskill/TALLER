@@ -9,10 +9,10 @@ import {
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
   calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
-  calcGananciaDisponible, calcComposicionCaja } from "../core/calc.js";
+  calcServiciosPorCategoriaRango } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import {
-  configurarDefaults, crearBarrasIngresosGastos, crearLinea, crearDona, destruirGrafica, paletaGrafica
+  configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
 } from "../core/graficas.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
@@ -42,8 +42,6 @@ export function render() {
   var html = renderKpis();
 
   html += renderAvisoPropuestasPendientes();
-
-  html += renderComposicionCaja();
 
   html += renderGraficaResumen();
 
@@ -138,56 +136,10 @@ function renderKpis() {
   return '<div class="kpis">' +
     renderKpiIvaCobrado() +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Caja actual</div><div class="kpi-value ' + (caja < 0 ? "danger" : "success") + '">' + fmt(caja) + '</div><div class="kpi-note">Ingresos y gastos ya pagados</div></div>' +
-    renderKpiGananciaDisponible() +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo pendiente"><div class="kpi-label">Por cobrar</div><div class="kpi-value warning">' + fmt(porCobrar) + '</div><div class="kpi-note">Clientes que aún deben</div></div>' +
     renderKpiPorPagar(resumenPago) +
     '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="pedidos" title="Ver pedidos activos"><div class="kpi-label">Pedidos activos</div><div class="kpi-value info">' + activos + '</div><div class="kpi-note">Solo pedidos (no cuenta cotizaciones)</div></div>' +
     "</div>";
-}
-// De la caja actual, lo que de verdad es ganancia (ya restado lo que hay que
-// pagar y el IVA que no es del taller) — ver calcGananciaDisponible en
-// core/calc.js. El usuario lo pidió explícito: separar cuánto de la plata en
-// caja es suya de verdad vs. cuánto ya tiene destino. Un negativo (se debe
-// más de lo que hay hoy) se muestra tal cual, en rojo: es la alerta, no un
-// error de cálculo.
-function renderKpiGananciaDisponible() {
-  var g = calcGananciaDisponible();
-  // Mismo cuidado que renderKpiIvaCobrado: en un taller que no factura IVA,
-  // ese KPI ni siquiera existe (para no estorbar con algo que no le aplica) —
-  // el texto de ayuda de acá tampoco debe MENCIONARLO si no viene al caso,
-  // aunque la resta (calcGananciaDisponible ya incluye calcIvaCobradoTotal)
-  // sea correcta igual: restar 0 no cambia el número.
-  var hayIva = calcIvaCobradoTotal() > 0;
-  var ayuda = "Lo que queda de la caja actual después de descontar lo que el taller debe pagar (gastos fijos, nómina, comisiones, deudas)" +
-    (hayIva ? " y el IVA cobrado que le corresponde al Estado" : "") + ". Es la plata que de verdad es tuya hoy.";
-  return '<div class="kpi kpi-clickable" data-action="kpi-nav" data-tab="finanzas" title="Ver historial de movimientos"><div class="kpi-label">Ganancia disponible' +
-    renderHelp(ayuda) +
-    '</div><div class="kpi-value ' + (g < 0 ? "danger" : "success") + '">' + fmt(g) + "</div><div class=\"kpi-note\">" + (g < 0 ? "Se debe más de lo que hay en caja" : "Caja actual menos lo que ya tiene destino") + "</div></div>";
-}
-
-// "Más gráficas, en pocas palabras" — de qué está hecha la caja actual, de un
-// vistazo: una dona en vez de otra fila de cifras, porque acá lo que importa
-// es la PROPORCIÓN (¿la mayoría de la caja es mía o ya tiene dueño?), no la
-// serie en el tiempo (esa es la gráfica de abajo, "Ingresos y gastos"). Solo
-// aparece si hay algo en caja: con todo en cero no hay nada que proporcionar.
-function renderComposicionCaja() {
-  var c = calcComposicionCaja();
-  if (!c.caja) return "";
-  // Mismo cuidado que renderKpiIvaCobrado: el IVA solo se menciona (acá y en
-  // la dona de abajo) si el taller de verdad factura IVA — si no, es una
-  // categoría vacía que no le aporta nada a quien nunca la usa.
-  var hayIva = c.iva > 0;
-  var cifras = [
-    { label: "Ganancia disponible", valor: fmt(c.ganancia), clase: c.ganancia >= 0 ? "pos" : "neg" },
-    { label: "Por pagar", valor: fmt(c.porPagar), clase: c.porPagar > 0 ? "neg" : "" }
-  ];
-  if (hayIva) cifras.push({ label: "IVA por girar", valor: fmt(c.iva), clase: "neg" });
-  var html = '<div class="card"><div class="section-title">De qué es la caja actual' +
-    renderHelp("Composición de \"Caja actual\": cuánto de esa plata es ganancia disponible y cuánto ya tiene destino (por pagar" + (hayIva ? " + IVA que le corresponde al Estado" : "") + "). Si \"Por pagar\" supera la caja, la ganancia disponible da negativa — no se dibuja una porción negativa, esa alerta ya la dice el KPI de arriba.") +
-    "</div>";
-  html += renderCifrasGrafica(cifras);
-  html += '<div style="position:relative;height:200px;"><canvas id="chart-composicion-caja"></canvas></div></div>';
-  return html;
 }
 // Parte de la caja que NO es del taller.
 //
@@ -277,12 +229,41 @@ function renderGraficaResumen() {
     return html + '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div></div>';
   }
   var t = totalesSerie(serie);
-  return html + renderCifrasGrafica([
+  // "Ganancia" = Balance menos lo que en el periodo fue trabajo del taller
+  // mismo (servicios — corte, confección...), nunca pagado de verdad y por
+  // eso ya incluido en Balance sin restar. El usuario lo pidió con sus
+  // palabras: "la ganancia es lo que queda cuando del dinero de la caja se
+  // le resta lo de los servicios". Ver calcServiciosPorCategoriaRango.
+  var servicios = calcServiciosPorCategoriaRango(serie.desde, serie.hasta);
+  var totalServicios = servicios.reduce(function (a, s) { return a + s.monto; }, 0);
+  var ganancia = t.balance - totalServicios;
+  var cifras = [
     { label: "Entró", valor: fmt(t.ingresos), clase: "pos" },
     { label: "Salió", valor: fmt(t.gastos), clase: "neg" },
-    { label: "Balance", valor: fmt(t.balance), clase: t.balance >= 0 ? "pos" : "neg" }
-  ]) +
-    '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div></div>';
+    { label: "Balance", valor: fmt(t.balance), clase: t.balance >= 0 ? "pos" : "neg" },
+    { label: "Ganancia", valor: fmt(ganancia), clase: ganancia >= 0 ? "pos" : "neg" }
+  ];
+  return html + renderCifrasGrafica(cifras) +
+    '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div>' +
+    renderServiciosMini(servicios) +
+    "</div>";
+}
+
+// Tiles chicos y discretos, uno por categoría de "servicio" (mano de obra
+// propia) del periodo — MENOS protagonismo que los KPI principales de
+// arriba, a propósito: son un detalle de por qué "Ganancia" es menor que
+// "Balance", no otro número que compita por atención. Solo aparecen si hubo
+// algo: sin servicios en el periodo, no hay nada que desglosar.
+function renderServiciosMini(servicios) {
+  if (!servicios.length) return "";
+  return '<div class="section-sub" style="margin:14px 0 6px;">De "Balance" a "Ganancia" se restó esto (trabajo propio, nunca pagado aparte)' +
+    renderHelp("Cada una de estas es una línea marcada \"Servicio\" en la lista de compras de una cotización: algo que el cliente sí pagó (va dentro de \"Entró\") pero que el taller hizo con su propia gente, sin pagarle a nadie aparte por eso. Sigue siendo plata disponible en caja — solo que no es utilidad del negocio, así que se resta de la ganancia real.") +
+    "</div>" +
+    '<div class="kpis-mini">' +
+    servicios.map(function (s) {
+      return '<div class="kpi-mini"><div class="kpi-mini-label" title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</div><div class="kpi-mini-value">' + fmt(s.monto) + "</div></div>";
+    }).join("") +
+    "</div>";
 }
 
 // Cifras grandes bajo el título de una gráfica, en el mismo lenguaje visual
@@ -395,7 +376,7 @@ function etiquetaFechaCorta(iso) {
   return partes[2] + "/" + partes[1];
 }
 
-var chartIngresosGastos = null, chartPrendasDia = null, chartReportePeriodo = null, chartComposicionCaja = null;
+var chartIngresosGastos = null, chartPrendasDia = null, chartReportePeriodo = null;
 
 // Único punto imperativo de este módulo (todo lo demás es render() puro que
 // devuelve un string) — llamado por core/dom.js justo después de insertar el
@@ -410,7 +391,6 @@ export function afterRender() {
   dibujarChartIngresosGastos();
   dibujarChartPrendasDia();
   dibujarChartReportePeriodo();
-  dibujarChartComposicionCaja();
 }
 
 // Simétrico a afterRender (lo llama core/dom.js al salir de esta pestaña).
@@ -421,21 +401,6 @@ export function beforeUnmount() {
   chartIngresosGastos = destruirGrafica(chartIngresosGastos);
   chartPrendasDia = destruirGrafica(chartPrendasDia);
   chartReportePeriodo = destruirGrafica(chartReportePeriodo);
-  chartComposicionCaja = destruirGrafica(chartComposicionCaja);
-}
-
-function dibujarChartComposicionCaja() {
-  chartComposicionCaja = destruirGrafica(chartComposicionCaja);
-  var canvas = document.getElementById("chart-composicion-caja");
-  if (!canvas) return;
-  var c = calcComposicionCaja();
-  var p = paletaGrafica();
-  // Mismo criterio que renderComposicionCaja: sin IVA que facturar, esa
-  // porción ni se lista — una categoría en 0 seguiría apareciendo vacía en
-  // la leyenda, mencionando algo que a este taller no le aplica.
-  var labels = ["Ganancia disponible", "Por pagar"], valores = [c.gananciaGrafica, c.porPagar], colores = [p.exito, p.peligro];
-  if (c.iva > 0) { labels.push("IVA por girar"); valores.push(c.iva); colores.push(p.acento); }
-  chartComposicionCaja = crearDona(canvas, { labels: labels, valores: valores, colores: colores, formatoTooltip: fmt });
 }
 
 // Gráfica del rango elegido en el reporte (distinta de la de arriba, que son
@@ -649,7 +614,7 @@ function renderGraficaPeriodo(fr) {
 
 function renderDetalleMovimientos(movimientos) {
   if (!movimientos.length) return '<div class="empty" style="padding:8px 0;">Sin movimientos en este rango.</div>';
-  var COLS = "85px 95px 1fr 130px 110px";
+  var COLS = "85px 95px minmax(140px,1fr) 130px 110px";
   var ordenados = movimientos.slice().sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
   var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>Tipo</span><span>Concepto</span><span>Persona</span><span>Monto</span></div>';
   ordenados.forEach(function (t) {
@@ -669,8 +634,11 @@ function renderDesglosePedidos(fr) {
   var filas = calcPedidosRango(fr.desde, fr.hasta);
   if (!filas.length) return '<div class="empty" style="padding:8px 0;">Sin pedidos en este rango.</div>';
   var r = calcResumenPedidos(filas);
-  var COLS = "85px 90px 1fr 70px 105px 105px 105px";
-  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>N.º OP</span><span>Cliente</span><span>Cant.</span><span>Total</span><span>Abonado</span><span>Saldo</span></div>';
+  // Columna "Vendedor": el usuario pidió poder ver quién vendió qué sin abrir
+  // el apartado aparte de "Ventas por vendedor" — mismo dato que ya trae
+  // calcPedidosRango, antes sin mostrar acá.
+  var COLS = "85px 90px minmax(140px,1fr) 90px 70px 105px 105px 105px";
+  var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Fecha</span><span>N.º OP</span><span>Cliente</span><span>Vendedor</span><span>Cant.</span><span>Total</span><span>Abonado</span><span>Saldo</span></div>';
   filas.forEach(function (f) {
     html += '<div class="tx-row' + (f.cancelado ? " fila-cancelada" : "") + '" style="grid-template-columns:' + COLS + ';">' +
       '<span class="mobile-th">Fecha</span><span>' + esc(f.fecha) + "</span>" +
@@ -678,6 +646,7 @@ function renderDesglosePedidos(fr) {
       '<span class="mobile-th">Cliente</span><span>' + esc(f.cliente) +
       (f.cancelado ? ' <span class="badge danger">Cancelado</span>' : "") +
       '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) + "</div></span>" +
+      '<span class="mobile-th">Vendedor</span><span>' + esc(f.vendedor || "—") + "</span>" +
       '<span class="mobile-th">Cant.</span><span class="amount">' + f.cantidad + "</span>" +
       '<span class="mobile-th">Total</span><span class="amount">' + fmt(f.total) + "</span>" +
       '<span class="mobile-th">Abonado</span><span class="amount">' + fmt(f.abonado) + "</span>" +
@@ -696,7 +665,7 @@ function renderDesglosePedidos(fr) {
 function renderDesgloseVendedores(fr) {
   var filas = calcVentasPorVendedorRango(fr.desde, fr.hasta);
   if (!filas.length) return '<div class="empty" style="padding:8px 0;">Sin ventas en este rango.</div>';
-  var COLS = "1fr 80px 80px 120px 120px 120px";
+  var COLS = "minmax(120px,1fr) 80px 80px 120px 120px 120px";
   var html = '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Vendedor</span><span>Pedidos</span><span>Unid.</span><span>Vendido</span><span>Ganancia</span><span>Comisión</span></div>';
   filas.forEach(function (f) {
     html += '<div class="tx-row" style="grid-template-columns:' + COLS + ';">' +
@@ -715,7 +684,7 @@ function renderDesgloseVendedores(fr) {
 // y no a otra cosa: qué se compró, cuánto se compró y cuánto costó. Son
 // compras REALES (movimientos marcados como insumo) — nunca lo cotizado.
 function renderDesgloseInsumos(compras) {
-  var COLS = "85px 1fr 110px 130px 110px";
+  var COLS = "85px minmax(140px,1fr) 110px 130px 110px";
   var total = compras.reduce(function (a, c) { return a + c.monto; }, 0);
   // El título y la ayuda los pone renderSeccionReporte (es un apartado
   // plegable), así que acá solo va la tabla.
@@ -744,7 +713,7 @@ function renderDesgloseInsumos(compras) {
 function renderDesgloseProductos(fr) {
   var filas = calcProductosVendidosRango(fr.desde, fr.hasta);
   var resumen = calcResumenProductosVendidos(filas);
-  var COLS = "85px 1fr 80px 110px 110px 110px";
+  var COLS = "85px minmax(140px,1fr) 80px 110px 110px 110px";
   // El título y la ayuda los pone renderSeccionReporte.
   var html = "";
   if (!filas.length) {
@@ -825,12 +794,20 @@ export var actions = {
     }
     var movimientos = state.tx.filter(function (t) { return t.fecha >= fr.desde && t.fecha <= fr.hasta; });
     var etiqueta = fr.desde === fr.hasta ? fr.desde : (fr.desde + " a " + fr.hasta);
+    // Comisión GENERADA en el periodo (esté pagada o no) — se calcula siempre,
+    // no solo si se marca el apartado detallado de "Ventas por vendedor": el
+    // usuario pidió que el tile de "Comisiones pagadas" de arriba no se lea
+    // solo, sin decir cuánto falta, aunque no se quiera el desglose completo
+    // por vendedor en el documento.
+    var ventasVendedorPeriodo = calcVentasPorVendedorRango(fr.desde, fr.hasta);
+    var comisionGeneradaTotal = ventasVendedorPeriodo.reduce(function (a, v) { return a + num(v.comision); }, 0);
     await generarPDFReporteFinanciero(movimientos, etiqueta, {
       movimientos: marcado("movimientos"),
       insumos: marcado("insumos") ? calcComprasInsumoRango(movimientos) : null,
       productos: marcado("productos") ? calcProductosVendidosRango(fr.desde, fr.hasta) : null,
       pedidos: marcado("pedidos") ? calcPedidosRango(fr.desde, fr.hasta) : null,
-      vendedores: marcado("vendedores") ? calcVentasPorVendedorRango(fr.desde, fr.hasta) : null,
+      vendedores: marcado("vendedores") ? ventasVendedorPeriodo : null,
+      comisionGeneradaTotal: comisionGeneradaTotal,
       // La gráfica solo puede ir si su apartado está abierto: la imagen se
       // toma del canvas que está en pantalla.
       grafica: marcado("grafica") ? imagenGraficaPeriodo() : null

@@ -222,6 +222,95 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — agosto 2026 (decimoquinta ronda: correcciones sobre la ronda anterior)
+
+El usuario revisó punto por punto la decimocuarta ronda y corrigió el rumbo en tres de nueve. Resumen de lo que cambió:
+
+**Unidad de medida — corrección.** `unidadesConocidas()` seguía sembrando la
+lista con `UNIDADES_SUGERIDAS` (UND, MT, CM...) aunque nunca se hubieran
+escrito. Se quitó esa siembra por completo (y la constante, ya sin ningún
+uso): el panel ahora sale vacío para un taller nuevo, y solo lista lo que de
+verdad se escribió alguna vez en un campo "Unidad".
+
+**Cantidad real estimada — sin la etiqueta.** Se quitó el "(estimado)" del
+PDF interno de cotización; el número se ve igual, solo sin el paréntesis.
+
+**Insumo nuevo — desborde de "Guardar"/"Descartar".** Dos botones con texto
+no caben en los 32px reservados para el "✕" de siempre. La barra de
+confirmación ahora ocupa el ancho COMPLETO de la fila (`grid-column:1/-1`),
+en su propia línea debajo de los campos — cabe en cualquier tamaño.
+
+**Responsividad de tablas — el pedido grande de esta ronda.** El usuario
+reportó, con ejemplo concreto, texto partiéndose letra por letra en las
+tablas. Causa real: cada fila tipo tabla fija sus columnas en px (varias
+suman 500-700px sin contar la columna flexible), y con la sidebar de
+escritorio ocupando lo suyo, entre ~880px y ~1080px de ventana la columna
+`1fr` calculaba a 0px — una columna de ancho cero no tiene dónde poner ni una
+palabra, así que el texto se partía carácter por carácter. Se corrigió con
+dos capas:
+1. **Breakpoint propio para tablas** (`responsive.css`, `@media (max-width:
+   1080px)`), separado del breakpoint de 880px que controla el resto del
+   cromo de la app (sidebar/topbar) — antes compartían uno solo, así que
+   subir el umbral general habría convertido de golpe la sidebar en cajón
+   móvil a un ancho donde eso no hacía falta. Las tablas ahora se apilan en
+   tarjeta (el mismo diseño ya existente para móvil) antes de quedarse sin
+   aire, mientras la sidebar sigue en modo escritorio.
+2. **`minmax()` como respaldo** en TODAS las columnas flexibles de TODAS las
+   listas tipo tabla del proyecto (catálogo, compras de cotización, insumos
+   de referencia, pedidos, pendientes, productos, plantillas, reportes de
+   Resumen — más de una decena de sitios), para que ninguna vuelva a
+   calcular a 0px así el breakpoint no alcance a cubrir algún caso.
+
+**Comisión de vendedor y "vendedores independientes" — reforzado.** El
+usuario seguía sin ver quién vendió qué sin abrir un apartado aparte.
+`seccionDesglosePedidos` (PDF) y `renderDesglosePedidos` (pantalla) ganan una
+columna "Vendedor" — el dato ya lo calculaba `calcPedidosRango`, solo no se
+mostraba. Además, el tile "Comisiones pagadas" del reporte financiero ahora
+tiene al lado un tile "Comisión generada" (el total acumulado del periodo,
+esté pagada o no) que antes solo se veía bajando hasta la tabla opcional de
+"Ventas por vendedor".
+
+**Finanzas "ganancia" — reimplementado desde cero.** La primera versión (KPI
+"Ganancia disponible" + dona "De qué es la caja") se descartó por completo:
+el usuario quería algo distinto y más específico. Lo nuevo, con sus propias
+palabras: *"la ganancia es lo que queda cuando del dinero de la caja se le
+resta lo de los servicios"* — donde "servicios" son las líneas marcadas
+"Servicio" en la lista de compras de una cotización (corte, confección: el
+taller hizo el trabajo, nadie le pagó aparte, esa plata del cliente sigue en
+caja pero no es utilidad real del negocio).
+- `calcServiciosPorCategoriaRango(desde, hasta)` (`core/calc.js`): agrupa por
+  nombre de línea (Corte, Confección...) usando la misma resolución de costo
+  que `calcResumenCompras` (estimado si nadie corrigió el costo real). Como
+  una línea de servicio nunca genera un movimiento en Finanzas, se filtra por
+  la fecha de la COTIZACIÓN, no de un tx que no existe.
+- La tarjeta "Ingresos y gastos" de Resumen gana una 4ª cifra, **Ganancia**
+  = Balance − total de servicios del mismo periodo de 30 días.
+- Debajo, una fila de tiles chicos y discretos (`.kpis-mini`/`.kpi-mini`,
+  nuevos en `layout.css`) — uno por categoría de servicio — con
+  DELIBERADAMENTE menos protagonismo que los KPI principales: es el detalle
+  de por qué "Ganancia" es menor que "Balance", no otro número que compita
+  por atención. No aparece si no hubo servicios en el rango.
+- Se eliminó por completo lo anterior: `calcGananciaDisponible`,
+  `calcComposicionCaja`, el KPI "Ganancia disponible", la tarjeta "De qué es
+  la caja actual" y `crearDona` (que quedó sin ningún otro uso) — nada se
+  dejó a medias ni deshabilitado, se borró.
+
+**Rendimiento de planta:** el usuario repitió el mismo reporte de la ronda
+anterior ("ya despaché algo y no refleja nada"). El fix de la decimocuarta
+ronda (`fechaTerminado`/`fechaTerminada` + `calcPrendasTerminadasPorDia`,
+cubierto por pruebas) sigue en el código sin cambios — no se encontró ningún
+hueco adicional revisándolo de nuevo. Como nada de este trabajo se había
+subido/desplegado todavía, lo más probable es que el reporte sea sobre la
+versión anterior al fix, sin haber probado la actualizada.
+
+Cubierto en `test/smoke.mjs`: `unidadesConocidas()` vacío sin uso previo,
+`calcServiciosPorCategoriaRango` con costo estimado y filtrado por rango, la
+tarjeta de Resumen con la nueva cifra "Ganancia" y sus tiles, y que la dona
+descartada no deja rastro en el DOM. Los cambios de CSS puro (breakpoint,
+`minmax()`, desborde de botones) se verificaron con capturas reales en el
+navegador a 900px/1000px/1300px de ancho — no hay forma de que `smoke.mjs`
+(sin layout real) los cubra.
+
 ## Registro de cambios — agosto 2026 (decimocuarta ronda: estética y varios pedidos del usuario)
 
 Nueve pedidos sueltos del usuario en un solo mensaje. Por orden de aparición:

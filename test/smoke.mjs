@@ -1504,46 +1504,64 @@ render();
 assert(!document.body.textContent.includes("IVA cobrado"), "y si no se factura IVA, esa tarjeta no aparece: no estorba a quien no lo usa");
 
 // ---------------------------------------------------------------------------
-// "Ganancia disponible" (Resumen): el usuario pidió separar, de la caja
-// actual, cuánto es ganancia de verdad y cuánto ya tiene destino (por pagar +
-// IVA) — "para saber qué servicio me toca pagar y cuánto". Reutiliza
-// calcCaja/calcPorPagar/calcIvaCobradoTotal ya existentes y ya probados: cero
-// fuentes paralelas, cero riesgo de doble conteo.
+// "Ganancia" (Resumen, tarjeta "Ingresos y gastos"): rechazada la primera
+// implementación (KPI "Ganancia disponible" + dona "De qué es la caja") —
+// el usuario la quería distinta: sumar lo marcado como "servicio" (corte,
+// confección — trabajo del taller mismo, nunca pagado de verdad) en tiles
+// chicos y discretos, y que "Ganancia" sea "Balance" menos eso. Con sus
+// palabras: "la ganancia es lo que queda cuando del dinero de la caja se le
+// resta lo de los servicios". Ver calcServiciosPorCategoriaRango.
 // ---------------------------------------------------------------------------
-assert(calcMod.calcGananciaDisponible() === calcMod.calcCaja() - calcMod.calcPorPagar() - calcMod.calcIvaCobradoTotal(), "ganancia disponible es EXACTAMENTE caja menos por-pagar menos IVA — una sola fórmula");
-const composicionActual = calcMod.calcComposicionCaja();
-if (composicionActual.ganancia >= 0) {
-  assert(composicionActual.gananciaGrafica === composicionActual.ganancia, "con ganancia positiva, la porción de la dona es exactamente la ganancia");
-  assert(composicionActual.gananciaGrafica + composicionActual.porPagar + composicionActual.iva === composicionActual.caja, "las tres partes de la dona suman EXACTAMENTE la caja actual — cero descuadre");
-} else {
-  assert(composicionActual.gananciaGrafica === 0, "con ganancia negativa, la dona no dibuja una porción negativa (se recorta a 0; la alerta la da la cifra, no el gráfico)");
-}
-
-// Escenario aislado y determinista: sin nada pendiente por pagar ni IVA, la
-// ganancia disponible tiene que ser EXACTAMENTE la caja — nada más restando.
-const txPrevios = state.tx, pedidosPrevios = state.pedidos, cotizacionesPrevias = state.cotizaciones, deudasPrevias = state.deudas;
-const gastosFijosPrevios = state.config.gastosFijos, nominaPrevia = state.config.nomina;
-state.tx = [{ id: "tx-caja-test", tipo: "ingreso", monto: 500000, concepto: "Prueba caja", fecha: hoyStr(), contraparte: "" }];
-state.pedidos = []; state.cotizaciones = []; state.deudas = []; state.config.gastosFijos = []; state.config.nomina = [];
-assert(calcMod.calcPorPagar() === 0 && calcMod.calcIvaCobradoTotal() === 0, "escenario de prueba: nada pendiente por pagar, nada de IVA");
-assert(calcMod.calcGananciaDisponible() === 500000, "sin nada pendiente ni IVA, la ganancia disponible es EXACTAMENTE la caja");
+const txPreviosGan = state.tx, cotizacionesPreviasGan = state.cotizaciones;
+const hoyGan = hoyStr();
+state.tx = [{ id: "tx-gan-ingreso", tipo: "ingreso", monto: 1000000, concepto: "Venta con corte propio", fecha: hoyGan, contraparte: "" }];
+state.cotizaciones = [{
+  id: "cot-gan", cliente: "Cliente Ganancia", descripcion: "Camisetas", fecha: hoyGan, estado: "convertida", pedidoId: "",
+  referencias: [{
+    id: "r1", nombre: "Camiseta", origen: "taller", estado: "nuevo", estadosDef: null, cantidadPedida: 10, consumoAprox: 1, precioVenta: 100000,
+    insumos: [{ id: "i1", nombre: "Corte", unidad: "servicio", tipo: "por_prenda", costo: 20000, cantidad: 1 }], detalle: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "gan1",
+  compras: [{ clave: "corte|servicio|por_prenda", estado: "servicio", cantidadReal: "", costoReal: "" }]
+}];
+const serviciosGan = calcMod.calcServiciosPorCategoriaRango(hoyGan, hoyGan);
+assert(serviciosGan.length === 1 && serviciosGan[0].nombre.toLowerCase() === "corte" && serviciosGan[0].monto > 0, "calcServiciosPorCategoriaRango agrupa por nombre y usa el costo ESTIMADO (nadie escribió un costoReal todavía)");
+assert(!calcMod.calcServiciosPorCategoriaRango("2000-01-01", "2000-01-01").length, "y fuera del rango de la cotización, no cuenta nada");
 state.tab = "resumen";
 render();
-assert(document.body.textContent.includes("Ganancia disponible"), "el Resumen muestra el nuevo KPI de ganancia disponible");
-assert(!!document.querySelector("#chart-composicion-caja"), "y su gráfica de composición de la caja (\"De qué es la caja actual\")");
-state.tx = txPrevios; state.pedidos = pedidosPrevios; state.cotizaciones = cotizacionesPrevias; state.deudas = deudasPrevias;
-state.config.gastosFijos = gastosFijosPrevios; state.config.nomina = nominaPrevia;
+const textoResumenGan = document.body.textContent;
+assert(textoResumenGan.includes("Ganancia"), "la tarjeta de Ingresos y gastos ahora incluye una cifra de Ganancia junto a Entró/Salió/Balance");
+assert(textoResumenGan.includes("Corte"), "y debajo, un tile propio (con menos protagonismo que los KPI) por cada categoría de servicio restada");
+assert(!!document.querySelector(".kpis-mini") && !!document.querySelector(".kpi-mini"), "usando el componente de tiles chicos, no la dona rechazada");
+assert(!document.querySelector("#chart-composicion-caja"), "la dona \"De qué es la caja actual\" no existe más — se descartó por completo, no se dejó a medias");
+// Sin ningún servicio en el periodo, la fila de tiles ni aparece — ver
+// renderServiciosMini.
+state.cotizaciones = [];
+render();
+assert(!document.querySelector(".kpis-mini"), "sin servicios en el periodo, la fila de tiles no se dibuja (nada que desglosar)");
+state.tx = txPreviosGan; state.cotizaciones = cotizacionesPreviasGan;
 render();
 
 // ---------------------------------------------------------------------------
 // Ajustes de feedback (Insumos + estados de producción).
 // ---------------------------------------------------------------------------
 
-// Unidad "conocida": el datalist compartido ya no es una lista fija — aprende
-// de lo que se escribe en cualquier campo de unidad de la app.
+// Unidad "conocida": el datalist compartido no es una lista fija — aprende
+// de lo que se escribe en cualquier campo de unidad de la app. El usuario
+// pidió explícitamente que NO aparezca ninguna sugerencia "de base": si
+// nunca se escribió "UND" en ningún campo, "UND" no debe salir en el panel,
+// así sea una unidad común — nada inventado, solo lo que él mismo ya usó.
+// unidadesConocidas() recorre 4 áreas (catalogoInsumos, productos,
+// plantillasPrendas, cotizaciones) — se limpian las 4 para que la prueba sea
+// de verdad aislada: si no, un "UND" que quedó de un insumo creado 800 líneas
+// atrás en este mismo archivo lo haría aparecer por una razón real, no por el
+// bug que se está probando.
+const productosPrevios = state.productos, plantillasPreviase = state.plantillasPrendas, cotizacionesPreviasUnidad = state.cotizaciones;
 state.catalogoInsumos = [{ id: "iu1", nombre: "Cinta rara", unidad: "rollo-40m", costo: 1000, tipo: "por_prenda", categoriaId: "", proveedorId: "" }];
+state.productos = []; state.plantillasPrendas = []; state.cotizaciones = [];
 assert(calcMod.unidadesConocidas().includes("rollo-40m"), "una unidad escrita en cualquier insumo queda disponible como sugerencia para los demás campos");
-assert(calcMod.unidadesConocidas().includes("UND"), "las sugerencias de base (UND, MT…) siguen ahí aunque no se hayan usado todavía");
+assert(!calcMod.unidadesConocidas().includes("UND"), "y ninguna unidad que nunca se haya escrito aparece — ni siquiera una \"común\" como UND");
+state.productos = productosPrevios; state.plantillasPrendas = plantillasPreviase; state.cotizaciones = cotizacionesPreviasUnidad;
 
 // "+" por categoría en Insumos: agrega YA CLASIFICADO en esa sección, sin
 // tener que elegirle la categoría después ni saltar de filtro para verlo.

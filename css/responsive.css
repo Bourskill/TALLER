@@ -7,6 +7,79 @@
 .mobile-th{display:none;}
 
 /* ==========================================================================
+   Tablas/filas de grid: rotura ANTES que la del resto del cromo de la app
+   (sidebar/topbar, 880px más abajo) — a propósito, en un breakpoint aparte.
+
+   POR QUÉ UN BREAKPOINT DISTINTO: cada fila tipo tabla fija sus columnas en
+   PX por `style="grid-template-columns:...` inline (catálogo de insumos,
+   compras de una cotización, movimientos de Finanzas...). La suma de esas
+   columnas fijas ya pasa de 500-700px en varias de ellas SIN contar la
+   columna flexible (`1fr`) — con la sidebar de escritorio ocupando lo suyo,
+   eso se queda sin aire mucho antes de los 880px donde recién se activa el
+   modo "cajón" de la sidebar. Entre 880px y este breakpoint, la columna
+   `1fr` se quedaba calculando a 0px (todo el espacio ya se lo comían las
+   columnas fijas) y su texto se veía OBLIGADO a partirse letra por letra —
+   "hilo\ne\ns\np\ne\nc\ni\na\nl" en vez de la palabra — porque un carácter
+   solo sí entra en una columna de ancho cero, una palabra completa no. Se
+   reportó dos veces como "los caracteres se apilan formando una columna".
+   Apilar las filas en tarjeta (el mismo layout que ya usa el modo móvil de
+   más abajo) ANTES de llegar a ese punto lo evita de raíz: nunca se llega a
+   pedirle a una columna que sea más angosta que su propio contenido. */
+@media (max-width: 1080px){
+  /* Cualquier fila tipo tabla (movimientos, insumos, tallas, nómina...) pasa
+     de columnas fijas en px a apilarse en una sola columna. El !important es
+     necesario: casi todas fijan su ancho con un style="grid-template-columns:
+     ...px..." inline por fila (para poder variar el layout entre pantallas),
+     y un estilo inline sin !important le gana a cualquier regla externa —
+     por eso un intento anterior de apilar sin !important quedaba inerte y la
+     tabla seguía desbordando con scroll horizontal.
+
+     CADA FILA ES SU PROPIA TARJETA. Antes se apilaban una tras otra separadas
+     solo por una línea de 1px: cinco movimientos seguidos se leían como un
+     único bloque de texto corrido donde no se veía dónde terminaba uno y
+     empezaba el siguiente (y en un teléfono, que es donde más se consulta,
+     eso es justo lo que uno necesita distinguir). Con fondo, borde y
+     separación propios, cada fila vuelve a ser una unidad.
+
+     ETIQUETA A LA IZQUIERDA, VALOR A LA DERECHA, en dos columnas. Apilar
+     etiqueta sobre valor dejaba una fila de Finanzas (6 datos) en 282px: casi
+     media pantalla para UN movimiento. Pareados se leen como una ficha, que es
+     como se consulta un dato en un teléfono.
+
+     El reparto es EXPLÍCITO (la etiqueta a la columna 1, todo lo demás a la 2)
+     y no por orden de aparición: así una celda que no traiga etiqueta delante
+     —la tira de botones del final, por ejemplo— cae igual en la columna del
+     valor, en vez de correr una posición y descolocar el resto de la fila.
+     Eso es lo que hace que funcione con tablas cuyo marcado no es uniforme. */
+  .tx-row, .ins-row, .det-row, .emp-row{
+    grid-template-columns:minmax(74px,31%) 1fr !important;
+    gap:8px 12px;
+    align-items:baseline;
+    padding:13px 14px;
+    margin-bottom:var(--sp-2);
+    background:var(--surface-2);
+    border:1px solid var(--border-soft);
+    border-radius:var(--radius-sm);
+    font-size:13.5px;
+    line-height:1.4;
+  }
+  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{grid-column:2;}
+  .tx-row > .mobile-th, .ins-row > .mobile-th,
+  .det-row > .mobile-th, .emp-row > .mobile-th{grid-column:1;}
+  /* El encabezado de columnas no tiene sentido cuando no hay columnas: cada
+     valor ya lleva su propia etiqueta (.mobile-th). */
+  .tx-row.head, .ins-row.head, .det-row.head, .emp-row.head{display:none;}
+  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;}
+
+  .mobile-th{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:700;line-height:1.5;}
+  /* La tira de acciones ocupa las dos columnas y sus botones se reparten el
+     ancho: son los que se van a tocar con el pulgar. */
+  .tx-row > span:has(.btn), .det-row > span:has(.btn), .emp-row > span:has(.btn){
+    grid-column:1/-1;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
+  .tx-row > span:has(.btn) .btn, .emp-row > span:has(.btn) .btn{flex:1 1 auto;}
+}
+
+/* ==========================================================================
    Móvil / pantallas angostas: la sidebar deja de ocupar espacio fijo y se
    convierte en un cajón (drawer) que se desliza desde la izquierda, con un
    botón ☰ en la topbar para abrirlo y un overlay para cerrarlo al tocar fuera.
@@ -81,58 +154,6 @@
   .kpi-value{font-size:20px;}
 
   .two-col{grid-template-columns:1fr;}
-
-  /* Cualquier fila tipo tabla (movimientos, insumos, tallas, nómina...) pasa
-     de columnas fijas en px a apilarse en una sola columna. El !important es
-     necesario: casi todas fijan su ancho con un style="grid-template-columns:
-     ...px..." inline por fila (para poder variar el layout entre pantallas),
-     y un estilo inline sin !important le gana a cualquier regla externa —
-     por eso un intento anterior de apilar sin !important quedaba inerte y la
-     tabla seguía desbordando con scroll horizontal.
-
-     CADA FILA ES SU PROPIA TARJETA. Antes se apilaban una tras otra separadas
-     solo por una línea de 1px: cinco movimientos seguidos se leían como un
-     único bloque de texto corrido donde no se veía dónde terminaba uno y
-     empezaba el siguiente (y en un teléfono, que es donde más se consulta,
-     eso es justo lo que uno necesita distinguir). Con fondo, borde y
-     separación propios, cada fila vuelve a ser una unidad.
-
-     ETIQUETA A LA IZQUIERDA, VALOR A LA DERECHA, en dos columnas. Apilar
-     etiqueta sobre valor dejaba una fila de Finanzas (6 datos) en 282px: casi
-     media pantalla para UN movimiento. Pareados se leen como una ficha, que es
-     como se consulta un dato en un teléfono.
-
-     El reparto es EXPLÍCITO (la etiqueta a la columna 1, todo lo demás a la 2)
-     y no por orden de aparición: así una celda que no traiga etiqueta delante
-     —la tira de botones del final, por ejemplo— cae igual en la columna del
-     valor, en vez de correr una posición y descolocar el resto de la fila.
-     Eso es lo que hace que funcione con tablas cuyo marcado no es uniforme. */
-  .tx-row, .ins-row, .det-row, .emp-row{
-    grid-template-columns:minmax(74px,31%) 1fr !important;
-    gap:8px 12px;
-    align-items:baseline;
-    padding:13px 14px;
-    margin-bottom:var(--sp-2);
-    background:var(--surface-2);
-    border:1px solid var(--border-soft);
-    border-radius:var(--radius-sm);
-    font-size:13.5px;
-    line-height:1.4;
-  }
-  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{grid-column:2;}
-  .tx-row > .mobile-th, .ins-row > .mobile-th,
-  .det-row > .mobile-th, .emp-row > .mobile-th{grid-column:1;}
-  /* El encabezado de columnas no tiene sentido cuando no hay columnas: cada
-     valor ya lleva su propia etiqueta (.mobile-th). */
-  .tx-row.head, .ins-row.head, .det-row.head, .emp-row.head{display:none;}
-  .tx-row > *, .ins-row > *, .det-row > *, .emp-row > *{width:100%;}
-
-  .mobile-th{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:700;line-height:1.5;}
-  /* La tira de acciones ocupa las dos columnas y sus botones se reparten el
-     ancho: son los que se van a tocar con el pulgar. */
-  .tx-row > span:has(.btn), .det-row > span:has(.btn), .emp-row > span:has(.btn){
-    grid-column:1/-1;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
-  .tx-row > span:has(.btn) .btn, .emp-row > span:has(.btn) .btn{flex:1 1 auto;}
 
   /* Las tarjetas comían ~52px de ancho útil justo donde menos sobra; con el
      padding reducido, una fila apilada gana casi media palabra más por línea. */

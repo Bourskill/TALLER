@@ -723,7 +723,7 @@ function renderRetiroFormConsignacion(p, porTalla) {
 // para lo que se envió vía remisión (lo viejo, sin desglose, sigue sumando
 // al total agregado de arriba, pero no puede aparecer aquí por talla).
 function renderSeguimientoTalla(p, porTalla) {
-  var COLS = "1fr 80px 90px 90px 90px 90px";
+  var COLS = "minmax(120px,1fr) 80px 90px 90px 90px 90px";
   var html = '<div class="cot-col-title">Seguimiento por talla' + renderHelp("Cuánto se ha entregado, vendido y retirado de CADA producto/talla enviado por remisión. \"Disponible\" es lo que en teoría sigue en el punto.") + "</div>";
   html += '<div class="tx-row head" style="grid-template-columns:' + COLS + ';"><span>Producto</span><span>Talla</span><span>Enviado</span><span>Vendida</span><span>Retirada</span><span>Disponible</span></div>';
   porTalla.forEach(function (t) {

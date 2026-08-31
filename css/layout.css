@@ -75,6 +75,17 @@
 .kpi:has(.kpi-value.info){border-left-color:var(--info);}
 .kpi-note{font-size:11.5px;color:var(--ink-faint);margin-top:5px;}
 
+/* Tiles "mini": mismo lenguaje que .kpi (rótulo arriba, cifra mono abajo)
+   pero deliberadamente MENOS protagonistas — sin borde de acento a la
+   izquierda, más chicos, en tinte de superficie en vez de tarjeta propia. Se
+   usan para un desglose SECUNDARIO (ej. de qué está hecha la diferencia
+   entre "Balance" y "Ganancia" en Resumen) que no debe competir visualmente
+   con los KPI principales de arriba. */
+.kpis-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
+.kpi-mini{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:8px 12px;min-width:0;}
+.kpi-mini-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kpi-mini-value{font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:var(--ink-soft);margin-top:3px;font-variant-numeric:tabular-nums;}
+
 /* ---------- secciones y tarjetas ---------- */
 .section-title{font-family:'Inter',sans-serif;font-size:18px;font-weight:700;margin:0 0 var(--sp-1);color:var(--ink);letter-spacing:-0.01em;}
 .section-title.small{font-size:15px;}

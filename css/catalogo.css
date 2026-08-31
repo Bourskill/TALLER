@@ -71,6 +71,13 @@
    se note que esta fila es distinta: no se guarda sola. */
 .tx-row.insumo.nuevo-sin-guardar{background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-sm);}
 
+/* Barra de confirmación del insumo nuevo: "grid-column:1/-1" la saca de la
+   columna angosta de 32px reservada para el "✕" de siempre (ahí desbordaba:
+   dos botones con texto no caben en el ancho de un ícono) y la pone en su
+   propia línea, a lo ancho de TODA la fila — cabe en cualquier tamaño de
+   pantalla sin pelearle espacio a ninguna columna. */
+.insumo-nuevo-acciones{grid-column:1 / -1;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;}
+
 /* El nombre se lee como texto, no como un campo más: sin caja hasta que se
    hace clic. Antes los seis campos de la fila competían por la atención con
    el mismo borde y el mismo tamaño. */
@@ -114,7 +121,12 @@
    derecha; si no, el título quedaba a la izquierda de números derechados. */
 .tx-row.head.insumo > span:nth-child(2){text-align:right;}
 
-@media (max-width:880px){
+/* Mismo breakpoint que el de las tablas (ver responsive.css, el comentario
+   grande junto a "@media (max-width: 1080px)"): esta fila se apila ahí, no a
+   los 880px del resto del cromo de la app, así que su re-estilo tiene que
+   activarse en el mismo punto o quedaría un tramo (880-1080px) con la fila
+   ya apilada pero el nombre/costo todavía en su estilo "de escritorio". */
+@media (max-width:1080px){
   /* Apilada, la fila ya muestra su etiqueta .mobile-th por campo, así que el
      nombre y el costo recuperan su caja: sin la columna al lado, un campo sin
      borde deja de leerse como editable. */

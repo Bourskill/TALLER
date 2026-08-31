@@ -304,7 +304,7 @@ function renderPendForm(key, labelBoton, contenidoHtml) {
     '<button class="btn ghost small" style="margin-top:8px;" data-action="toggle-pend-form" data-key="' + key + '">Cancelar</button></div>';
 }
 
-var COLS_EMP = "1.2fr 1.3fr 110px 105px 100px 195px";
+var COLS_EMP = "minmax(110px,1.2fr) minmax(120px,1.3fr) 110px 105px 100px 195px";
 
 // Fila de solo-lectura de una persona en nómina — periodo/día/salario ya NO
 // se editan aquí en vivo (antes eran <select>/<input> siempre activos en la

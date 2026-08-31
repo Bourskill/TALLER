@@ -558,7 +558,11 @@ function renderTabProduccion(c, totales, real) {
 // cuál insumo se había comprado). Como la lista de compras YA es el desglose
 // del estimado, registrar lo real es simplemente llenar dos columnas más en
 // la misma fila — sin volver a decir de qué insumo se está hablando.
-var COMPRA_COLS = "1.3fr 1fr 90px 105px 90px 105px 120px";
+// Las dos columnas flexibles llevan un mínimo (ver el porqué grande junto a
+// ".tx-row" en css/tables.css): "qué comprar" es un nombre de insumo, "para
+// / a quién" puede llevar varios badges — ninguna de las dos puede quedar en
+// 0px sin que su texto se parta letra por letra.
+var COMPRA_COLS = "minmax(130px,1.3fr) minmax(110px,1fr) 90px 105px 90px 105px 120px";
 
 function renderTablaCompras(c, compras, hayProveedor) {
   var resumen = calcResumenCompras(c);
@@ -771,7 +775,7 @@ function renderRefProveedorResumen(ref, calc) {
   return html;
 }
 
-var INS_COLS_REF = "1fr 90px 90px 165px 70px 90px 30px";
+var INS_COLS_REF = "minmax(130px,1fr) 90px 90px 165px 70px 90px 30px";
 
 // Aviso de que un insumo cambió en el catálogo desde que se copió a esta
 // referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
@@ -1092,7 +1096,7 @@ function renderRepartoReferencias(cotId) {
     return '<div class="empty" style="padding:8px 0;">No hay filas que repartir todavía — importa la lista en cualquier referencia y vuelve acá.</div>';
   }
 
-  var COLS = "34px 1.4fr 70px 70px 1fr 34px";
+  var COLS = "34px minmax(110px,1.4fr) 70px 70px minmax(90px,1fr) 34px";
   var html = '<div class="detalle-table">' +
     '<div class="det-row head" style="grid-template-columns:' + COLS + ';"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Referencia</span><span></span></div>';
   filas.forEach(function (f, i) {

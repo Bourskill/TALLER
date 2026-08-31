@@ -226,49 +226,6 @@ function serieBarra(label, datos, color) {
   };
 }
 
-// Dona: de qué está hecho UN total, en partes — a diferencia de barras/línea
-// (que comparan series a lo largo del tiempo), esta compara PARTES de un
-// mismo todo en un instante, así que no lleva ejes ni serie por nombre. Se
-// usa para "de la caja actual, cuánto es ganancia y cuánto ya tiene dueño"
-// (ver renderGraficaCaja en modules/resumen.js). configurarDefaults() ya deja
-// listos el color y la tipografía del tooltip/leyenda a nivel global —
-// llamarla antes de crear esta gráfica, igual que las demás.
-export function crearDona(canvas, cfg) {
-  var C = window.Chart;
-  if (!C || !canvas) return null;
-  var p = paletaGrafica(cfg && cfg.paraImpresion);
-  return new C(canvas, {
-    type: "doughnut",
-    data: {
-      labels: cfg.labels,
-      datasets: [{
-        data: cfg.valores,
-        backgroundColor: cfg.colores,
-        borderColor: p.superficie,
-        borderWidth: 2,
-        hoverOffset: 6
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: cfg.animar === false ? false : { duration: 260, easing: "easeOutQuart" },
-      cutout: "66%",
-      plugins: {
-        legend: { display: true, position: "bottom" },
-        tooltip: {
-          callbacks: {
-            label: function (ctx) {
-              var valor = cfg.formatoTooltip ? cfg.formatoTooltip(ctx.parsed) : String(ctx.parsed);
-              return ctx.label + ": " + valor;
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
 // Línea con relleno degradado. Se usa para conteos en el tiempo (prendas
 // producidas por día); acepta color propio por si algún día se grafica otra
 // cosa con la misma forma.

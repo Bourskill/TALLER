@@ -169,9 +169,6 @@ export const TIPOS_COSTO = {
 // "N unidades" en la lista de compras — no es algo tangible que se pida.
 export const UNIDAD_SERVICIO = "servicio";
 
-// Sugerencias del campo "Unidad" (datalist): se puede escribir cualquier otra.
-export const UNIDADES_SUGERIDAS = ["UND", "MT", "CM", "KG", "GR", "LT", "DOC", "PAR", UNIDAD_SERVICIO];
-
 // De dónde sale un insumo o producto: fabricado dentro del taller (pasa por
 // fases de producción propias) o comprado ya hecho a un proveedor externo
 // (no tiene fases que seguir — se recibe y ya). Un producto/referencia

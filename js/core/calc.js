@@ -5,7 +5,7 @@
 
 import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe } from "./utils.js";
-import { ESTADOS_DEFAULT, UNIDAD_SERVICIO, UNIDADES_SUGERIDAS } from "./constants.js";
+import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
 // Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
 // producción propias en el taller) — a diferencia de ESTADOS_DEFAULT (5
@@ -566,38 +566,53 @@ export function calcPorPagar() {
   return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes() + calcComisionesConsignacionPendientes();
 }
 
-// De la plata que hoy está en la caja (calcCaja, todo el histórico), cuánta
-// es ganancia de verdad y cuánta ya tiene dueño — el usuario lo pidió
-// explícito: "separa los montos de plata que hay en caja tanto la ganancia
-// como lo que no lo es, para saber qué servicio me toca pagar y cuánto".
+// Cuánto de la plata que entró en un periodo corresponde a trabajo hecho POR
+// EL TALLER MISMO (corte, confección...) marcado como "Servicio" en la lista
+// de compras de una cotización — plata que el cliente sí pagó (va incluida
+// en su abono/ingreso) pero que nunca salió realmente de la caja, porque no
+// se le pagó a nadie aparte por hacerlo.
 //
-// Ya existían, cada uno probado por separado, los dos números que faltaba
-// restar: calcPorPagar() (todo lo que el TALLER debe: gastos fijos, nómina,
-// comisiones, deudas) y calcIvaCobradoTotal() (lo que ya se cobró pero es
-// del Estado, no del taller — mismo criterio que ya usa el KPI "IVA
-// cobrado"). Ninguno de los dos se resta dos veces en ningún otro lado: ver
-// calcResumenPorPagar/calcPorPagarDesglose (una sola fuente para "por
-// pagar") y renderKpiIvaCobrado (una sola fuente para el IVA).
+// El usuario lo pidió explícito, con ejemplo: "si es corte, digamos que es
+// una plata que no la pagué porque el corte lo hice yo, esa plata... la
+// puedo usar para pagar nómina" — y por eso se resta de "Balance" para armar
+// "Ganancia" (ver renderGraficaResumen en modules/resumen.js): no es que esa
+// plata no esté disponible (si está, es de las primeras candidatas para
+// pagar algo con ella), es que no cuenta como UTILIDAD real del negocio —
+// contarla como ganancia sin más infla el margen con el valor de tu propio
+// trabajo, no con lo que de verdad ganaste por encima de tus costos.
 //
-// Puede dar negativo (se debe más de lo que hay en caja hoy mismo: plata ya
-// cobrada por adelantado que en realidad está comprometida) — no se recorta
-// a 0, porque ocultar ese número sería ocultar justo la alerta que el KPI
-// existe para dar.
-export function calcGananciaDisponible() {
-  return calcCaja() - calcPorPagar() - calcIvaCobradoTotal();
+// Se agrupa por NOMBRE de la línea (ej. "Confección", "Corte") para poder
+// mostrar un tile por categoría, no solo un total. La fecha de referencia es
+// la de la COTIZACIÓN (`cot.fecha`): una línea de "servicio" nunca genera un
+// movimiento en Finanzas (por definición no hubo pago real, ver
+// calcResumenCompras), así que no tiene su propia fecha de tx contra la cual
+// filtrar — la fecha en que se cotizó/vendió es el dato disponible más
+// cercano a "cuándo entró esa plata a la caja".
+export function calcServiciosPorCategoriaRango(desde, hasta) {
+  var porNombre = {};
+  (state.cotizaciones || []).forEach(function (cot) {
+    var fecha = cot.fecha || "";
+    if ((desde && fecha < desde) || (hasta && fecha > hasta)) return;
+    if (!(cot.compras || []).length) return;
+    var lineas = calcListaCompras(cot);
+    cot.compras.forEach(function (compra) {
+      if (estadoCompra(compra) !== "servicio") return;
+      var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
+      var nombre = linea ? linea.nombre : compra.clave;
+      // Mismo criterio que calcResumenCompras: sin costoReal escrito, se usa
+      // el estimado — es la misma plata que ya se cotizó, solo que nadie
+      // corrigió el número real todavía.
+      var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
+      var monto = hayCostoReal ? num(compra.costoReal) : (linea ? linea.costoTotal : 0);
+      if (monto <= 0) return;
+      porNombre[nombre] = (porNombre[nombre] || 0) + monto;
+    });
+  });
+  return Object.keys(porNombre)
+    .map(function (nombre) { return { nombre: nombre, monto: porNombre[nombre] }; })
+    .sort(function (a, b) { return b.monto - a.monto; });
 }
 
-// Desglose para la gráfica de composición de la caja (ver
-// renderGraficaCaja en modules/resumen.js): tres partes que suman
-// EXACTAMENTE calcCaja() — la misma garantía que ya exige README, "cero
-// descuadres entre apartados". Si la ganancia disponible da negativo, no
-// hay una "parte negativa" que graficar: se muestra en 0 en la dona (la
-// cifra de arriba, esa sí negativa, es la que avisa).
-export function calcComposicionCaja() {
-  var caja = calcCaja(), porPagar = calcPorPagar(), iva = calcIvaCobradoTotal();
-  var ganancia = caja - porPagar - iva;
-  return { caja: caja, porPagar: porPagar, iva: iva, ganancia: ganancia, gananciaGrafica: Math.max(0, ganancia) };
-}
 // Desglose de "Por pagar" por categoría, con el detalle de cada obligación
 // (concepto + monto + fecha si aplica) — para mostrar la lista resumida en
 // Pendientes en vez de solo el total.
@@ -1396,15 +1411,11 @@ export function esInsumoServicio(ins) {
 // las ofrezca como sugerencia — así "MT", "docena" o cualquier cosa rara que
 // se haya usado antes se reutiliza en vez de volver a escribirla.
 //
-// POR QUÉ CAMBIÓ (dos veces): primero el campo usaba un <input
-// list="dl-unidades"> con la lista fija UNIDADES_SUGERIDAS (9 valores) —
-// nunca aprendía nada de lo que el usuario en verdad escribía. Se corrigió
-// para que esta función SÍ recorriera toda la app (ver abajo), pero el
-// datalist nativo del navegador solo muestra sugerencias mientras se
-// ESCRIBE: con el campo ya lleno —el caso normal al editar— un clic no
-// mostraba nada, así que seguía sin sentirse como una lista desplegable de
-// verdad pese a que la memoria ya funcionaba. Se reemplazó el <input list>
-// por renderComboUnidad, cuya flecha SIEMPRE abre el panel completo.
+// A propósito NO incluye ninguna lista fija de "sugerencias de base": el
+// usuario pidió explícitamente que solo aparezca lo que él mismo ya escribió
+// antes en algún campo "Unidad", nada que la app suponga que podría
+// necesitar. Una lista vacía (taller nuevo, sin nada escrito todavía) es un
+// panel de sugerencias vacío, no un problema.
 //
 // Recorre TODO lugar donde se escribe una unidad a mano, no solo el catálogo:
 // un insumo suelto agregado directo en una cotización, un costo global
@@ -1414,7 +1425,6 @@ export function esInsumoServicio(ins) {
 // distintas.
 export function unidadesConocidas() {
   var set = {};
-  UNIDADES_SUGERIDAS.forEach(function (u) { set[u] = true; });
   function agregar(u) { if (u && String(u).trim()) set[String(u).trim()] = true; }
   (state.catalogoInsumos || []).forEach(function (i) { agregar(i.unidad); });
   (state.productos || []).forEach(function (p) { (p.insumos || []).forEach(function (i) { agregar(i.unidad); }); });

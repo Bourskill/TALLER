@@ -22,9 +22,9 @@ import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsu
 import { getSession } from "../core/auth.js";
 import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
 
-var INS_COLS = "1fr 60px 90px 150px 70px 30px";
-var TALLA_COLS = "1fr 90px 30px";
-var MOV_COLS = "90px 90px 70px 70px 1fr";
+var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 70px 30px";
+var TALLA_COLS = "minmax(90px,1fr) 90px 30px";
+var MOV_COLS = "90px 90px 70px 70px minmax(120px,1fr)";
 
 export function render() {
   var session = getSession();
