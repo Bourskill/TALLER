@@ -5,6 +5,7 @@ import { sincronizarContacto, eliminarContacto, listarContactosGoogle } from "..
 import { getSession } from "../core/auth.js";
 import { renderHelp, renderBuscador } from "../core/components.js";
 import { TIPOS_RELACION_CONTACTO } from "../core/constants.js";
+import { ICONS } from "../core/icons.js";
 
 // Mismo patrón que Cotizaciones y Pedidos: "+ Nuevo contacto" es solo el
 // formulario de alta. La lista se parte en DOS pestañas —quien te compra y
@@ -150,8 +151,7 @@ function renderListaContactos(vista) {
     conteo: { visibles: lista.length, total: totalContactos, singular: esProveedores ? "proveedor" : "contacto", plural: esProveedores ? "proveedores" : "contactos" }
   }) + "</div>";
 
-  html += renderSyncGoogle(lista);
-  if (!esProveedores) html += renderImportarGoogle();
+  html += renderGoogleContactos(lista, !esProveedores);
 
   var criterios = [["abc", "A–Z"], ["recientes", "Recientes"]];
   if (esProveedores) criterios.push(["categoria", "Por categoría"]);
@@ -171,58 +171,59 @@ function renderListaContactos(vista) {
   return html + ordenarContactos(lista, orden).map(renderClienteCard).join("");
 }
 
-// El sync con Google Contacts es lo que hace que estos contactos terminen en
-// la agenda del celular y, de ahí, en WhatsApp. Hasta ahora solo ocurría al
-// crear o editar un contacto: los que ya existían —o los que registró otra
-// persona del taller— nunca llegaban a tu cuenta. Este botón los empuja
-// todos de una vez, a la cuenta con la que estés dentro ahora mismo.
-function renderSyncGoogle(lista) {
+// Una sola tarjeta para las dos direcciones del sync con Google Contacts —
+// antes eran dos botones sueltos con estilos distintos, uno con un párrafo de
+// texto al lado y el otro solo, que no encajaban con el resto de la app.
+// "Enviar los míos" empuja los clientes de acá hacia Google (es lo que hace
+// que terminen en la agenda del celular y, de ahí, en WhatsApp — antes solo
+// pasaba al crear o editar un contacto uno por uno). "Ver los tuyos" trae la
+// agenda PERSONAL de quien esté logueado, para el caso "un contacto que ya
+// tenía guardado decide comprarme", con la lista pedida bajo demanda (nunca
+// al abrir la pestaña sola: es una llamada aparte a la People API).
+// `permitirImportar` apaga "Ver los tuyos" para Proveedores: no es algo que
+// se importe desde la agenda personal.
+function renderGoogleContactos(lista, permitirImportar) {
   var session = getSession();
   if (!session || !session.email) return "";
   var email = session.email;
-  var pendientes = lista.filter(function (c) { return !resourceNameDe(c, email); }).length;
+  var pendientesSync = lista.filter(function (c) { return !resourceNameDe(c, email); }).length;
   var sincronizando = !!state.sincronizandoContactos;
-  return '<div class="section-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;">' +
-    '<button class="btn ghost small" ' + (sincronizando ? "disabled" : "") + ' data-action="sincronizar-contactos-google">' +
-    (sincronizando ? "Sincronizando…" : "🔄 Enviar a mis Contactos de Google") + "</button>" +
-    "<span>" +
-    (pendientes
-      ? "<b>" + pendientes + "</b> de esta lista todavía no están en la agenda de " + esc(email) + "."
-      : "Todos los de esta lista ya están en la agenda de " + esc(email) + ".") +
-    " Una vez en Google, aparecen solos en el celular y en WhatsApp.</span>" +
+  var abierto = permitirImportar && !!state.panelImportarGoogleAbierto;
+
+  var html = '<div class="google-card">' +
+    '<div class="google-card-head">' +
+    '<span class="google-card-icono">' + ICONS.clientes + "</span>" +
+    '<div class="google-card-info">' +
+    '<div class="google-card-titulo">Contactos de Google</div>' +
+    '<div class="google-card-sub">' +
+    (pendientesSync
+      ? "<b>" + pendientesSync + "</b> de esta lista " + (pendientesSync === 1 ? "todavía no está" : "todavía no están") + " en tu agenda (" + esc(email) + ")."
+      : "Todos los de esta lista ya están en tu agenda (" + esc(email) + ").") +
+    "</div></div></div>" +
+    '<div class="google-card-acciones">' +
+    '<button class="btn ghost small" ' + (sincronizando ? "disabled" : "") + ' data-action="sincronizar-contactos-google" title="Sube los contactos de esta lista a tu agenda de Google — así aparecen solos en el celular y en WhatsApp.">' +
+    (sincronizando ? "Sincronizando…" : "🔄 Enviar los míos") + "</button>" +
+    (permitirImportar
+      ? '<button class="btn ghost small" data-action="toggle-importar-google" title="Trae tu agenda personal de Google, por si alguien que ya tenías guardado decide comprarte.">📥 Ver los tuyos ' + (abierto ? "▴" : "▾") + "</button>"
+      : "") +
     "</div>";
+  if (abierto) html += renderListaImportarGoogle(session);
+  html += "</div>";
+  return html;
 }
 
-// Ver + importar desde la agenda PERSONAL de Google de quien esté logueado —
-// distinto de renderSyncGoogle de arriba (que EMPUJA los clientes de acá
-// hacia Google): esto trae lo que YA existe allá, para el caso "un contacto
-// que ya tenía guardado decide comprarme" sin tener que volver a teclearlo a
-// mano. Colapsado por defecto y con la lista pedida bajo demanda (nunca al
-// abrir la pestaña sola): es una llamada aparte a la People API que no todo
-// el mundo necesita en cada visita.
-function renderImportarGoogle() {
-  var session = getSession();
-  if (!session || !session.email) return "";
-  var abierto = !!state.panelImportarGoogleAbierto;
-  var html = '<div style="margin:0 0 14px;">' +
-    '<button class="btn ghost small" data-action="toggle-importar-google">' +
-    (abierto ? "▴ Ocultar mis Contactos de Google" : "📥 Ver mis Contactos de Google") + "</button>";
-  if (!abierto) return html + "</div>";
-  html += "</div>";
-
-  html += '<div class="card" style="margin-bottom:14px;">' +
-    '<div class="section-title small">Importar desde mis Contactos de Google' +
-    renderHelp("Tu agenda de Google completa, no solo lo que ya está en este directorio — por si alguien que ya tenías guardado decide comprarte. Solo se muestra a quien todavía no es un contacto de este taller.") +
-    "</div>";
-
-  if (state.contactosGoogleCargando) { return html + '<div class="empty">Cargando tu agenda de Google…</div></div>'; }
+// Cuerpo desplegable de "Ver los tuyos": la agenda de Google completa, con
+// buscador, ocultando a quien ya sea cliente de esta cuenta (comparando
+// resourceName contra contactResourceNames — ver resourceNameDe).
+function renderListaImportarGoogle(session) {
+  if (state.contactosGoogleCargando) return '<div class="google-card-lista empty">Cargando tu agenda de Google…</div>';
   if (state.contactosGoogle === null) {
-    return html + '<div class="empty">No se pudo cargar (o todavía no se ha pedido).</div>' +
-      '<button class="btn ghost small" style="margin-top:8px;" data-action="cargar-contactos-google">Cargar mis contactos</button></div>';
+    return '<div class="google-card-lista">' +
+      '<div class="empty">No se pudo cargar (o todavía no se ha pedido).</div>' +
+      '<button class="btn ghost small" style="margin-top:8px;" data-action="cargar-contactos-google">Cargar mis contactos</button>' +
+      "</div>";
   }
 
-  // Un contacto de Google ya vinculado a algún cliente de ESTA cuenta no
-  // tiene nada que "importar": ya es un contacto del taller.
   var yaImportados = {};
   state.clientes.forEach(function (c) {
     var rn = resourceNameDe(c, session.email);
@@ -235,7 +236,7 @@ function renderImportarGoogle() {
     return norm(p.nombre).indexOf(q) >= 0 || norm(p.telefono).indexOf(q) >= 0 || norm(p.correo).indexOf(q) >= 0;
   }) : disponibles;
 
-  html += renderBuscador({
+  var html = '<div class="google-card-lista">' + renderBuscador({
     id: "inp-buscar-contactos-google", filtro: "buscarContactosGoogleImportar", valor: state.buscarContactosGoogleImportar,
     placeholder: "Buscar en tu agenda de Google…",
     conteo: { visibles: filtrados.length, total: disponibles.length, singular: "contacto", plural: "contactos" }
@@ -246,12 +247,12 @@ function renderImportarGoogle() {
   } else if (!filtrados.length) {
     html += '<div class="empty" style="margin-top:10px;">Sin resultados para tu búsqueda.</div>';
   } else {
-    html += '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:340px;overflow-y:auto;">';
+    html += '<div class="google-contactos-lista">';
     filtrados.slice(0, 100).forEach(function (p) {
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface-2);border-radius:8px;">' +
-        '<div style="min-width:0;"><div style="font-weight:600;font-size:13px;">' + esc(p.nombre) + "</div>" +
-        '<div style="font-size:11.5px;color:var(--ink-faint);">' + [p.telefono, p.correo].filter(Boolean).map(esc).join(" · ") + "</div></div>" +
-        '<button class="btn small" style="flex-shrink:0;" data-action="importar-contacto-google" data-resource="' + esc(p.resourceName) + '">+ Importar</button>' +
+      html += '<div class="google-contacto-item">' +
+        '<div class="google-contacto-info"><div class="google-contacto-nombre">' + esc(p.nombre) + "</div>" +
+        '<div class="google-contacto-datos">' + [p.telefono, p.correo].filter(Boolean).map(esc).join(" · ") + "</div></div>" +
+        '<button class="btn small" data-action="importar-contacto-google" data-resource="' + esc(p.resourceName) + '">+ Importar</button>' +
         "</div>";
     });
     if (filtrados.length > 100) html += '<div class="section-sub" style="margin-top:4px;">Mostrando 100 de ' + filtrados.length + " — afina la búsqueda para ver el resto.</div>";

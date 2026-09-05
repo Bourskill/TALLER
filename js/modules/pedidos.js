@@ -10,6 +10,7 @@ import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar
 import { getSession } from "../core/auth.js";
 import { ajustarStockProducto } from "../core/stock.js";
 import { subirImagenReferencia } from "../core/drive.js";
+import { duplicarCotizacionCompleta } from "./cotizaciones.js";
 
 // Nuevo total abonado de un pedido después de agregar, editar o eliminar una
 // fila de su lista de abonos. Todo lo que toque esa lista pasa por acá, así
@@ -98,17 +99,32 @@ function faltantesPedido(f) {
 // va llenando de información a medida que se agregan líneas. El camino por
 // defecto —venta directa, un producto del catálogo— está a la vista sin
 // tener que configurar nada.
-function renderFormNuevoPedido() {
-  var f = state.formPedido;
-  var lineas = f.lineas || [];
-  var totales = calcTotalesLineasPedido(lineas);
-  var faltantes = faltantesPedido(f);
+// "Opciones avanzadas": decisiones de la BASE del pedido (venta directa vs.
+// consignación, si lleva seguimiento por etapas de producción, origen propio
+// o de tercero) — casi siempre se quedan en su valor por defecto, así que
+// antes de esto se veían siempre arriba de todo, empujando lo que sí cambia
+// pedido a pedido (cliente, líneas) más abajo. El usuario lo reportó
+// puntualmente sobre "Duplicar pedido": aterrizar en un formulario con estas
+// tres decisiones repetidas de cero, cuando la intención es solo cambiar el
+// cliente, se sentía engorroso. Colapsado salvo que ya tenga algo distinto
+// del default (consignación, tercero, sin flujo) — mismo criterio "con
+// bulto" que ya usa el toggle de Vendedor (ver renderVendedorPedido): si hay
+// algo adentro que de verdad hay que revisar, se ve de una.
+function renderOpcionesAvanzadasPedido(f) {
+  var tieneAlgoDistinto = f.esConsignacion || f.tipoCliente === "tercero" || !f.conFlujoProduccion;
+  var abierta = !!state.pedidoOpcionesAvanzadasAbierto || tieneAlgoDistinto;
+  var resumen = [];
+  if (f.esConsignacion) resumen.push("consignación");
+  if (f.tipoCliente === "tercero") resumen.push("tercero");
+  if (!f.esConsignacion && !f.conFlujoProduccion) resumen.push("sin flujo de producción");
+  var html = renderToggleSeccion({
+    titulo: "Opciones avanzadas" + (resumen.length ? " · " + resumen.join(", ") : ""),
+    abierta: abierta, action: "toggle-pedido-opciones-avanzadas",
+    ayuda: "La base del pedido: si es una venta directa o una consignación, si lleva seguimiento por etapas de producción, y si la producción es propia o de un tercero. Casi siempre se queda en lo de por defecto — ábrelo solo si necesitas cambiar algo de esto en particular."
+  });
+  if (!abierta) return html;
 
-  var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
-    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créalo en Cotizaciones y conviértelo en pedido.") +
-    "</div>";
-
-  html += '<div class="cot-col-title" style="margin-top:2px;">Tipo de pedido' +
+  html += '<div class="cot-col-title" style="margin-top:10px;">Tipo de pedido' +
     renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
     "</div>" +
     '<div class="segmented">' +
@@ -128,11 +144,28 @@ function renderFormNuevoPedido() {
       "</label>";
   }
 
-  html += '<div class="form-grid" style="margin-top:14px;">' +
-    renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+  html += '<div class="form-grid" style="margin-top:10px;">' +
     '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
+    "</div>";
+  return html;
+}
+
+function renderFormNuevoPedido() {
+  var f = state.formPedido;
+  var lineas = f.lineas || [];
+  var totales = calcTotalesLineasPedido(lineas);
+  var faltantes = faltantesPedido(f);
+
+  var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
+    renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créalo en Cotizaciones y conviértelo en pedido.") +
+    "</div>";
+
+  html += '<div class="form-grid" style="margin-top:10px;">' +
+    renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
     '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
     "</div>";
+
+  html += renderOpcionesAvanzadasPedido(f);
 
   html += '<hr class="stitch" />';
   html += '<div class="cot-col-title">Qué incluye este pedido' +
@@ -1829,18 +1862,47 @@ export var actions = {
     state.cotizacionesVista = "nueva";
     notify();
   },
-  // Copia las líneas de un pedido ya existente al formulario de "Nuevo
-  // pedido rápido" — para cuando distintos clientes piden lo mismo, sin
-  // tener que rearmar las líneas a mano. A propósito NO clona el pedido
-  // directo con un id nuevo: eso saltaría por encima de la validación de
-  // stock, la generación del N.º de OP y el registro del abono inicial que
-  // ya hace "Crear pedido" (ver esa acción) — se deja que el usuario elija
-  // el cliente y confirme por el camino normal, con el stock revisado en ese
-  // momento (no el de cuando se duplicó).
+  "toggle-pedido-opciones-avanzadas": function () {
+    state.pedidoOpcionesAvanzadasAbierto = !state.pedidoOpcionesAvanzadasAbierto;
+    notify();
+  },
+  // Duplicar un pedido — para cuando distintos clientes piden lo mismo. Dos
+  // caminos, según de dónde viene el detalle real de "qué se vendió":
+  //  - Si el pedido nació de una cotización (p.cotizacionId), sus líneas
+  //    (p.lineas) NO tienen el detalle real — insumos, tallas, márgenes —
+  //    que vive en la cotización. Duplicar solo p.lineas habría dejado un
+  //    pedido nuevo vacío de contenido pese a "verse" igual. Se duplica la
+  //    COTIZACIÓN completa (ver duplicarCotizacionCompleta) y se aterriza
+  //    ahí, para revisarla y convertirla en pedido por el camino de siempre.
+  //  - Si es un pedido rápido (sin cotización), sus líneas SÍ son todo el
+  //    contenido: se copian al formulario de "Nuevo pedido rápido".
+  // Ninguno de los dos clona el registro final (pedido o cotización ya
+  // "convertida") con un id nuevo de una: eso saltaría por encima de la
+  // validación de stock, la generación del N.º de OP y el registro del
+  // abono inicial que ya hacen "Crear pedido"/"Convertir en pedido" — se
+  // deja que el usuario elija el cliente y confirme por el camino normal.
   "duplicar-pedido": function (el) {
     var id = el.getAttribute("data-id");
     var p = state.pedidos.filter(function (x) { return x.id === id; })[0];
     if (!p) return;
+    if (p.cotizacionId) {
+      var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
+      if (cot) {
+        var copiaCot = duplicarCotizacionCompleta(cot);
+        state.cotizaciones.unshift(copiaCot);
+        persist("cotizaciones");
+        state.tab = "cotizaciones";
+        state.cotizacionEditando = copiaCot.id;
+        state.cotizacionesVista = "nueva";
+        state.sidebarMobileOpen = false;
+        notify();
+        mostrarToast("📋 Se duplicó la cotización de este pedido (con sus insumos y tallas) — elige el cliente, revisa y conviértela en pedido.");
+        return;
+      }
+      // La cotización de origen ya no existe (se pudo haber borrado): se
+      // sigue con el camino normal de abajo, usando lo que el pedido sí
+      // conserva en sus propias líneas.
+    }
     state.formPedido = {
       clienteId: "", cliente: "", tipoCliente: p.tipoCliente || "propio", abono: "", fechaEntrega: "",
       vendedorNombre: (p.vendedor && p.vendedor.nombre) || "",
@@ -1854,6 +1916,7 @@ export var actions = {
       lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); return copia; })
     };
     state.pedidoVendedorAbierto = !!(p.vendedor && p.vendedor.nombre);
+    state.pedidoOpcionesAvanzadasAbierto = p.tipoCliente === "tercero" || p.sinFlujoProduccion;
     state.pedidosVista = "nueva";
     state.sidebarMobileOpen = false;
     notify();

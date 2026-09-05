@@ -1,14 +1,33 @@
-.pend-group{margin-bottom:22px;}
-.pend-item{display:flex;align-items:flex-start;gap:10px;padding:11px 6px;border-bottom:1px solid var(--border-soft);}
-.pend-item:hover{background:var(--surface-2);border-radius:8px;}
-.pend-item.done .pend-text{text-decoration:line-through;color:var(--ink-faint);}
-.pend-item > input[type="checkbox"]{margin-top:3px;}
-/* Una nota puede ser un párrafo largo, no solo una línea de tarea — se
-   respetan los saltos de línea que el usuario escribió (pre-wrap) y se
-   permite cortar palabras largas para que nunca desborde el ancho. */
-.pend-text{flex:1;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.5;}
-.pend-item-edit{flex:1;display:flex;flex-direction:column;gap:8px;}
-.pend-item-edit textarea{width:100%;min-height:70px;font-family:inherit;font-size:13px;resize:vertical;}
+/* Formulario de "Nueva nota": protagonismo al párrafo, no a los selects — la
+   fila de metadatos (categoría/prioridad/fecha/hora) va compacta arriba, y
+   abajo el título y un textarea grande dedicado son lo que ocupa la mayor
+   parte de la tarjeta. */
+.nota-form-opciones{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;}
+.nota-form-opciones .field{flex:1 1 140px;min-width:120px;}
+.nota-form-titulo{width:100%;font-size:16px;font-weight:700;padding:11px 13px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);margin-bottom:10px;font-family:inherit;}
+.nota-form-titulo:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.nota-form-titulo::placeholder{color:var(--ink-faint);font-weight:600;}
+.nota-form-parrafo{width:100%;min-height:150px;font-size:14px;line-height:1.6;padding:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);resize:vertical;font-family:inherit;margin-bottom:12px;}
+.nota-form-parrafo::placeholder{color:var(--ink-faint);}
+.nota-form-parrafo:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+
+/* Notas guardadas como tarjetas en grilla (no una lista) — auto-fill hace el
+   trabajo responsivo solo, sin media queries: cae a 1 columna en pantalla
+   angosta por su cuenta. */
+.notas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:12px;}
+.nota-card{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:14px 16px;display:flex;flex-direction:column;gap:8px;}
+.nota-card-top{display:flex;align-items:flex-start;gap:8px;}
+.nota-card-check{display:flex;align-items:center;padding-top:2px;}
+.nota-card-titulo{flex:1;font-weight:700;font-size:14px;line-height:1.35;}
+.nota-card-top .prio{margin-left:auto;flex-shrink:0;}
+/* El párrafo respeta los saltos de línea que el usuario escribió (pre-wrap)
+   y corta palabras largas para nunca desbordar el ancho de la tarjeta. */
+.nota-card-texto{font-size:13px;line-height:1.55;color:var(--ink-soft);white-space:pre-wrap;word-break:break-word;}
+.nota-card.done .nota-card-titulo, .nota-card.done .nota-card-texto{text-decoration:line-through;color:var(--ink-faint);}
+.nota-card-fecha{font-size:11px;color:var(--ink-faint);font-family:'IBM Plex Mono',monospace;}
+.nota-card-acciones{display:flex;gap:6px;margin-top:auto;padding-top:4px;}
+.nota-card-editando{gap:10px;}
+
 .prio{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;}
 .prio.alta{background:var(--danger-soft);color:var(--danger-ink);}
 .prio.media{background:var(--warning-soft);color:var(--warning-ink);}

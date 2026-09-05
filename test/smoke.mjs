@@ -600,6 +600,7 @@ assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descue
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+click('[data-action="toggle-pedido-opciones-avanzadas"]'); // Tipo de pedido vive detrás de "Opciones avanzadas" (colapsada por defecto)
 click('[data-action="set-tipo-pedido"][data-val="consignacion"]');
 click('[data-action="abrir-producto-picker-pedido"]');
 click('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]');
@@ -1671,12 +1672,36 @@ assert(nombresOrdenados[nombresOrdenados.length - 1] !== nombresOrdenados[0], "s
 const filasTrasAgregar = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
 assert(filasTrasAgregar[filasTrasAgregar.length - 1].includes(state.catalogoInsumos[state.catalogoInsumos.length - 1].id), "bajo A–Z, un insumo sin nombre todavía se dibuja AL FINAL — cerca del botón que se acaba de pulsar, no al principio");
 
-// El toggle "pasa por producción" del formulario de pedido rápido.
+// "Opciones avanzadas" (tipo de pedido, flujo, origen): colapsado por
+// defecto cuando todo está en su valor de por defecto — antes estos tres
+// campos se veían siempre arriba de todo del formulario, incluso recién
+// abierto (o recién "Duplicado"), empujando lo que sí cambia pedido a pedido.
 state.tab = "pedidos";
 state.pedidosVista = "nueva";
+state.pedidoOpcionesAvanzadasAbierto = false;
+state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+render();
+assert(!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "con todo en su valor por defecto, 'Opciones avanzadas' arranca colapsada — no se ve la casilla de flujo");
+assert(!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "...ni el selector de Origen");
+assert(!!document.querySelector('[data-action="toggle-pedido-opciones-avanzadas"]'), "...pero sí el botón para abrirla");
+click('[data-action="toggle-pedido-opciones-avanzadas"]');
+assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "al abrirla, aparece la casilla de flujo");
+// Con algo YA distinto del default (ej. consignación, tercero, sin flujo),
+// se abre sola — mismo criterio "con bulto" que ya usa Vendedor: si hay algo
+// que de verdad hay que revisar, no queda escondido.
+state.pedidoOpcionesAvanzadasAbierto = false;
+state.formPedido.tipoCliente = "tercero";
+render();
+assert(!!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "con Origen ya en 'tercero' (no el default), la sección se abre sola aunque nadie la haya tocado");
+state.formPedido.tipoCliente = "propio";
+
+// El toggle "pasa por producción" del formulario de pedido rápido.
 state.formPedido = { clienteId: "", cliente: "Cliente Sin Flujo", tipoCliente: "propio", abono: "", fechaEntrega: "",
   vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
   esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+state.pedidoOpcionesAvanzadasAbierto = true;
 render();
 assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "el formulario de pedido rápido ofrece elegir si lleva flujo de producción");
 click('[data-action="add-pedido-linea-libre"]');
@@ -2454,6 +2479,41 @@ assert(state.formPedido.lineas[0].id !== "lin-1", "...pero cada línea con un id
 assert(state.formPedido.vendedorNombre === "Vendedor X", "...y el mismo vendedor de referencia (se puede cambiar antes de confirmar)");
 assert(!state.formPedido.esConsignacion, "...nunca como consignación, aunque el pedido original lo fuera");
 
+// Duplicar un pedido que VIENE de una cotización: p.lineas no tiene el
+// detalle real (insumos, tallas) — hay que duplicar la cotización completa,
+// no solo el formulario de pedido rápido, o la copia queda vacía de contenido.
+state.cotizaciones = [{
+  id: "cot-origen-dup", clienteId: "cli-original", cliente: "Cliente Original", descripcion: "Uniformes", fecha: hoyStr(),
+  estado: "convertida", pedidoId: "ped-dup-2", referencias: [{
+    id: "ref-origen-dup", nombre: "Camiseta", origen: "taller", consumoAprox: 1, cantidadPedida: 5, precioVenta: 40000,
+    insumos: [{ id: "ins-origen-dup", nombre: "Tela", unidad: "MT", costo: 8000, tipo: "por_prenda", cantidad: 1 }],
+    detalle: [], costoCompra: 0, proveedorId: ""
+  }],
+  gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: { nombre: "Vendedor Y", tipo: "porcentaje", valor: 8, estado: "pendiente" },
+  codigoPublico: "cotorigdup"
+}];
+state.pedidos = [{
+  id: "ped-dup-2", numeroOp: "OP-9002", cliente: "Cliente Original", tipoCliente: "propio",
+  descripcion: "Uniformes", cantidad: "5", total: 200000, costo: 40000, abono: 0, abonos: [],
+  fechaEntrega: "", fechaCreacion: hoyStr(), estado: "nuevo", estadosDef: null,
+  cotizacionId: "cot-origen-dup", lineas: [], stockConsumido: [], vendedor: { nombre: "Vendedor Y", tipo: "porcentaje", valor: 8, estado: "pendiente" },
+  consignacion: null, sinFlujoProduccion: false, codigoPublico: "peddup2", calendarEventId: ""
+}];
+state.pedidosVista = "historial";
+state.tab = "pedidos";
+render();
+click('[data-action="duplicar-pedido"][data-id="ped-dup-2"]');
+assert(state.tab === "cotizaciones", "duplicar un pedido con cotización de origen lleva a Cotizaciones, no al formulario de pedido rápido");
+const cotDuplicada = state.cotizaciones.find(c => c.id === state.cotizacionEditando);
+assert(!!cotDuplicada && cotDuplicada.id !== "cot-origen-dup", "se creó una cotización nueva (id distinto de la original)");
+assert(cotDuplicada.estado === "borrador", "la copia nace en borrador, no 'convertida' como la original");
+assert(!cotDuplicada.pedidoId && !cotDuplicada.pedidoOrigenId, "...y sin vínculo a ningún pedido (ni origen ni destino)");
+assert(cotDuplicada.cliente === "" && cotDuplicada.clienteId === "", "...con el cliente en blanco, para elegir uno nuevo");
+assert(cotDuplicada.referencias.length === 1 && cotDuplicada.referencias[0].nombre === "Camiseta", "...con las mismas referencias");
+assert(cotDuplicada.referencias[0].id !== "ref-origen-dup", "...pero con id nuevo para la referencia");
+assert(cotDuplicada.referencias[0].insumos[0].nombre === "Tela" && cotDuplicada.referencias[0].insumos[0].id !== "ins-origen-dup", "...y el insumo real copiado, con su propio id nuevo (esto es justo lo que se perdía duplicando solo p.lineas)");
+assert(state.cotizaciones.some(c => c.id === "cot-origen-dup"), "la cotización ORIGINAL sigue intacta, no se modificó ni se movió");
+
 // ---------- Distintivo en contactos ----------
 state.clientes = [];
 state.formCliente = Object.assign({}, state.formCliente, { nombre: "Juan Pérez", distintivo: "Equipo Fenix" });
@@ -2472,24 +2532,33 @@ render();
 assert(document.querySelectorAll(".cliente-card").length === 1, "buscar por el distintivo también encuentra el contacto");
 state.filtroClientes = "";
 
-// ---------- Notas como bloc de notas (texto largo + editar) ----------
+// ---------- Notas como bloc de notas (título + párrafo + tarjetas) ----------
 state.pendientes = [];
-state.formPend = { texto: "Primera línea\nSegunda línea, más larga todavía", categoria: "tarea", prioridad: "media", fecha: "", hora: "" };
+state.formPend = { titulo: "Compras pendientes", texto: "Primera línea\nSegunda línea, más larga todavía", categoria: "tarea", prioridad: "media", fecha: "", hora: "" };
 state.tab = "notas";
 render();
+assert(!!document.querySelector(".nota-form-titulo") && !!document.querySelector(".nota-form-parrafo"), "el formulario tiene un campo de título y un párrafo grande dedicado, no un solo campo de descripción");
 click('[data-action="add-pend"]');
 assert(state.pendientes.length === 1 && state.pendientes[0].texto.indexOf("\n") !== -1, "una nota guarda texto de varias líneas, no solo una tarea corta");
+assert(state.pendientes[0].titulo === "Compras pendientes", "y guarda el título por separado del párrafo");
 render();
-assert(document.querySelector(".pend-text").textContent.indexOf("Segunda línea") !== -1, "el texto largo se ve completo en la lista (no se trunca)");
+assert(!!document.querySelector(".notas-grid"), "las notas se guardan como tarjetas en grilla, no como filas de lista");
+var cardHtmlNota = document.querySelector(".nota-card").outerHTML;
+assert(cardHtmlNota.indexOf("Compras pendientes") !== -1, "la tarjeta muestra el título");
+assert(document.querySelector(".nota-card-texto").textContent.indexOf("Segunda línea") !== -1, "y el párrafo completo, sin truncar");
 var notaId = state.pendientes[0].id;
 click('[data-action="editar-pend"][data-id="' + notaId + '"]');
 assert(state.pendEditando === notaId, "editar-pend entra en modo edición explícito");
 render();
 var textareaNota = document.querySelector('[data-pend-edit-row="' + notaId + '"] textarea');
 assert(!!textareaNota, "el modo edición muestra un textarea (no un input de una sola línea)");
+var tituloEdit = document.querySelector('[data-pend-edit-row="' + notaId + '"] [data-role="edit-titulo"]');
+assert(!!tituloEdit, "y también un campo para editar el título");
+tituloEdit.value = "Título editado";
 textareaNota.value = "Texto reescrito por completo";
 click('[data-action="guardar-pend-edit"][data-id="' + notaId + '"]');
 assert(state.pendientes[0].texto === "Texto reescrito por completo", "guardar-pend-edit reemplaza el texto de la nota");
+assert(state.pendientes[0].titulo === "Título editado", "...y también el título");
 assert(state.pendEditando === "", "y cierra el modo edición al guardar");
 
 // ---------- Reordenar insumos de una referencia (arrastrar y soltar) ----------
@@ -2508,12 +2577,12 @@ state.cotizaciones = [{
   gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "xyz"
 }];
 state.cotSucia = "";
-cotizacionesMod.reordenarInsumo("cot-reorder-1", "ref-reorder-1", "ins-C", "ins-A");
+cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-C", "ins-A", "ins-B"]);
 var ordenTrasArrastre = state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; });
-assert(ordenTrasArrastre.join(",") === "ins-C,ins-A,ins-B", "reordenarInsumo mueve el insumo arrastrado justo antes del que recibió el soltado");
+assert(ordenTrasArrastre.join(",") === "ins-C,ins-A,ins-B", "reordenarInsumos aplica el nuevo orden leído del DOM tras soltar (SortableJS)");
 assert(state.cotSucia === "cot-reorder-1", "reordenar insumos marca la cotización como \"sin guardar\", igual que cualquier otra edición (guardado explícito)");
-cotizacionesMod.reordenarInsumo("cot-reorder-1", "ref-reorder-1", "ins-A", "ins-A");
-assert(state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; }).join(",") === "ins-C,ins-A,ins-B", "soltar un insumo sobre sí mismo no cambia nada");
+cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-C", "ins-A", "ins-B"]);
+assert(state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; }).join(",") === "ins-C,ins-A,ins-B", "aplicar el mismo orden de nuevo no cambia nada");
 state.cotSucia = "";
 
 // ---------- Importar desde mis Contactos de Google ----------

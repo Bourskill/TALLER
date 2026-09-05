@@ -866,36 +866,33 @@ function bindEvents() {
 
   // Patrón genérico 5: arrastrar y soltar para reordenar una lista — hoy,
   // solo los insumos de una referencia de cotización (ver el manijo "⠿" en
-  // modules/cotizaciones.js). No encaja en el patrón 4 (data-action/click):
-  // son varios eventos del API nativo de drag-and-drop, y el "drop" necesita
-  // DOS elementos (origen y destino), no uno solo como dispatch(). Por eso se
-  // llama directo a cotizaciones.reordenarInsumo() en vez de pasar por el
-  // registro de acciones.
-  app.querySelectorAll("[data-drag-handle]").forEach(function (handle) {
-    handle.addEventListener("dragstart", function (e) {
-      var fila = handle.closest("[data-ins-row]");
-      if (!fila) return;
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", fila.getAttribute("data-ins"));
-      fila.classList.add("arrastrando");
+  // modules/cotizaciones.js). Se usa SortableJS (window.Sortable, cargado
+  // como script clásico en index.html) en vez de mecánica propia con el API
+  // nativo de drag-and-drop: trae soporte real por touch de fábrica, y no
+  // tiene sentido reinventar algo que una librería madura ya resuelve bien.
+  // No encaja en el patrón 4 (data-action/click): Sortable necesita quedarse
+  // "escuchando" todo el gesto de arrastre, no solo un clic — por eso se
+  // inicializa acá en vez de pasar por dispatch().
+  //
+  // Se crea una instancia nueva en CADA render (igual que el resto de los
+  // patrones de acá arriba): el HTML se regenera entero cada vez, así que la
+  // instancia vieja quedó colgada de un nodo que ya no existe y se descarta
+  // sola (sin falta de destroy() explícito).
+  if (window.Sortable) {
+    app.querySelectorAll(".ins-table").forEach(function (tabla) {
+      window.Sortable.create(tabla, {
+        handle: ".ins-drag-handle",
+        draggable: '.ins-row[data-ins-row]', // dejar afuera el encabezado y las filas de globales/servicios
+        animation: 150,
+        onEnd: function (evt) {
+          var fila = evt.item;
+          var ids = Array.prototype.slice.call(tabla.querySelectorAll('.ins-row[data-ins-row]'))
+            .map(function (el) { return el.getAttribute("data-ins"); });
+          cotizaciones.reordenarInsumos(fila.getAttribute("data-cot"), fila.getAttribute("data-ref"), ids);
+        }
+      });
     });
-    handle.addEventListener("dragend", function () {
-      var fila = handle.closest("[data-ins-row]");
-      if (fila) fila.classList.remove("arrastrando");
-    });
-  });
-  app.querySelectorAll("[data-ins-row]").forEach(function (fila) {
-    fila.addEventListener("dragover", function (e) {
-      e.preventDefault(); // sin esto el navegador nunca dispara "drop"
-      e.dataTransfer.dropEffect = "move";
-    });
-    fila.addEventListener("drop", function (e) {
-      e.preventDefault();
-      var origenId = e.dataTransfer.getData("text/plain");
-      var destinoId = fila.getAttribute("data-ins");
-      cotizaciones.reordenarInsumo(fila.getAttribute("data-cot"), fila.getAttribute("data-ref"), origenId, destinoId);
-    });
-  });
+  }
 }
 
 function handleFormInput(el) {

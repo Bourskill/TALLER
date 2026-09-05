@@ -70,6 +70,13 @@
 <!-- Login con Google (core/auth.js). Script clásico: expone window.google. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
+<!-- Arrastrar y soltar para reordenar (insumos de una referencia, en
+     Cotizaciones). SortableJS en vez de mecánica propia con el API nativo de
+     drag-and-drop: soporte real por touch de fábrica (el nativo no lo tiene
+     de forma confiable) y evita reinventar algo que esta librería ya
+     resuelve bien. Script clásico: expone window.Sortable. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.7/Sortable.min.js" crossorigin="anonymous"></script>
+
 <!-- CSS modular: variables primero, luego base/layout, luego por área de negocio.
      El orden importa poco (las clases no se pisan entre archivos), pero mantenerlo
      así facilita ubicar cada regla. -->

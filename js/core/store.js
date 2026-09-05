@@ -269,6 +269,7 @@ export const state = {
     lineas: []
   },
   pedidoVendedorAbierto: false, // sección de comisión de vendedor desplegada en el formulario de pedido
+  pedidoOpcionesAvanzadasAbierto: false, // sección "Opciones avanzadas" (tipo de pedido, flujo, origen) desplegada en el formulario de pedido
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
     // Nombre de usuario de WhatsApp (el que empieza por @): se guarda sin la
@@ -286,7 +287,7 @@ export const state = {
     categoriasInsumo: [], descripcion: "", puntuacion: ""
   },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
-  formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
+  formPend: { titulo: "", texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   pendEditando: "", // id de la nota actualmente en modo edición (o "")
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
   // Qué apartados del reporte están desplegados. El resumen financiero no

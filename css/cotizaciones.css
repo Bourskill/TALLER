@@ -92,17 +92,24 @@
 .ref-fields label{flex:0 0 128px;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
 .ins-table{width:100%;margin-top:10px;font-size:12px;}
 .ins-row{display:grid;grid-template-columns:1fr 60px 90px 90px 90px 30px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border-soft);}
-/* Manijo para arrastrar y reordenar (ver reordenarInsumo en
-   modules/cotizaciones.js): position:absolute a propósito — así NO cuenta
-   como hijo del grid ni participa de las parejas etiqueta/valor del colapso
-   responsivo (ver responsive.css), sin tener que tocar esa lógica para nada.
-   El padding-left de la fila le deja el espacio; cambio-catalogo ya usaba
-   8px para su borde de aviso, así que suma encima en vez de reemplazarlo. */
+/* Manijo para arrastrar y reordenar con SortableJS (ver reordenarInsumos en
+   modules/cotizaciones.js y su inicialización en core/dom.js):
+   position:absolute a propósito — así NO cuenta como hijo del grid ni
+   participa de las parejas etiqueta/valor del colapso responsivo (ver
+   responsive.css), sin tener que tocar esa lógica para nada. Se deja visible
+   en cualquier tamaño de pantalla: a diferencia del API nativo de
+   drag-and-drop, SortableJS sí soporta touch de forma confiable. El
+   padding-left de la fila le deja el espacio; cambio-catalogo ya usaba 8px
+   para su borde de aviso, así que suma encima en vez de reemplazarlo. */
 .ins-row[data-ins-row]{position:relative;padding-left:20px;}
 .ins-row[data-ins-row].cambio-catalogo{padding-left:28px;}
-.ins-drag-handle{position:absolute;left:0;top:50%;transform:translateY(-50%);cursor:grab;color:var(--ink-faint);font-size:15px;padding:6px 4px;user-select:none;}
+.ins-drag-handle{position:absolute;left:0;top:50%;transform:translateY(-50%);cursor:grab;color:var(--ink-faint);font-size:15px;padding:6px 4px;user-select:none;touch-action:none;}
 .ins-drag-handle:active{cursor:grabbing;}
-.ins-row[data-ins-row].arrastrando{opacity:.4;}
+/* Clases que SortableJS agrega solas durante el arrastre — sin esto se ve el
+   comportamiento por defecto (que ya es aceptable), esto solo lo afina un
+   poco al estilo del resto de la app. */
+.ins-row.sortable-ghost{opacity:.35;}
+.ins-row.sortable-chosen{background:var(--surface-3);}
 
 /* Barra de "cambios sin guardar" de una cotización. Sticky: en una cotización
    larga hay que poder guardar sin volver hasta arriba, y sobre todo no perder

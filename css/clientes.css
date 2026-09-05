@@ -3,6 +3,23 @@
 .cliente-nombre{font-weight:700;font-size:14.5px;}
 .cliente-distintivo{font-weight:400;font-size:12.5px;color:var(--ink-faint);}
 
+/* Tarjeta única para "Enviar a"/"Ver desde" Contactos de Google — antes eran
+   dos botones sueltos con estilos distintos que no encajaban con el resto de
+   la app (ver modules/clientes.js: renderGoogleContactos). */
+.google-card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;}
+.google-card-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;}
+.google-card-icono{flex-shrink:0;width:36px;height:36px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;}
+.google-card-icono svg{width:19px;height:19px;}
+.google-card-titulo{font-weight:700;font-size:14px;}
+.google-card-sub{font-size:12px;color:var(--ink-faint);margin-top:2px;}
+.google-card-acciones{display:flex;gap:8px;flex-wrap:wrap;}
+.google-card-lista{margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);}
+.google-contactos-lista{display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:340px;overflow-y:auto;}
+.google-contacto-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface-2);border-radius:8px;}
+.google-contacto-info{min-width:0;}
+.google-contacto-nombre{font-weight:600;font-size:13px;}
+.google-contacto-datos{font-size:11.5px;color:var(--ink-faint);}
+
 /* Franja de resumen comercial (pedidos, total comprado, última entrega):
    va arriba de la ficha de datos porque es lo que se consulta de verdad al
    abrir un cliente. Fondo propio para separarla del bloque de datos. */

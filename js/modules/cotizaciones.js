@@ -14,6 +14,29 @@ import { ajustarStockProducto } from "../core/stock.js";
 function nuevaReferencia() {
   return { id: uid(), nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "" };
 }
+// Clona una cotización completa con ids nuevos (referencias e insumos
+// incluidos) — la usa "Duplicar pedido" en Pedidos cuando el pedido a
+// duplicar viene de una cotización convertida: duplicar solo las líneas del
+// pedido perdería el detalle real (insumos, tallas, márgenes), que vive acá,
+// no en el pedido. La copia nace en "borrador", sin vínculo a ningún pedido
+// (ni origen ni destino — sería el de OTRO pedido, no de este) y con el
+// cliente en blanco, lista para que el usuario la revise y la convierta en
+// un pedido nuevo por el camino de siempre ("Convertir en pedido").
+export function duplicarCotizacionCompleta(cot) {
+  var copia = JSON.parse(JSON.stringify(cot));
+  copia.id = uid();
+  copia.clienteId = ""; copia.cliente = "";
+  copia.estado = "borrador";
+  copia.pedidoId = ""; copia.pedidoOrigenId = "";
+  copia.codigoPublico = codigoPublico();
+  copia.fecha = todayStr();
+  (copia.referencias || []).forEach(function (r) {
+    r.id = uid();
+    (r.insumos || []).forEach(function (i) { i.id = uid(); });
+  });
+  return copia;
+}
+
 function nuevoInsumo(fuente) {
   return {
     id: uid(),
@@ -939,15 +962,15 @@ function renderRefCard(cotId, ref) {
     // cotización sigue funcionando igual con el número que tenía, hasta que
     // alguien decida actualizarla.
     var cambio = insumoCambioDeCatalogo(i);
-    // Reordenar por arrastre (ver reordenarInsumo, más abajo, y el patrón
-    // genérico 5 en core/dom.js): "más estético que necesario", así que el
-    // manijo se posiciona ABSOLUTO (no participa del grid ni de las parejas
-    // etiqueta/valor que usa el colapso responsivo — ver responsive.css) y se
-    // esconde por completo en pantalla angosta, donde arrastrar con el dedo
-    // no funciona igual (el API nativo de drag-and-drop no tiene soporte
-    // confiable por touch).
+    // Reordenar por arrastre con SortableJS (ver bindEvents en core/dom.js y
+    // reordenarInsumos más abajo) — no con el API nativo de drag-and-drop:
+    // esta librería trae soporte real por touch de fábrica, que el nativo no
+    // ofrece de forma confiable. El manijo se posiciona ABSOLUTO (ver
+    // css/cotizaciones.css) para no participar del grid ni de las parejas
+    // etiqueta/valor del colapso responsivo (ver responsive.css) — no hizo
+    // falta tocar esa lógica para nada.
     html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
-      '<span class="ins-drag-handle" draggable="true" data-drag-handle title="Arrastra para reordenar">⠿</span>' +
+      '<span class="ins-drag-handle" title="Arrastra para reordenar">⠿</span>' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
       renderComboUnidad({ id: "cotins-unidad-" + i.id, clave: "cotins-unidad-" + i.id, abierto: state.comboUnidadAbierto === "cotins-unidad-" + i.id }) + "</span>" +
@@ -2560,31 +2583,31 @@ function confirmarSalidaSiSucia() {
 // global ni un servicio cobrado guardan categoriaId— así que si no se copia
 // acá se pierde en silencio la primera vez que alguien cambia el "Tipo de
 // costo" de la fila.
-// Reordena los insumos de UNA referencia arrastrando y soltando (ver el
-// manijo "⠿" en el render de arriba y el patrón genérico 5 en core/dom.js,
-// que es quien de verdad escucha dragstart/dragover/drop y llama acá). Puro
-// cambio de orden visual — no toca costos, cantidades ni nada que afecte un
-// cálculo — así que igual pasa por "guardado explícito" como cualquier otra
-// edición de la cotización (ver marcarSucia): el usuario puede reordenar y
-// arrepentirse con "Descartar" antes de confirmar.
-export function reordenarInsumo(cotId, refId, origenId, destinoId) {
-  if (!origenId || !destinoId || origenId === destinoId) return;
+// Reordena los insumos de UNA referencia tras arrastrar y soltar con
+// SortableJS (ver bindEvents en core/dom.js, que llama acá con el orden final
+// de ids leído directo del DOM tras soltar). Puro cambio de orden visual — no
+// toca costos, cantidades ni nada que afecte un cálculo — así que igual pasa
+// por "guardado explícito" como cualquier otra edición de la cotización (ver
+// marcarSucia): el usuario puede reordenar y arrepentirse con "Descartar"
+// antes de confirmar.
+export function reordenarInsumos(cotId, refId, nuevoOrdenIds) {
   var huboCambio = false;
   state.cotizaciones = state.cotizaciones.map(function (c) {
     if (c.id !== cotId) return c;
     return Object.assign({}, c, {
       referencias: (c.referencias || []).map(function (r) {
         if (r.id !== refId) return r;
-        var lista = (r.insumos || []).slice();
-        var origenIdx = lista.findIndex(function (i) { return i.id === origenId; });
-        if (origenIdx === -1) return r;
-        var movido = lista[origenIdx];
-        lista.splice(origenIdx, 1);
-        var destinoIdx = lista.findIndex(function (i) { return i.id === destinoId; });
-        if (destinoIdx === -1) return r;
-        lista.splice(destinoIdx, 0, movido);
+        var actuales = r.insumos || [];
+        var porId = {};
+        actuales.forEach(function (i) { porId[i.id] = i; });
+        var reordenado = nuevoOrdenIds.map(function (id) { return porId[id]; }).filter(Boolean);
+        // Cualquier insumo que no vino en `nuevoOrdenIds` (no debería pasar,
+        // pero por seguridad — ej. un id repetido o desconocido) se agrega al
+        // final en vez de perderse.
+        actuales.forEach(function (i) { if (reordenado.indexOf(i) === -1) reordenado.push(i); });
+        if (reordenado.length !== actuales.length) return r; // algo no calzó: se deja tal cual, sin arriesgar perder un insumo
         huboCambio = true;
-        return Object.assign({}, r, { insumos: lista });
+        return Object.assign({}, r, { insumos: reordenado });
       })
     });
   });

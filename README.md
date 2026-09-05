@@ -222,6 +222,70 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (decimonovena ronda: correcciones sobre la ronda anterior)
+
+El usuario probó los cinco cambios de la "decimoctava ronda" y corrigió el
+rumbo en todos menos uno (distintivo: "ok"). Dos quedaron sin resolver por
+falta de un caso concreto para reproducirlos.
+
+**Duplicar pedido — el formulario se sentía engorroso, y faltaba duplicar la
+cotización.** Dos fixes en `modules/pedidos.js`:
+1. Si el pedido viene de una cotización convertida (`p.cotizacionId`), sus
+   `lineas` no tienen el detalle real (insumos, tallas, márgenes) — eso vive
+   en la cotización. Duplicar solo copiaba un pedido vacío de contenido. Fix:
+   se duplica la COTIZACIÓN completa (`duplicarCotizacionCompleta` en
+   `modules/cotizaciones.js`, nace en "borrador", sin vínculo a ningún
+   pedido) y se aterriza ahí para revisar y convertir por el camino normal.
+   El camino de antes (prellenar `state.formPedido`) se conserva para
+   pedidos rápidos sin cotización de origen.
+2. "Opciones avanzadas" nuevo (`renderOpcionesAvanzadasPedido`): Tipo de
+   pedido, "pasa por producción" y Origen — decisiones de la BASE del pedido
+   que casi siempre quedan en su default — pasaron detrás de un
+   `renderToggleSeccion` colapsado, con el mismo criterio "con bulto" que ya
+   usa Vendedor (se abre solo si algo ya está distinto del default). Aplica
+   al formulario completo, no solo a pedidos duplicados.
+
+**Reordenar insumos por arrastre — rechazado el API nativo.** "Es preferible
+usar una librería que ya se dedica a eso, no reinventar la rueda" (ver
+[[preferir-librerias-antes-que-reinventar]] en memoria). Se reemplazó la
+mecánica de dragstart/dragover/drop nativa por **SortableJS**
+(`cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.7/Sortable.min.js`, cargado
+como script clásico igual que jsPDF/Chart.js). Ventaja extra: soporte real
+por touch de fábrica — ya no hace falta esconder el manijo en pantalla
+angosta, funciona en móvil también.
+
+**Notas — la primera versión ("agrandar el campo") se rechazó de plano.** Se
+rediseñó de verdad: un campo de Título nuevo, protagonismo real al párrafo
+(metadatos en una fila compacta arriba, textarea grande dedicado abajo), y
+las notas se guardan como TARJETAS en una grilla (`.notas-grid`, CSS Grid
+`auto-fill`), no como filas de lista.
+
+**Contactos de Google — los dos botones sueltos rompían la estética.** Se
+unificaron "Enviar a mis Contactos" y "Ver mis Contactos" en una sola
+tarjeta (`renderGoogleContactos`, `.google-card` en `css/clientes.css`) con
+ícono, estado y las dos acciones lado a lado — "Ver los tuyos" expande su
+contenido dentro de la misma tarjeta en vez de abrir una aparte.
+
+**Sin resolver — necesitan un caso concreto para diagnosticar:**
+- *Comisión de vendedor no aparece en Cuentas por pagar.* Se revisó a fondo
+  la propagación de `vendedor` entre cotización y pedido (escalar, convertir,
+  aplicar) sin encontrar el hueco — los tres caminos la copian bien. Puede
+  ser un caso puntual (consignación, donde `p.vendedor` siempre es `null` por
+  diseño) u otra cosa. Pendiente de que el usuario señale el pedido/
+  cotización exacto.
+- *Navegación por teclado (Tab) "tediosa".* Se revisó `core/teclado.js`
+  completo: ningún código intercepta Tab en ningún lado del proyecto — el
+  comportamiento nativo del navegador está intacto. Pendiente de un ejemplo
+  concreto de qué se siente mal antes de tocar nada ahí.
+
+Verificado con `test/smoke.mjs` (532 aserciones: +14 de esta ronda). La
+verificación visual en navegador quedó parcial esta vez: un intento de login
+silencioso (la mejora de sesión de la ronda anterior) abrió una ventana real
+de Google que quedó bloqueando el panel de pruebas — confirma que ese
+intento es un `fetch`/popup real, no solo una promesa que falla en silencio,
+aunque en producción (con el origen bien registrado) no debería mostrar
+nada visible.
+
 ## Registro de cambios — septiembre 2026 (decimoctava ronda: seis pedidos sueltos)
 
 Seis pedidos del usuario en un solo mensaje. Uno de ellos ("que las comisiones
