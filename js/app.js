@@ -86,6 +86,21 @@ if (GOOGLE_CLIENT_ID.indexOf("PENDIENTE") === 0 || SPREADSHEET_ID.indexOf("PENDI
   if (restaurada && restaurada.rol) {
     entrarConSesion(restaurada);
   } else {
+    // No hay nada en sessionStorage (se cerró el navegador del todo, o pasó
+    // más de una hora) — antes esto SIEMPRE mostraba la pantalla de login
+    // exigiendo un clic. Se muestra igual (por si este intento no resuelve
+    // rápido o falla), pero de una vez se intenta un login silencioso: si
+    // Google ya le había dado consentimiento a esta cuenta, puede resolverlo
+    // solo sin ningún clic ni pantalla — es la misma causa que "a veces de la
+    // nada pide iniciar sesión de nuevo" (sessionStorage se borra solo al
+    // cerrar el navegador, aunque la cuenta de Google siga con la sesión
+    // abierta). Si el navegador bloquea el intento por no venir de un clic
+    // real, o hace falta elegir cuenta, esta promesa simplemente no resuelve
+    // y el usuario se queda con la pantalla de login normal, sin notar nada.
     intentarLogin();
+    login().then(function (session) {
+      if (!session.rol) { mostrarAccesoDenegado(session.email); return; }
+      entrarConSesion(session);
+    }).catch(function () { /* se queda con la pantalla de login ya visible */ });
   }
 }

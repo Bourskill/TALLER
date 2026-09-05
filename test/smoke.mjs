@@ -2371,6 +2371,58 @@ const porDiaHoy = calcMod.calcPrendasTerminadasPorDia(hoyStr(), hoyStr());
 assert(porDiaHoy[hoyStr()] === 8, "cuenta 5 del pedido rápido + 3 de la referencia A ya terminada = 8; la referencia B (atrás) y el pedido cancelado no suman");
 assert(!calcMod.calcPrendasTerminadasPorDia("2020-01-01", "2020-01-01")[hoyStr()], "y fuera del rango pedido no cuenta nada de hoy");
 
+// ---------------------------------------------------------------------------
+// Conflicto entre dispositivos: el usuario reportó que trabajar desde dos
+// computadores distintos perdía cambios en silencio ("hice cambios en otro
+// computador y no se guardaron"). Causa: cada guardado reescribía la clave
+// ENTERA sin comprobar antes si alguien más ya la había cambiado — "el último
+// que guarda gana", sin ningún aviso, porque desde el punto de vista de cada
+// dispositivo su propia escritura sí tenía éxito. Fix: verificarConflicto()/
+// fijarRevNueva() en core/store.js sellan una revisión por clave
+// ("__rev__:<clave>", en la misma pestaña "kv") y la comparan, EN CALIENTE,
+// justo antes de escribir de verdad.
+// ---------------------------------------------------------------------------
+await loadAll(); // primero se sincroniza con lo que haya de pruebas anteriores y fija revConocida["deudas"] contra eso
+state.deudas = [{ id: "deuda-conflicto-1", concepto: "Original", monto: 100000, contraparte: "", fechaVencimiento: "", cuotas: "1", periodo: "mensual", diasPago: [] }];
+await storeMod2.persist("deudas");
+assert(guardadoMod.estadoGuardado().clavesConflicto.indexOf("deudas") === -1, "el primer guardado de la sesión para 'deudas' no se marca como conflicto");
+const revTrasGuardar = await window.storage.get("__rev__:deudas");
+assert(!!revTrasGuardar && !!revTrasGuardar.value, "tras guardar, queda sellada una revisión nueva para 'deudas'");
+
+// Simula que OTRO dispositivo guardó "deudas" mientras tanto: cambia la
+// revisión sellada en la Sheet sin que esta pestaña se entere.
+await window.storage.set("__rev__:deudas", "otro-dispositivo:999", false);
+state.deudas = state.deudas.concat([{ id: "deuda-conflicto-2", concepto: "Agregada acá", monto: 50000, contraparte: "", fechaVencimiento: "", cuotas: "1", periodo: "mensual", diasPago: [] }]);
+await storeMod2.persist("deudas");
+const gConflicto = guardadoMod.estadoGuardado();
+assert(gConflicto.clavesConflicto.indexOf("deudas") !== -1, "si la revisión en la Sheet cambió desde otro lado, el guardado se marca como CONFLICTO, no como fallo de red genérico");
+const filaDeudasTrasConflicto = await window.storage.get(constantsMod.KEYS.deudas);
+const deudasEnSheetTrasConflicto = JSON.parse(filaDeudasTrasConflicto.value);
+assert(deudasEnSheetTrasConflicto.length === 1 && deudasEnSheetTrasConflicto[0].id === "deuda-conflicto-1", "y NO se sobrescribe lo que había en la Sheet: la 'deuda-conflicto-2' de este dispositivo no se escribe encima de lo del otro");
+
+render();
+const bannerConflicto = document.querySelector(".aviso-barra.malo");
+assert(!!bannerConflicto && bannerConflicto.textContent.indexOf("Alguien más guardó") !== -1, "el aviso en pantalla explica que fue otro dispositivo, no un problema de red");
+assert(!!document.querySelector('[data-action="recargar-pagina"]'), 'y ofrece recargar la página en vez de "reintentar", que no arreglaría nada');
+
+// El reintento automático NO debe insistir solo en un conflicto (repetiría el
+// mismo choque para siempre, sin arreglar nada, hasta que se recargue).
+const setCallsDuranteReintento = [];
+const origSetConflicto = window.storage.set;
+window.storage.set = async function (key, value, arg2) { setCallsDuranteReintento.push(key); return origSetConflicto(key, value, arg2); };
+await guardadoMod.reintentarPendientes();
+window.storage.set = origSetConflicto;
+assert(setCallsDuranteReintento.indexOf(constantsMod.KEYS.deudas) === -1, "reintentarPendientes() no vuelve a intentar escribir sola una clave marcada como conflicto");
+
+// "Recargar la página" (acá: volver a cargar) resuelve el conflicto: la
+// próxima carga trae lo más reciente y sella una base fresca.
+state.deudas = [];
+await loadAll();
+assert(state.deudas.length === 1 && state.deudas[0].id === "deuda-conflicto-1", 'al recargar, se trae lo que de verdad quedó guardado (lo del otro dispositivo), listo para ofrecerse en "Restaurar"');
+await storeMod2.persist("deudas");
+assert(guardadoMod.estadoGuardado().clavesConflicto.indexOf("deudas") === -1, "y con una base fresca, el siguiente guardado ya no choca");
+state.recuperacion = null;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

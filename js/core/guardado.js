@@ -52,6 +52,13 @@ var REINTENTO_MS = 15000;
 //  - `pendientes`: la escritura YA FALLÓ. Esto sí se muestra y sí se reintenta.
 var pendientes = {};   // { [clave]: true } — falló y espera reintento (lo visible)
 var enCola = {};       // { [clave]: true } — escribiéndose ahora o pendiente (para recuperación)
+// Subconjunto de `pendientes`: falló porque otro dispositivo guardó algo
+// distinto mientras tanto (ver verificarConflicto en core/store.js), NO por
+// red. Reintentar a ciegas cada 15s no arregla esto (el conflicto sigue
+// exactamente igual hasta que la pestaña se recargue con lo más reciente),
+// así que estas claves se saltan del reintento automático — solo cuentan
+// para el aviso, que le pide al usuario recargar en vez de solo esperar.
+var conflictos = {};
 var enVuelo = 0;       // escrituras en curso ahora mismo
 var ultimoError = "";
 var ultimoOkEl = 0;
@@ -225,10 +232,14 @@ export function estadoGuardado() {
     cantidad: claves.length,
     guardando: guardadoLento,
     ultimoError: ultimoError,
-    ultimoOkEl: ultimoOkEl
+    ultimoOkEl: ultimoOkEl,
+    clavesConflicto: claves.filter(function (c) { return conflictos[c]; })
   };
 }
 export function hayPendientes() { return Object.keys(pendientes).length > 0; }
+function hayPendientesReintentables() {
+  return Object.keys(pendientes).some(function (c) { return !conflictos[c]; });
+}
 
 // ---------- motor ----------
 export function configurarGuardado(opts) {
@@ -262,11 +273,18 @@ export function configurarGuardado(opts) {
 }
 
 function programarReintento() {
-  if (temporizador || !hayPendientes()) return;
+  if (temporizador || !hayPendientesReintentables()) return;
   temporizador = setTimeout(function () {
     temporizador = null;
     reintentarPendientes();
   }, REINTENTO_MS);
+}
+
+// El mensaje de conflicto (ver verificarConflicto en core/store.js) ya trae
+// texto claro y específico de qué área chocó — se usa tal cual en vez de
+// pasarlo por mensajeDeError, que asume que todo error es de red/conexión.
+function mensajeDeConflicto(e) {
+  return (e && e.message) ? e.message : "Alguien más guardó un cambio distinto mientras tanto.";
 }
 
 // Intenta escribir una clave, dejándola encolada si falla. `json` es solo para
@@ -283,14 +301,25 @@ export async function guardarClave(clave, json) {
     await escritor(clave);
     delete enCola[clave];
     delete pendientes[clave];
+    delete conflictos[clave];
     anotarEnDisco();
     ultimoError = "";
     ultimoOkEl = Date.now();
   } catch (e) {
     pendientes[clave] = true; // recién ahora es noticia
-    ultimoError = mensajeDeError(e);
-    console.error("No se pudo guardar", clave, e);
-    programarReintento();
+    if (e && e.esConflicto) {
+      conflictos[clave] = true;
+      ultimoError = mensajeDeConflicto(e);
+      console.error("Conflicto al guardar", clave, e);
+      // NO se programa reintento: reintentar a ciegas repetiría el MISMO
+      // conflicto para siempre sin arreglar nada (ver la nota junto a
+      // `conflictos` más arriba). Hace falta recargar la página.
+    } else {
+      delete conflictos[clave];
+      ultimoError = mensajeDeError(e);
+      console.error("No se pudo guardar", clave, e);
+      programarReintento();
+    }
   } finally {
     enVuelo--;
     limpiarLentitudSiTerminó();
@@ -298,11 +327,13 @@ export async function guardarClave(clave, json) {
   }
 }
 
-// Vuelve a intentar TODO lo pendiente con el estado de ahora. Devuelve cuántas
-// claves quedaron sin guardar al terminar.
+// Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver
+// hayPendientesReintentables) con el estado de ahora. Devuelve cuántas claves
+// quedaron sin guardar al terminar (conflictos incluidos: siguen sin
+// guardarse, solo que no se les vuelve a insistir solas).
 export async function reintentarPendientes() {
-  var claves = Object.keys(pendientes);
-  if (!claves.length || !escritor) return 0;
+  var claves = Object.keys(pendientes).filter(function (c) { return !conflictos[c]; });
+  if (!claves.length || !escritor) return Object.keys(pendientes).length;
   enVuelo += claves.length;
   marcarPosibleLentitud();
   await Promise.all(claves.map(function (clave) {
@@ -311,10 +342,16 @@ export async function reintentarPendientes() {
       .then(function () {
         delete pendientes[clave];
         delete enCola[clave];
+        delete conflictos[clave];
         ultimoOkEl = Date.now();
       })
       .catch(function (e) {
-        ultimoError = mensajeDeError(e);
+        if (e && e.esConflicto) {
+          conflictos[clave] = true;
+          ultimoError = mensajeDeConflicto(e);
+        } else {
+          ultimoError = mensajeDeError(e);
+        }
       })
       .finally(function () { enVuelo--; });
   }));

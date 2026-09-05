@@ -45,13 +45,97 @@ if (syncChannel) {
   };
 }
 
+// ---------- conflicto entre dispositivos ----------
+// EL PROBLEMA: cada guardado reescribe la clave ENTERA (ver escribirClave más
+// abajo y core/sheetsTabular.js) sin mirar antes si alguien más ya la cambió.
+// Si el mismo taller se usa desde dos computadores el mismo día, el que
+// guarda de ÚLTIMO borra en silencio lo que el otro acababa de guardar — sin
+// ningún error, sin ninguna cola de reintento, porque desde el punto de vista
+// de cada dispositivo SU escritura sí tuvo éxito. Es la causa más probable
+// detrás de "hice cambios en otro computador y desaparecieron".
+//
+// LA SOLUCIÓN: un sello de revisión por clave, guardado como una fila más de
+// la pestaña "kv" ("__rev__:<clave>"), independiente de en qué pestaña vive
+// el dato real (kv o su propia tabla — ver TABLAS_SHEET). Cada pestaña
+// recuerda, para cada clave, la última revisión que sabe que coincide con la
+// hoja (revConocida, abajo — se fija al cargar y después de cada guardado
+// propio exitoso). Antes de escribir de verdad, se relee esa revisión en
+// caliente (sin la caché de sesión, ver releerFresco en sheetsStorage.js): si
+// no coincide con la que esta pestaña esperaba, alguien más guardó algo
+// distinto mientras tanto — se aborta la escritura ANTES de tocar el dato
+// real (ver verificarConflicto) en vez de pisarlo.
+//
+// Es control optimista de concurrencia, no un merge de verdad (esta hoja de
+// cálculo no ofrece transacciones): sigue existiendo una ventana muy angosta
+// entre el chequeo y la escritura donde OTRO guardado podría colarse — pero
+// pasa de "siempre pisa sin avisar" a "casi nunca pisa, y cuando no puede
+// evitarlo, avisa en vez de perder el cambio" (el cambio propio sigue a salvo
+// en el espejo local — ver core/guardado.js — y se ofrece recuperar al
+// recargar, igual que cualquier otro guardado fallido).
+var revConocida = {}; // { [clave]: revisión de esta clave que esta pestaña sabe que coincide con la hoja }
+
+function claveRev(key) { return "__rev__:" + key; }
+
+// Fija la revisión conocida de una clave a lo que HAY DE VERDAD en la hoja
+// ahora mismo (se llama tras una carga o relectura exitosa de esa clave, para
+// que el chequeo de conflicto compare contra un punto de partida real, no
+// contra "nunca se supo"). Un fallo acá no es grave: la clave sencillamente
+// se queda sin este chequeo hasta la próxima carga u guardado exitoso — igual
+// de "desprotegida" que estaba ANTES de que existiera todo esto.
+async function fijarRevConocida(key) {
+  try {
+    var r = await window.storage.get(claveRev(key), false);
+    revConocida[key] = (r && r.value) || "";
+  } catch (e) { /* sin red: esta clave se queda sin base para el chequeo por ahora */ }
+}
+
+// Antes de escribir `key` de verdad: relee su revisión EN CALIENTE y la
+// compara con la que esta pestaña esperaba encontrar.
+async function verificarConflicto(key) {
+  if (revConocida[key] === undefined) return; // nunca se estableció una base (primera vez, o la carga inicial falló) — nada contra qué comparar, se deja pasar como pasaba antes
+  if (window.storage.releerFresco) {
+    try { await window.storage.releerFresco(); }
+    catch (e) { return; } // sin red no hay forma de chequear — se deja pasar; la escritura de abajo va a fallar igual y quedar "pendiente"
+  }
+  var r = await window.storage.get(claveRev(key), false);
+  var actual = (r && r.value) || "";
+  if (actual !== revConocida[key]) {
+    var err = new Error("Alguien más guardó un cambio distinto en " + (ETIQUETA_CLAVE[key] || key) + " mientras tanto — para no perder ni pisar nada, no se sobrescribió.");
+    err.esConflicto = true;
+    throw err;
+  }
+}
+
+// Después de escribir `key` de verdad: sella una revisión nueva. Si esto
+// falla (red se cae justo acá), revConocida[key] se queda con la revisión
+// VIEJA en memoria — que sigue siendo igual a la que hay en la hoja (nunca se
+// llegó a escribir la nueva), así que el próximo reintento vuelve a pasar el
+// chequeo de conflicto sin problema y repite este paso.
+async function fijarRevNueva(key) {
+  var nueva = uid() + ":" + Date.now();
+  await window.storage.set(claveRev(key), nueva, false);
+  revConocida[key] = nueva;
+}
+
 // Recarga una sola área de datos desde storage (usado por la sincronización entre
 // pestañas). A diferencia de loadAll(), no corre las migraciones de datos
 // antiguos: esas solo tienen sentido en la carga inicial de la app.
 async function reloadKey(key) {
   if (!STORAGE_OK) return;
   try {
-    if (TABLAS_SHEET[key]) { state[key] = await TABLAS_SHEET[key].leer(); notify(); return; }
+    // Refresca la caché de "kv" antes de leer: la pestaña que disparó este
+    // aviso (vía BroadcastChannel) ya escribió su nueva "rev" (ver
+    // fijarRevNueva más abajo); si ESTA pestaña se queda con su caché vieja,
+    // su propia idea de "revConocida" quedaría atrasada frente a lo que de
+    // verdad hay en la hoja, y su PRÓXIMO guardado se vería a sí mismo como
+    // un conflicto contra su propia pestaña hermana.
+    if (window.storage.releerFresco) await window.storage.releerFresco();
+    if (TABLAS_SHEET[key]) {
+      state[key] = await TABLAS_SHEET[key].leer();
+      await fijarRevConocida(key);
+      notify();
+      return;
+    }
     if (!KEYS[key]) return;
     var r = await window.storage.get(KEYS[key], false);
     var valor = r ? safeParse(r.value, undefined) : undefined;
@@ -63,6 +147,7 @@ async function reloadKey(key) {
     } else if (valor !== undefined) {
       state[key] = valor;
     }
+    await fijarRevConocida(key);
     notify();
   } catch (e) {
     console.error("No se pudo sincronizar", key, e);
@@ -428,9 +513,17 @@ export async function loadAll() {
     // frente a lo que YA tiene la Sheet real (ver el comentario junto a esa
     // migración).
     var clavesDeEspejo = {};
+    // Claves de "kv" que sí se pudieron leer de la red esta vez (fulfilled,
+    // haya habido valor o no) — son la base real para el chequeo de conflicto
+    // de más abajo (verificarConflicto): si una clave cayó al espejo local,
+    // no hay forma de saber su revisión VERDADERA en la hoja ahora mismo, así
+    // que se deja sin esa protección hasta la próxima carga u guardado que sí
+    // tenga red.
+    var clavesOkRed = [];
     nombres.forEach(function (n, i) {
       var r = resultados[i];
       if (r.status === "fulfilled") {
+        if (n !== "configNombreLegacy") clavesOkRed.push(n);
         if (r.value) {
           datos[n] = safeParse(r.value.value, undefined);
           // Copia local de lo que SÍ se pudo leer — es lo único de donde
@@ -509,18 +602,20 @@ export async function loadAll() {
     //      desde el blob de "kv" (líneas de arriba) — más viejo (esa pestaña
     //      dejó de actualizarse desde que esto se migró), pero mejor que
     //      nada.
+    var tablaOk = {}; // key -> true si esta vez SÍ se pudo leer su pestaña propia de la red
     await Promise.allSettled(Object.keys(TABLAS_SHEET).map(function (key) {
       return TABLAS_SHEET[key].leer().then(function (items) {
         if (items.length === 0 && state[key] && state[key].length) {
           // Pestaña nueva vacía pero "kv" ya tenía datos: primera vez que se
           // activa esta migración para esta clave — se copian una sola vez
           // (sin borrar el blob de "kv", que queda como respaldo).
-          return TABLAS_SHEET[key].escribir(state[key]);
+          return TABLAS_SHEET[key].escribir(state[key]).then(function () { tablaOk[key] = true; });
         }
         state[key] = items;
         // Copia local, igual que con las claves de "kv" arriba — esta es la
         // que se usa si el próximo intento de leer esta pestaña falla.
         espejar(key, JSON.stringify(items));
+        tablaOk[key] = true;
       }).catch(function (e) {
         console.error("No se pudo leer la hoja estructurada de " + key + " — se intenta con la última copia local", e);
         // "Lo último guardado en kv" ya no es del todo cierto para tx/clientes
@@ -535,6 +630,15 @@ export async function loadAll() {
         if (parsed !== undefined) { state[key] = parsed; huboFalloDeRed = true; }
       });
     }));
+
+    // Base del chequeo de conflicto (ver verificarConflicto más arriba): para
+    // cada clave que sí se pudo leer de la red esta vez (kv o tabla propia),
+    // se anota qué revisión tiene AHORA la hoja — es contra lo que se va a
+    // comparar el próximo guardado de esa clave. Las revisiones ya viven en
+    // la caché de "kv" que acaba de rellenar cargar()/releerFresco() (arriba),
+    // así que esto no cuesta ninguna lectura de red extra.
+    await Promise.all(clavesOkRed.concat(Object.keys(TABLAS_SHEET).filter(function (k) { return tablaOk[k]; }))
+      .map(function (key) { return fijarRevConocida(key); }));
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora
     // vive en la REFERENCIA de la cotización de origen (así se puede
@@ -942,8 +1046,10 @@ export function revisarBorradoresSinGuardar() {
 // que hace que un reintento mande siempre lo último, incluido todo lo que el
 // usuario haya hecho mientras la conexión estaba caída.
 async function escribirClave(key) {
+  await verificarConflicto(key);
   if (TABLAS_SHEET[key]) { await TABLAS_SHEET[key].escribir(state[key]); }
   else { await window.storage.set(KEYS[key], JSON.stringify(state[key]), false); }
+  await fijarRevNueva(key);
   if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
 }
 

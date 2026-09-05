@@ -46,14 +46,95 @@ export function getAccessToken() { return accessToken; }
 var MARGEN_REFRESCO_PROACTIVO_MS = 5 * 60 * 1000;
 var timerRefrescoProactivo = null;
 
+// Si el refresco silencioso falla (típico: cookies de terceros bloqueadas
+// justo en ese instante — ver la nota grande al principio del archivo), antes
+// esto se quedaba callado del todo hasta que el token terminaba de vencer de
+// verdad: el usuario se enteraba horas después con un guardado fallido, o con
+// la pantalla de login apareciendo "de la nada" a mitad de una tarea. Ahora
+// se reintenta un par de veces con espera corta (30s, 60s) ANTES de avisar —
+// muchos fallos de este tipo son pasajeros y se resuelven solos en el
+// segundo o tercer intento — y solo si los tres fallan se prende el aviso de
+// "sesión por vencer" (ver haySesionPorVencer), con tiempo de sobra (el
+// margen de 5 minutos de arriba) para que el usuario renueve con un clic real
+// sin perder el lugar en el que estaba trabajando.
+var REINTENTOS_REFRESCO_MS = [30 * 1000, 60 * 1000];
+var sesionPorVencer = false;
+var timerReintentoRefresco = null;
+
+export function haySesionPorVencer() { return sesionPorVencer; }
+
+function avisarSesionPorVencer(valor) {
+  if (sesionPorVencer === valor) return;
+  sesionPorVencer = valor;
+  if (valor) armarRenovacionEnProximoClic(); else desarmarRenovacionEnProximoClic();
+  // Mismo evento que notify() en core/store.js: se dispara directo (en vez de
+  // importar store.js, que ya importa ESTE archivo) para no crear un ciclo de
+  // imports — dom.js ya escucha "app:render" para volver a pintar la topbar.
+  if (typeof document !== "undefined" && document.dispatchEvent) {
+    document.dispatchEvent(new CustomEvent("app:render"));
+  }
+}
+
+// Mientras el aviso de "sesión por vencer" está prendido, el PRÓXIMO clic
+// real del usuario en cualquier parte de la app —no hace falta que sea en el
+// botón de la topbar— se aprovecha para reintentar la renovación: como viene
+// de un gesto real, el navegador no lo bloquea igual que a un intento
+// disparado solo por un timer. Con esto, la inmensa mayoría de las veces la
+// sesión se renueva sola con el primer clic normal que el usuario iba a dar
+// de todos modos (elegir una pestaña, tocar un botón cualquiera), sin que
+// llegue a notar el aviso ni tenga que buscar un botón especial. Si ese
+// intento también falla, se vuelve a armar para el siguiente clic — barato,
+// y cada clic es una oportunidad real, no una insistencia a ciegas.
+var listenerClicRenovacion = null;
+function armarRenovacionEnProximoClic() {
+  if (listenerClicRenovacion || typeof document === "undefined" || !document.addEventListener) return;
+  listenerClicRenovacion = function () {
+    desarmarRenovacionEnProximoClic();
+    refrescarToken().catch(function () {
+      if (sesionPorVencer) armarRenovacionEnProximoClic();
+    });
+  };
+  // Fase de captura: se dispara ANTES que cualquier manejador de clic de la
+  // app (que podría detener la propagación), así que ningún clic se escapa.
+  document.addEventListener("click", listenerClicRenovacion, true);
+}
+function desarmarRenovacionEnProximoClic() {
+  if (!listenerClicRenovacion) return;
+  document.removeEventListener("click", listenerClicRenovacion, true);
+  listenerClicRenovacion = null;
+}
+
+function intentarRefrescoConReintento(intento) {
+  clearTimeout(timerReintentoRefresco);
+  refrescarToken().then(function () {
+    avisarSesionPorVencer(false);
+  }).catch(function () {
+    if (intento < REINTENTOS_REFRESCO_MS.length) {
+      timerReintentoRefresco = setTimeout(function () {
+        intentarRefrescoConReintento(intento + 1);
+      }, REINTENTOS_REFRESCO_MS[intento]);
+    } else {
+      avisarSesionPorVencer(true);
+    }
+  });
+}
+
+// Renovación manual (botón "Sesión por vencer" en la topbar): mismo refresco
+// de siempre, disparado por un CLIC real — así, si Google necesita mostrar
+// algo (no solo renovar en silencio), el navegador no lo bloquea por no venir
+// de un gesto del usuario.
+export function renovarSesionAhora() {
+  return refrescarToken().then(function () {
+    avisarSesionPorVencer(false);
+  });
+}
+
 function programarRefrescoProactivo(msHastaVencer) {
   clearTimeout(timerRefrescoProactivo);
+  clearTimeout(timerReintentoRefresco);
   var espera = Math.max(0, msHastaVencer - MARGEN_REFRESCO_PROACTIVO_MS);
   timerRefrescoProactivo = setTimeout(function () {
-    // Si falla, no pasa nada grave: fetchGoogleConReintento sigue cubriendo
-    // el caso reactivo, y esta misma función se vuelve a llamar sola en el
-    // próximo login/refresco exitoso.
-    refrescarToken().catch(function () {});
+    intentarRefrescoConReintento(0);
   }, espera);
 }
 
@@ -139,6 +220,7 @@ export function refrescarToken() {
       if (resp.error) { reject(new Error(resp.error)); return; }
       accessToken = resp.access_token;
       guardarSesion(resp.expires_in);
+      avisarSesionPorVencer(false); // este refresco pudo venir del camino reactivo (fetchGoogleConReintento) y no del proactivo — de cualquier lado que venga, si hay token nuevo ya no hay nada por vencer
       resolve(accessToken);
     };
     client.requestAccessToken({ prompt: "" });

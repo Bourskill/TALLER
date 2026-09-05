@@ -10,11 +10,11 @@
 // si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
-import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar } from "./store.js";
+import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, ETIQUETA_CLAVE } from "./store.js";
 import { esc } from "./utils.js";
 import { clienteById, calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
-import { getSession, logout } from "./auth.js";
+import { getSession, logout, haySesionPorVencer, renovarSesionAhora } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
 import { subirImagenReferencia } from "./drive.js";
 import { initTeclado, renderAtajos, atajosActions } from "./teclado.js";
@@ -285,9 +285,28 @@ var coreActions = {
     window.location.reload();
   },
   "reintentar-guardado": function () {
+    // Si TODO lo pendiente es un conflicto (otro dispositivo guardó algo
+    // distinto — ver core/store.js: verificarConflicto), reintentar no hace
+    // nada: hace falta recargar. Se avisa eso en vez del mensaje genérico de
+    // "revisa tu conexión", que acá sería engañoso.
+    var antes = estadoGuardado();
+    if (antes.cantidad && antes.clavesConflicto.length === antes.cantidad) {
+      window.alert("Esto no es un problema de conexión: alguien más guardó cambios distintos en " +
+        antes.clavesConflicto.map(function (c) { return ETIQUETA_CLAVE[c] || c; }).join(", ") +
+        ".\n\nRecarga la página para verlos y aplicar tu cambio encima.");
+      return;
+    }
     reintentarPendientes().then(function (quedan) {
       if (!quedan) return;
       window.alert("Todavía no se pudo guardar.\n\nRevisa tu conexión. Si el problema sigue, recarga la página e inicia sesión de nuevo — al volver se te va a ofrecer recuperar lo que quedó pendiente.");
+    });
+  },
+  "recargar-pagina": function () {
+    window.location.reload();
+  },
+  "renovar-sesion": function () {
+    renovarSesionAhora().catch(function () {
+      window.alert("No se pudo renovar la sesión sola.\n\nGuarda lo que puedas y recarga la página para iniciar sesión de nuevo — no vas a perder tu trabajo: se te va a ofrecer recuperarlo al volver a entrar.");
     });
   },
   "recuperar-espejo": function () {
@@ -569,6 +588,7 @@ function renderTopbar() {
     '<div class="topbar-title">' + esc(titulo) + "</div>" +
     '<div class="topbar-date">' + esc(fecha) + "</div>" +
     renderIndicadorConexion() +
+    renderAvisoSesionPorVencer() +
     renderIndicadorGuardado() +
     renderCampanita() +
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
@@ -623,12 +643,37 @@ function renderIndicadorGuardado() {
 function renderAvisoSinGuardar() {
   var g = estadoGuardado();
   if (!g.cantidad) return "";
+  // Un conflicto (otro dispositivo guardó algo distinto mientras tanto — ver
+  // verificarConflicto en core/store.js) es un caso aparte: reintentar sin
+  // más no arregla nada, porque la causa sigue ahí. La salida es recargar la
+  // página, lo que trae lo más reciente y a la vez ofrece "Restaurar" para
+  // aplicar este cambio encima (ver renderAvisoRecuperacion) — mismo mensaje
+  // que ya usa esa recuperación para este caso exacto.
+  if (g.clavesConflicto.length) {
+    var etiquetas = g.clavesConflicto.map(function (c) { return ETIQUETA_CLAVE[c] || c; }).join(", ");
+    return '<div class="aviso-barra malo">' +
+      '<div><b>Alguien más guardó cambios distintos en: ' + esc(etiquetas) + ".</b>" +
+      '<div class="aviso-barra-sub">Para no perder ni pisar nada, tu cambio NO se sobrescribió encima. Sigue copiado en este navegador. Recarga la página: vas a ver lo más reciente y se te va a ofrecer aplicar tu cambio encima.</div></div>' +
+      '<button class="btn" data-action="recargar-pagina">Recargar ahora</button>' +
+      "</div>";
+  }
   return '<div class="aviso-barra malo">' +
     '<div><b>No se pudieron guardar ' + g.cantidad + (g.cantidad === 1 ? " cambio" : " cambios") + " en la hoja de datos.</b>" +
     '<div class="aviso-barra-sub">Lo que hiciste NO se perdió: quedó copiado en este navegador y se reintenta solo. ' +
     "Mientras tanto no cierres la pestaña. " + (g.ultimoError ? "(" + esc(g.ultimoError) + ")" : "") + "</div></div>" +
     '<button class="btn" data-action="reintentar-guardado">Reintentar ahora</button>' +
     "</div>";
+}
+
+// Aviso corto en la barra superior: la renovación silenciosa del token de
+// Google falló varias veces seguidas (típico: cookies de terceros
+// bloqueadas) y la sesión está por vencer de verdad. Sin esto, el usuario se
+// enteraba recién cuando algo fallaba a mitad de una acción, o cuando la
+// pantalla de login aparecía "de la nada" — acá se avisa CON TIEMPO, para
+// renovar con un clic sin perder el lugar en el que se estaba trabajando.
+function renderAvisoSesionPorVencer() {
+  if (!haySesionPorVencer()) return "";
+  return '<button class="guardado-chip malo" data-action="renovar-sesion" title="Google no pudo renovar tu sesión solo (pasa con algunos navegadores/configuraciones de privacidad). Clic para renovarla ahora, antes de que se cierre.">⏳ Sesión por vencer</button>';
 }
 
 // Al arrancar: la sesión anterior se cerró con cambios que nunca llegaron a la

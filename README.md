@@ -222,6 +222,100 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (decimoséptima ronda: conflictos entre dispositivos + sesión)
+
+El usuario reportó, con mucha preocupación ("es algo muy delicado... la app en
+vez de brindar soluciones está creando problemas e inseguridad"), que trabajar
+desde dos computadores perdía cambios: hizo ediciones en "otro computador" que
+no se guardaron, pero "el computador de siempre" mostró un aviso de
+"restaurar" que, al usarlo, no trajo nada. Además, la sesión de Google a veces
+pide iniciar sesión de nuevo "de la nada", y sospechaba que eso también estaba
+detrás de guardados fallidos.
+
+**La causa raíz real (no la que parecía).** El aviso de "recuperación" (ver
+"undécima ronda" más abajo) es 100% local a CADA navegador: compara el espejo
+de ESTE dispositivo contra lo que se acaba de leer de la Sheet. Nunca pudo
+haber traído de vuelta algo que solo existe en el disco de OTRO computador —
+eso explica el "restaurar" que no restauró nada, pero no explica la pérdida en
+sí. La causa de fondo, mirando `core/sheetsTabular.js` y `core/sheetsStorage.js`,
+es más grave: **cada guardado reescribe la clave ENTERA (todo el array, o toda
+la celda) sin comprobar antes si alguien más ya la cambió** — "el último que
+guarda gana", en silencio, porque desde el punto de vista de CADA dispositivo
+su propia escritura sí tuvo éxito (no hay ningún error que ver, ninguna cola
+de reintento que se active). Si el mismo taller se usa desde dos computadores
+el mismo día — o incluso el mismo navegador, dos pestañas, dos personas — el
+que guarda de último borra en silencio lo que el otro acababa de guardar.
+
+**La solución: control optimista de concurrencia (sello de revisión por
+clave).** Google Sheets no ofrece transacciones ni versionado nativo desde
+esta API, así que se construyó uno mínimo:
+- Cada clave (`pedidos`, `cotizaciones`, `deudas`, `tx`... tanto las que viven
+  como blob en "kv" como las que tienen su propia pestaña — ver
+  `TABLAS_SHEET`) tiene ahora una fila hermana `"__rev__:<clave>"` en la
+  pestaña "kv", con un sello que cambia en cada guardado exitoso.
+- Cada pestaña del navegador recuerda, en memoria, la última revisión que
+  sabe que coincide con la hoja (`revConocida` en `core/store.js`) — se fija
+  al cargar y después de cada guardado propio.
+- Antes de escribir de verdad (`verificarConflicto`, en `escribirClave`), se
+  relee esa revisión EN CALIENTE (`sheetsStorage.releerFresco()`, que
+  ignora la caché de sesión — sin esto, `sheetsStorage.js` solo lee la red
+  UNA vez por pestaña abierta y nunca se enteraría de nada nuevo) y se
+  compara. Si no coincide, alguien más guardó algo distinto mientras tanto:
+  se aborta la escritura ANTES de tocar el dato real, en vez de pisarlo.
+- El cambio propio no se pierde: sigue protegido por el espejo local de
+  siempre (ver "undécima ronda"). Al recargar la página, la recuperación YA
+  EXISTENTE detecta la diferencia real (ahora sí hay una) y ofrece
+  "Restaurar" — esta vez restaurando algo de verdad.
+- Es optimista, no un merge real: sigue existiendo una ventana angosta entre
+  el chequeo y la escritura. Pasa de "siempre pisa sin avisar" a "casi nunca
+  pisa, y cuando no puede evitarlo, avisa en vez de perder el cambio".
+
+**La UI distingue un conflicto de un problema de red.** Antes, cualquier
+guardado fallido mostraba el mismo aviso ("revisa tu conexión... se reintenta
+solo") — para un conflicto eso es un error activo: reintentar a ciegas cada
+15s repite el MISMO choque para siempre sin arreglar nada (`guardado.js`:
+`conflictos`, subconjunto de `pendientes` que el reintento automático se
+salta). El aviso fijo y el chip de la topbar ahora dicen explícitamente
+"Alguien más guardó cambios distintos en X" y ofrecen **Recargar ahora** en
+vez de **Reintentar ahora**.
+
+**Sesión: renovación silenciosa con reintento + aviso, en vez de fallar
+callada.** `programarRefrescoProactivo` (`core/auth.js`) reintentaba el
+refresco de token UNA sola vez y, si fallaba (cookies de terceros bloqueadas,
+algo pasajero), se quedaba callado hasta que el token vencía de verdad — el
+usuario se enteraba horas después, con un guardado fallido o con la pantalla
+de login apareciendo "de la nada". Ahora reintenta con espera corta (30s,
+60s) antes de rendirse, y solo si los tres fallan prende un aviso claro y
+con tiempo de sobra en la topbar ("⏳ Sesión por vencer") con un botón que
+renueva con un clic real (que Google no bloquea, a diferencia del intento
+silencioso). Además, al arrancar sin nada en `sessionStorage` (se cerró el
+navegador del todo, o pasó más de una hora — la causa más común de "me pide
+iniciar sesión de la nada", ya que `sessionStorage` se borra sola al cerrar
+el navegador aunque la cuenta de Google siga con la sesión abierta), `app.js`
+ya no espera un clic a ciegas: intenta un login silencioso de una vez (mismo
+`prompt:""` de siempre) mientras muestra la pantalla de login por si acaso —
+si Google puede resolverlo solo, el usuario entra sin notar nada.
+
+**Adenda: el límite de ~1h en sí es de Google y no se puede quitar**, pero
+casi todo el resto de la molestia sí es evitable. Se agregó
+`armarRenovacionEnProximoClic` (`core/auth.js`): mientras el aviso de "sesión
+por vencer" está prendido, el PRÓXIMO clic real del usuario en cualquier
+parte de la app (no hace falta que sea en el botón de la topbar) se
+aprovecha para reintentar la renovación — como viene de un gesto real, el
+navegador no lo bloquea igual que a un intento disparado solo por un timer.
+Con esto, la inmensa mayoría de las veces la sesión se renueva sola con el
+primer clic normal que el usuario ya iba a dar, sin que llegue a notar el
+aviso.
+
+Verificado con `test/smoke.mjs` (490 aserciones, incluye un escenario completo
+de conflicto: dos "guardados" a la misma clave con revisiones distintas, la
+Sheet simulada queda con el valor correcto, el reintento automático no
+insiste solo, y recargar sí trae lo real) — el intento de login silencioso, el
+aviso de sesión por vencer y la renovación en el próximo clic no tienen
+cobertura automática (dependen de Google Identity Services real, que no está
+disponible en Node): se verificaron leyendo el código y probando manualmente
+el flujo de arranque.
+
 ## Registro de cambios — agosto 2026 (decimosexta ronda: colapso gradual de tablas)
 
 El usuario señaló, con captura, que el apilado de tablas de la ronda anterior

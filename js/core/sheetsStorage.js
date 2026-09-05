@@ -46,6 +46,24 @@ export var sheetsStorage = {
     await cargar();
     return key in valueByKey ? { value: valueByKey[key] } : null;
   },
+  // Vuelve a leer TODA la pestaña "kv" de la red, ignorando la caché de esta
+  // sesión (cargar() se memoriza una sola vez y no vuelve a tocar la red
+  // aunque pasen horas). Hace falta antes de escribir algo importante: sin
+  // esto, esta pestaña nunca se entera de que otro dispositivo ya cambió la
+  // misma clave desde que ESTA pestaña cargó — ver el chequeo de conflicto en
+  // core/store.js (escribirClave/verificarConflicto). Se paga como un GET más
+  // por guardado, aceptable para el volumen de este taller.
+  releerFresco: async function () {
+    var filas = await sheetsValuesGet(getAccessToken(), SPREADSHEET_ID, "kv!A2:B5000");
+    rowByKey = {};
+    valueByKey = {};
+    filas.forEach(function (fila, i) {
+      var key = fila[0];
+      if (!key) return;
+      rowByKey[key] = i + 2;
+      valueByKey[key] = fila[1] || "";
+    });
+  },
   set: async function (key, value) {
     await cargar();
     valueByKey[key] = value;
