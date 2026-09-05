@@ -2423,6 +2423,120 @@ await storeMod2.persist("deudas");
 assert(guardadoMod.estadoGuardado().clavesConflicto.indexOf("deudas") === -1, "y con una base fresca, el siguiente guardado ya no choca");
 state.recuperacion = null;
 
+// ---------------------------------------------------------------------------
+// Ronda de 6 pedidos del usuario (2026-09-04): duplicar pedidos, reordenar
+// insumos por arrastre, notas como bloc de notas, distintivo en contactos e
+// importar desde los Contactos de Google. ("Comisiones pendientes en Cuentas
+// por pagar" ya existía — ver calcSaldosVendedores/calcSaldosConsignacion —
+// y no necesitó cambios.)
+// ---------------------------------------------------------------------------
+
+// ---------- Duplicar pedido ----------
+loginComo("admin", "", "admin@taller.test");
+state.pedidos = [{
+  id: "ped-dup-1", numeroOp: "OP-9001", cliente: "Cliente Original", tipoCliente: "propio",
+  descripcion: "Camisetas", cantidad: "3", total: 90000, costo: 60000, abono: 0, abonos: [],
+  fechaEntrega: "", fechaCreacion: hoyStr(), estado: "nuevo", estadosDef: null,
+  lineas: [{ id: "lin-1", tipo: "libre", productoId: "", productoNombre: "Camiseta", imagenUrl: "", talla: "M", cantidad: 3, precioUnitario: 30000, costoUnitario: 20000, observacion: "", campos: [] }],
+  stockConsumido: [], vendedor: { nombre: "Vendedor X", tipo: "porcentaje", valor: 10, estado: "pendiente" },
+  consignacion: null, sinFlujoProduccion: false, codigoPublico: "abcde", calendarEventId: ""
+}];
+state.cotizaciones = [];
+state.pedidosVista = "historial";
+state.filtroPedidosVista = "activos";
+state.tab = "pedidos";
+render();
+click('[data-action="duplicar-pedido"][data-id="ped-dup-1"]');
+assert(state.pedidosVista === "nueva", "duplicar-pedido lleva al formulario de \"Nuevo pedido rápido\"");
+assert(state.formPedido.cliente === "" && state.formPedido.clienteId === "", "...con el cliente en blanco, listo para elegir uno nuevo");
+assert(state.formPedido.lineas.length === 1 && state.formPedido.lineas[0].productoNombre === "Camiseta", "...con las mismas líneas copiadas");
+assert(state.formPedido.lineas[0].id !== "lin-1", "...pero cada línea con un id nuevo, no el mismo objeto del pedido original");
+assert(state.formPedido.vendedorNombre === "Vendedor X", "...y el mismo vendedor de referencia (se puede cambiar antes de confirmar)");
+assert(!state.formPedido.esConsignacion, "...nunca como consignación, aunque el pedido original lo fuera");
+
+// ---------- Distintivo en contactos ----------
+state.clientes = [];
+state.formCliente = Object.assign({}, state.formCliente, { nombre: "Juan Pérez", distintivo: "Equipo Fenix" });
+state.clientesVista = "nueva";
+state.tab = "clientes";
+render();
+click('[data-action="add-cliente"]');
+var juanCreado = state.clientes.filter(function (c) { return c.nombre === "Juan Pérez"; })[0];
+assert(!!juanCreado && juanCreado.distintivo === "Equipo Fenix", "add-cliente guarda el distintivo junto con el resto del contacto");
+state.clientesVista = "contactos";
+render();
+var cardHtml = document.querySelector(".cliente-card").outerHTML;
+assert(cardHtml.indexOf("Equipo Fenix") !== -1, "el distintivo se muestra junto al nombre en la tarjeta del contacto");
+state.filtroClientes = "fenix";
+render();
+assert(document.querySelectorAll(".cliente-card").length === 1, "buscar por el distintivo también encuentra el contacto");
+state.filtroClientes = "";
+
+// ---------- Notas como bloc de notas (texto largo + editar) ----------
+state.pendientes = [];
+state.formPend = { texto: "Primera línea\nSegunda línea, más larga todavía", categoria: "tarea", prioridad: "media", fecha: "", hora: "" };
+state.tab = "notas";
+render();
+click('[data-action="add-pend"]');
+assert(state.pendientes.length === 1 && state.pendientes[0].texto.indexOf("\n") !== -1, "una nota guarda texto de varias líneas, no solo una tarea corta");
+render();
+assert(document.querySelector(".pend-text").textContent.indexOf("Segunda línea") !== -1, "el texto largo se ve completo en la lista (no se trunca)");
+var notaId = state.pendientes[0].id;
+click('[data-action="editar-pend"][data-id="' + notaId + '"]');
+assert(state.pendEditando === notaId, "editar-pend entra en modo edición explícito");
+render();
+var textareaNota = document.querySelector('[data-pend-edit-row="' + notaId + '"] textarea');
+assert(!!textareaNota, "el modo edición muestra un textarea (no un input de una sola línea)");
+textareaNota.value = "Texto reescrito por completo";
+click('[data-action="guardar-pend-edit"][data-id="' + notaId + '"]');
+assert(state.pendientes[0].texto === "Texto reescrito por completo", "guardar-pend-edit reemplaza el texto de la nota");
+assert(state.pendEditando === "", "y cierra el modo edición al guardar");
+
+// ---------- Reordenar insumos de una referencia (arrastrar y soltar) ----------
+var cotizacionesMod = await import("../js/modules/cotizaciones.js");
+state.cotizaciones = [{
+  id: "cot-reorder-1", clienteId: "", cliente: "Cliente Reorder", descripcion: "d", fecha: hoyStr(),
+  estado: "borrador", referencias: [{
+    id: "ref-reorder-1", nombre: "Camiseta", origen: "taller", consumoAprox: 1, cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-A", nombre: "Tela", unidad: "MT", costo: 1000, tipo: "por_prenda", cantidad: 1 },
+      { id: "ins-B", nombre: "Hilo", unidad: "UND", costo: 500, tipo: "por_prenda", cantidad: 1 },
+      { id: "ins-C", nombre: "Botón", unidad: "UND", costo: 200, tipo: "por_prenda", cantidad: 4 }
+    ],
+    detalle: [], costoCompra: 0, proveedorId: ""
+  }],
+  gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "xyz"
+}];
+state.cotSucia = "";
+cotizacionesMod.reordenarInsumo("cot-reorder-1", "ref-reorder-1", "ins-C", "ins-A");
+var ordenTrasArrastre = state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; });
+assert(ordenTrasArrastre.join(",") === "ins-C,ins-A,ins-B", "reordenarInsumo mueve el insumo arrastrado justo antes del que recibió el soltado");
+assert(state.cotSucia === "cot-reorder-1", "reordenar insumos marca la cotización como \"sin guardar\", igual que cualquier otra edición (guardado explícito)");
+cotizacionesMod.reordenarInsumo("cot-reorder-1", "ref-reorder-1", "ins-A", "ins-A");
+assert(state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; }).join(",") === "ins-C,ins-A,ins-B", "soltar un insumo sobre sí mismo no cambia nada");
+state.cotSucia = "";
+
+// ---------- Importar desde mis Contactos de Google ----------
+state.clientes = [];
+state.contactosGoogle = [{ resourceName: "people/c1", nombre: "María Gómez", telefono: "3001234567", correo: "maria@example.com" }];
+state.panelImportarGoogleAbierto = true;
+state.buscarContactosGoogleImportar = "";
+state.clientesVista = "contactos";
+state.tab = "clientes";
+render();
+assert(!!document.querySelector('[data-action="importar-contacto-google"][data-resource="people/c1"]'), "un contacto de Google todavía no importado aparece con su botón de importar");
+click('[data-action="importar-contacto-google"][data-resource="people/c1"]');
+assert(state.clientesVista === "nueva", "importar-contacto-google lleva al formulario de alta");
+assert(state.formCliente.nombre === "María Gómez" && state.formCliente.telefono === "3001234567" && state.formCliente.correo === "maria@example.com", "...con nombre, teléfono y correo prellenados desde el contacto de Google");
+// Contraprueba: uno YA importado (mismo resourceName que un cliente existente
+// de esta cuenta) no debe volver a ofrecerse.
+state.clientes = [{ id: "cli-ya-importado", nombre: "María Gómez", contactResourceNames: { "admin@taller.test": "people/c1" }, contactResourceName: "people/c1", tipoRelacion: "cliente" }];
+state.clientesVista = "contactos";
+render();
+assert(!document.querySelector('[data-action="importar-contacto-google"][data-resource="people/c1"]'), "un contacto que ya es cliente de esta cuenta no se vuelve a ofrecer para importar");
+state.panelImportarGoogleAbierto = false;
+state.contactosGoogle = null;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

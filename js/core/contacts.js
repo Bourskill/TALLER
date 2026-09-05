@@ -93,3 +93,35 @@ export async function eliminarContacto(resourceName) {
   if (!resourceName) return;
   await peopleFetch(resourceName + ":deleteContact", { method: "DELETE" });
 }
+
+// Lista los Contactos de Google YA GUARDADOS por quien esté logueado — no los
+// que este taller ya sincronizó (eso es sincronizarContacto, arriba), sino
+// TODA la agenda personal de la cuenta, para poder mirarla y convertir a
+// alguien en cliente si hace falta ("un contacto guardado decide comprarme").
+// Con paginación (la API entrega de a 200 como mucho por página) pero con un
+// tope de páginas — una agenda de miles de contactos no tiene sentido
+// traerla completa solo para buscar un nombre; si hace falta más, se afina
+// la búsqueda por nombre en Google Contacts directamente.
+var TOPE_PAGINAS = 10;
+export async function listarContactosGoogle() {
+  var personas = [];
+  var pageToken = "";
+  for (var i = 0; i < TOPE_PAGINAS; i++) {
+    var qs = "personFields=" + CAMPOS + "&pageSize=200" + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : "");
+    var res = await peopleFetch("people/me/connections?" + qs, { method: "GET" });
+    if (!res) break;
+    (res.connections || []).forEach(function (p) {
+      var nombre = (p.names && p.names[0] && (p.names[0].displayName || p.names[0].givenName)) || "";
+      if (!nombre) return; // sin nombre no hay nada que mostrar ni que importar
+      personas.push({
+        resourceName: p.resourceName,
+        nombre: nombre,
+        telefono: (p.phoneNumbers && p.phoneNumbers[0] && p.phoneNumbers[0].value) || "",
+        correo: (p.emailAddresses && p.emailAddresses[0] && p.emailAddresses[0].value) || ""
+      });
+    });
+    pageToken = res.nextPageToken || "";
+    if (!pageToken) break;
+  }
+  return personas;
+}

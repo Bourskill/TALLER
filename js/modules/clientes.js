@@ -1,7 +1,7 @@
-import { state, persist, notify } from "../core/store.js";
+import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, uid, val, num, fmt, opt, norm, todayStr, exigirCampos } from "../core/utils.js";
 import { clientesFiltrados, calcHistorialCliente } from "../core/calc.js";
-import { sincronizarContacto, eliminarContacto } from "../core/contacts.js";
+import { sincronizarContacto, eliminarContacto, listarContactosGoogle } from "../core/contacts.js";
 import { getSession } from "../core/auth.js";
 import { renderHelp, renderBuscador } from "../core/components.js";
 import { TIPOS_RELACION_CONTACTO } from "../core/constants.js";
@@ -100,6 +100,7 @@ function renderFormNuevoCliente() {
     renderHelp("Un mismo directorio para todos: clientes que te compran, proveedores que te venden insumos, y puntos de consignación (locales donde exhibís mercancía sin cobrarla de una vez — se quedan con una comisión solo por lo que vendan).") +
     '</div><div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input data-form="cliente" data-field="nombre" value="' + esc(f.nombre) + '" placeholder="Nombre completo" /></div>' +
+    '<div class="field"><label>Distintivo (opcional)' + renderHelp("Algo para recordar de quién se trata de un vistazo — un equipo, un apodo, con quién vino. No es parte del nombre, solo ayuda a reconocerlo en la lista.") + '</label><input data-form="cliente" data-field="distintivo" value="' + esc(f.distintivo || "") + '" placeholder="Ej. Equipo Fenix" /></div>' +
     '<div class="field"><label>Tipo</label><select data-action-change="set-cliente-tipo-relacion">' +
     Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], tipo); }).join("") +
     "</select></div>" +
@@ -150,6 +151,7 @@ function renderListaContactos(vista) {
   }) + "</div>";
 
   html += renderSyncGoogle(lista);
+  if (!esProveedores) html += renderImportarGoogle();
 
   var criterios = [["abc", "A–Z"], ["recientes", "Recientes"]];
   if (esProveedores) criterios.push(["categoria", "Por categoría"]);
@@ -189,6 +191,88 @@ function renderSyncGoogle(lista) {
       : "Todos los de esta lista ya están en la agenda de " + esc(email) + ".") +
     " Una vez en Google, aparecen solos en el celular y en WhatsApp.</span>" +
     "</div>";
+}
+
+// Ver + importar desde la agenda PERSONAL de Google de quien esté logueado —
+// distinto de renderSyncGoogle de arriba (que EMPUJA los clientes de acá
+// hacia Google): esto trae lo que YA existe allá, para el caso "un contacto
+// que ya tenía guardado decide comprarme" sin tener que volver a teclearlo a
+// mano. Colapsado por defecto y con la lista pedida bajo demanda (nunca al
+// abrir la pestaña sola): es una llamada aparte a la People API que no todo
+// el mundo necesita en cada visita.
+function renderImportarGoogle() {
+  var session = getSession();
+  if (!session || !session.email) return "";
+  var abierto = !!state.panelImportarGoogleAbierto;
+  var html = '<div style="margin:0 0 14px;">' +
+    '<button class="btn ghost small" data-action="toggle-importar-google">' +
+    (abierto ? "▴ Ocultar mis Contactos de Google" : "📥 Ver mis Contactos de Google") + "</button>";
+  if (!abierto) return html + "</div>";
+  html += "</div>";
+
+  html += '<div class="card" style="margin-bottom:14px;">' +
+    '<div class="section-title small">Importar desde mis Contactos de Google' +
+    renderHelp("Tu agenda de Google completa, no solo lo que ya está en este directorio — por si alguien que ya tenías guardado decide comprarte. Solo se muestra a quien todavía no es un contacto de este taller.") +
+    "</div>";
+
+  if (state.contactosGoogleCargando) { return html + '<div class="empty">Cargando tu agenda de Google…</div></div>'; }
+  if (state.contactosGoogle === null) {
+    return html + '<div class="empty">No se pudo cargar (o todavía no se ha pedido).</div>' +
+      '<button class="btn ghost small" style="margin-top:8px;" data-action="cargar-contactos-google">Cargar mis contactos</button></div>';
+  }
+
+  // Un contacto de Google ya vinculado a algún cliente de ESTA cuenta no
+  // tiene nada que "importar": ya es un contacto del taller.
+  var yaImportados = {};
+  state.clientes.forEach(function (c) {
+    var rn = resourceNameDe(c, session.email);
+    if (rn) yaImportados[rn] = true;
+  });
+  var disponibles = state.contactosGoogle.filter(function (p) { return !yaImportados[p.resourceName]; });
+
+  var q = norm(state.buscarContactosGoogleImportar).trim();
+  var filtrados = q ? disponibles.filter(function (p) {
+    return norm(p.nombre).indexOf(q) >= 0 || norm(p.telefono).indexOf(q) >= 0 || norm(p.correo).indexOf(q) >= 0;
+  }) : disponibles;
+
+  html += renderBuscador({
+    id: "inp-buscar-contactos-google", filtro: "buscarContactosGoogleImportar", valor: state.buscarContactosGoogleImportar,
+    placeholder: "Buscar en tu agenda de Google…",
+    conteo: { visibles: filtrados.length, total: disponibles.length, singular: "contacto", plural: "contactos" }
+  });
+
+  if (!disponibles.length) {
+    html += '<div class="empty" style="margin-top:10px;">Ya tienes a todos tus Contactos de Google como clientes acá, o tu agenda está vacía.</div>';
+  } else if (!filtrados.length) {
+    html += '<div class="empty" style="margin-top:10px;">Sin resultados para tu búsqueda.</div>';
+  } else {
+    html += '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:340px;overflow-y:auto;">';
+    filtrados.slice(0, 100).forEach(function (p) {
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface-2);border-radius:8px;">' +
+        '<div style="min-width:0;"><div style="font-weight:600;font-size:13px;">' + esc(p.nombre) + "</div>" +
+        '<div style="font-size:11.5px;color:var(--ink-faint);">' + [p.telefono, p.correo].filter(Boolean).map(esc).join(" · ") + "</div></div>" +
+        '<button class="btn small" style="flex-shrink:0;" data-action="importar-contacto-google" data-resource="' + esc(p.resourceName) + '">+ Importar</button>' +
+        "</div>";
+    });
+    if (filtrados.length > 100) html += '<div class="section-sub" style="margin-top:4px;">Mostrando 100 de ' + filtrados.length + " — afina la búsqueda para ver el resto.</div>";
+    html += "</div>";
+  }
+  html += "</div>";
+  return html;
+}
+
+function cargarContactosGoogle() {
+  state.contactosGoogleCargando = true;
+  notify();
+  listarContactosGoogle().then(function (lista) {
+    state.contactosGoogle = lista;
+  }).catch(function (e) {
+    console.error("No se pudo cargar la agenda de Google Contacts", e);
+    state.contactosGoogle = null; // se deja en null para poder reintentar con el botón
+  }).finally(function () {
+    state.contactosGoogleCargando = false;
+    notify();
+  });
 }
 
 // Atajo para escribirle sin pasar por la agenda: wa.me abre el chat directo,
@@ -265,6 +349,7 @@ function renderClienteCard(c) {
     var historial = calcHistorialCliente(c.id);
     html += '<div class="cliente-card">' +
       '<div class="cliente-top"><span class="cliente-nombre">' + esc(c.nombre) +
+      (c.distintivo ? ' <span class="cliente-distintivo">— ' + esc(c.distintivo) + "</span>" : "") +
       (esPuntoC ? ' <span class="badge info" title="Punto de consignación">🏬 Consignación</span>' : "") +
       (esProveedorC ? ' <span class="badge" title="Proveedor">🧵 Proveedor' + (c.puntuacion ? " " + "⭐".repeat(Number(c.puntuacion)) : "") + "</span>" : "") +
       (historial.esRecurrente ? ' <span class="badge success" title="Más de un pedido registrado">↻ Recurrente</span>' : "") +
@@ -441,6 +526,7 @@ function renderClienteEdit(c) {
   return '<div class="cliente-card" data-cliente-edit-row="' + c.id + '">' +
     '<div class="form-grid">' +
     '<div class="field"><label>Nombre</label><input class="mini-input" data-role="edit-nombre" value="' + esc(c.nombre) + '" /></div>' +
+    '<div class="field"><label>Distintivo (opcional)</label><input class="mini-input" data-role="edit-distintivo" value="' + esc(c.distintivo || "") + '" placeholder="Ej. Equipo Fenix" /></div>' +
     '<div class="field"><label>Tipo</label><select class="mini-input" data-role="edit-tipo-relacion" data-action-change="set-cliente-edit-tipo">' +
     Object.keys(TIPOS_RELACION_CONTACTO).map(function (k) { return opt(k, TIPOS_RELACION_CONTACTO[k], tipo); }).join("") +
     "</select></div>" +
@@ -567,6 +653,30 @@ export var actions = {
     state.formCliente.categoriasInsumo = actuales.indexOf(val) === -1 ? actuales.concat([val]) : actuales.filter(function (v) { return v !== val; });
     notify();
   },
+  "toggle-importar-google": function () {
+    state.panelImportarGoogleAbierto = !state.panelImportarGoogleAbierto;
+    if (state.panelImportarGoogleAbierto && state.contactosGoogle === null && !state.contactosGoogleCargando) cargarContactosGoogle();
+    notify();
+  },
+  "cargar-contactos-google": function () { cargarContactosGoogle(); },
+  "importar-contacto-google": function (el) {
+    var resourceName = el.getAttribute("data-resource");
+    var p = (state.contactosGoogle || []).filter(function (x) { return x.resourceName === resourceName; })[0];
+    if (!p) return;
+    // Mismo formulario de siempre, prellenado — el usuario elige el tipo
+    // (cliente/proveedor/punto de consignación) y confirma con "Agregar",
+    // igual que si lo hubiera tecleado a mano.
+    state.formCliente = {
+      nombre: p.nombre, cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "",
+      telefono: p.telefono || "", correo: p.correo || "", distintivo: "", usuarioWhatsapp: "",
+      tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "",
+      categoriasInsumo: [], descripcion: "", puntuacion: ""
+    };
+    state.clientesVista = "nueva";
+    state.sidebarMobileOpen = false;
+    notify();
+    mostrarToast("📥 Datos copiados al formulario — revisa el tipo de contacto y guarda.");
+  },
   "add-cliente": function () {
     var fcli = state.formCliente;
     if (!exigirCampos([["Nombre", fcli.nombre]])) return;
@@ -575,6 +685,7 @@ export var actions = {
     var esProveedor = tipo === "proveedor";
     var nuevo = {
       id: uid(), nombre: fcli.nombre, cedula: fcli.cedula, direccion: fcli.direccion, ciudad: fcli.ciudad, cp: fcli.cp, cuenta: fcli.cuenta, entidad: fcli.entidad, telefono: fcli.telefono, correo: fcli.correo,
+      distintivo: (fcli.distintivo || "").trim(),
       usuarioWhatsapp: normalizarUsuarioWhatsapp(fcli.usuarioWhatsapp),
       contactResourceName: "", contactResourceNames: {},
       tipoRelacion: tipo,
@@ -588,7 +699,7 @@ export var actions = {
       roster: []
     };
     state.clientes.unshift(nuevo);
-    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", usuarioWhatsapp: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
+    state.formCliente = { nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "", distintivo: "", usuarioWhatsapp: "", tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "", categoriasInsumo: [], descripcion: "", puntuacion: "" };
     // Aterriza en la pestaña donde acaba de quedar registrado, no en una
     // lista donde habría que buscarlo entre los de otro tipo.
     state.clientesVista = esProveedor ? "proveedores" : "contactos";
@@ -646,6 +757,7 @@ export var actions = {
       if (c.id !== id) return c;
       return Object.assign({}, c, {
         nombre: nombre,
+        distintivo: val(fila, "edit-distintivo"),
         cedula: val(fila, "edit-cedula"),
         telefono: val(fila, "edit-telefono"),
         usuarioWhatsapp: normalizarUsuarioWhatsapp(val(fila, "edit-usuario-whatsapp")),

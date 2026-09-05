@@ -90,6 +90,16 @@
   .tx-row > span:has(.btn), .det-row > span:has(.btn), .emp-row > span:has(.btn){
     grid-column:1/-1;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
   .tx-row > span:has(.btn) .btn, .emp-row > span:has(.btn) .btn{flex:1 1 auto;}
+
+  /* El manijo de arrastrar insumos (ver css/cotizaciones.css) se esconde acá:
+     el API nativo de drag-and-drop no tiene soporte confiable por touch, y
+     como es position:absolute (no un hijo de grid), sacarlo no descuadra el
+     emparejamiento etiqueta/valor de arriba para nada — solo se pareja lo que
+     SÍ sigue siendo un hijo del grid. Se empareja el padding-left de la fila
+     con el resto de sus lados (el mismo 14px del padding de la tarjeta) para
+     no dejar un hueco asimétrico donde vivía el manijo. */
+  .ins-drag-handle{display:none;}
+  .ins-row[data-ins-row]{padding-left:14px;}
 }
 
 /* ==========================================================================

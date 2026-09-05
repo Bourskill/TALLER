@@ -1355,6 +1355,7 @@ export function clientesFiltrados() {
   return list.filter(function (c) {
     return norm(c.nombre).indexOf(q) >= 0 || norm(c.cedula).indexOf(q) >= 0 ||
       norm(c.ciudad).indexOf(q) >= 0 || norm(c.telefono).indexOf(q) >= 0 ||
+      norm(c.distintivo).indexOf(q) >= 0 ||
       (!!c.usuarioWhatsapp && norm(c.usuarioWhatsapp).indexOf(qUsuario) >= 0);
   });
 }

@@ -939,7 +939,15 @@ function renderRefCard(cotId, ref) {
     // cotización sigue funcionando igual con el número que tenía, hasta que
     // alguien decida actualizarla.
     var cambio = insumoCambioDeCatalogo(i);
-    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;">' +
+    // Reordenar por arrastre (ver reordenarInsumo, más abajo, y el patrón
+    // genérico 5 en core/dom.js): "más estético que necesario", así que el
+    // manijo se posiciona ABSOLUTO (no participa del grid ni de las parejas
+    // etiqueta/valor que usa el colapso responsivo — ver responsive.css) y se
+    // esconde por completo en pantalla angosta, donde arrastrar con el dedo
+    // no funciona igual (el API nativo de drag-and-drop no tiene soporte
+    // confiable por touch).
+    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
+      '<span class="ins-drag-handle" draggable="true" data-drag-handle title="Arrastra para reordenar">⠿</span>' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
       renderComboUnidad({ id: "cotins-unidad-" + i.id, clave: "cotins-unidad-" + i.id, abierto: state.comboUnidadAbierto === "cotins-unidad-" + i.id }) + "</span>" +
@@ -2552,6 +2560,37 @@ function confirmarSalidaSiSucia() {
 // global ni un servicio cobrado guardan categoriaId— así que si no se copia
 // acá se pierde en silencio la primera vez que alguien cambia el "Tipo de
 // costo" de la fila.
+// Reordena los insumos de UNA referencia arrastrando y soltando (ver el
+// manijo "⠿" en el render de arriba y el patrón genérico 5 en core/dom.js,
+// que es quien de verdad escucha dragstart/dragover/drop y llama acá). Puro
+// cambio de orden visual — no toca costos, cantidades ni nada que afecte un
+// cálculo — así que igual pasa por "guardado explícito" como cualquier otra
+// edición de la cotización (ver marcarSucia): el usuario puede reordenar y
+// arrepentirse con "Descartar" antes de confirmar.
+export function reordenarInsumo(cotId, refId, origenId, destinoId) {
+  if (!origenId || !destinoId || origenId === destinoId) return;
+  var huboCambio = false;
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, {
+      referencias: (c.referencias || []).map(function (r) {
+        if (r.id !== refId) return r;
+        var lista = (r.insumos || []).slice();
+        var origenIdx = lista.findIndex(function (i) { return i.id === origenId; });
+        if (origenIdx === -1) return r;
+        var movido = lista[origenIdx];
+        lista.splice(origenIdx, 1);
+        var destinoIdx = lista.findIndex(function (i) { return i.id === destinoId; });
+        if (destinoIdx === -1) return r;
+        lista.splice(destinoIdx, 0, movido);
+        huboCambio = true;
+        return Object.assign({}, r, { insumos: lista });
+      })
+    });
+  });
+  if (huboCambio) marcarSucia(cotId);
+}
+
 function moverInsumoAGlobal(cotId, refId, insId) {
   var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
   if (!cot) return;

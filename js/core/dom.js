@@ -863,6 +863,39 @@ function bindEvents() {
       dispatch(el.getAttribute("data-action"), el);
     });
   });
+
+  // Patrón genérico 5: arrastrar y soltar para reordenar una lista — hoy,
+  // solo los insumos de una referencia de cotización (ver el manijo "⠿" en
+  // modules/cotizaciones.js). No encaja en el patrón 4 (data-action/click):
+  // son varios eventos del API nativo de drag-and-drop, y el "drop" necesita
+  // DOS elementos (origen y destino), no uno solo como dispatch(). Por eso se
+  // llama directo a cotizaciones.reordenarInsumo() en vez de pasar por el
+  // registro de acciones.
+  app.querySelectorAll("[data-drag-handle]").forEach(function (handle) {
+    handle.addEventListener("dragstart", function (e) {
+      var fila = handle.closest("[data-ins-row]");
+      if (!fila) return;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", fila.getAttribute("data-ins"));
+      fila.classList.add("arrastrando");
+    });
+    handle.addEventListener("dragend", function () {
+      var fila = handle.closest("[data-ins-row]");
+      if (fila) fila.classList.remove("arrastrando");
+    });
+  });
+  app.querySelectorAll("[data-ins-row]").forEach(function (fila) {
+    fila.addEventListener("dragover", function (e) {
+      e.preventDefault(); // sin esto el navegador nunca dispara "drop"
+      e.dataTransfer.dropEffect = "move";
+    });
+    fila.addEventListener("drop", function (e) {
+      e.preventDefault();
+      var origenId = e.dataTransfer.getData("text/plain");
+      var destinoId = fila.getAttribute("data-ins");
+      cotizaciones.reordenarInsumo(fila.getAttribute("data-cot"), fila.getAttribute("data-ref"), origenId, destinoId);
+    });
+  });
 }
 
 function handleFormInput(el) {

@@ -1,4 +1,4 @@
-import { state, persist, notify } from "../core/store.js";
+import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
@@ -569,6 +569,7 @@ function renderHistorialPedidos() {
       "</span>" +
       (cotRelacionada ? '<button class="btn ghost small" data-action="ver-cotizacion-relacionada" data-id="' + cotRelacionada.id + '">↗ Ver cotización relacionada</button>' :
         '<button class="btn ghost small" data-action="escalar-a-cotizacion" data-id="' + p.id + '" title="Si este pedido rápido escaló y necesitas cotizar insumos, tallas y márgenes en detalle.">📈 Cotizar este pedido</button>') +
+      '<button class="btn ghost small" data-action="duplicar-pedido" data-id="' + p.id + '" title="Copia las mismas líneas a un pedido nuevo — para cuando otro cliente pide lo mismo. El cliente, el abono y el N.º de OP se llenan de cero.">⧉ Duplicar</button>' +
       '<button class="btn ghost small" style="margin-left:auto;" data-action="toggle-pedido-panel" data-id="' + p.id + '">' + (abierto ? "▴ Ocultar dinero y documentos" : "▾ Dinero y documentos") + "</button>" +
       "</div>" +
       (abierto ? renderPanelPedido(p, saldo) : "") +
@@ -1827,6 +1828,36 @@ export var actions = {
     state.cotizacionEditando = cotId; // abre de una vez el detalle completo de la recién creada
     state.cotizacionesVista = "nueva";
     notify();
+  },
+  // Copia las líneas de un pedido ya existente al formulario de "Nuevo
+  // pedido rápido" — para cuando distintos clientes piden lo mismo, sin
+  // tener que rearmar las líneas a mano. A propósito NO clona el pedido
+  // directo con un id nuevo: eso saltaría por encima de la validación de
+  // stock, la generación del N.º de OP y el registro del abono inicial que
+  // ya hace "Crear pedido" (ver esa acción) — se deja que el usuario elija
+  // el cliente y confirme por el camino normal, con el stock revisado en ese
+  // momento (no el de cuando se duplicó).
+  "duplicar-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    var p = state.pedidos.filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    state.formPedido = {
+      clienteId: "", cliente: "", tipoCliente: p.tipoCliente || "propio", abono: "", fechaEntrega: "",
+      vendedorNombre: (p.vendedor && p.vendedor.nombre) || "",
+      vendedorTipo: (p.vendedor && p.vendedor.tipo) || "porcentaje",
+      vendedorValor: (p.vendedor && p.vendedor.valor) ? String(p.vendedor.valor) : "",
+      conFlujoProduccion: !p.sinFlujoProduccion,
+      // Consignación no se copia: es una relación con un punto de venta
+      // puntual, no algo que "otro cliente también pidió" — duplicar deja
+      // siempre una venta normal con las mismas líneas.
+      esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+      lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); return copia; })
+    };
+    state.pedidoVendedorAbierto = !!(p.vendedor && p.vendedor.nombre);
+    state.pedidosVista = "nueva";
+    state.sidebarMobileOpen = false;
+    notify();
+    mostrarToast("📋 Pedido copiado al formulario — elige el cliente y confirma.");
   },
   "toggle-pedido-panel": function (el) {
     var id = el.getAttribute("data-id");

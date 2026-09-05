@@ -222,6 +222,69 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (decimoctava ronda: seis pedidos sueltos)
+
+Seis pedidos del usuario en un solo mensaje. Uno de ellos ("que las comisiones
+pendientes por pagar salgan en Cuentas por pagar") ya existía por completo —
+`calcSaldosVendedores()`/`calcSaldosConsignacion()` en `core/calc.js` ya
+agrupan eso bajo "Comisiones de vendedores"/"Comisiones de consignación" en
+Pendientes, con detalle expandible por pedido — así que no se tocó nada ahí.
+Los otros cinco:
+
+**Duplicar pedidos** (`modules/pedidos.js`: botón "⧉ Duplicar" + acción
+`duplicar-pedido`). A propósito NO clona el pedido guardado con un id nuevo
+de una — eso saltaría por encima de la validación de stock, la generación
+del N.º de OP y el registro del abono inicial que ya hace "Crear pedido".
+En vez de eso, copia las líneas al formulario de "Nuevo pedido rápido" (cada
+línea con un id nuevo, cliente y abono en blanco) y deja que el usuario
+elija el cliente y confirme por el camino normal — el stock se revisa en
+ESE momento, no en el de cuando se duplicó.
+
+**Reordenar insumos arrastrando** (`modules/cotizaciones.js`:
+`reordenarInsumo()` + manijo "⠿" en cada fila; patrón genérico 5 en
+`core/dom.js` para dragstart/dragover/drop). El usuario mismo lo calificó de
+"más estético que necesario". Detalles que importan si se vuelve a tocar:
+- El manijo es `position:absolute` a propósito (ver `css/cotizaciones.css`):
+  así NO participa del grid ni de las parejas etiqueta/valor del colapso
+  responsivo de tablas (ver "decimosexta ronda" más abajo) — no hizo falta
+  tocar esa lógica para nada.
+- Se esconde por completo bajo 1080px (mismo breakpoint que el colapso de
+  tablas, en `css/responsive.css`): el API nativo de drag-and-drop no tiene
+  soporte confiable por touch.
+- Es puro reordenamiento visual — pasa por "guardado explícito"
+  (`marcarSucia`) como cualquier otra edición de la cotización, no se
+  auto-guarda solo.
+
+**Notas como bloc de notas** (`modules/notas.js`). El campo "Descripción" pasó
+de `<input>` a `<textarea>` (con `white-space:pre-wrap` en la lista para
+respetar los saltos de línea) y se agregó edición explícita
+(`editar-pend`/`guardar-pend-edit`/`cancelar-edicion-pend`, mismo patrón
+Guardar/Cancelar que ya usan Deudas/Nómina/Clientes) — antes una nota solo se
+tachaba o se borraba, nunca se corregía sin borrar y volver a escribir.
+
+**Importar desde los Contactos de Google** (`core/contacts.js`:
+`listarContactosGoogle()`, con paginación y un tope de 10 páginas;
+`modules/clientes.js`: panel colapsado "📥 Ver mis Contactos de Google" en la
+pestaña Contactos). Trae la agenda PERSONAL completa de quien esté logueado
+—no lo que este taller ya sincronizó, que es lo que hace `renderSyncGoogle`
+justo arriba, en la dirección contraria— y oculta a quien ya es cliente de
+esta cuenta (comparando `resourceName` contra `contactResourceNames`).
+"Importar" no crea el cliente de una: copia nombre/teléfono/correo al
+formulario de "+ Nuevo contacto" y deja que el usuario elija el tipo
+(cliente/proveedor/punto) y confirme, mismo patrón que "Duplicar pedido".
+
+**Distintivo en contactos** (`core/store.js`: `formCliente.distintivo`). Campo
+de texto libre, análogo a como el usuario describió "un segundo nombre o
+apellido" — no identifica nada por sí solo, solo ayuda a reconocer al
+contacto de un vistazo (ej. "Equipo Fenix"). Se muestra junto al nombre en la
+tarjeta y entra en la búsqueda de contactos (`clientesFiltrados` en
+`core/calc.js`).
+
+Verificado con `test/smoke.mjs` (512 aserciones: +22 de esta ronda, cubriendo
+las cinco funciones nuevas) y con capturas reales en el navegador para cada
+una (el manijo de arrastre, el panel de importación, el modo edición de una
+nota, el formulario de pedido/cliente prellenado).
+
 ## Registro de cambios — septiembre 2026 (decimoséptima ronda: conflictos entre dispositivos + sesión)
 
 El usuario reportó, con mucha preocupación ("es algo muy delicado... la app en

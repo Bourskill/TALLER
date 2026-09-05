@@ -274,6 +274,12 @@ export const state = {
     // Nombre de usuario de WhatsApp (el que empieza por @): se guarda sin la
     // arroba y en minúsculas, ver normalizarUsuarioWhatsapp en modules/clientes.js.
     usuarioWhatsapp: "",
+    // Distintivo libre para recordar de quién se trata (ej. "Equipo Fenix",
+    // "Cuñado de Marta") — mismo espíritu que un segundo nombre o apellido:
+    // no identifica nada por sí solo, solo ayuda a reconocer el contacto de
+    // un vistazo. Se muestra junto al nombre (ver renderClienteCard) y entra
+    // en la búsqueda (ver clientesFiltrados en core/calc.js).
+    distintivo: "",
     // "punto_consignacion": local externo donde se exhibe mercancía por comisión (ver modules/pedidos.js).
     // "proveedor": vende insumos — categoriasInsumo/descripcion/puntuacion son propias de este tipo.
     tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "",
@@ -281,6 +287,7 @@ export const state = {
   },
   formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
   formPend: { texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
+  pendEditando: "", // id de la nota actualmente en modo edición (o "")
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },
   // Qué apartados del reporte están desplegados. El resumen financiero no
   // está acá porque va siempre visible: es el titular, no un detalle.
@@ -376,6 +383,16 @@ export const state = {
   // renderClienteEdit.
   clienteEditTipoRelacion: "",
   sincronizandoContactos: false, // true mientras se empujan todos los contactos a Google Contacts — nunca se persiste
+  // Panel "Ver mis Contactos de Google" (importar como cliente): la agenda
+  // completa de la cuenta logueada, no solo lo que este taller ya sincronizó
+  // — se trae bajo demanda (nunca al abrir la pestaña sola) y se cachea en
+  // memoria mientras dura la sesión. Ninguno de estos campos se persiste: es
+  // un panel de UI, y la lista puede cambiar del lado de Google en cualquier
+  // momento sin que este dispositivo se entere.
+  panelImportarGoogleAbierto: false,
+  contactosGoogle: null, // null = todavía no se pidió; [] = se pidió y no hay nada más que importar
+  contactosGoogleCargando: false,
+  buscarContactosGoogleImportar: "",
   clienteRosterAbierto: "", // id del cliente con su roster de equipo desplegado (o "")
   clientePreciosAbierto: "", // id del proveedor con su panel de "Precios y compras" desplegado (o "")
   // true mientras la imagen del pie de página (Configuración) se sube a
