@@ -12,7 +12,7 @@
 
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, ETIQUETA_CLAVE } from "./store.js";
 import { esc } from "./utils.js";
-import { clienteById, calcNotificaciones } from "./calc.js";
+import { calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout, haySesionPorVencer, renovarSesionAhora } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
@@ -177,16 +177,6 @@ var coreActions = {
     if (state.ui.sidebarCollapsed) return; // colapsado: no hay categorías que plegar
     state.ui.navGroups[g] = !state.ui.navGroups[g];
     persist("ui");
-    notify();
-  },
-  "select-cliente": function (el) {
-    var form = el.getAttribute("data-form");
-    var c = clienteById(el.getAttribute("data-id"));
-    if (c) {
-      var target = form === "pedido" ? state.formPedido : state.formCotizacion;
-      target.clienteId = c.id;
-      target.cliente = c.nombre;
-    }
     notify();
   },
   // El ícono del taller se SUBE, igual que cualquier otra imagen de la app

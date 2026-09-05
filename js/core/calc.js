@@ -1359,13 +1359,6 @@ export function clientesFiltrados() {
       (!!c.usuarioWhatsapp && norm(c.usuarioWhatsapp).indexOf(qUsuario) >= 0);
   });
 }
-export function buscarClientesCombo(q) {
-  q = norm(q).trim();
-  if (!q) return [];
-  return state.clientes.filter(function (c) {
-    return norm(c.nombre).indexOf(q) >= 0 || norm(c.cedula).indexOf(q) >= 0 || norm(c.ciudad).indexOf(q) >= 0;
-  }).slice(0, 6);
-}
 
 // ---------- costeo de cotizaciones (por referencia) ----------
 //

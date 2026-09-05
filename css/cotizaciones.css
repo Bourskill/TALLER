@@ -199,6 +199,11 @@
 .cliente-picker-item-info b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cliente-picker-item-info small{font-size:11.5px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cliente-picker-btn{width:100%;justify-content:flex-start;text-align:left;}
+/* Escape hatch de Pedidos: "usar como cliente nuevo" cuando la búsqueda no
+   encontró (o no hay) un contacto registrado. No existe en Cotizaciones
+   (permitirNuevo:false), que exige elegir un contacto real. */
+.cliente-picker-nuevo{padding:8px 12px;border-top:1px solid var(--border-soft);}
+.cliente-picker-nuevo .btn{width:100%;justify-content:flex-start;text-align:left;}
 
 @media (max-width: 700px){
   .picker-overlay{padding:0;}

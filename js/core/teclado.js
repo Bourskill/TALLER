@@ -230,9 +230,103 @@ function tecladoEnMenu(e, item) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Flechas en el combo de "Unidad" (renderComboUnidad, core/components.js)
+// ---------------------------------------------------------------------------
+// Es un <input> de texto libre con un panel de sugerencias aparte, no un
+// <select> nativo — por eso las flechas del teclado no hacían nada ahí,
+// a diferencia del resto de listas desplegables de la app (<select>, que el
+// navegador ya maneja solo). Este bloque le da el mismo comportamiento a
+// mano, solo para este campo: ↓/↑ abre el panel y mueve el resaltado,
+// Enter elige lo resaltado, Escape cierra sin elegir.
+
+function flechaDeComboUnidad(input) {
+  var celda = input.closest(".insumo-unidad-cell");
+  return celda ? celda.querySelector(".combo-unidad-flecha") : null;
+}
+
+function panelDeComboUnidad(input) {
+  var celda = input.closest(".insumo-unidad-cell");
+  return celda ? celda.querySelector(".combo-unidad-suggestions") : null;
+}
+
+function itemsComboUnidad(panel) {
+  return Array.prototype.slice.call(panel.querySelectorAll(".combo-item"));
+}
+
+function resaltarItemCombo(panel, item) {
+  itemsComboUnidad(panel).forEach(function (it) { it.classList.remove("activo"); });
+  if (item) {
+    item.classList.add("activo");
+    if (typeof item.scrollIntoView === "function") item.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function tecladoEnComboUnidad(e, input) {
+  var key = e.key;
+  if (key !== "ArrowDown" && key !== "ArrowUp" && key !== "Enter" && key !== "Escape") return false;
+  var flecha = flechaDeComboUnidad(input);
+  if (!flecha) return false; // no es un campo de unidad
+  var panel = panelDeComboUnidad(input);
+
+  if (key === "Escape") {
+    if (!panel) return false; // deja que Escape siga su curso normal (sacar el foco)
+    e.preventDefault();
+    api.dispatch("toggle-combo-unidad", flecha);
+    return true;
+  }
+
+  if (!panel) {
+    if (key === "Enter") return false; // panel cerrado: Enter salta de campo, como siempre
+    e.preventDefault();
+    // api.dispatch() llama a notify(), que reconstruye TODO el HTML de la
+    // pestaña (ver render() en core/dom.js) — `input` y `flecha` quedan
+    // apuntando al árbol viejo, ya desconectado de document. Hay que volver a
+    // buscar el campo por su id (siempre lo tiene, ver renderComboUnidad) una
+    // vez terminado el redibujado, igual que hace tecladoEnMenu con el foco.
+    var idCampo = input.id;
+    api.dispatch("toggle-combo-unidad", flecha); // abre y redibuja
+    var inputFresco = idCampo ? document.getElementById(idCampo) : null;
+    panel = inputFresco ? panelDeComboUnidad(inputFresco) : null;
+    if (panel) {
+      var recienAbiertos = itemsComboUnidad(panel);
+      resaltarItemCombo(panel, key === "ArrowUp" ? recienAbiertos[recienAbiertos.length - 1] : recienAbiertos[0]);
+    }
+    return true;
+  }
+
+  var items = itemsComboUnidad(panel);
+  if (!items.length) {
+    if (key === "Enter") return false;
+    e.preventDefault();
+    return true;
+  }
+  var idx = items.indexOf(panel.querySelector(".combo-item.activo"));
+
+  if (key === "ArrowDown") {
+    e.preventDefault();
+    resaltarItemCombo(panel, items[idx < 0 ? 0 : Math.min(idx + 1, items.length - 1)]);
+    return true;
+  }
+  if (key === "ArrowUp") {
+    e.preventDefault();
+    resaltarItemCombo(panel, items[idx < 0 ? items.length - 1 : Math.max(idx - 1, 0)]);
+    return true;
+  }
+  // Enter
+  if (idx < 0) return false; // nada resaltado: que Enter siga de largo
+  e.preventDefault();
+  api.dispatch("elegir-unidad", items[idx]);
+  return true;
+}
+
 document.addEventListener("keydown", function (e) {
   if (!api) return;
   var el = e.target;
+
+  if (el && el.classList && el.classList.contains("insumo-unidad")) {
+    if (tecladoEnComboUnidad(e, el)) return;
+  }
 
   // Escape: primero cierra capas; si no hay ninguna, saca el foco del campo —
   // una salida sin mouse de un buscador o de un formulario largo.

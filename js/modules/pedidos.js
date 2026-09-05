@@ -3,7 +3,7 @@ import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exig
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
-import { renderClienteCombo, renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion } from "../core/components.js";
+import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
@@ -183,7 +183,7 @@ function renderFormNuevoPedido() {
     // (ver renderOpcionesAvanzadasPedido) — lo primero que se ve es elegir el
     // cliente, que es lo único que de verdad cambia al duplicar.
     html += '<div class="form-grid" style="margin-top:10px;">' +
-      renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+      renderClienteSeleccionCampo({ clienteId: f.clienteId, nombreLibre: (!f.clienteId && f.cliente) ? f.cliente : "", accionAbrir: "abrir-cliente-picker-pedido", permitirNuevo: true }) +
       '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
       "</div>";
     html += renderOpcionesAvanzadasPedido(f);
@@ -194,7 +194,7 @@ function renderFormNuevoPedido() {
     html += renderSegmentedTipoPedido(f);
     html += renderCheckboxFlujoPedido(f);
     html += '<div class="form-grid" style="margin-top:14px;">' +
-      renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+      renderClienteSeleccionCampo({ clienteId: f.clienteId, nombreLibre: (!f.clienteId && f.cliente) ? f.cliente : "", accionAbrir: "abrir-cliente-picker-pedido", permitirNuevo: true }) +
       renderSelectOrigenPedido(f) +
       '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
       "</div>";
@@ -218,6 +218,15 @@ function renderFormNuevoPedido() {
     "</div>";
   html += "</div>"; // .card
   html += renderProductoPickerPedido();
+  html += renderClientePicker({
+    abierto: state.clientePickerAbierto, busqueda: state.clientePickerBusqueda, clientes: state.clientes,
+    inputId: "inp-cliente-picker-buscar", filtroBusqueda: "clientePickerBusqueda",
+    accionCerrar: "cerrar-cliente-picker", accionSeleccionar: "seleccionar-cliente-picker-pedido",
+    // A diferencia de Cotizaciones: un pedido rápido SÍ puede ser una venta
+    // informal a alguien que todavía no está registrado — se deja la puerta
+    // de "usar como cliente nuevo" abierta (ver "usar-cliente-nuevo-pedido").
+    permitirNuevo: true, accionUsarNuevo: "usar-cliente-nuevo-pedido"
+  });
   return html;
 }
 
@@ -1354,6 +1363,31 @@ export var actions = {
     var lineaId = el.getAttribute("data-linea");
     var fp = state.formPedido;
     fp.lineas = (fp.lineas || []).filter(function (l) { return l.id !== lineaId; });
+    notify();
+  },
+  "abrir-cliente-picker-pedido": function () {
+    state.clientePickerAbierto = true;
+    state.clientePickerBusqueda = "";
+    notify();
+  },
+  "seleccionar-cliente-picker-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    var c = state.clientes.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    state.formPedido.clienteId = c.id;
+    state.formPedido.cliente = c.nombre;
+    state.clientePickerAbierto = false;
+    notify();
+  },
+  // Escape hatch: en Pedidos sí se puede facturar a un cliente que aún no
+  // está registrado en Contactos (venta rápida/informal), a diferencia de
+  // Cotizaciones que exige elegir un contacto real ya existente.
+  "usar-cliente-nuevo-pedido": function (el) {
+    var nombre = el.getAttribute("data-nombre");
+    if (!nombre) return;
+    state.formPedido.clienteId = "";
+    state.formPedido.cliente = nombre;
+    state.clientePickerAbierto = false;
     notify();
   },
   "abrir-producto-picker-pedido": function () {

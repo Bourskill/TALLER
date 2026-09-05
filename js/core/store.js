@@ -364,10 +364,13 @@ export const state = {
   insumoPickerCategoria: "todos", // "todos" | "sin" | id de categoría
   insumoPickerBusqueda: "",
   insumoPickerSeleccion: [], // ids de insumos marcados (selección múltiple)
-  // Explorador de contactos para elegir el cliente de una cotización — a
-  // diferencia de Pedidos (donde "cliente libre" tiene sentido: ventas
-  // rápidas, informales), una cotización SIEMPRE es de un contacto real ya
-  // registrado, así que acá no se ofrece "escribir uno nuevo al vuelo".
+  // Explorador de contactos para elegir el cliente de una cotización o un
+  // pedido (compartido entre los dos: nunca están abiertos a la vez).
+  // La diferencia entre uno y otro es el flag `permitirNuevo` que cada
+  // módulo le pasa a renderClientePicker (ver core/components.js): en
+  // Cotizaciones siempre es false —una cotización es de un contacto real ya
+  // registrado—, en Pedidos es true, porque ahí "cliente libre" (venta
+  // rápida, informal) sí tiene sentido.
   // Estado de UI, nunca se persiste.
   clientePickerAbierto: false,
   clientePickerBusqueda: "",

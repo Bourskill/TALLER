@@ -2,8 +2,8 @@
 // Si mañana un tercer módulo necesita buscar/crear un cliente, se reutiliza esto
 // en vez de duplicar el combobox.
 
-import { esc } from "./utils.js";
-import { clienteById, buscarClientesCombo, unidadesConocidas } from "./calc.js";
+import { esc, norm } from "./utils.js";
+import { clienteById, unidadesConocidas } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -234,25 +234,86 @@ function iconoLupa() {
 }
 
 // form: "pedido" | "cotizacion" — debe existir state.form<Form> con {cliente, clienteId}.
-export function renderClienteCombo(form, inputId, f) {
-  var html = '<div class="field combo-wrap"><label>Cliente</label>' +
-    '<input id="' + inputId + '" autocomplete="off" data-form="' + form + '" data-field="cliente" value="' + esc(f.cliente) + '" placeholder="Escribe para buscar o crear uno nuevo" />';
+// Campo "Cliente": un botón que abre el buscador de Contactos (ver
+// renderClientePicker más abajo), no un texto libre. Reemplazó al combo de
+// autocompletado ("escribe para buscar o crear") que usaban Pedidos y
+// Cotizaciones por igual — el usuario aclaró que las dos pestañas necesitan
+// cosas distintas: una cotización SIEMPRE es de un contacto real (sus datos
+// van al PDF), así que ahí no se ofrece crear uno al vuelo; un pedido rápido
+// SÍ puede ser una venta informal a alguien que todavía no está registrado,
+// así que ahí el buscador (ver `permitirNuevo` en renderClientePicker) deja
+// esa puerta abierta. `nombreLibre` es el nombre tecleado (sin clienteId)
+// cuando SÍ se usó esa puerta — solo aplica a Pedidos.
+export function renderClienteSeleccionCampo(opts) {
+  var cliente = opts.clienteId ? clienteById(opts.clienteId) : null;
+  var texto;
+  if (cliente) texto = "✓ " + esc(cliente.nombre) + (cliente.ciudad ? " · " + esc(cliente.ciudad) : "") + " — cambiar";
+  else if (opts.nombreLibre) texto = "✎ " + esc(opts.nombreLibre) + " (nuevo) — cambiar";
+  else texto = opts.permitirNuevo ? "🔍 Buscar o crear cliente…" : "🔍 Buscar cliente…";
+  return '<div class="field"><label>Cliente</label>' +
+    '<button type="button" class="btn ghost cliente-picker-btn" data-action="' + opts.accionAbrir + '">' + texto + "</button></div>";
+}
 
-  if (f.clienteId) {
-    var c = clienteById(f.clienteId);
-    if (c) {
-      html += '<div class="combo-linked">✓ Vinculado a cliente registrado' + (c.ciudad ? " · " + esc(c.ciudad) : "") + '</div>';
-    }
-  } else if ((f.cliente || "").trim().length >= 1) {
-    var matches = buscarClientesCombo(f.cliente);
-    if (matches.length > 0) {
-      html += '<div class="combo-suggestions">' + matches.map(function (c) {
-        return '<div class="combo-item" data-action="select-cliente" data-form="' + form + '" data-id="' + c.id + '"><b>' + esc(c.nombre) + '</b><span>' + esc(c.cedula || "sin documento") + (c.ciudad ? " · " + esc(c.ciudad) : "") + '</span></div>';
-      }).join("") + '</div>';
-    } else {
-      html += '<div class="combo-suggestions"><div class="combo-empty">Sin coincidencias — se guardará como cliente libre (o regístralo en la pestaña Contactos).</div></div>';
-    }
+// Explorador de Contactos para elegir un cliente — mismo "chrome" de modal
+// que el picker de insumos (overlay/cabecera/buscador/pie), pero de una sola
+// columna (se busca por nombre, no se navega por categoría) y selección
+// única. Filtra fuera a los proveedores (el cliente de un pedido/cotización
+// es a quien se le vende, nunca a quien se le compra) y busca también por
+// distintivo, no solo nombre/cédula/ciudad.
+//
+// `permitirNuevo` (solo Pedidos) agrega, cuando hay texto buscado y no
+// calzó con nadie, un botón para seguir usando ese texto como un cliente
+// nuevo — sin eso (Cotizaciones), no calzar con nadie solo invita a
+// registrar el contacto primero en la pestaña Contactos.
+export function renderClientePicker(opts) {
+  if (!opts.abierto) return "";
+  var q = norm(opts.busqueda || "").trim();
+  var lista = (opts.clientes || []).filter(function (c) { return c.tipoRelacion !== "proveedor"; });
+  var filtrados = q ? lista.filter(function (c) {
+    return norm(c.nombre).indexOf(q) >= 0 || norm(c.cedula || "").indexOf(q) >= 0 ||
+      norm(c.ciudad || "").indexOf(q) >= 0 || norm(c.distintivo || "").indexOf(q) >= 0;
+  }) : lista;
+
+  var html = '<div class="picker-overlay" data-action="' + opts.accionCerrar + '">' +
+    '<div class="picker-modal" style="max-width:520px;" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Elegir cliente</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="' + opts.accionCerrar + '" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="picker-search">' + renderBuscador({
+      id: opts.inputId, filtro: opts.filtroBusqueda, valor: opts.busqueda,
+      placeholder: "Buscar por nombre, cédula, ciudad o distintivo…", ancho: "full", compacto: true
+    }) + "</div>" +
+    '<div class="cliente-picker-lista">';
+
+  var sugerenciaContactos = opts.permitirNuevo ? "" : ' Si es alguien nuevo, regístralo primero en la pestaña <b>Contactos</b>.';
+  if (!lista.length) {
+    html += '<div class="empty">Aún no tienes contactos registrados.' + sugerenciaContactos + "</div>";
+  } else if (!filtrados.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(opts.busqueda) + '"' : "") + "." + sugerenciaContactos + "</div>";
+  } else {
+    filtrados.forEach(function (c) {
+      html += '<div class="cliente-picker-item" data-action="' + opts.accionSeleccionar + '" data-id="' + c.id + '">' +
+        '<div class="cliente-picker-item-info"><b>' + esc(c.nombre) + (c.distintivo ? ' <span class="cliente-distintivo">— ' + esc(c.distintivo) + "</span>" : "") + "</b>" +
+        "<small>" + ([c.cedula, c.ciudad].filter(Boolean).map(esc).join(" · ") || "sin más datos") + "</small></div>" +
+        "</div>";
+    });
   }
   html += "</div>";
+
+  // Solo se ofrece cuando la búsqueda no encontró a nadie: si ya hay un
+  // contacto que coincide, mostrar igual el botón invitaría a crear un
+  // duplicado por accidente (el mismo cliente con dos ids distintos, con su
+  // historial de pedidos partido entre los dos).
+  if (opts.permitirNuevo && q && !filtrados.length) {
+    html += '<div class="cliente-picker-nuevo">' +
+      '<button class="btn ghost small" data-action="' + opts.accionUsarNuevo + '" data-nombre="' + esc(opts.busqueda) + '">+ Usar "' + esc(opts.busqueda) + '" como cliente nuevo</button>' +
+      "</div>";
+  }
+
+  html += '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">' + filtrados.length + (filtrados.length === 1 ? " contacto" : " contactos") + "</span>" +
+    '<button class="btn ghost small" data-action="' + opts.accionCerrar + '">Cancelar</button>' +
+    "</div></div></div>";
   return html;
 }

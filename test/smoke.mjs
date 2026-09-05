@@ -4,6 +4,12 @@ const dom = new JSDOM("<!DOCTYPE html><div id=\"app\"></div>", { url: "http://lo
 global.window = dom.window;
 global.document = dom.window.document;
 global.CustomEvent = dom.window.CustomEvent;
+// Node trae su propio Event global (desde Node 15+) que NO es el mismo que
+// el de jsdom — sin este parche, cualquier `new Event(...)` que la app haga
+// (ver "elegir-unidad" en core/dom.js) crea un Event de Node, y jsdom lo
+// rechaza al hacer dispatchEvent sobre un nodo suyo ("parameter 1 is not of
+// type 'Event'"). En un navegador real esto no pasa: solo hay un Event.
+global.Event = dom.window.Event;
 global.Blob = dom.window.Blob || class {};
 global.URL = dom.window.URL;
 if (!global.URL.createObjectURL) global.URL.createObjectURL = () => "blob:mock";
@@ -71,6 +77,20 @@ function elegirClienteCotizacion(nombre) {
   }
   state.formCotizacion.clienteId = id;
   state.formCotizacion.cliente = nombre;
+}
+// Mismo atajo que elegirClienteCotizacion, pero para Pedidos: para las
+// pruebas que solo necesitan "un pedido con este cliente" (no están probando
+// el buscador en sí). A diferencia de Cotizaciones, Pedidos SÍ admite un
+// cliente libre (sin contacto real) — ver "usar-cliente-nuevo-pedido" en
+// modules/pedidos.js — pero acá se crea igual el contacto para que las
+// pruebas que sí verifican clienteId (no solo el nombre) también funcionen.
+function elegirClientePedido(nombre) {
+  const id = "cli-test-" + nombre.replace(/\s+/g, "-").toLowerCase();
+  if (!state.clientes.some(c => c.id === id)) {
+    state.clientes.push({ id, nombre, tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] });
+  }
+  state.formPedido.clienteId = id;
+  state.formPedido.cliente = nombre;
 }
 // Los campos que alimentan un cálculo en pantalla no usan data-form (que
 // escribe en el borrador sin repintar) sino data-action-change, que dispara
@@ -149,16 +169,22 @@ render();
 
 // --- pedidos: pestañas "+ Nuevo pedido" / "Historial" — mismo patrón ---
 click('[data-action="tab"][data-tab="pedidos"]');
-assert(state.pedidosVista === "nueva" && !!document.querySelector('[data-form="pedido"][data-field="cliente"]'), "Pedidos entra mostrando el formulario en blanco");
+assert(state.pedidosVista === "nueva" && !!document.querySelector('[data-action="abrir-cliente-picker-pedido"]'), "Pedidos entra mostrando el formulario en blanco");
 
 // --- pedidos: crear pedido vinculado al cliente + abono inicial ---
 // El total y el costo del pedido ya NO son campos que se escriban: salen de
 // las líneas (ver renderPrecioYPago en modules/pedidos.js), así que crear un
 // pedido pasa por agregar al menos una línea con su cantidad y su precio.
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-assert(document.querySelector(".combo-item"), "sugiere el cliente en el combobox");
-click('.combo-item[data-action="select-cliente"]');
-assert(state.formPedido.clienteId === state.clientes[0].id, "vincula clienteId en el combobox");
+// El cliente, igual que en Cotizaciones, se elige con el mismo buscador de
+// contactos — acá se ejercita el flujo real (abrir, buscar, elegir) porque
+// "Cliente Prueba" ya es un contacto real (se registró arriba, en Contactos).
+click('[data-action="abrir-cliente-picker-pedido"]');
+assert(!!document.querySelector(".picker-overlay"), "el buscador de cliente se abre en Pedidos");
+setInput("#inp-cliente-picker-buscar", "Cliente Prueba");
+render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
+click('[data-action="seleccionar-cliente-picker-pedido"][data-id="' + state.clientes[0].id + '"]');
+assert(state.formPedido.clienteId === state.clientes[0].id && state.formPedido.cliente === "Cliente Prueba", "vincula clienteId con el contacto elegido en el buscador");
+assert(!state.clientePickerAbierto, "y cierra el buscador solo");
 click('[data-action="add-pedido-linea-libre"]');
 assert(state.formPedido.lineas.length === 1, "agrega una línea escrita a mano al pedido");
 const lineaLibreId = state.formPedido.lineas[0].id;
@@ -451,7 +477,7 @@ assert(state.cotizaciones.find(c => c.id === cotConvertida.id).cliente === "Clie
 // explícitamente al formulario en blanco antes de poder llenarlo de nuevo.
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+elegirClientePedido("Cliente Prueba");
 click('[data-action="add-pedido-linea-libre"]');
 const lineaVendedorId = state.formPedido.lineas[0].id;
 setLinea(lineaVendedorId, "productoNombre", "Pedido con vendedor");
@@ -515,7 +541,7 @@ assert(state.productoEditando === productoId && state.productosVista === "nueva"
 // queda "seleccionado" en un segundo mini-formulario aparte. ---
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+elegirClientePedido("Cliente Prueba");
 click('[data-action="abrir-producto-picker-pedido"]');
 assert(state.pedidoProductoPickerAbierto === true, "abre el explorador de productos del catálogo");
 setInput('#inp-producto-picker-pedido-buscar', "CAM-001");
@@ -558,7 +584,7 @@ assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock =
 
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+elegirClientePedido("Cliente Prueba");
 click('[data-action="abrir-producto-picker-pedido"]');
 setInput('#inp-producto-picker-pedido-buscar', "Camiseta unica");
 render();
@@ -622,7 +648,7 @@ assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descue
 // precio al público acordado con él. ---
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+elegirClientePedido("Cliente Prueba");
 click('[data-action="set-tipo-pedido"][data-val="consignacion"]');
 click('[data-action="abrir-producto-picker-pedido"]');
 click('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]');
@@ -746,7 +772,7 @@ const { movimientosGeneradosPorPedido, pedidoCancelado, calcPorCobrar: porCobrar
 // se arma un pedido con un abono real (plata que de verdad entró)
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
+elegirClientePedido("Cliente Prueba");
 click('[data-action="add-pedido-linea-libre"]');
 const lineaCancelId = state.formPedido.lineas[0].id;
 setLinea(lineaCancelId, "productoNombre", "Pedido que se va a caer");
@@ -2514,7 +2540,17 @@ assert(!state.formPedido.esConsignacion, "...nunca como consignación, aunque el
 assert(state.pedidoFormDuplicado === true, "...y queda marcado como formulario duplicado (solo ahí se recoge la base detrás de 'Opciones avanzadas')");
 render();
 assert(!!document.querySelector('[data-action="toggle-pedido-opciones-avanzadas"]'), "el formulario recién duplicado muestra el colapsable de 'Opciones avanzadas'");
-setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Nuevo Dup"); // la línea duplicada ("Camiseta") ya trae datos válidos, no hace falta agregar otra
+// La línea duplicada ("Camiseta") ya trae datos válidos, no hace falta agregar
+// otra — solo falta el cliente, que es justo lo que reportó el usuario: al
+// duplicar (típicamente porque OTRO cliente pidió lo mismo) el campo de
+// cliente no ofrecía nada para elegirlo. Se prueba con "usar cliente nuevo"
+// (no un contacto ya registrado) porque ese es el caso de uso real de duplicar.
+click('[data-action="abrir-cliente-picker-pedido"]');
+setInput("#inp-cliente-picker-buscar", "Cliente Nuevo Dup");
+render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
+click('[data-action="usar-cliente-nuevo-pedido"]');
+assert(state.formPedido.cliente === "Cliente Nuevo Dup" && state.formPedido.clienteId === "", "\"usar cliente nuevo\" deja el nombre libre sin atarlo a un contacto registrado");
+assert(!state.clientePickerAbierto, "y cierra el buscador solo");
 click('[data-action="add-pedido"]');
 assert(state.pedidoFormDuplicado === false, "al crear el pedido de verdad, se apaga la marca de 'duplicado' — el próximo formulario en blanco vuelve a ser el normal");
 
@@ -2641,8 +2677,9 @@ state.cotizacionEditando = "";
 // El usuario aclaró: una cotización SIEMPRE es de un contacto real ya
 // registrado (nombre, cédula, dirección van al PDF) — a diferencia de
 // Pedidos, donde "cliente libre" tiene sentido para una venta rápida e
-// informal. El combo de texto libre + "se guardará como cliente libre" que
-// SÍ sigue usando Pedidos no era lo que hacía falta acá.
+// informal. Pedidos usa el MISMO buscador (ver bloque más abajo), pero con
+// permitirNuevo:true — ahí sí se ofrece "usar cliente nuevo" cuando no hay
+// coincidencia con ningún contacto registrado.
 state.tab = "cotizaciones";
 state.cotizacionesVista = "nueva";
 state.cotizacionEditando = "";
@@ -2660,11 +2697,11 @@ assert(!!document.querySelector('[data-action="abrir-cliente-picker-cotizacion"]
 assert(document.querySelector('[data-action="add-cotizacion"]').disabled, "sin cliente elegido, \"Crear cotización\" queda deshabilitado");
 click('[data-action="abrir-cliente-picker-cotizacion"]');
 assert(!!document.querySelector(".picker-overlay"), "el buscador se abre");
-assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker"]').length === 2, "lista los contactos que SÍ son clientes (2), sin el proveedor");
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker-cotizacion"]').length === 2, "lista los contactos que SÍ son clientes (2), sin el proveedor");
 setInput("#inp-cliente-picker-buscar", "fenix");
 render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
-assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker"]').length === 1, "el buscador también filtra por el distintivo del contacto");
-click('[data-action="seleccionar-cliente-picker"][data-id="cli-pick-2"]');
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker-cotizacion"]').length === 1, "el buscador también filtra por el distintivo del contacto");
+click('[data-action="seleccionar-cliente-picker-cotizacion"][data-id="cli-pick-2"]');
 assert(state.formCotizacion.clienteId === "cli-pick-2" && state.formCotizacion.cliente === "Carlos Ruiz", "elegir un contacto vincula clienteId Y copia el nombre");
 assert(!state.clientePickerAbierto, "y cierra el buscador solo");
 render();
@@ -2673,6 +2710,29 @@ setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes Fenix"
 click('[data-action="add-cotizacion"]');
 assert(state.cotizaciones.some(function (c) { return c.clienteId === "cli-pick-2" && c.cliente === "Carlos Ruiz"; }), "la cotización se crea con el cliente elegido en el buscador");
 state.cotizacionEditando = "";
+
+// ---------- Mismo buscador en Pedidos, CON la puerta de "cliente nuevo" ----------
+state.tab = "pedidos";
+state.pedidosVista = "nueva";
+state.clientePickerAbierto = false;
+state.clientePickerBusqueda = "";
+state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true, esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+render();
+assert(!document.querySelector('[data-form="pedido"][data-field="cliente"]'), "en Pedidos el cliente tampoco es ya un campo de texto libre");
+click('[data-action="abrir-cliente-picker-pedido"]');
+assert(!!document.querySelector(".picker-overlay"), "el mismo buscador se abre en Pedidos");
+assert(!document.querySelector('[data-action="usar-cliente-nuevo-pedido"]'), "sin nada escrito en la búsqueda, no se ofrece \"usar cliente nuevo\" todavía");
+setInput("#inp-cliente-picker-buscar", "Carlos");
+render();
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker-pedido"]').length === 1, "encuentra el contacto real que coincide");
+assert(!document.querySelector('[data-action="usar-cliente-nuevo-pedido"]'), "y como SÍ hay coincidencia, tampoco se ofrece crear uno nuevo (evita duplicar el mismo contacto por error)");
+setInput("#inp-cliente-picker-buscar", "Nadie Registrado Aún");
+render();
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker-pedido"]').length === 0, "sin coincidencias entre los contactos reales");
+assert(!!document.querySelector('[data-action="usar-cliente-nuevo-pedido"]'), "acá sí aparece la puerta de \"usar cliente nuevo\" — Pedidos admite ventas informales, a diferencia de Cotizaciones");
+click('[data-action="usar-cliente-nuevo-pedido"]');
+assert(state.formPedido.cliente === "Nadie Registrado Aún" && state.formPedido.clienteId === "", "\"usar cliente nuevo\" copia el texto buscado como cliente libre, sin clienteId");
+assert(!state.clientePickerAbierto, "y cierra el buscador solo");
 
 // ---------- Importar desde mis Contactos de Google ----------
 state.clientes = [];
@@ -2746,6 +2806,57 @@ campoCosto.value = "7000";
 campoCosto.dispatchEvent(new dom.window.Event("change", { bubbles: true })); // sin keydown Tab antes
 assert(document.activeElement !== document.body, "un 'change' sin Tab de por medio tampoco pierde el foco...");
 assert(document.activeElement && document.activeElement.getAttribute("data-campo") === "costoUnitario", "...y sin un destino de Tab que seguir, se queda en el mismo campo (mejor que caer a document.body)");
+
+// ---------------------------------------------------------------------------
+// Flechas del teclado en el combo de "Unidad" (renderComboUnidad): el usuario
+// notó que ESTE campo en particular no se manejaba con ↑/↓ "como las otras
+// listas desplegables" de la app — esas son <select> nativos, que el
+// navegador ya maneja solo. Este campo es un <input> de texto con un panel de
+// sugerencias aparte (no un <select>), así que había que dárselo a mano —
+// ver tecladoEnComboUnidad en core/teclado.js.
+// ---------------------------------------------------------------------------
+const productosPreviosFlecha = state.productos, plantillasPreviasFlecha = state.plantillasPrendas, cotizacionesPreviasFlecha = state.cotizaciones;
+state.productos = []; state.plantillasPrendas = []; state.cotizaciones = [];
+state.catalogoInsumos = [
+  { id: "iu-flecha", nombre: "Cinta flecha", unidad: "MT", costo: 1000, tipo: "por_prenda", categoriaId: "", proveedorId: "" },
+  { id: "iu-flecha-2", nombre: "Otro insumo", unidad: "ROLLO", costo: 500, tipo: "por_prenda", categoriaId: "", proveedorId: "" },
+  { id: "iu-flecha-3", nombre: "Tercer insumo", unidad: "UND", costo: 500, tipo: "por_prenda", categoriaId: "", proveedorId: "" }
+];
+state.catalogoCategorias = [];
+state.filtroCatalogoCategoria = "todos";
+state.buscarCatalogo = "";
+state.comboUnidadAbierto = "";
+state.tab = "catalogo";
+render();
+const campoUnidad = document.getElementById("ins-unidad-iu-flecha");
+assert(!!campoUnidad, "sanity: existe el campo de unidad del primer insumo");
+campoUnidad.focus();
+tecla("ArrowDown");
+assert(!!document.querySelector(".combo-unidad-suggestions"), "↓ con el panel cerrado lo abre, igual que un <select>");
+let itemActivo = document.querySelector(".combo-item.activo");
+assert(!!itemActivo && itemActivo.textContent === "MT", "...y resalta la primera sugerencia en orden alfabético (MT, ROLLO, UND)");
+tecla("ArrowDown");
+itemActivo = document.querySelector(".combo-item.activo");
+assert(itemActivo && itemActivo.textContent === "ROLLO", "↓ de nuevo mueve el resaltado a la siguiente sugerencia");
+tecla("ArrowDown");
+tecla("ArrowDown"); // ya en la última: una de más no debe dar la vuelta al principio
+itemActivo = document.querySelector(".combo-item.activo");
+assert(itemActivo && itemActivo.textContent === "UND", "↓ se detiene en la última sugerencia, no da la vuelta (igual que un <select>)");
+tecla("ArrowUp");
+itemActivo = document.querySelector(".combo-item.activo");
+assert(itemActivo && itemActivo.textContent === "ROLLO", "↑ mueve el resaltado hacia atrás");
+tecla("Enter");
+assert(!document.querySelector(".combo-unidad-suggestions"), "Enter elige lo resaltado y cierra el panel");
+assert(document.getElementById("ins-unidad-iu-flecha").value === "ROLLO", "...escribe la unidad elegida sobre el campo original");
+assert(state.catalogoInsumos[0].unidad === "ROLLO", "...y el cambio queda guardado en el insumo (mismo camino que elegirlo con el mouse)");
+assert(document.activeElement && document.activeElement.id === "ins-unidad-iu-flecha", "tras elegir con Enter, el foco se queda en el campo (no se pierde ni salta)");
+// Escape cierra sin elegir nada.
+tecla("ArrowDown");
+assert(!!document.querySelector(".combo-unidad-suggestions"), "sanity: el panel vuelve a abrirse");
+tecla("Escape");
+assert(!document.querySelector(".combo-unidad-suggestions"), "Escape cierra el panel");
+assert(state.catalogoInsumos[0].unidad === "ROLLO", "...sin haber cambiado la unidad");
+state.productos = productosPreviosFlecha; state.plantillasPrendas = plantillasPreviasFlecha; state.cotizaciones = cotizacionesPreviasFlecha;
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

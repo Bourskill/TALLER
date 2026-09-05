@@ -46,6 +46,8 @@
 .combo-item{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--border-soft);}
 .combo-item:last-child{border-bottom:none;}
 .combo-item:hover{background:var(--surface-2);}
+/* Resaltado por teclado (↑/↓), ver tecladoEnComboUnidad en core/teclado.js. */
+.combo-item.activo{background:var(--accent-soft);color:var(--accent-ink);}
 .combo-item b{color:var(--ink);}
 .combo-item span{color:var(--ink-faint);font-size:11px;display:block;margin-top:1px;}
 .combo-empty{padding:9px 10px;font-size:12px;color:var(--ink-faint);}

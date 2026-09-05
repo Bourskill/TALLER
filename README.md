@@ -222,6 +222,49 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimosegunda ronda: el buscador de cliente también en Pedidos, y flechas en el combo de Unidad)
+
+Cuarta vuelta sobre el mismo bloque de reportes. Dos correcciones.
+
+**El buscador de contactos, que la ronda anterior dejó SOLO en Cotizaciones,
+también hacía falta en Pedidos.** La ronda pasada asumió (por la aclaración
+del usuario sobre Cotizaciones) que en Pedidos "un cliente libre para una
+venta rápida SÍ tiene sentido, y se dejó intacto" — pero el siguiente reporte
+del usuario, con el mismo bullet de "duplicar pedidos", trajo "r4: no hay
+cambio": el campo de cliente de Pedidos seguía sin ofrecer nada para
+seleccionarlo, que era justamente el reclamo original. Se generalizó el
+mismo componente (`renderClienteSeleccionCampo`/`renderClientePicker` en
+`core/components.js`, ya no locales a Cotizaciones) a los dos módulos,
+distinguidos por un flag `permitirNuevo`: en Cotizaciones sigue en `false`
+(un contacto real siempre), en Pedidos es `true` — ahí el buscador agrega un
+botón "usar cliente nuevo" para la venta informal de siempre, pero SOLO
+cuando la búsqueda no encontró ningún contacto real (si ya hay una
+coincidencia, no se ofrece crear uno nuevo — evitar un mismo cliente
+duplicado con dos ids, con su historial de pedidos partido entre los dos).
+
+**Las flechas del teclado no hacían nada en el combo de "Unidad".** El
+usuario lo notó al probar el arreglo de Tab: "hay algunos campos que no sé
+cómo editar con el teclado, por ejemplo el de unidades... en las otras listas
+desplegables se maneja con las flechas". La diferencia real: esas "otras
+listas" son `<select>` nativos, que el navegador ya maneja solo; el combo de
+Unidad (`renderComboUnidad`) es un `<input>` de texto con un panel de
+sugerencias aparte, sin ningún manejo de teclado propio. Se le agregó a mano
+en `core/teclado.js` (`tecladoEnComboUnidad`): ↓ abre el panel y resalta la
+primera sugerencia (orden alfabético), ↓/↑ mueven el resaltado sin dar la
+vuelta en los extremos (igual que un `<select>`), Enter elige lo resaltado y
+Escape cierra sin elegir. Al implementarlo salió a la luz un bug de prueba
+—no de la app— que llevaba latente desde que existe el combo: `elegir-unidad`
+usa `new Event(...)` para dispararle "input"/"change" al campo, y Node trae
+su propio `Event` global (desde Node 15+) que jsdom rechaza al usarlo sobre
+uno de sus nodos; en un navegador real esto nunca pasa, solo hay un `Event`.
+Se corrigió parcheando `global.Event` en `test/smoke.mjs`, igual que ya
+estaba parchado `CustomEvent`.
+
+De paso, limpieza: la acción `"select-cliente"` (de un combo de sugerencias
+que ya no existe en ningún lado) quedó huérfana en `core/dom.js` — se borró.
+
+Verificado con `test/smoke.mjs` (583 aserciones en total: +25 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimoprimera ronda: Tab de verdad, y SortableJS no interrumpe)
 
 Tercera vuelta sobre "Duplicar pedido"/SortableJS/Tab. Dos correcciones reales.
