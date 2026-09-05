@@ -362,6 +362,67 @@ var actionRegistry = Object.assign(
 // form -> clave en `state` que guarda su borrador.
 var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", emp: "formEmp", gastoFijo: "formGastoFijo", deuda: "formDeuda", pedido: "formPedido", cotizacion: "formCotizacion", reporte: "formReporte", producto: "formProducto", nominaPago: "formNominaPago", reembolso: "formReembolso", abono: "formAbono" };
 
+// ---------------------------------------------------------------------------
+// Restaurar el foco tras un render sin id propio en el campo
+// ---------------------------------------------------------------------------
+// EL PROBLEMA QUE RESUELVE: render() reconstruye TODO el HTML de la pestaña
+// activa en cada cambio (ver más abajo: app.innerHTML = html) — no hay una
+// sola pieza del DOM que sobreviva intacta. Para que esto no se sintiera como
+// recargar la página en cada clic, ya existía una restauración de foco POR
+// ID: se anota qué elemento tenía el foco antes de redibujar, y se le vuelve
+// a poner después. Pero eso solo funciona si el campo tiene un `id` — y la
+// enorme mayoría de los campos de la app (un "mini-input" de una línea de
+// pedido, una casilla, un <select> de tipo de costo...) NO lo tienen: se
+// identifican por sus atributos data-* (data-campo, data-linea, data-ins...),
+// no por id.
+//
+// Por qué esto se sentía justo al usar Tab (reportado por el usuario): un
+// campo con `data-action-change` dispara su acción en el evento "change" —
+// que el navegador lanza AL SALIR del campo, incluida la salida por Tab,
+// ANTES de terminar de mover el foco al siguiente campo. Si ese campo no
+// tenía id, la reconstrucción de HTML que la propia acción dispara (vía
+// notify()) no tenía a dónde devolver el foco: quedaba en document.body. Sin
+// ninguna posición “actual” en el orden de tabulación, el SIGUIENTE Tab
+// arrancaba desde el principio del documento — aterrizando en el enlace
+// "Saltar al contenido" (el primer elemento tabulable de toda la página) en
+// vez de seguir avanzando con naturalidad. Se sentía como que Tab
+// "deseleccionaba" el campo y no hacía nada, cuando en realidad sí hacía
+// algo: perdía el hilo por completo.
+//
+// LA SOLUCIÓN: si el campo con foco no tiene id, se arma un selector CSS con
+// sus atributos data-* (los mismos que ya usan las acciones para saber sobre
+// qué fila/línea/insumo operar) — alcanza para volver a encontrar EXACTAMENTE
+// ese campo entre sus hermanos después de reconstruir el HTML, sin necesitar
+// ponerle un id a cada uno de los cientos de campos de la app.
+var ATRIBUTOS_IDENTIDAD_FOCO = [
+  "data-campo", "data-field", "data-form", "data-action-change", "data-role",
+  "data-linea", "data-id", "data-cot", "data-ref", "data-ins", "data-idx",
+  "data-insumo", "data-pedido", "data-venta", "data-resource"
+];
+function selectorEstableParaFoco(el) {
+  if (!el || el.nodeType !== 1 || el === document.body || !el.tagName) return null;
+  var partes = [el.tagName.toLowerCase()];
+  ATRIBUTOS_IDENTIDAD_FOCO.forEach(function (attr) {
+    var v = el.getAttribute(attr);
+    if (v != null) partes.push("[" + attr + '="' + v.replace(/["\\]/g, "\\$&") + '"]');
+  });
+  // Sin ningún atributo identificador no hay forma confiable de volver a
+  // encontrarlo entre varios hermanos iguales (ej. dos <select> sueltos sin
+  // marcar) — se deja pasar en vez de arriesgar enfocar el elemento
+  // equivocado, que sería peor que no restaurar nada.
+  return partes.length > 1 ? partes.join("") : null;
+}
+// Vuelve a poner el foco (y la posición del cursor, si aplica) en `el`,
+// compartido por las dos vías de restauración (por id y por selector) de
+// render() más abajo.
+function reponerFoco(el, selStart) {
+  if (!el) return;
+  el.focus();
+  if (selStart != null && typeof el.setSelectionRange === "function") {
+    try { el.setSelectionRange(selStart, selStart); } catch (e) { /* elementos sin selección de texto (ej. checkbox) */ }
+  }
+}
+
 var rendering = false;
 var pendingRerender = false;
 // Última pestaña dibujada, para poder avisarle cuando se sale de ella (ver
@@ -386,6 +447,10 @@ export function render() {
   aplicarTema();
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
+  // Sin id propio: se guarda un selector armado con sus atributos data-*
+  // (ver selectorEstableParaFoco arriba) para poder restaurarle el foco
+  // igual — es el caso de la enorme mayoría de los campos de la app.
+  var activeSelector = !activeId ? selectorEstableParaFoco(active) : null;
   var selStart = active && typeof active.selectionStart === "number" ? active.selectionStart : null;
   // El explorador de insumos (ver renderInsumoPicker en modules/cotizaciones.js)
   // se re-renderiza ENTERO con cada marca/desmarca (checkbox de selección) —
@@ -464,11 +529,11 @@ export function render() {
     if (mod && mod.afterRender) mod.afterRender();
 
     if (activeId) {
-      var el2 = document.getElementById(activeId);
-      if (el2) {
-        el2.focus();
-        if (selStart != null && el2.setSelectionRange) { try { el2.setSelectionRange(selStart, selStart); } catch (e) {} }
-      }
+      reponerFoco(document.getElementById(activeId), selStart);
+    } else if (activeSelector) {
+      var elRestaurado;
+      try { elRestaurado = app.querySelector(activeSelector); } catch (e) { elRestaurado = null; }
+      reponerFoco(elRestaurado, selStart);
     }
     if (scrollPicker != null) {
       var listaPicker2 = document.querySelector(".picker-list");

@@ -270,6 +270,12 @@ export const state = {
   },
   pedidoVendedorAbierto: false, // sección de comisión de vendedor desplegada en el formulario de pedido
   pedidoOpcionesAvanzadasAbierto: false, // sección "Opciones avanzadas" (tipo de pedido, flujo, origen) desplegada en el formulario de pedido
+  // true solo cuando state.formPedido se prellenó con "Duplicar pedido": es
+  // lo único que decide si el formulario recoge tipo/flujo/origen detrás de
+  // "Opciones avanzadas" — el formulario normal de "+ Nuevo pedido rápido"
+  // nunca cambia de forma (ver renderFormNuevoPedido en modules/pedidos.js).
+  // Se apaga solo al crear el pedido de verdad.
+  pedidoFormDuplicado: false,
   formCliente: {
     nombre: "", cedula: "", direccion: "", ciudad: "", cp: "", cuenta: "", entidad: "", telefono: "", correo: "",
     // Nombre de usuario de WhatsApp (el que empieza por @): se guarda sin la

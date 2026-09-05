@@ -99,17 +99,52 @@ function faltantesPedido(f) {
 // va llenando de información a medida que se agregan líneas. El camino por
 // defecto —venta directa, un producto del catálogo— está a la vista sin
 // tener que configurar nada.
-// "Opciones avanzadas": decisiones de la BASE del pedido (venta directa vs.
-// consignación, si lleva seguimiento por etapas de producción, origen propio
-// o de tercero) — casi siempre se quedan en su valor por defecto, así que
-// antes de esto se veían siempre arriba de todo, empujando lo que sí cambia
-// pedido a pedido (cliente, líneas) más abajo. El usuario lo reportó
-// puntualmente sobre "Duplicar pedido": aterrizar en un formulario con estas
-// tres decisiones repetidas de cero, cuando la intención es solo cambiar el
-// cliente, se sentía engorroso. Colapsado salvo que ya tenga algo distinto
-// del default (consignación, tercero, sin flujo) — mismo criterio "con
-// bulto" que ya usa el toggle de Vendedor (ver renderVendedorPedido): si hay
-// algo adentro que de verdad hay que revisar, se ve de una.
+// Las tres decisiones de la BASE de un pedido nuevo: venta directa o
+// consignación, si lleva seguimiento por etapas, y origen propio o de
+// tercero. Factorizadas aparte porque se arman DISTINTO según de dónde viene
+// el formulario (ver renderFormNuevoPedido): al crear uno desde cero se ven
+// inline, de entrada, como siempre — son la primera decisión real de un
+// pedido nuevo, no "algo avanzado". Solo se recogen detrás de un colapsable
+// cuando el formulario llegó de "Duplicar pedido" (ver
+// renderOpcionesAvanzadasPedido, más abajo): ahí SÍ son casi siempre
+// redundantes (ya vienen decididas del pedido original), y esconderlas de
+// entrada es lo que de verdad pidió el usuario — la corrección explícita
+// fue que el formulario NORMAL no debía cambiar de forma, solo el caso de
+// duplicar.
+function renderSegmentedTipoPedido(f) {
+  return '<div class="cot-col-title" style="margin-top:2px;">Tipo de pedido' +
+    renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
+    "</div>" +
+    '<div class="segmented">' +
+    '<button class="segmented-opcion ' + (f.esConsignacion ? "" : "active") + '" data-action="set-tipo-pedido" data-val="venta">🧾 Venta directa</button>' +
+    '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
+    "</div>";
+}
+// No todo pedido rápido pasa por producción: algo ya hecho, un servicio, una
+// reventa. No se ofrece en consignación porque esa ya nace sin flujo por su
+// cuenta (ver "add-pedido": nace directo como "entregado", como cualquier
+// mercancía que ya está lista para salir).
+function renderCheckboxFlujoPedido(f) {
+  if (f.esConsignacion) return "";
+  return '<label class="toggle-card" style="margin-top:10px;">' +
+    '<input type="checkbox" ' + (f.conFlujoProduccion ? "checked" : "") + ' data-action-change="toggle-pedido-flujo" />' +
+    "<span><b>🧵 Este pedido pasa por producción</b>" +
+    '<small>Muestra el seguimiento por etapas (cortado, confección…) en la tarjeta del pedido. Desmárcalo si ya está listo, es un servicio, o no tiene sentido llevarle etapas — el pedido se crea directo como terminado.</small></span>' +
+    "</label>";
+}
+function renderSelectOrigenPedido(f) {
+  return '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>";
+}
+
+// Versión "recogida" de las tres decisiones de arriba — SOLO para un
+// formulario que llegó de "Duplicar pedido" (ver state.pedidoFormDuplicado).
+// Ahí sí son casi siempre redundantes (ya vienen copiadas del pedido
+// original), así que se ven detrás de un colapsable, envuelto en su propia
+// caja con fondo — para que se lea como un panel aparte de "esto ya viene
+// definido, tócalo solo si este caso puntual lo necesita", no como campos
+// sueltos flotando en medio del formulario. Colapsado salvo que ya traiga
+// algo distinto del default (consignación, tercero, sin flujo) — mismo
+// criterio "con bulto" que ya usa el toggle de Vendedor.
 function renderOpcionesAvanzadasPedido(f) {
   var tieneAlgoDistinto = f.esConsignacion || f.tipoCliente === "tercero" || !f.conFlujoProduccion;
   var abierta = !!state.pedidoOpcionesAvanzadasAbierto || tieneAlgoDistinto;
@@ -117,37 +152,19 @@ function renderOpcionesAvanzadasPedido(f) {
   if (f.esConsignacion) resumen.push("consignación");
   if (f.tipoCliente === "tercero") resumen.push("tercero");
   if (!f.esConsignacion && !f.conFlujoProduccion) resumen.push("sin flujo de producción");
-  var html = renderToggleSeccion({
-    titulo: "Opciones avanzadas" + (resumen.length ? " · " + resumen.join(", ") : ""),
+  var html = '<div class="pedido-opciones-avanzadas">' + renderToggleSeccion({
+    titulo: "⚙ Este pedido se copió con" + (resumen.length ? ": " + resumen.join(", ") : " su configuración de base"),
     abierta: abierta, action: "toggle-pedido-opciones-avanzadas",
-    ayuda: "La base del pedido: si es una venta directa o una consignación, si lleva seguimiento por etapas de producción, y si la producción es propia o de un tercero. Casi siempre se queda en lo de por defecto — ábrelo solo si necesitas cambiar algo de esto en particular."
+    ayuda: "Tipo de pedido, si lleva seguimiento por etapas y el origen — se copiaron del pedido que duplicaste. Ábrelo solo si este caso puntual necesita cambiar algo de esa base; si no, ni lo mires y sigue con el cliente."
   });
-  if (!abierta) return html;
-
-  html += '<div class="cot-col-title" style="margin-top:10px;">Tipo de pedido' +
-    renderHelp("Venta directa: le vendes al cliente y cobras (de una o con abonos). Consignación: le dejas mercancía a un punto de venta externo sin cobrarla todavía — solo facturas lo que el punto reporte como vendido, y él se queda con una comisión por cada venta.") +
-    "</div>" +
-    '<div class="segmented">' +
-    '<button class="segmented-opcion ' + (f.esConsignacion ? "" : "active") + '" data-action="set-tipo-pedido" data-val="venta">🧾 Venta directa</button>' +
-    '<button class="segmented-opcion ' + (f.esConsignacion ? "active" : "") + '" data-action="set-tipo-pedido" data-val="consignacion">🏬 Consignación</button>' +
-    "</div>";
-
-  // No todo pedido rápido pasa por producción: algo ya hecho, un servicio, una
-  // reventa. No se ofrece en consignación porque esa ya nace sin flujo por su
-  // cuenta (ver "add-pedido": nace directo como "entregado", como cualquier
-  // mercancía que ya está lista para salir).
-  if (!f.esConsignacion) {
-    html += '<label class="toggle-card" style="margin-top:10px;">' +
-      '<input type="checkbox" ' + (f.conFlujoProduccion ? "checked" : "") + ' data-action-change="toggle-pedido-flujo" />' +
-      "<span><b>🧵 Este pedido pasa por producción</b>" +
-      '<small>Muestra el seguimiento por etapas (cortado, confección…) en la tarjeta del pedido. Desmárcalo si ya está listo, es un servicio, o no tiene sentido llevarle etapas — el pedido se crea directo como terminado.</small></span>' +
-      "</label>";
+  if (abierta) {
+    html += '<div class="pedido-opciones-avanzadas-cuerpo">' +
+      renderSegmentedTipoPedido(f) +
+      renderCheckboxFlujoPedido(f) +
+      '<div class="form-grid" style="margin-top:10px;">' + renderSelectOrigenPedido(f) + "</div>" +
+      "</div>";
   }
-
-  html += '<div class="form-grid" style="margin-top:10px;">' +
-    '<div class="field"><label>Origen</label><select data-form="pedido" data-field="tipoCliente">' + opt("propio", "Producción propia", f.tipoCliente) + opt("tercero", "Tercero", f.tipoCliente) + "</select></div>" +
-    "</div>";
-  return html;
+  return html + "</div>";
 }
 
 function renderFormNuevoPedido() {
@@ -155,17 +172,33 @@ function renderFormNuevoPedido() {
   var lineas = f.lineas || [];
   var totales = calcTotalesLineasPedido(lineas);
   var faltantes = faltantesPedido(f);
+  var esDuplicado = !!state.pedidoFormDuplicado;
 
   var html = '<div class="card"><div class="section-title small">Nuevo pedido rápido' +
     renderHelp("Para lo del día a día que no necesita pasar por una cotización completa: stock, cosas sencillas, sin personalización. Si el pedido escala y necesitas cotizar insumos y márgenes en detalle, créalo en Cotizaciones y conviértelo en pedido.") +
     "</div>";
 
-  html += '<div class="form-grid" style="margin-top:10px;">' +
-    renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
-    '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
-    "</div>";
-
-  html += renderOpcionesAvanzadasPedido(f);
+  if (esDuplicado) {
+    // Formulario prellenado por "Duplicar pedido": la base ya viene decidida
+    // (ver renderOpcionesAvanzadasPedido) — lo primero que se ve es elegir el
+    // cliente, que es lo único que de verdad cambia al duplicar.
+    html += '<div class="form-grid" style="margin-top:10px;">' +
+      renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+      '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
+      "</div>";
+    html += renderOpcionesAvanzadasPedido(f);
+  } else {
+    // Formulario normal, de siempre: la base del pedido (tipo, flujo, origen)
+    // se decide de entrada, antes de elegir cliente — sin cambios de forma
+    // respecto a como funcionaba este formulario antes de "Duplicar pedido".
+    html += renderSegmentedTipoPedido(f);
+    html += renderCheckboxFlujoPedido(f);
+    html += '<div class="form-grid" style="margin-top:14px;">' +
+      renderClienteCombo("pedido", "pedido-cliente-nombre", f) +
+      renderSelectOrigenPedido(f) +
+      '<div class="field"><label>Fecha de entrega</label><input type="date" data-form="pedido" data-field="fechaEntrega" value="' + esc(f.fechaEntrega) + '" /></div>' +
+      "</div>";
+  }
 
   html += '<hr class="stitch" />';
   html += '<div class="cot-col-title">Qué incluye este pedido' +
@@ -1619,6 +1652,8 @@ export var actions = {
     };
     state.pedidoProductoBusqueda = "";
     state.pedidoVendedorAbierto = false;
+    state.pedidoFormDuplicado = false; // el próximo "+ Nuevo pedido rápido" vuelve a ser el formulario normal, no el recogido de un duplicado
+    state.pedidoOpcionesAvanzadasAbierto = false;
     // Salta directo al Historial para confirmar de una vez que el pedido
     // quedó creado (con su N.º de OP) — el formulario en blanco queda a un
     // clic de distancia en la otra pestaña.
@@ -1916,6 +1951,13 @@ export var actions = {
       lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); return copia; })
     };
     state.pedidoVendedorAbierto = !!(p.vendedor && p.vendedor.nombre);
+    // Marca este borrador como "duplicado": SOLO en este caso la base del
+    // pedido (tipo/flujo/origen) se recoge detrás de "Opciones avanzadas" —
+    // el formulario normal de "+ Nuevo pedido rápido" no cambia de forma
+    // (ver renderFormNuevoPedido). Se apaga solo al crear el pedido de
+    // verdad (ver "add-pedido"): mientras el borrador siga siendo este, el
+    // colapsable sigue siendo lo que corresponde mostrar.
+    state.pedidoFormDuplicado = true;
     state.pedidoOpcionesAvanzadasAbierto = p.tipoCliente === "tercero" || p.sinFlujoProduccion;
     state.pedidosVista = "nueva";
     state.sidebarMobileOpen = false;

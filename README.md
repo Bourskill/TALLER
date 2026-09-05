@@ -222,6 +222,54 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigésima ronda: Tab resuelto + alcance de "Opciones avanzadas" corregido)
+
+Segunda vuelta de correcciones sobre la ronda anterior, con dos resultados
+importantes: el bug de Tab quedó diagnosticado y resuelto (el usuario dio el
+repro exacto), y el alcance de "Opciones avanzadas" se corrigió.
+
+**Tab "se deselecciona" y aterriza en "Saltar al contenido" — RESUELTO.** El
+usuario dio el repro exacto: "cuando estoy escribiendo en un campo y quiero
+pasar al siguiente presionando Tab no pasa sino que se deselecciona, y luego
+sale el aviso 'saltar al contenido'". La causa no tenía nada que ver con
+`core/teclado.js` (que en efecto no toca Tab): `render()` en `core/dom.js`
+reconstruye TODO el HTML de la pestaña en cada cambio, y la restauración de
+foco existente solo funcionaba por `id` — pero la enorme mayoría de los
+campos de la app (una línea de pedido, un checkbox, un `<select>`) no tienen
+uno, se identifican por sus atributos `data-*`. Un campo con
+`data-action-change` dispara su acción en "change", que el navegador lanza
+AL SALIR del campo — incluido salir con Tab, antes de terminar de mover el
+foco. Sin id a donde volver, el foco quedaba en `document.body`; el
+SIGUIENTE Tab arrancaba desde el principio del documento, aterrizando en el
+enlace "Saltar al contenido" (el primer elemento tabulable de la página, ahí
+a propósito para saltar sidebar+topbar de un solo Tab).
+
+Se evaluó migrar el motor de render a una librería de "morphing" de DOM
+(morphdom) — habría resuelto esto de raíz, sin parches — pero se descartó
+POR AHORA: exigía reescribir cómo se enlazan todos los eventos de la app
+para que un mismo botón no termine con varios manejadores duplicados tras
+suficientes renders, y ese riesgo (una acción disparándose dos veces por
+error) es demasiado alto en una app que maneja plata sin verificarlo a fondo
+primero. Fix aplicado en su lugar, mucho más quirúrgico:
+`selectorEstableParaFoco()` en `core/dom.js` arma un selector CSS con los
+atributos `data-*` del campo enfocado cuando no tiene `id`, y sirve de
+respaldo para restaurarle el foco tras el render — sin necesitar ponerle un
+id a los cientos de campos de la app. Cubierto con un test que reproduce el
+escenario exacto.
+
+**"Opciones avanzadas" del pedido — alcance corregido.** La versión anterior
+colapsaba Tipo de pedido/flujo/Origen para TODO el formulario de "+ Nuevo
+pedido rápido", incluida la creación desde cero — el usuario aclaró que
+debía recogerse SOLO cuando el formulario venía de "Duplicar pedido", sin
+cambiar la forma natural del formulario normal. Ahora `state.pedidoFormDuplicado`
+(se prende solo en "Duplicar pedido", se apaga al crear el pedido de verdad)
+decide el layout: si es un pedido nuevo desde cero, esos tres campos se ven
+inline como siempre; si es un duplicado, se ven recogidos detrás del
+colapsable — y esta vez dentro de una caja con fondo propio
+(`.pedido-opciones-avanzadas` en `css/pedidos.css`), no como campos sueltos.
+
+Verificado con `test/smoke.mjs` (543 aserciones: +11 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (decimonovena ronda: correcciones sobre la ronda anterior)
 
 El usuario probó los cinco cambios de la "decimoctava ronda" y corrigió el

@@ -600,7 +600,6 @@ assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descue
 click('[data-action="tab"][data-tab="pedidos"]');
 click('[data-action="pedido-vista"][data-val="nueva"]');
 setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Prueba");
-click('[data-action="toggle-pedido-opciones-avanzadas"]'); // Tipo de pedido vive detrás de "Opciones avanzadas" (colapsada por defecto)
 click('[data-action="set-tipo-pedido"][data-val="consignacion"]');
 click('[data-action="abrir-producto-picker-pedido"]');
 click('[data-action="select-producto-pedido-picker"][data-id="' + productoId + '"]');
@@ -1672,36 +1671,47 @@ assert(nombresOrdenados[nombresOrdenados.length - 1] !== nombresOrdenados[0], "s
 const filasTrasAgregar = [...document.querySelectorAll(".insumo-nombre")].map(i => i.id);
 assert(filasTrasAgregar[filasTrasAgregar.length - 1].includes(state.catalogoInsumos[state.catalogoInsumos.length - 1].id), "bajo A–Z, un insumo sin nombre todavía se dibuja AL FINAL — cerca del botón que se acaba de pulsar, no al principio");
 
-// "Opciones avanzadas" (tipo de pedido, flujo, origen): colapsado por
-// defecto cuando todo está en su valor de por defecto — antes estos tres
-// campos se veían siempre arriba de todo del formulario, incluso recién
-// abierto (o recién "Duplicado"), empujando lo que sí cambia pedido a pedido.
+// "Opciones avanzadas" (tipo de pedido, flujo, origen): el usuario corrigió
+// que esto SOLO debía recogerse cuando el formulario viene de "Duplicar
+// pedido" — el formulario NORMAL de "+ Nuevo pedido rápido" no cambia de
+// forma (sigue mostrando estos tres campos inline, como siempre).
 state.tab = "pedidos";
 state.pedidosVista = "nueva";
+state.pedidoFormDuplicado = false;
 state.pedidoOpcionesAvanzadasAbierto = false;
 state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
   vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
   esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
 render();
-assert(!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "con todo en su valor por defecto, 'Opciones avanzadas' arranca colapsada — no se ve la casilla de flujo");
-assert(!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "...ni el selector de Origen");
+assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "el formulario NORMAL de pedido rápido muestra la casilla de flujo inline, sin ningún colapsable");
+assert(!!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "...y el selector de Origen también, igual que siempre");
+assert(!document.querySelector('[data-action="toggle-pedido-opciones-avanzadas"]'), "...no existe ningún botón de 'Opciones avanzadas' en el formulario normal");
+
+// Con un formulario que SÍ viene de "Duplicar pedido" (pedidoFormDuplicado),
+// esos mismos tres campos se recogen detrás de "Opciones avanzadas" —
+// colapsada salvo que ya traiga algo distinto del default (mismo criterio
+// "con bulto" que ya usa Vendedor: si hay algo que de verdad hay que
+// revisar, no queda escondido).
+state.pedidoFormDuplicado = true;
+state.pedidoOpcionesAvanzadasAbierto = false;
+render();
+assert(!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "en un formulario DUPLICADO, con todo en su valor por defecto, 'Opciones avanzadas' arranca colapsada");
+assert(!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "...ni el selector de Origen se ve suelto");
 assert(!!document.querySelector('[data-action="toggle-pedido-opciones-avanzadas"]'), "...pero sí el botón para abrirla");
 click('[data-action="toggle-pedido-opciones-avanzadas"]');
 assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "al abrirla, aparece la casilla de flujo");
-// Con algo YA distinto del default (ej. consignación, tercero, sin flujo),
-// se abre sola — mismo criterio "con bulto" que ya usa Vendedor: si hay algo
-// que de verdad hay que revisar, no queda escondido.
 state.pedidoOpcionesAvanzadasAbierto = false;
 state.formPedido.tipoCliente = "tercero";
 render();
-assert(!!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "con Origen ya en 'tercero' (no el default), la sección se abre sola aunque nadie la haya tocado");
+assert(!!document.querySelector('[data-form="pedido"][data-field="tipoCliente"]'), "en un duplicado con Origen ya en 'tercero' (no el default), la sección se abre sola aunque nadie la haya tocado");
 state.formPedido.tipoCliente = "propio";
+state.pedidoFormDuplicado = false; // se restaura para no afectar las pruebas siguientes
 
-// El toggle "pasa por producción" del formulario de pedido rápido.
+// El toggle "pasa por producción" del formulario de pedido rápido (normal,
+// no duplicado — inline, sin colapsable).
 state.formPedido = { clienteId: "", cliente: "Cliente Sin Flujo", tipoCliente: "propio", abono: "", fechaEntrega: "",
   vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
   esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
-state.pedidoOpcionesAvanzadasAbierto = true;
 render();
 assert(!!document.querySelector('[data-action-change="toggle-pedido-flujo"]'), "el formulario de pedido rápido ofrece elegir si lleva flujo de producción");
 click('[data-action="add-pedido-linea-libre"]');
@@ -2478,6 +2488,12 @@ assert(state.formPedido.lineas.length === 1 && state.formPedido.lineas[0].produc
 assert(state.formPedido.lineas[0].id !== "lin-1", "...pero cada línea con un id nuevo, no el mismo objeto del pedido original");
 assert(state.formPedido.vendedorNombre === "Vendedor X", "...y el mismo vendedor de referencia (se puede cambiar antes de confirmar)");
 assert(!state.formPedido.esConsignacion, "...nunca como consignación, aunque el pedido original lo fuera");
+assert(state.pedidoFormDuplicado === true, "...y queda marcado como formulario duplicado (solo ahí se recoge la base detrás de 'Opciones avanzadas')");
+render();
+assert(!!document.querySelector('[data-action="toggle-pedido-opciones-avanzadas"]'), "el formulario recién duplicado muestra el colapsable de 'Opciones avanzadas'");
+setInput('[data-form="pedido"][data-field="cliente"]', "Cliente Nuevo Dup"); // la línea duplicada ("Camiseta") ya trae datos válidos, no hace falta agregar otra
+click('[data-action="add-pedido"]');
+assert(state.pedidoFormDuplicado === false, "al crear el pedido de verdad, se apaga la marca de 'duplicado' — el próximo formulario en blanco vuelve a ser el normal");
 
 // Duplicar un pedido que VIENE de una cotización: p.lineas no tiene el
 // detalle real (insumos, tallas) — hay que duplicar la cotización completa,
@@ -2605,6 +2621,40 @@ render();
 assert(!document.querySelector('[data-action="importar-contacto-google"][data-resource="people/c1"]'), "un contacto que ya es cliente de esta cuenta no se vuelve a ofrecer para importar");
 state.panelImportarGoogleAbierto = false;
 state.contactosGoogle = null;
+
+// ---------------------------------------------------------------------------
+// Navegación por teclado: el usuario reportó que Tab se sentía "tedioso" y
+// dio el repro exacto — al salir de un campo con Tab, en vez de avanzar al
+// siguiente, "se deselecciona" y aparece el aviso "Saltar al contenido".
+// Causa real: un campo con data-action-change dispara su acción en "change"
+// (el navegador lo lanza AL SALIR del campo, antes de terminar de mover el
+// foco) — la acción llama a notify(), que reconstruye TODO el HTML de la
+// pestaña. La restauración de foco de siempre solo funcionaba por id, y la
+// enorme mayoría de los campos (como este) no tienen uno — se identifican
+// por sus atributos data-*. Sin ningún elemento al que devolver el foco,
+// quedaba en document.body; el SIGUIENTE Tab arrancaba desde el principio
+// del documento, aterrizando en el enlace "Saltar al contenido" (el primer
+// elemento tabulable de toda la página) en vez de seguir avanzando. Fix:
+// selectorEstableParaFoco en core/dom.js arma un selector con esos mismos
+// atributos data-* para restaurar el foco igual, sin id.
+state.tab = "pedidos";
+state.pedidosVista = "nueva";
+state.formPedido = {
+  clienteId: "", cliente: "Cliente Teclado", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+  lineas: [{ id: "lin-teclado", tipo: "libre", productoId: "", productoNombre: "Arreglo", imagenUrl: "", talla: "", cantidad: 1, precioUnitario: 10000, costoUnitario: 5000, observacion: "", campos: [] }]
+};
+render();
+const campoCantidad = document.querySelector('[data-action-change="set-pedido-linea-campo"][data-linea="lin-teclado"][data-campo="cantidad"]');
+assert(!!campoCantidad && !campoCantidad.id, "sanity: el campo de cantidad de una línea no tiene id propio (es el caso típico, no la excepción)");
+campoCantidad.focus();
+assert(document.activeElement === campoCantidad, "sanity: el campo queda enfocado antes de disparar el cambio");
+campoCantidad.value = "3";
+campoCantidad.dispatchEvent(new dom.window.Event("change", { bubbles: true })); // el navegador dispara esto al salir del campo, incluido salir con Tab
+assert(state.formPedido.lineas[0].cantidad === 3, "sanity: el cambio sí se aplicó (dispara set-pedido-linea-campo → notify → render)");
+assert(document.activeElement !== document.body, "tras el render que dispara el propio campo, el foco NO queda perdido en <body> (que es lo que hacía que el siguiente Tab aterrizara en \"Saltar al contenido\")");
+assert(document.activeElement && document.activeElement.getAttribute("data-linea") === "lin-teclado" && document.activeElement.getAttribute("data-campo") === "cantidad", "...se restaura al campo equivalente (mismo data-linea/data-campo) en el HTML reconstruido, aunque sea un nodo del DOM distinto y sin id");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
