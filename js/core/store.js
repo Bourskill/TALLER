@@ -374,6 +374,15 @@ export const state = {
   // Estado de UI, nunca se persiste.
   clientePickerAbierto: false,
   clientePickerBusqueda: "",
+  // Cuándo el picker se abrió desde la CABECERA de una cotización ya
+  // existente (renderCotHead, para cambiarle el cliente sin tener que
+  // borrar y reescribir el nombre a mano) en vez de desde el formulario de
+  // "nueva". Con esto puesto, elegir un contacto edita ESA cotización
+  // (state.cotizaciones) en vez de state.formCotizacion/formPedido. Se
+  // limpia SIEMPRE al abrir el picker desde cualquier otro lado o al
+  // cerrarlo, para que nunca quede una cotización vieja "enganchada" por
+  // error en la próxima vez que se abra el buscador desde un formulario.
+  clientePickerCotizacionId: "",
   // { [cotId + "|" + claveLinea]: true } — qué filas de la tabla de compras
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.

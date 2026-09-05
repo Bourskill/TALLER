@@ -1368,6 +1368,7 @@ export var actions = {
   "abrir-cliente-picker-pedido": function () {
     state.clientePickerAbierto = true;
     state.clientePickerBusqueda = "";
+    state.clientePickerCotizacionId = ""; // por si quedó de una edición de cotización sin cerrar bien
     notify();
   },
   "seleccionar-cliente-picker-pedido": function (el) {

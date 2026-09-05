@@ -244,14 +244,23 @@ function iconoLupa() {
 // así que ahí el buscador (ver `permitirNuevo` en renderClientePicker) deja
 // esa puerta abierta. `nombreLibre` es el nombre tecleado (sin clienteId)
 // cuando SÍ se usó esa puerta — solo aplica a Pedidos.
+// `opts.dataId` va en el botón como `data-id`: para el picker de una
+// cotización/pedido ya EXISTENTE (no un formulario en borrador), es lo único
+// que le dice a la acción "abrir" CUÁL registro está editando (ver
+// abrir-cliente-picker-cotizacion-editar en modules/cotizaciones.js).
+// `opts.prominente` quita el envoltorio `.field`/`<label>` — para usarlo
+// donde el nombre del cliente YA es el elemento más prominente del bloque
+// (ver renderCotHead), no un campo más de un formulario.
 export function renderClienteSeleccionCampo(opts) {
   var cliente = opts.clienteId ? clienteById(opts.clienteId) : null;
   var texto;
   if (cliente) texto = "✓ " + esc(cliente.nombre) + (cliente.ciudad ? " · " + esc(cliente.ciudad) : "") + " — cambiar";
   else if (opts.nombreLibre) texto = "✎ " + esc(opts.nombreLibre) + " (nuevo) — cambiar";
   else texto = opts.permitirNuevo ? "🔍 Buscar o crear cliente…" : "🔍 Buscar cliente…";
-  return '<div class="field"><label>Cliente</label>' +
-    '<button type="button" class="btn ghost cliente-picker-btn" data-action="' + opts.accionAbrir + '">' + texto + "</button></div>";
+  var boton = '<button type="button" class="btn ghost cliente-picker-btn' + (opts.prominente ? " cliente-picker-btn-prominente" : "") +
+    '" data-action="' + opts.accionAbrir + '"' + (opts.dataId ? ' data-id="' + esc(opts.dataId) + '"' : "") + '>' + texto + "</button>";
+  if (opts.prominente) return boton;
+  return '<div class="field"><label>Cliente</label>' + boton + "</div>";
 }
 
 // Explorador de Contactos para elegir un cliente — mismo "chrome" de modal

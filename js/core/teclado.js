@@ -236,8 +236,19 @@ function tecladoEnMenu(e, item) {
 // Es un <input> de texto libre con un panel de sugerencias aparte, no un
 // <select> nativo — por eso las flechas del teclado no hacían nada ahí,
 // a diferencia del resto de listas desplegables de la app (<select>, que el
-// navegador ya maneja solo). Este bloque le da el mismo comportamiento a
-// mano, solo para este campo: ↓/↑ abre el panel y mueve el resaltado,
+// navegador ya maneja solo, con las 4 flechas). Este bloque le da el mismo
+// comportamiento a mano, solo para este campo:
+// - Panel CERRADO: el campo sigue siendo de texto libre, así que ←/→ tienen
+//   que seguir moviendo el cursor entre caracteres (si no, no se podría
+//   corregir un error de tipeo al escribir una unidad nueva a mano). Por eso
+//   solo ↓/↑ abren el panel acá — en un <input> de una sola línea esas dos
+//   nunca hacían nada de todos modos, así que no le quitan nada a nadie.
+// - Panel ABIERTO: ahí sí, las 4 flechas mueven el resaltado (← y ↑ igual,
+//   → y ↓ igual) — como un <select> real, que tampoco distingue vertical de
+//   horizontal. (El primer intento solo cubría ↓/↑; el usuario probó con
+//   ←/→ y reportó "las flechas solo me permiten moverme entre los
+//   caracteres" — con el panel cerrado eso sigue pasando a propósito, pero
+//   con el panel abierto ya no.)
 // Enter elige lo resaltado, Escape cierra sin elegir.
 
 function flechaDeComboUnidad(input) {
@@ -264,7 +275,8 @@ function resaltarItemCombo(panel, item) {
 
 function tecladoEnComboUnidad(e, input) {
   var key = e.key;
-  if (key !== "ArrowDown" && key !== "ArrowUp" && key !== "Enter" && key !== "Escape") return false;
+  var esFlecha = key === "ArrowDown" || key === "ArrowUp" || key === "ArrowLeft" || key === "ArrowRight";
+  if (!esFlecha && key !== "Enter" && key !== "Escape") return false;
   var flecha = flechaDeComboUnidad(input);
   if (!flecha) return false; // no es un campo de unidad
   var panel = panelDeComboUnidad(input);
@@ -277,7 +289,9 @@ function tecladoEnComboUnidad(e, input) {
   }
 
   if (!panel) {
-    if (key === "Enter") return false; // panel cerrado: Enter salta de campo, como siempre
+    // Cerrado, ←/→ quedan intactos (mover el cursor en el texto) — ver el
+    // comentario de arriba. Solo ↓/↑ abren.
+    if (key !== "ArrowDown" && key !== "ArrowUp") return false;
     e.preventDefault();
     // api.dispatch() llama a notify(), que reconstruye TODO el HTML de la
     // pestaña (ver render() en core/dom.js) — `input` y `flecha` quedan
@@ -295,6 +309,9 @@ function tecladoEnComboUnidad(e, input) {
     return true;
   }
 
+  // Abierto: las 4 flechas navegan (← se comporta como ↑, → como ↓) — acá ya
+  // no hace falta el cursor de texto, el valor entero se va a reemplazar en
+  // cuanto se elija algo.
   var items = itemsComboUnidad(panel);
   if (!items.length) {
     if (key === "Enter") return false;
@@ -303,12 +320,12 @@ function tecladoEnComboUnidad(e, input) {
   }
   var idx = items.indexOf(panel.querySelector(".combo-item.activo"));
 
-  if (key === "ArrowDown") {
+  if (key === "ArrowDown" || key === "ArrowRight") {
     e.preventDefault();
     resaltarItemCombo(panel, items[idx < 0 ? 0 : Math.min(idx + 1, items.length - 1)]);
     return true;
   }
-  if (key === "ArrowUp") {
+  if (key === "ArrowUp" || key === "ArrowLeft") {
     e.preventDefault();
     resaltarItemCombo(panel, items[idx < 0 ? items.length - 1 : Math.max(idx - 1, 0)]);
     return true;

@@ -222,6 +222,49 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimotercera ronda: correcciones sobre la ronda anterior)
+
+Quinta vuelta sobre el mismo bloque. La ronda anterior generalizó el
+buscador de cliente y le agregó flechas al combo de Unidad, pero ambas
+correcciones apuntaron a un lugar equivocado o quedaron incompletas.
+
+**El buscador de cliente hacía falta en OTRO campo: la cabecera de una
+cotización ya existente, no (solo) el formulario de "nueva".** El usuario
+aclaró: "yo me refería era el campo del cliente DENTRO de la cotización...
+cuando dupliqué el pedido necesitaba cambiarle el cliente y me dejaba
+ponerle un nombre pero no salía la opción para seleccionar uno existente".
+La ronda anterior solo tocó `renderFormNueva()` (crear una cotización desde
+cero); `renderCotHead()` — la cabecera de CUALQUIER cotización ya existente,
+que es justo donde aterriza "Duplicar pedido" cuando el pedido viene de una
+cotización — seguía con el `<input class="cot-cliente-input">` de texto
+libre de siempre (acción `set-cot-cliente`, ahora borrada por no usarse). Se
+reemplazó por el mismo `renderClienteSeleccionCampo`, con dos piezas nuevas
+para que sirviera en un botón de cabecera (no un campo de formulario):
+`opts.prominente` (en `core/components.js`) quita el envoltorio
+`.field`/`<label>` cuando el nombre del cliente ya es, de por sí, el
+elemento más prominente del bloque; y `state.clientePickerCotizacionId`
+(en `core/store.js`) le dice al picker compartido SOBRE CUÁL cotización
+existente actuar (`abrir-cliente-picker-cotizacion-editar` /
+`seleccionar-cliente-picker-cotizacion-editar`, en vez de editar el
+borrador de "nueva"). Se limpia al abrir el picker desde cualquier otro
+lado (Pedidos, el formulario de nueva cotización) para que nunca quede una
+cotización vieja enganchada por error.
+
+**Las flechas del combo de Unidad solo cubrían ↓/↑ — el usuario probó con
+←/→ y volvió a caer en el cursor de texto de siempre.** "No funciona como
+dices, las flechas solo me permiten moverme entre los caracteres de 'und' o
+'mt'". Un `<select>` nativo real responde a las 4 flechas por igual (no solo
+verticales); el primer intento solo cubrió ↓/↑ porque, con el panel CERRADO,
+←/→ tienen que seguir moviendo el cursor de texto (el campo sigue siendo
+editable a mano). Fix en `tecladoEnComboUnidad` (`core/teclado.js`): con el
+panel cerrado, la regla no cambia (←/→ intactas, para no perder la
+edición); en cuanto el panel está ABIERTO, las 4 flechas navegan por igual
+(← se comporta como ↑, → como ↓) — en ese punto el valor completo se va a
+reemplazar de todas formas en cuanto se elija algo, así que no hay nada que
+"cursor" que proteger.
+
+Verificado con `test/smoke.mjs` (590 aserciones en total: +7 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimosegunda ronda: el buscador de cliente también en Pedidos, y flechas en el combo de Unidad)
 
 Cuarta vuelta sobre el mismo bloque de reportes. Dos correcciones.

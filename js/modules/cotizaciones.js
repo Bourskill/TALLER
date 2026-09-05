@@ -85,7 +85,11 @@ export function render() {
   html += renderClientePicker({
     abierto: state.clientePickerAbierto, busqueda: state.clientePickerBusqueda, clientes: state.clientes,
     inputId: "inp-cliente-picker-buscar", filtroBusqueda: "clientePickerBusqueda",
-    accionCerrar: "cerrar-cliente-picker", accionSeleccionar: "seleccionar-cliente-picker-cotizacion",
+    accionCerrar: "cerrar-cliente-picker",
+    // Si se abrió desde la cabecera de una cotización YA EXISTENTE (ver
+    // renderCotHead), elegir un contacto edita esa cotización directo; si
+    // no, viene del formulario de "nueva" y edita el borrador de siempre.
+    accionSeleccionar: state.clientePickerCotizacionId ? "seleccionar-cliente-picker-cotizacion-editar" : "seleccionar-cliente-picker-cotizacion",
     permitirNuevo: false
   });
   return html;
@@ -396,7 +400,10 @@ function renderCotHead(c, iva) {
   var html = '<div class="cot-head">' +
     '<div class="cot-head-info">' +
     '<div class="cot-head-top">' +
-    '<input class="cot-cliente-input" value="' + esc(c.cliente) + '" placeholder="Nombre del cliente" data-action-change="set-cot-cliente" data-id="' + c.id + '" title="Editar el nombre del cliente" />' +
+    renderClienteSeleccionCampo({
+      clienteId: c.clienteId, nombreLibre: (!c.clienteId && c.cliente) ? c.cliente : "",
+      accionAbrir: "abrir-cliente-picker-cotizacion-editar", dataId: c.id, permitirNuevo: false, prominente: true
+    }) +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
     (pedidoVinculado ? '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;" title="Pedido vinculado — clic para verlo" data-action="ver-cotizacion-relacionada-pedido" data-id="' + pedidoVinculado.id + '">' + esc(pedidoVinculado.numeroOp || "OP-????") + "</span>" : "") +
     "</div>" +
@@ -1185,10 +1192,12 @@ export var actions = {
   "abrir-cliente-picker-cotizacion": function () {
     state.clientePickerAbierto = true;
     state.clientePickerBusqueda = "";
+    state.clientePickerCotizacionId = ""; // por si quedó de una edición anterior sin cerrar bien
     notify();
   },
   "cerrar-cliente-picker": function () {
     state.clientePickerAbierto = false;
+    state.clientePickerCotizacionId = "";
     notify();
   },
   "seleccionar-cliente-picker-cotizacion": function (el) {
@@ -1198,6 +1207,29 @@ export var actions = {
     state.formCotizacion.clienteId = c.id;
     state.formCotizacion.cliente = c.nombre;
     state.clientePickerAbierto = false;
+    notify();
+  },
+  // Cambiar el cliente de una cotización que YA EXISTE, desde el botón en la
+  // cabecera del detalle (renderCotHead) — a diferencia de
+  // "seleccionar-cliente-picker-cotizacion" (arriba), que edita el
+  // BORRADOR de "nueva cotización", esto edita de una el registro real.
+  "abrir-cliente-picker-cotizacion-editar": function (el) {
+    state.clientePickerAbierto = true;
+    state.clientePickerBusqueda = "";
+    state.clientePickerCotizacionId = el.getAttribute("data-id");
+    notify();
+  },
+  "seleccionar-cliente-picker-cotizacion-editar": function (el) {
+    var id = el.getAttribute("data-id");
+    var c = state.clientes.filter(function (x) { return x.id === id; })[0];
+    var cotId = state.clientePickerCotizacionId;
+    if (!c || !cotId) return;
+    state.cotizaciones = state.cotizaciones.map(function (cot) {
+      return cot.id === cotId ? Object.assign({}, cot, { clienteId: c.id, cliente: c.nombre }) : cot;
+    });
+    marcarSucia(cotId);
+    state.clientePickerAbierto = false;
+    state.clientePickerCotizacionId = "";
     notify();
   },
   "cot-vista": function (el) {
@@ -1329,17 +1361,6 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var valor = el.value;
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fechaEntrega: valor }) : c; });
-    marcarSucia(id);
-  },
-  // Solo cambia el nombre mostrado (c.cliente) — si la cotización estaba
-  // vinculada a un cliente registrado (clienteId), el vínculo se conserva tal
-  // cual (sigue sirviendo para correo, roster, etc.); esto es para corregir
-  // un nombre mal escrito o dejar constancia de un apodo/razón social distinta.
-  "set-cot-cliente": function (el) {
-    var id = el.getAttribute("data-id");
-    var nombre = el.value.trim();
-    if (!nombre) { notify(); return; }
-    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { cliente: nombre }) : c; });
     marcarSucia(id);
   },
   // Eliminar SÍ guarda de una: no tendría sentido dejar "pendiente de

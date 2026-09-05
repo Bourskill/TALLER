@@ -14,12 +14,6 @@
 .cot-card.colapsada{padding:12px 20px;}
 .cot-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
 .cot-cliente{font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);}
-/* Mismo peso visual que .cot-cliente (nace como texto corrido), pero es un
-   input real: borde transparente hasta que se pasa el mouse o se enfoca, para
-   que se lea como un título y no como un campo de formulario suelto. */
-.cot-cliente-input{font-family:'Inter',sans-serif;font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 7px;margin:-3px -7px;flex:0 1 320px;min-width:120px;max-width:100%;}
-.cot-cliente-input:hover{border-color:var(--border);}
-.cot-cliente-input:focus{outline:none;border-color:var(--accent);background:var(--surface-2);box-shadow:0 0 0 3px var(--accent-soft);}
 .cot-collapse-toggle{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;padding:0 2px;vertical-align:middle;}
 .cot-collapse-toggle:hover{color:var(--ink);}
 /* Encabezado plegable "con bulto" para una sección de campos OPCIONALES —
@@ -199,6 +193,12 @@
 .cliente-picker-item-info b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cliente-picker-item-info small{font-size:11.5px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cliente-picker-btn{width:100%;justify-content:flex-start;text-align:left;}
+/* Variante para la cabecera de una cotización ya existente (renderCotHead):
+   el cliente ahí es el elemento más prominente del bloque, no un campo más
+   de formulario — mismo tratamiento tipográfico que tenía el <input> de
+   texto libre que reemplaza (.cot-cliente-input), pero como botón. */
+.cliente-picker-btn-prominente{display:inline-block;width:auto;font-family:'Inter',sans-serif;font-weight:800;font-size:18px;letter-spacing:-0.01em;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 7px;margin:-3px -7px;flex:0 1 320px;min-width:120px;max-width:100%;box-shadow:none;text-align:left;white-space:normal;}
+.cliente-picker-btn-prominente:hover{border-color:var(--border);color:var(--ink);}
 /* Escape hatch de Pedidos: "usar como cliente nuevo" cuando la búsqueda no
    encontró (o no hay) un contacto registrado. No existe en Cotizaciones
    (permitirNuevo:false), que exige elegir un contacto real. */

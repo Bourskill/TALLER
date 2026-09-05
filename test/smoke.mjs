@@ -463,12 +463,25 @@ click('[data-action="abrir-cotizacion-editor"][data-id="' + cotConvertida.id + '
 assert(state.cotizacionEditando === cotConvertida.id && state.cotizacionesVista === "nueva", "abrir desde el historial abre el detalle completo");
 assert(!!document.querySelector('.cot-card[data-cot-id="' + cotConvertida.id + '"]'), "el detalle completo se renderiza en la pestaña de edición");
 
-// --- cotizaciones: el cliente es editable directamente en la cabecera del detalle ---
-const cotClienteInput = document.querySelector('.cot-cliente-input[data-id="' + cotConvertida.id + '"]');
-assert(!!cotClienteInput, "el nombre del cliente de la cotización se edita con un input en la cabecera");
-cotClienteInput.value = "Cliente Prueba Renombrado";
-cotClienteInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-assert(state.cotizaciones.find(c => c.id === cotConvertida.id).cliente === "Cliente Prueba Renombrado", "editar el input de cliente actualiza el nombre en la cotización");
+// --- cotizaciones: el cliente de una cotización YA EXISTENTE (no solo la
+// del formulario de "nueva") también se elige del buscador de contactos —
+// el usuario aclaró que era justo ESTE campo el que le faltaba: "cuando
+// dupliqué el pedido necesitaba cambiarle el cliente... no salía la opción
+// para seleccionar un cliente existente". ---
+state.clientes = state.clientes.concat([
+  { id: "cli-recambio", nombre: "Cliente Recambio", tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] }
+]);
+render();
+assert(!document.querySelector(".cot-cliente-input"), "la cabecera de una cotización ya no tiene un input de texto libre para el cliente");
+click('[data-action="abrir-cliente-picker-cotizacion-editar"][data-id="' + cotConvertida.id + '"]');
+assert(!!document.querySelector(".picker-overlay"), "el mismo buscador de contactos se abre desde la cabecera de una cotización ya existente");
+assert(state.clientePickerCotizacionId === cotConvertida.id, "...y sabe para cuál cotización es, para no editar la equivocada");
+setInput("#inp-cliente-picker-buscar", "Recambio");
+render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
+click('[data-action="seleccionar-cliente-picker-cotizacion-editar"][data-id="cli-recambio"]');
+const cotRenombrada = state.cotizaciones.find(c => c.id === cotConvertida.id);
+assert(cotRenombrada.clienteId === "cli-recambio" && cotRenombrada.cliente === "Cliente Recambio", "elegir un contacto desde la cabecera vincula clienteId Y el nombre de ESA cotización, no del formulario de \"nueva\"");
+assert(!state.clientePickerAbierto && state.clientePickerCotizacionId === "", "cierra el buscador y limpia a cuál cotización apuntaba (para no engancharla por error la próxima vez)");
 
 // --- pedidos: comisión de vendedor ---
 // Pedidos ahora se divide en pestañas "+ Nuevo pedido" / "Historial" (mismo
@@ -959,12 +972,16 @@ assert(!state.productoPropuestas.some(p => p.productoId === prodUnicoId), "no qu
 // sin mouse. Se simulan teclas reales sobre el elemento que tiene el foco,
 // igual que click() simula clics reales.
 // ---------------------------------------------------------------------------
+// Devuelve lo mismo que dispatchEvent: false si algún manejador llamó a
+// preventDefault() (útil para confirmar que una tecla se dejó pasar tal
+// cual, ej. que ←/→ siguen moviendo el cursor de texto en vez de haber sido
+// interceptadas).
 function tecla(key, opts) {
   const o = Object.assign({ key: key, bubbles: true, cancelable: true }, opts || {});
   const destino = document.activeElement && document.activeElement !== document.body
     ? document.activeElement
     : document;
-  destino.dispatchEvent(new dom.window.KeyboardEvent("keydown", o));
+  return destino.dispatchEvent(new dom.window.KeyboardEvent("keydown", o));
 }
 function focoId() {
   return document.activeElement ? document.activeElement.id : "";
@@ -2831,6 +2848,14 @@ render();
 const campoUnidad = document.getElementById("ins-unidad-iu-flecha");
 assert(!!campoUnidad, "sanity: existe el campo de unidad del primer insumo");
 campoUnidad.focus();
+// Con el panel CERRADO, ←/→ tienen que seguir siendo el cursor de texto de
+// siempre — el usuario probó justo esto y reportó "las flechas solo me
+// permiten moverme entre los caracteres" (el primer intento solo cubría
+// ↓/↑). Acá, con el panel cerrado, ESE comportamiento es el correcto: no se
+// interceptan, para poder seguir corrigiendo a mano una unidad escrita.
+let noInterceptada = tecla("ArrowRight");
+assert(noInterceptada === true, "← /→ con el panel cerrado NO se interceptan (dispatchEvent devuelve true: nadie llamó preventDefault)");
+assert(!document.querySelector(".combo-unidad-suggestions"), "...y no abren el panel (a diferencia de ↓/↑)");
 tecla("ArrowDown");
 assert(!!document.querySelector(".combo-unidad-suggestions"), "↓ con el panel cerrado lo abre, igual que un <select>");
 let itemActivo = document.querySelector(".combo-item.activo");
@@ -2845,6 +2870,14 @@ assert(itemActivo && itemActivo.textContent === "UND", "↓ se detiene en la úl
 tecla("ArrowUp");
 itemActivo = document.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "ROLLO", "↑ mueve el resaltado hacia atrás");
+// Con el panel YA ABIERTO, las 4 flechas navegan — no solo ↑/↓ — para que se
+// sienta igual sea cual sea la dirección que el usuario pruebe primero.
+tecla("ArrowRight");
+itemActivo = document.querySelector(".combo-item.activo");
+assert(itemActivo && itemActivo.textContent === "UND", "con el panel abierto, → se comporta como ↓ (siguiente)");
+tecla("ArrowLeft");
+itemActivo = document.querySelector(".combo-item.activo");
+assert(itemActivo && itemActivo.textContent === "ROLLO", "...y ← se comporta como ↑ (anterior)");
 tecla("Enter");
 assert(!document.querySelector(".combo-unidad-suggestions"), "Enter elige lo resaltado y cierra el panel");
 assert(document.getElementById("ins-unidad-iu-flecha").value === "ROLLO", "...escribe la unidad elegida sobre el campo original");
