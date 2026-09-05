@@ -240,30 +240,41 @@ var coreActions = {
     a.click();
     document.body.removeChild(a);
   },
-  // Ver renderComboUnidad en core/components.js. Un solo panel abierto a la
-  // vez en toda la app (clave global, no por módulo): abrir otro cierra el
-  // anterior solo, sin necesitar un listener de "clic afuera cierra".
+  // Ver renderComboUnidad en core/components.js. Manipulación DIRECTA del
+  // DOM (el atributo nativo `hidden`), sin pasar por state/notify(): abrir o
+  // cerrar este panel no cambia ningún dato, así que forzar un render de
+  // TODA la pestaña por esto se sentía "poco fluido" (reportado por el
+  // usuario) — un <select> nativo tampoco redibuja la página al abrirse.
+  // Un solo panel abierto a la vez en toda la app: abrir este cierra
+  // cualquier otro que haya quedado abierto.
   "toggle-combo-unidad": function (el) {
-    var clave = el.getAttribute("data-clave");
-    state.comboUnidadAbierto = state.comboUnidadAbierto === clave ? "" : clave;
-    notify();
+    var celda = el.closest(".insumo-unidad-cell");
+    var panel = celda ? celda.querySelector(".combo-unidad-suggestions") : null;
+    if (!panel) return;
+    var vaAAbrir = panel.hidden;
+    document.querySelectorAll(".combo-unidad-suggestions").forEach(function (p) { if (p !== panel) p.hidden = true; });
+    panel.hidden = !vaAAbrir;
+    el.setAttribute("aria-expanded", vaAAbrir ? "true" : "false");
   },
   // Escribe la unidad elegida sobre el <input> ORIGINAL (por su id) y le
   // dispara su evento normal — "input" para un campo enlazado con
   // data-form/data-field (ver handleFormInput), "change" para uno con
   // data-action-change (el patrón genérico 3, más abajo). Se disparan los
   // dos: cada input solo escucha el suyo, así que no hay doble efecto, y
-  // este componente no necesita saber cuál usa cada llamador.
+  // este componente no necesita saber cuál usa cada llamador. Ninguno de los
+  // dos casos necesita un notify() extra acá: el campo queda exactamente
+  // como si se hubiera escrito el valor a mano (mismo camino, mismo
+  // redibujado si el campo lo pide — o ninguno, si no lo pide).
   "elegir-unidad": function (el) {
     var targetId = el.getAttribute("data-target"), valor = el.getAttribute("data-valor");
-    state.comboUnidadAbierto = "";
+    var panel = el.closest(".combo-unidad-suggestions");
+    if (panel) panel.hidden = true;
     var input = document.getElementById(targetId);
     if (input) {
       input.value = valor;
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }
-    notify();
   },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el

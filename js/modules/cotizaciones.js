@@ -859,7 +859,7 @@ function renderFilasGlobales(cotId, ref) {
     html += '<div class="ins-row global" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotglobal-unidad-' + g.id + '" style="width:100%" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
-      renderComboUnidad({ id: "cotglobal-unidad-" + g.id, clave: "cotglobal-unidad-" + g.id, abierto: state.comboUnidadAbierto === "cotglobal-unidad-" + g.id }) + "</span>" +
+      renderComboUnidad({ id: "cotglobal-unidad-" + g.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global", true) + "</select>" +
       // La cantidad no aplica: se paga una vez, no por prenda.
@@ -904,7 +904,7 @@ function renderFilasServicios(cotId) {
     html += '<div class="ins-row servicio" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Servicio</span><input class="mini-input" style="width:100%" placeholder="Ej. diseño" value="' + esc(s.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotserv-unidad-' + s.id + '" style="width:100%" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
-      renderComboUnidad({ id: "cotserv-unidad-" + s.id, clave: "cotserv-unidad-" + s.id, abierto: state.comboUnidadAbierto === "cotserv-unidad-" + s.id }) + "</span>" +
+      renderComboUnidad({ id: "cotserv-unidad-" + s.id }) + "</span>" +
       '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0." />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
@@ -986,7 +986,7 @@ function renderRefCard(cotId, ref) {
       '<span class="ins-drag-handle" title="Arrastra para reordenar">⠿</span>' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
-      renderComboUnidad({ id: "cotins-unidad-" + i.id, clave: "cotins-unidad-" + i.id, abierto: state.comboUnidadAbierto === "cotins-unidad-" + i.id }) + "</span>" +
+      renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +

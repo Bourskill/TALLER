@@ -280,32 +280,25 @@ function tecladoEnComboUnidad(e, input) {
   var flecha = flechaDeComboUnidad(input);
   if (!flecha) return false; // no es un campo de unidad
   var panel = panelDeComboUnidad(input);
+  if (!panel) return false; // sanity: siempre existe en el DOM (solo cambia `hidden`)
 
   if (key === "Escape") {
-    if (!panel) return false; // deja que Escape siga su curso normal (sacar el foco)
+    if (panel.hidden) return false; // deja que Escape siga su curso normal (sacar el foco)
     e.preventDefault();
-    api.dispatch("toggle-combo-unidad", flecha);
+    api.dispatch("toggle-combo-unidad", flecha); // ya está abierto: esto lo cierra
     return true;
   }
 
-  if (!panel) {
+  if (panel.hidden) {
     // Cerrado, ←/→ quedan intactos (mover el cursor en el texto) — ver el
     // comentario de arriba. Solo ↓/↑ abren.
     if (key !== "ArrowDown" && key !== "ArrowUp") return false;
     e.preventDefault();
-    // api.dispatch() llama a notify(), que reconstruye TODO el HTML de la
-    // pestaña (ver render() en core/dom.js) — `input` y `flecha` quedan
-    // apuntando al árbol viejo, ya desconectado de document. Hay que volver a
-    // buscar el campo por su id (siempre lo tiene, ver renderComboUnidad) una
-    // vez terminado el redibujado, igual que hace tecladoEnMenu con el foco.
-    var idCampo = input.id;
-    api.dispatch("toggle-combo-unidad", flecha); // abre y redibuja
-    var inputFresco = idCampo ? document.getElementById(idCampo) : null;
-    panel = inputFresco ? panelDeComboUnidad(inputFresco) : null;
-    if (panel) {
-      var recienAbiertos = itemsComboUnidad(panel);
-      resaltarItemCombo(panel, key === "ArrowUp" ? recienAbiertos[recienAbiertos.length - 1] : recienAbiertos[0]);
-    }
+    // Sin notify() de por medio (ver core/dom.js), `panel` sigue siendo el
+    // mismo nodo antes y después — no hace falta volver a buscarlo.
+    api.dispatch("toggle-combo-unidad", flecha); // ya está cerrado: esto lo abre
+    var recienAbiertos = itemsComboUnidad(panel);
+    resaltarItemCombo(panel, key === "ArrowUp" ? recienAbiertos[recienAbiertos.length - 1] : recienAbiertos[0]);
     return true;
   }
 

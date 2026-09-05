@@ -367,7 +367,7 @@ function renderFilaInsumo(c, categorias) {
     '<span class="mobile-th">Unidad</span>' +
     '<span class="insumo-unidad-cell">' +
     '<input class="mini-input insumo-unidad" id="ins-unidad-' + c.id + '" value="' + esc(c.unidad) + '" title="Escribe &quot;servicio&quot; si es algo que se paga pero no se compra en ningún lado (diseño, confección, sublimado)."' + attrs + ' data-campo="unidad" />' +
-    renderComboUnidad({ id: "ins-unidad-" + c.id, clave: "ins-unidad-" + c.id, abierto: state.comboUnidadAbierto === "ins-unidad-" + c.id }) +
+    renderComboUnidad({ id: "ins-unidad-" + c.id }) +
     "</span>" +
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +

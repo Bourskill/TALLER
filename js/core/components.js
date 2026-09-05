@@ -60,16 +60,22 @@ export function renderToggleSeccion(o) {
 // CÓMO se guarda cada campo (set-cat-campo, set-ins-campo, data-form...),
 // solo sirve la sugerencia. Ver las acciones "toggle-combo-unidad" y
 // "elegir-unidad" en core/dom.js.
+//
+// El panel se pinta SIEMPRE (no solo cuando está abierto) y se
+// muestra/oculta con el atributo nativo `hidden`, en vez de con un
+// state.comboUnidadAbierto que forzaba a notify() (redibujar TODA la
+// pestaña) solo para abrir o cerrar un panel de tres líneas — el usuario lo
+// notó ("se siente poco fluido") y esto es justo lo que causaba el
+// tranquito: abrir/cerrar/moverse por las sugerencias ahora es una
+// manipulación directa del DOM, cero renders de por medio, igual de
+// instantáneo que un <select> nativo.
 export function renderComboUnidad(o) {
-  var html = '<button type="button" class="combo-unidad-flecha" tabindex="-1" data-action="toggle-combo-unidad" data-clave="' + esc(o.clave) + '" aria-label="Ver unidades usadas antes" aria-expanded="' + (o.abierto ? "true" : "false") + '">▾</button>';
-  if (o.abierto) {
-    html += '<div class="combo-suggestions combo-unidad-suggestions">' +
-      unidadesConocidas().map(function (u) {
-        return '<div class="combo-item" data-action="elegir-unidad" data-target="' + esc(o.id) + '" data-valor="' + esc(u) + '">' + esc(u) + "</div>";
-      }).join("") +
-      "</div>";
-  }
-  return html;
+  return '<button type="button" class="combo-unidad-flecha" tabindex="-1" data-action="toggle-combo-unidad" aria-label="Ver unidades usadas antes" aria-expanded="false">▾</button>' +
+    '<div class="combo-suggestions combo-unidad-suggestions" hidden>' +
+    unidadesConocidas().map(function (u) {
+      return '<div class="combo-item" data-action="elegir-unidad" data-target="' + esc(o.id) + '" data-valor="' + esc(u) + '">' + esc(u) + "</div>";
+    }).join("") +
+    "</div>";
 }
 
 export function renderTipoCostoOptions(current, enCotizacion) {
@@ -254,9 +260,20 @@ function iconoLupa() {
 export function renderClienteSeleccionCampo(opts) {
   var cliente = opts.clienteId ? clienteById(opts.clienteId) : null;
   var texto;
-  if (cliente) texto = "✓ " + esc(cliente.nombre) + (cliente.ciudad ? " · " + esc(cliente.ciudad) : "") + " — cambiar";
-  else if (opts.nombreLibre) texto = "✎ " + esc(opts.nombreLibre) + " (nuevo) — cambiar";
-  else texto = opts.permitirNuevo ? "🔍 Buscar o crear cliente…" : "🔍 Buscar cliente…";
+  if (opts.prominente) {
+    // Cabecera de una cotización: el usuario pidió "solo basta con el
+    // nombre, no tan exagerado" — nada de ✓/✎/ciudad/"— cambiar": el propio
+    // hover del botón (ver .cliente-picker-btn-prominente en
+    // css/cotizaciones.css) ya avisa que es clickeable, igual que hacía el
+    // <input> de texto libre que reemplaza.
+    if (cliente) texto = esc(cliente.nombre);
+    else if (opts.nombreLibre) texto = esc(opts.nombreLibre);
+    else texto = "Elegir cliente…";
+  } else {
+    if (cliente) texto = "✓ " + esc(cliente.nombre) + (cliente.ciudad ? " · " + esc(cliente.ciudad) : "") + " — cambiar";
+    else if (opts.nombreLibre) texto = "✎ " + esc(opts.nombreLibre) + " (nuevo) — cambiar";
+    else texto = opts.permitirNuevo ? "🔍 Buscar o crear cliente…" : "🔍 Buscar cliente…";
+  }
   var boton = '<button type="button" class="btn ghost cliente-picker-btn' + (opts.prominente ? " cliente-picker-btn-prominente" : "") +
     '" data-action="' + opts.accionAbrir + '"' + (opts.dataId ? ' data-id="' + esc(opts.dataId) + '"' : "") + '>' + texto + "</button>";
   if (opts.prominente) return boton;

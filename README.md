@@ -222,6 +222,44 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimocuarta ronda: pulido sobre la ronda anterior)
+
+Sexta vuelta. El usuario confirmó que las dos correcciones de la ronda
+anterior YA FUNCIONAN — esto es pulido, no un bug nuevo.
+
+**Botón de cliente en la cabecera de una cotización: "mejora la estética,
+solo basta con el nombre, no tan exagerado".** El texto reutilizaba el
+mismo formato que el botón del FORMULARIO ("✓ Nombre · Ciudad — cambiar"),
+que tiene sentido ahí (es un campo más, con su label "Cliente") pero se
+sentía recargado en la cabecera, donde el nombre es el elemento más grande
+y prominente del bloque. `renderClienteSeleccionCampo` ahora bifurca por
+`opts.prominente`: en ese caso el texto es SOLO el nombre (sin ✓, sin
+ciudad, sin "— cambiar") — la propia affordance de hover del botón
+(`.cliente-picker-btn-prominente`, mismo criterio que tenía el
+`<input>` de texto libre que reemplazó) ya avisa que es clickeable. El
+formulario de "nueva cotización"/Pedidos no cambió — ahí el texto explícito
+sigue teniendo sentido.
+
+**Flechas del combo de Unidad: "funciona pero se siente poco fluido, usa
+funciones nativas si las hay".** Causa real: abrir o cerrar el panel de
+sugerencias pasaba por `state.comboUnidadAbierto` + `notify()`, que
+redibuja TODA la pestaña — para un panel de tres líneas, eso se siente
+pesado comparado con un `<select>` nativo (que no redibuja nada al
+abrirse). Fix: el panel ahora vive SIEMPRE en el DOM (antes solo se pintaba
+cuando `abierto`) y se muestra/oculta con el atributo nativo `hidden` —
+"la función nativa para este caso" que pedía el usuario — sin pasar por
+`notify()` para nada: abrir, cerrar y moverse entre sugerencias con las
+flechas es ahora manipulación directa del DOM, cero renders de por medio.
+Solo ELEGIR una sugerencia sigue notificando lo que ya notificaba antes
+(el campo se comporta exactamente como si se hubiera escrito el valor a
+mano — con render si ese campo lo pide, sin él si no). De paso se pudo
+borrar bastante código: ya no hace falta rastrear "a qué nodo volver tras
+el redibujado" (`state.comboUnidadAbierto`, `data-clave`, el truco de
+volver a buscar el campo por id) porque, sin redibujado, los nodos nunca
+se vuelven obsoletos a mitad de la navegación.
+
+Verificado con `test/smoke.mjs` (593 aserciones en total: +3 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimotercera ronda: correcciones sobre la ronda anterior)
 
 Quinta vuelta sobre el mismo bloque. La ronda anterior generalizó el

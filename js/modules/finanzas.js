@@ -111,7 +111,7 @@ function renderFormMovimiento() {
       "</select></div>" +
       '<div class="field"><label>Cantidad comprada</label><input type="number" data-form="tx" data-field="cantidad" value="' + esc(f.cantidad) + '" placeholder="Ej. 12" /></div>' +
       '<div class="field"><label>Unidad</label><span class="insumo-unidad-cell"><input class="insumo-unidad" id="tx-unidad" data-form="tx" data-field="unidad" value="' + esc(f.unidad) + '" placeholder="MT, UND…" />' +
-      renderComboUnidad({ id: "tx-unidad", clave: "tx-unidad", abierto: state.comboUnidadAbierto === "tx-unidad" }) + "</span></div>" +
+      renderComboUnidad({ id: "tx-unidad" }) + "</span></div>" +
       "</div>";
   }
 

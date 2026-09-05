@@ -333,11 +333,6 @@ export const state = {
   // visor DENTRO de la app en vez de descargarlo directo — o null. Ver
   // mostrarPdfEnApp() en core/pdf.js. Nunca se persiste.
   pdfPreview: null,
-  // Clave (por id de fila) del campo "Unidad" que tiene abierto su panel de
-  // sugerencias — ver renderComboUnidad en core/components.js. Un solo campo
-  // a la vez en toda la app, nunca se persiste.
-  comboUnidadAbierto: "",
-
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
   filtroPedidos: "todos",

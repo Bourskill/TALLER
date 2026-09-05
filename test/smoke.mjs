@@ -482,6 +482,9 @@ click('[data-action="seleccionar-cliente-picker-cotizacion-editar"][data-id="cli
 const cotRenombrada = state.cotizaciones.find(c => c.id === cotConvertida.id);
 assert(cotRenombrada.clienteId === "cli-recambio" && cotRenombrada.cliente === "Cliente Recambio", "elegir un contacto desde la cabecera vincula clienteId Y el nombre de ESA cotización, no del formulario de \"nueva\"");
 assert(!state.clientePickerAbierto && state.clientePickerCotizacionId === "", "cierra el buscador y limpia a cuál cotización apuntaba (para no engancharla por error la próxima vez)");
+render();
+const botonClienteCabecera = document.querySelector('[data-action="abrir-cliente-picker-cotizacion-editar"][data-id="' + cotConvertida.id + '"]');
+assert(botonClienteCabecera.textContent === "Cliente Recambio", "el botón de la cabecera muestra SOLO el nombre — el usuario pidió \"no tan exagerado\", nada de ✓/ciudad/\"— cambiar\" ahí");
 
 // --- pedidos: comisión de vendedor ---
 // Pedidos ahora se divide en pestañas "+ Nuevo pedido" / "Historial" (mismo
@@ -2830,7 +2833,11 @@ assert(document.activeElement && document.activeElement.getAttribute("data-campo
 // listas desplegables" de la app — esas son <select> nativos, que el
 // navegador ya maneja solo. Este campo es un <input> de texto con un panel de
 // sugerencias aparte (no un <select>), así que había que dárselo a mano —
-// ver tecladoEnComboUnidad en core/teclado.js.
+// ver tecladoEnComboUnidad en core/teclado.js. El panel ahora vive SIEMPRE en
+// el DOM y se muestra/oculta con el atributo nativo `hidden` (antes requería
+// notify() — redibujar TODA la pestaña — para abrir o cerrar tres líneas de
+// sugerencias, que el usuario sintió "poco fluido"), así que las pruebas de
+// abierto/cerrado revisan `panel.hidden`, no si el nodo existe.
 // ---------------------------------------------------------------------------
 const productosPreviosFlecha = state.productos, plantillasPreviasFlecha = state.plantillasPrendas, cotizacionesPreviasFlecha = state.cotizaciones;
 state.productos = []; state.plantillasPrendas = []; state.cotizaciones = [];
@@ -2842,11 +2849,12 @@ state.catalogoInsumos = [
 state.catalogoCategorias = [];
 state.filtroCatalogoCategoria = "todos";
 state.buscarCatalogo = "";
-state.comboUnidadAbierto = "";
 state.tab = "catalogo";
 render();
 const campoUnidad = document.getElementById("ins-unidad-iu-flecha");
 assert(!!campoUnidad, "sanity: existe el campo de unidad del primer insumo");
+const panelUnidad = campoUnidad.closest(".insumo-unidad-cell").querySelector(".combo-unidad-suggestions");
+assert(!!panelUnidad && panelUnidad.hidden === true, "sanity: el panel de sugerencias ya vive en el DOM desde el primer render, pero arranca oculto");
 campoUnidad.focus();
 // Con el panel CERRADO, ←/→ tienen que seguir siendo el cursor de texto de
 // siempre — el usuario probó justo esto y reportó "las flechas solo me
@@ -2855,39 +2863,44 @@ campoUnidad.focus();
 // interceptan, para poder seguir corrigiendo a mano una unidad escrita.
 let noInterceptada = tecla("ArrowRight");
 assert(noInterceptada === true, "← /→ con el panel cerrado NO se interceptan (dispatchEvent devuelve true: nadie llamó preventDefault)");
-assert(!document.querySelector(".combo-unidad-suggestions"), "...y no abren el panel (a diferencia de ↓/↑)");
+assert(panelUnidad.hidden === true, "...y no abren el panel (a diferencia de ↓/↑)");
 tecla("ArrowDown");
-assert(!!document.querySelector(".combo-unidad-suggestions"), "↓ con el panel cerrado lo abre, igual que un <select>");
-let itemActivo = document.querySelector(".combo-item.activo");
+assert(panelUnidad.hidden === false, "↓ con el panel cerrado lo abre, igual que un <select> — sin pasar por notify() (fluido, cero redibujado)");
+let itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(!!itemActivo && itemActivo.textContent === "MT", "...y resalta la primera sugerencia en orden alfabético (MT, ROLLO, UND)");
 tecla("ArrowDown");
-itemActivo = document.querySelector(".combo-item.activo");
+itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "ROLLO", "↓ de nuevo mueve el resaltado a la siguiente sugerencia");
 tecla("ArrowDown");
 tecla("ArrowDown"); // ya en la última: una de más no debe dar la vuelta al principio
-itemActivo = document.querySelector(".combo-item.activo");
+itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "UND", "↓ se detiene en la última sugerencia, no da la vuelta (igual que un <select>)");
 tecla("ArrowUp");
-itemActivo = document.querySelector(".combo-item.activo");
+itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "ROLLO", "↑ mueve el resaltado hacia atrás");
 // Con el panel YA ABIERTO, las 4 flechas navegan — no solo ↑/↓ — para que se
 // sienta igual sea cual sea la dirección que el usuario pruebe primero.
 tecla("ArrowRight");
-itemActivo = document.querySelector(".combo-item.activo");
+itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "UND", "con el panel abierto, → se comporta como ↓ (siguiente)");
 tecla("ArrowLeft");
-itemActivo = document.querySelector(".combo-item.activo");
+itemActivo = panelUnidad.querySelector(".combo-item.activo");
 assert(itemActivo && itemActivo.textContent === "ROLLO", "...y ← se comporta como ↑ (anterior)");
+assert(document.getElementById("ins-unidad-iu-flecha") === campoUnidad, "sanity: navegar con las flechas nunca redibujó la pestaña (mismo nodo de siempre, no uno nuevo)");
 tecla("Enter");
-assert(!document.querySelector(".combo-unidad-suggestions"), "Enter elige lo resaltado y cierra el panel");
+assert(panelUnidad.hidden === true, "Enter elige lo resaltado y cierra el panel");
 assert(document.getElementById("ins-unidad-iu-flecha").value === "ROLLO", "...escribe la unidad elegida sobre el campo original");
 assert(state.catalogoInsumos[0].unidad === "ROLLO", "...y el cambio queda guardado en el insumo (mismo camino que elegirlo con el mouse)");
 assert(document.activeElement && document.activeElement.id === "ins-unidad-iu-flecha", "tras elegir con Enter, el foco se queda en el campo (no se pierde ni salta)");
 // Escape cierra sin elegir nada.
+// "Enter" (arriba) sí disparó un notify() real — set-cat-campo persiste y
+// redibuja, como cualquier otro campo de esta fila — así que el panel de
+// antes quedó en el árbol viejo; se vuelve a buscar el de verdad.
+const panelUnidadTrasElegir = document.getElementById("ins-unidad-iu-flecha").closest(".insumo-unidad-cell").querySelector(".combo-unidad-suggestions");
 tecla("ArrowDown");
-assert(!!document.querySelector(".combo-unidad-suggestions"), "sanity: el panel vuelve a abrirse");
+assert(panelUnidadTrasElegir.hidden === false, "sanity: el panel vuelve a abrirse");
 tecla("Escape");
-assert(!document.querySelector(".combo-unidad-suggestions"), "Escape cierra el panel");
+assert(panelUnidadTrasElegir.hidden === true, "Escape cierra el panel");
 assert(state.catalogoInsumos[0].unidad === "ROLLO", "...sin haber cambiado la unidad");
 state.productos = productosPreviosFlecha; state.plantillasPrendas = plantillasPreviasFlecha; state.cotizaciones = cotizacionesPreviasFlecha;
 
