@@ -187,6 +187,19 @@
 .picker-item-info small{font-size:11px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .picker-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-top:1px solid var(--border-soft);background:var(--surface-2);flex-wrap:wrap;}
 
+/* Buscador de Contactos para elegir el cliente de una cotización (ver
+   renderClientePickerCotizacion en modules/cotizaciones.js) — mismo "chrome"
+   de modal que el picker de insumos, pero de una sola columna: acá se busca
+   por nombre, no se navega por categoría, y la selección es única (sin
+   checkbox: elegir uno cierra el picker de una vez). */
+.cliente-picker-lista{overflow-y:auto;padding:8px;max-height:360px;}
+.cliente-picker-item{padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;}
+.cliente-picker-item:hover{background:var(--surface-2);}
+.cliente-picker-item-info{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.cliente-picker-item-info b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cliente-picker-item-info small{font-size:11.5px;color:var(--ink-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cliente-picker-btn{width:100%;justify-content:flex-start;text-align:left;}
+
 @media (max-width: 700px){
   .picker-overlay{padding:0;}
   .picker-modal{max-height:100vh;height:100vh;width:100%;border-radius:0;}

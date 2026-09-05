@@ -11,6 +11,15 @@ if (!global.URL.revokeObjectURL) global.URL.revokeObjectURL = () => {};
 global.alert = dom.window.alert = () => {}; // jsPDF no está cargado en este entorno de prueba
 global.confirm = dom.window.confirm = () => true; // simula que el usuario siempre acepta el confirm()
 global.sessionStorage = dom.window.sessionStorage; // para simular login de vendedor/admin (ver core/auth.js)
+// jsdom no calcula layout real: offsetParent es SIEMPRE null para todo el
+// mundo, sin importar si el elemento está visible de verdad o no. El propio
+// código de la app usa "offsetParent !== null" como filtro de "¿esto está
+// visible?" en más de un lado (saltarAlSiguienteCampo en core/teclado.js,
+// y el cálculo de a dónde va Tab en core/dom.js) — sin este parche, esos
+// filtros vacían la lista de campos en CADA prueba y ese camino queda sin
+// probar de verdad. En un navegador real esto no hace falta: offsetParent
+// funciona solo.
+Object.defineProperty(dom.window.HTMLElement.prototype, "offsetParent", { get() { return this.ownerDocument.body; }, configurable: true });
 
 // Mock mínimo de window.storage (interfaz get/set de core/sheetsStorage.js) en
 // memoria — sin esto STORAGE_OK queda en false y persist() es un no-op total,
@@ -48,6 +57,20 @@ function setInput(selector, value) {
   if (!el) throw new Error("No se encontró input: " + selector);
   el.value = value;
   el.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+}
+// El cliente de una cotización se ELIGE de Contactos (ver
+// renderClientePickerCotizacion en modules/cotizaciones.js) — ya no es un
+// campo de texto libre como en Pedidos. Para las pruebas que solo necesitan
+// "una cotización con este cliente" (no están probando el buscador en sí),
+// esto crea el contacto si hace falta y lo deja elegido directo en el
+// borrador, sin simular el clic en cada uno de los pasos del picker.
+function elegirClienteCotizacion(nombre) {
+  const id = "cli-test-" + nombre.replace(/\s+/g, "-").toLowerCase();
+  if (!state.clientes.some(c => c.id === id)) {
+    state.clientes.push({ id, nombre, tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] });
+  }
+  state.formCotizacion.clienteId = id;
+  state.formCotizacion.cliente = nombre;
 }
 // Los campos que alimentan un cálculo en pantalla no usan data-form (que
 // escribe en el borrador sin repintar) sino data-action-change, que dispara
@@ -231,7 +254,7 @@ assert(
 
 // --- cotizaciones: crear cotización (ya trae una referencia en blanco), tipos de costo y PDF ---
 click('[data-action="tab"][data-tab="cotizaciones"]');
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Prueba");
+elegirClienteCotizacion("Cliente Prueba");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes de prueba");
 click('[data-action="add-cotizacion"]');
 assert(state.cotizaciones.length === 1, "crea cotización");
@@ -564,7 +587,7 @@ assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock =
 // "Tallas y observaciones" por talla ---
 click('[data-action="tab"][data-tab="cotizaciones"]');
 click('[data-action="cerrar-cotizacion-editor"]'); // la pestaña "nueva" seguía mostrando el detalle de la cotización abierta antes
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Prueba");
+elegirClienteCotizacion("Cliente Prueba");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes con producto de catálogo");
 click('[data-action="add-cotizacion"]');
 const cotProdId = state.cotizaciones[0].id;
@@ -1048,7 +1071,7 @@ const calcMod = await import("../js/core/calc.js");
 state.tab = "cotizaciones";
 state.cotizacionEditando = "";
 render();
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Diseño");
+elegirClienteCotizacion("Cliente Diseño");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Pedido con diseño cobrado");
 click('[data-action="add-cotizacion"]');
 const cotD = state.cotizaciones[0];
@@ -1932,7 +1955,7 @@ assert(!calcMod2.esInsumoServicio(state.catalogoInsumos.find(i => i.id === insTe
 state.tab = "cotizaciones";
 state.cotizacionEditando = "";
 render();
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Servicio");
+elegirClienteCotizacion("Cliente Servicio");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba de servicio en producción");
 click('[data-action="add-cotizacion"]');
 const cotServ = state.cotizaciones.find(c => c.descripcion === "Prueba de servicio en producción");
@@ -2073,7 +2096,7 @@ assert(proInsServ.esServicio === true, "confirmar-insumo-picker-producto (produc
 state.tab = "cotizaciones";
 state.cotizacionEditando = "";
 render();
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Servicio 2");
+elegirClienteCotizacion("Cliente Servicio 2");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba plantilla/producto servicio");
 click('[data-action="add-cotizacion"]');
 const cotServ2 = state.cotizaciones.find(c => c.descripcion === "Prueba plantilla/producto servicio");
@@ -2096,7 +2119,7 @@ assert(refConPla.insumos.some(i => i.esServicio === true), "aplicar-plantilla he
 const { fmt } = await import("../js/core/utils.js");
 state.cotizacionEditando = "";
 render();
-setInput('[data-form="cotizacion"][data-field="cliente"]', "Cliente Comisión");
+elegirClienteCotizacion("Cliente Comisión");
 setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba comisión en estimado y real");
 click('[data-action="add-cotizacion"]');
 const cotCom = state.cotizaciones.find(c => c.descripcion === "Prueba comisión en estimado y real");
@@ -2593,13 +2616,63 @@ state.cotizaciones = [{
   gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "xyz"
 }];
 state.cotSucia = "";
+state.cotizacionEditando = "cot-reorder-1";
 cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-C", "ins-A", "ins-B"]);
 var ordenTrasArrastre = state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; });
 assert(ordenTrasArrastre.join(",") === "ins-C,ins-A,ins-B", "reordenarInsumos aplica el nuevo orden leído del DOM tras soltar (SortableJS)");
-assert(state.cotSucia === "cot-reorder-1", "reordenar insumos marca la cotización como \"sin guardar\", igual que cualquier otra edición (guardado explícito)");
+// El usuario reportó: reordenar insumos no debería encender el dock de "sin
+// guardar" — es puramente visual, no afecta ningún costo/cantidad/total de
+// la cotización, así que se guarda solo en vez de pedir confirmación.
+assert(state.cotSucia === "", "reordenar insumos NO marca la cotización como \"sin guardar\" — se guarda solo, sin pedir confirmación");
+assert(!!state.cotSnapshot && state.cotSnapshot.referencias[0].insumos.map(function (i) { return i.id; }).join(",") === "ins-C,ins-A,ins-B", "...y el nuevo punto de \"Descartar\" ya incluye este orden (quedó guardado de verdad, no solo en pantalla)");
 cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-C", "ins-A", "ins-B"]);
 assert(state.cotizaciones[0].referencias[0].insumos.map(function (i) { return i.id; }).join(",") === "ins-C,ins-A,ins-B", "aplicar el mismo orden de nuevo no cambia nada");
+// Excepción: si YA había otra edición sin confirmar en esta misma
+// cotización, reordenar no se auto-guarda — eso arrastraría esa otra edición
+// sin que el usuario la haya confirmado con "Guardar".
+state.cotizaciones[0].descripcion = "Editado a mano, todavía sin guardar";
+state.cotSucia = "cot-reorder-1";
+cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-B", "ins-A", "ins-C"]);
+assert(state.cotSucia === "cot-reorder-1", "si ya había otra edición pendiente en la misma cotización, reordenar NO se auto-guarda — se suma a lo ya pendiente de confirmar");
 state.cotSucia = "";
+state.cotizacionEditando = "";
+
+// ---------- Buscador de cliente en Cotizaciones (ya no es texto libre) ----------
+// El usuario aclaró: una cotización SIEMPRE es de un contacto real ya
+// registrado (nombre, cédula, dirección van al PDF) — a diferencia de
+// Pedidos, donde "cliente libre" tiene sentido para una venta rápida e
+// informal. El combo de texto libre + "se guardará como cliente libre" que
+// SÍ sigue usando Pedidos no era lo que hacía falta acá.
+state.tab = "cotizaciones";
+state.cotizacionesVista = "nueva";
+state.cotizacionEditando = "";
+state.clientePickerAbierto = false;
+state.clientePickerBusqueda = "";
+state.clientes = [
+  { id: "cli-pick-1", nombre: "Ana Torres", tipoRelacion: "cliente", cedula: "111", ciudad: "Cali", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] },
+  { id: "cli-pick-2", nombre: "Carlos Ruiz", tipoRelacion: "cliente", cedula: "222", ciudad: "Cali", distintivo: "Equipo Fenix", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] },
+  { id: "cli-pick-3", nombre: "Distribuidora Textil", tipoRelacion: "proveedor", cedula: "333", ciudad: "Cali", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] }
+];
+state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: hoyStr(), fechaEntrega: "" };
+render();
+assert(!document.querySelector('[data-form="cotizacion"][data-field="cliente"]'), "el cliente de una cotización ya no es un campo de texto libre");
+assert(!!document.querySelector('[data-action="abrir-cliente-picker-cotizacion"]'), "...sino un botón que abre el buscador de contactos");
+assert(document.querySelector('[data-action="add-cotizacion"]').disabled, "sin cliente elegido, \"Crear cotización\" queda deshabilitado");
+click('[data-action="abrir-cliente-picker-cotizacion"]');
+assert(!!document.querySelector(".picker-overlay"), "el buscador se abre");
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker"]').length === 2, "lista los contactos que SÍ son clientes (2), sin el proveedor");
+setInput("#inp-cliente-picker-buscar", "fenix");
+render(); // data-live-filter debounce; el estado ya quedó actualizado, solo falta repintar
+assert(document.querySelectorAll('[data-action="seleccionar-cliente-picker"]').length === 1, "el buscador también filtra por el distintivo del contacto");
+click('[data-action="seleccionar-cliente-picker"][data-id="cli-pick-2"]');
+assert(state.formCotizacion.clienteId === "cli-pick-2" && state.formCotizacion.cliente === "Carlos Ruiz", "elegir un contacto vincula clienteId Y copia el nombre");
+assert(!state.clientePickerAbierto, "y cierra el buscador solo");
+render();
+assert(!document.querySelector('[data-action="add-cotizacion"]').disabled, "con un cliente ya elegido, \"Crear cotización\" se habilita");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes Fenix");
+click('[data-action="add-cotizacion"]');
+assert(state.cotizaciones.some(function (c) { return c.clienteId === "cli-pick-2" && c.cliente === "Carlos Ruiz"; }), "la cotización se crea con el cliente elegido en el buscador");
+state.cotizacionEditando = "";
 
 // ---------- Importar desde mis Contactos de Google ----------
 state.clientes = [];
@@ -2647,14 +2720,32 @@ state.formPedido = {
 };
 render();
 const campoCantidad = document.querySelector('[data-action-change="set-pedido-linea-campo"][data-linea="lin-teclado"][data-campo="cantidad"]');
+const campoPrecioAntes = document.querySelector('[data-action-change="set-pedido-linea-campo"][data-linea="lin-teclado"][data-campo="precioUnitario"]');
 assert(!!campoCantidad && !campoCantidad.id, "sanity: el campo de cantidad de una línea no tiene id propio (es el caso típico, no la excepción)");
+assert(!!campoPrecioAntes, "sanity: existe un campo siguiente (Precio x1) al que Tab debería avanzar");
 campoCantidad.focus();
-assert(document.activeElement === campoCantidad, "sanity: el campo queda enfocado antes de disparar el cambio");
+assert(document.activeElement === campoCantidad, "sanity: el campo queda enfocado antes de presionar Tab");
+// Primero el keydown de Tab de verdad (fase de captura, ANTES que nada más
+// — así es como se calcula a dónde iba, mientras el campo de origen todavía
+// existe) y RECIÉN DESPUÉS el "change" que el navegador dispara al salir del
+// campo — es el mismo orden real de eventos al tabular fuera de un input.
+campoCantidad.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
 campoCantidad.value = "3";
-campoCantidad.dispatchEvent(new dom.window.Event("change", { bubbles: true })); // el navegador dispara esto al salir del campo, incluido salir con Tab
+campoCantidad.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 assert(state.formPedido.lineas[0].cantidad === 3, "sanity: el cambio sí se aplicó (dispara set-pedido-linea-campo → notify → render)");
-assert(document.activeElement !== document.body, "tras el render que dispara el propio campo, el foco NO queda perdido en <body> (que es lo que hacía que el siguiente Tab aterrizara en \"Saltar al contenido\")");
-assert(document.activeElement && document.activeElement.getAttribute("data-linea") === "lin-teclado" && document.activeElement.getAttribute("data-campo") === "cantidad", "...se restaura al campo equivalente (mismo data-linea/data-campo) en el HTML reconstruido, aunque sea un nodo del DOM distinto y sin id");
+assert(document.activeElement !== document.body, "tras Tab, el foco NO queda perdido en <body> (que es lo que hacía que el SIGUIENTE Tab aterrizara en \"Saltar al contenido\")");
+assert(document.activeElement && document.activeElement.getAttribute("data-campo") === "precioUnitario", "y Tab de verdad AVANZA al siguiente campo (Precio x1) — no se queda ni vuelve al que se acaba de dejar, que es lo que reportó el usuario que seguía pasando");
+
+// Contraprueba: un "change" SIN que Tab lo haya precedido (ej. el usuario
+// hizo clic en otra parte, no tabuló) no tiene a dónde "avanzar" — se cae al
+// respaldo de antes (mismo campo, por su selector data-*), que sigue siendo
+// mejor que perder el foco en document.body.
+const campoCosto = document.querySelector('[data-action-change="set-pedido-linea-campo"][data-linea="lin-teclado"][data-campo="costoUnitario"]');
+campoCosto.focus();
+campoCosto.value = "7000";
+campoCosto.dispatchEvent(new dom.window.Event("change", { bubbles: true })); // sin keydown Tab antes
+assert(document.activeElement !== document.body, "un 'change' sin Tab de por medio tampoco pierde el foco...");
+assert(document.activeElement && document.activeElement.getAttribute("data-campo") === "costoUnitario", "...y sin un destino de Tab que seguir, se queda en el mismo campo (mejor que caer a document.body)");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

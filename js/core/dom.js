@@ -413,8 +413,8 @@ function selectorEstableParaFoco(el) {
   return partes.length > 1 ? partes.join("") : null;
 }
 // Vuelve a poner el foco (y la posición del cursor, si aplica) en `el`,
-// compartido por las dos vías de restauración (por id y por selector) de
-// render() más abajo.
+// compartido por las tres vías de restauración (por Tab pendiente, por id y
+// por selector) de render() más abajo.
 function reponerFoco(el, selStart) {
   if (!el) return;
   el.focus();
@@ -422,6 +422,53 @@ function reponerFoco(el, selStart) {
     try { el.setSelectionRange(selStart, selStart); } catch (e) { /* elementos sin selección de texto (ej. checkbox) */ }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Tab que de verdad avanza al siguiente campo (no solo "no pierde el foco")
+// ---------------------------------------------------------------------------
+// La solución de arriba (selectorEstableParaFoco) evita que el foco quede
+// perdido en document.body, pero por sí sola solo logra que, tras el render
+// que el propio "change" dispara, el foco vuelva a caer en EL MISMO campo
+// que se acaba de dejar — Tab dejaba de romperse, pero tampoco avanzaba: el
+// usuario reportó que seguía sin sentirse natural. Falta la otra mitad:
+// saber A DÓNDE iba Tab ANTES de que el campo se destruya, para reponer el
+// foco AHÍ y no en el campo de origen.
+//
+// Se calcula en la fase de CAPTURA de "keydown" — antes que cualquier otro
+// manejador, incluido el "change" nativo que Tab dispara al salir del campo
+// (que es lo que a su vez llama a notify()/render()) — recorriendo los
+// mismos campos que ya usa Enter (ver saltarAlSiguienteCampo en
+// core/teclado.js) más botones y enlaces, en orden del documento (que es,
+// para esta app, el mismo orden que usa el Tab nativo: nada acá define un
+// tabindex positivo que lo reordene). Se guarda solo su identidad (id, o el
+// mismo selector por atributos data-* de arriba) — el propio elemento se
+// habrá destruido para cuando haga falta usarlo.
+//
+// Se limpia solo (setTimeout 0) si nadie lo consume: la enorme mayoría de
+// los campos NO disparan ningún render al perder el foco (data-form normal,
+// sin notify() en cada tecla), así que esto tiene que evaporarse antes de
+// que un render de verdad, pero completamente ajeno a este Tab (ej. el chip
+// de guardado actualizándose 15s después), lo encuentre todavía puesto y
+// mande el foco a un campo que el usuario ya ni recuerda haber rozado.
+var CAMPOS_TABULABLES = 'input:not([type="hidden"]):not([disabled]):not([tabindex="-1"]), ' +
+  'select:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]):not([tabindex="-1"]), ' +
+  'button:not([disabled]):not([tabindex="-1"]), a[href]:not([tabindex="-1"])';
+var pendingTabId = null;
+var pendingTabSelector = null;
+document.addEventListener("keydown", function (e) {
+  if (e.key !== "Tab") return;
+  var app = document.getElementById("app");
+  var el = e.target;
+  if (!app || !el || !app.contains(el)) return;
+  var campos = Array.prototype.slice.call(app.querySelectorAll(CAMPOS_TABULABLES))
+    .filter(function (f) { return f.offsetParent !== null; });
+  var idx = campos.indexOf(el);
+  if (idx === -1) return;
+  var destino = e.shiftKey ? campos[idx - 1] : campos[idx + 1];
+  pendingTabId = destino && destino.id ? destino.id : null;
+  pendingTabSelector = destino && !pendingTabId ? selectorEstableParaFoco(destino) : null;
+  setTimeout(function () { pendingTabId = null; pendingTabSelector = null; }, 0);
+}, true);
 
 var rendering = false;
 var pendingRerender = false;
@@ -528,7 +575,17 @@ export function render() {
     // render()). Opcional: la mayoría de los módulos no lo necesitan.
     if (mod && mod.afterRender) mod.afterRender();
 
-    if (activeId) {
+    // Si Tab (o Shift+Tab) disparó este mismo render (ver el "keydown" de
+    // arriba), el foco va A DONDE IBA — no de vuelta al campo que se acaba
+    // de dejar. Tiene que ir ANTES que la restauración normal por
+    // id/selector: esa restauraría el campo de origen, que es justo el salto
+    // que Tab quería dejar atrás.
+    var destinoTab = pendingTabId ? document.getElementById(pendingTabId)
+      : (pendingTabSelector ? (function () { try { return app.querySelector(pendingTabSelector); } catch (e) { return null; } })() : null);
+    if (destinoTab) {
+      pendingTabId = null; pendingTabSelector = null;
+      reponerFoco(destinoTab, null); // campo nuevo: no hay cursor previo que seguir
+    } else if (activeId) {
       reponerFoco(document.getElementById(activeId), selStart);
     } else if (activeSelector) {
       var elRestaurado;

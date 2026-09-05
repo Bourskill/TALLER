@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra } from "../core/calc.js";
-import { renderClienteCombo, renderTipoCostoOptions, renderHelp, renderBuscador, renderToggleSeccion, renderComboUnidad } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderBuscador, renderToggleSeccion, renderComboUnidad } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
@@ -82,6 +82,7 @@ export function render() {
   var html = renderTabsCotizaciones(vista);
   html += vista === "historial" ? renderHistorial() : renderEditor();
   html += renderInsumoPicker();
+  html += renderClientePickerCotizacion();
   return html;
 }
 
@@ -212,14 +213,79 @@ function renderFormNueva() {
   return '<div class="card"><div class="section-title small">Nueva cotización' +
     renderHelp("Arma cada referencia con sus insumos (o aplica una plantilla), define el precio de venta y el margen se calcula solo. Los gastos reales de producción se registran aparte para comparar contra lo cotizado.") +
     '</div><div class="form-grid">' +
-    renderClienteCombo("cotizacion", "cot-cliente-nombre", f) +
+    renderClienteSeleccionCotizacion(f) +
     '<div class="field wide"><label>Descripción</label><input data-form="cotizacion" data-field="descripcion" value="' + esc(f.descripcion) + '" placeholder="Ej. Uniformes equipo San Jorge" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="cotizacion" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
     '<div class="field"><label>Fecha de entrega (opcional)' +
     renderHelp("Se traslada al pedido cuando conviertas esta cotización — es lo que hace que aparezca en \"Próximas entregas\" del Resumen. Si aún no la sabes, puedes definirla después.") +
     '</label><input type="date" data-form="cotizacion" data-field="fechaEntrega" value="' + esc(f.fechaEntrega || "") + '" /></div>' +
-    '<button class="btn" data-action="add-cotizacion">Crear cotización</button>' +
+    '<button class="btn" ' + (f.clienteId ? "" : "disabled") + ' data-action="add-cotizacion">Crear cotización</button>' +
     "</div></div>";
+}
+
+// El cliente de una cotización SIEMPRE es un contacto real ya registrado —
+// a diferencia del "cliente libre" de Pedidos (ventas rápidas, informales),
+// una cotización se le entrega a alguien concreto (nombre, cédula, dirección
+// van en el PDF). Por eso este campo no es un texto libre que además puede
+// crear uno al vuelo: es un botón que abre el buscador de Contactos (ver
+// renderClientePickerCotizacion) y solo permite ELEGIR, nunca escribir.
+function renderClienteSeleccionCotizacion(f) {
+  var cliente = f.clienteId ? clienteById(f.clienteId) : null;
+  return '<div class="field">' +
+    "<label>Cliente</label>" +
+    '<button type="button" class="btn ghost cliente-picker-btn" data-action="abrir-cliente-picker-cotizacion">' +
+    (cliente
+      ? "✓ " + esc(cliente.nombre) + (cliente.ciudad ? " · " + esc(cliente.ciudad) : "") + " — cambiar"
+      : "🔍 Buscar cliente…") +
+    "</button></div>";
+}
+
+// Explorador de Contactos para elegir el cliente de una cotización — mismo
+// "chrome" de modal que renderInsumoPicker (overlay + cabecera + buscador +
+// pie), pero de una sola columna (sin categorías laterales: acá se busca por
+// nombre, no se navega por categoría) y selección única.
+function renderClientePickerCotizacion() {
+  if (!state.clientePickerAbierto) return "";
+  var q = norm(state.clientePickerBusqueda || "").trim();
+  // Proveedores fuera: el cliente de una cotización es a quien se le vende,
+  // nunca a quien se le compra.
+  var lista = (state.clientes || []).filter(function (c) { return c.tipoRelacion !== "proveedor"; });
+  var filtrados = q ? lista.filter(function (c) {
+    return norm(c.nombre).indexOf(q) >= 0 || norm(c.cedula || "").indexOf(q) >= 0 ||
+      norm(c.ciudad || "").indexOf(q) >= 0 || norm(c.distintivo || "").indexOf(q) >= 0;
+  }) : lista;
+
+  var html = '<div class="picker-overlay" data-action="cerrar-cliente-picker">' +
+    '<div class="picker-modal" style="max-width:520px;" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Elegir cliente</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-cliente-picker" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="picker-search">' + renderBuscador({
+      id: "inp-cliente-picker-buscar", filtro: "clientePickerBusqueda", valor: state.clientePickerBusqueda,
+      placeholder: "Buscar por nombre, cédula, ciudad o distintivo…", ancho: "full", compacto: true
+    }) + "</div>" +
+    '<div class="cliente-picker-lista">';
+
+  if (!lista.length) {
+    html += '<div class="empty">Aún no tienes contactos registrados. Créalo primero en la pestaña <b>Contactos</b> y vuelve a intentarlo.</div>';
+  } else if (!filtrados.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.clientePickerBusqueda) + '"' : "") + ". Si es alguien nuevo, regístralo primero en la pestaña <b>Contactos</b>.</div>";
+  } else {
+    filtrados.forEach(function (c) {
+      html += '<div class="cliente-picker-item" data-action="seleccionar-cliente-picker" data-id="' + c.id + '">' +
+        '<div class="cliente-picker-item-info"><b>' + esc(c.nombre) + (c.distintivo ? ' <span class="cliente-distintivo">— ' + esc(c.distintivo) + "</span>" : "") + "</b>" +
+        "<small>" + ([c.cedula, c.ciudad].filter(Boolean).map(esc).join(" · ") || "sin más datos") + "</small></div>" +
+        "</div>";
+    });
+  }
+
+  html += "</div>" +
+    '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">' + filtrados.length + (filtrados.length === 1 ? " contacto" : " contactos") + "</span>" +
+    '<button class="btn ghost small" data-action="cerrar-cliente-picker">Cancelar</button>' +
+    "</div></div></div>";
+  return html;
 }
 
 // Muestra el formulario en blanco, o (si se abrió una desde Historial, o se
@@ -1176,6 +1242,24 @@ function renderThumb(cotId, ref) {
 }
 
 export var actions = {
+  "abrir-cliente-picker-cotizacion": function () {
+    state.clientePickerAbierto = true;
+    state.clientePickerBusqueda = "";
+    notify();
+  },
+  "cerrar-cliente-picker": function () {
+    state.clientePickerAbierto = false;
+    notify();
+  },
+  "seleccionar-cliente-picker": function (el) {
+    var id = el.getAttribute("data-id");
+    var c = state.clientes.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    state.formCotizacion.clienteId = c.id;
+    state.formCotizacion.cliente = c.nombre;
+    state.clientePickerAbierto = false;
+    notify();
+  },
   "cot-vista": function (el) {
     // Irse al Historial deja el detalle atrás: si hay cambios sin guardar,
     // se avisa antes (si no, se perderían sin que nadie los vea).
@@ -2611,7 +2695,22 @@ export function reordenarInsumos(cotId, refId, nuevoOrdenIds) {
       })
     });
   });
-  if (huboCambio) marcarSucia(cotId);
+  if (!huboCambio) return;
+  // El orden de los insumos es puramente visual — no cambia ningún costo,
+  // cantidad ni total de la cotización. El usuario lo pidió explícito: no
+  // tiene sentido interrumpir con el dock de "sin guardar" por algo que no
+  // afecta la cotización de ninguna forma, así que esto se guarda solo.
+  // ÚNICA excepción: si esta misma cotización YA tenía otra edición sin
+  // confirmar (cotSucia === cotId) — ahí NO se auto-guarda nada, porque
+  // guardar ahora arrastraría también esa otra edición sin que el usuario la
+  // haya confirmado con "Guardar".
+  if (state.cotSucia === cotId) {
+    notify();
+    return;
+  }
+  persist("cotizaciones");
+  tomarSnapshotCotizacion(); // el nuevo punto de retorno de "Descartar" ya incluye este orden
+  notify();
 }
 
 function moverInsumoAGlobal(cotId, refId, insId) {

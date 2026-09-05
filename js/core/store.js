@@ -364,6 +364,13 @@ export const state = {
   insumoPickerCategoria: "todos", // "todos" | "sin" | id de categoría
   insumoPickerBusqueda: "",
   insumoPickerSeleccion: [], // ids de insumos marcados (selección múltiple)
+  // Explorador de contactos para elegir el cliente de una cotización — a
+  // diferencia de Pedidos (donde "cliente libre" tiene sentido: ventas
+  // rápidas, informales), una cotización SIEMPRE es de un contacto real ya
+  // registrado, así que acá no se ofrece "escribir uno nuevo al vuelo".
+  // Estado de UI, nunca se persiste.
+  clientePickerAbierto: false,
+  clientePickerBusqueda: "",
   // { [cotId + "|" + claveLinea]: true } — qué filas de la tabla de compras
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.

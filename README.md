@@ -222,6 +222,52 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimoprimera ronda: Tab de verdad, y SortableJS no interrumpe)
+
+Tercera vuelta sobre "Duplicar pedido"/SortableJS/Tab. Dos correcciones reales.
+
+**Tab: el primer fix no bastaba — ahora sí avanza de verdad.** El usuario
+confirmó que "sigue pasando lo mismo" tras la corrección anterior. Causa: esa
+corrección (`selectorEstableParaFoco`) evitaba que el foco quedara perdido en
+`document.body`, pero solo lograba que volviera al MISMO campo que se
+acababa de dejar — Tab dejaba de romperse, pero tampoco avanzaba, que es lo
+que un Tab de verdad tiene que hacer. Fix completo: un `keydown` en fase de
+captura calcula, ANTES de que el campo de origen se destruya, cuál es el
+siguiente campo tabulable (mismo criterio que ya usa Enter — ver
+`saltarAlSiguienteCampo` en `core/teclado.js`) y guarda su identidad;
+`render()` usa ese destino con prioridad sobre la restauración normal. Se
+descubrió de paso una trampa real para probarlo: jsdom no calcula layout, así
+que `offsetParent` (el filtro de "¿está visible?" que ya usaba el propio
+Enter) siempre da `null` ahí — sin parchearlo en `test/smoke.mjs`, la prueba
+"pasaba" sin haber probado nada de verdad. Ahora hay un test que simula el
+Tab real y confirma que el foco aterriza en el siguiente campo, no que
+simplemente "no se pierde".
+
+**SortableJS: reordenar insumos ya no enciende el dock de "sin guardar".**
+El orden es puramente visual — no toca ningún costo, cantidad ni total — así
+que pedir confirmación con "Guardar"/"Descartar" no tenía sentido. Ahora
+`reordenarInsumos` persiste directo (se guarda solo) si no había otra edición
+pendiente en esa misma cotización; si SÍ la había, no se auto-guarda nada
+(evita arrastrar esa otra edición sin confirmar) y se suma a lo ya pendiente.
+
+Verificado con `test/smoke.mjs` (548 aserciones: +5 de esta ronda).
+
+**Bonus de esta misma vuelta: Cotizaciones ya no permite un cliente "al
+vuelo".** El usuario reportó que el campo Cliente "no despliega nada para
+seleccionarlo"; al investigar, el combo de texto libre sí funcionaba bien —
+lo que de verdad hacía falta era otra cosa: "quiero la barra de búsqueda de
+contactos en cotizaciones para seleccionar el cliente que busco, no crearlo
+de 0 porque cotizaciones no es para eso". A diferencia de **Pedidos** (donde
+un cliente libre para una venta rápida SÍ tiene sentido, y se dejó intacto),
+una cotización siempre es de un contacto real ya registrado — nombre,
+cédula y dirección van al PDF. Se reemplazó el campo de texto por un botón
+que abre un buscador de Contactos (mismo "chrome" de modal que el picker de
+insumos, filtrando proveedores fuera y buscando también por distintivo);
+"Crear cotización" queda deshabilitado sin un cliente elegido. Si no existe
+el contacto, el buscador dirige a crearlo primero en Contactos.
+
+Verificado con `test/smoke.mjs` (558 aserciones en total: +10 de este ajuste).
+
 ## Registro de cambios — septiembre 2026 (vigésima ronda: Tab resuelto + alcance de "Opciones avanzadas" corregido)
 
 Segunda vuelta de correcciones sobre la ronda anterior, con dos resultados
