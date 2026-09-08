@@ -304,6 +304,21 @@ tipoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 ref = state.cotizaciones[0].referencias[0];
 assert(ref.insumos[0].tipo === "tela" && ref.insumos[0].costo === 8000, "actualiza costo y tipo de costo del insumo");
 
+// El usuario reportó: "la cantidad del insumo se mantiene en 1... pero el
+// costo x prenda sí refleja el consumo de tela... la cantidad en este caso
+// debería ser la misma que el consumo de tela". Antes "Cant." mostraba
+// insumo.cantidad (que nadie toca, siempre 1) mientras "Costo x prenda" ya
+// usaba consumoAprox — acá se prueba que ahora los dos van de la mano.
+state.cotizaciones[0].referencias[0].consumoAprox = 1.6;
+render();
+const campoCantTela = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId + '"][data-campo="cantidad"]');
+assert(campoCantTela.value === "1.6", "para tipo \"tela\", \"Cant.\" muestra el consumo aprox. de la referencia, no el insumo.cantidad de siempre");
+assert(campoCantTela.disabled === true, "...y queda deshabilitado (la cantidad la da el consumo, igual que \"fijo_pedido\" con cantidadPedida)");
+const costoPrendaTela = document.querySelector('[data-ref-id="' + refId + '"] [data-ins-row][data-ins="' + insId + '"] .amount');
+assert(costoPrendaTela.textContent.indexOf("12.800") >= 0 || costoPrendaTela.textContent.indexOf("12,800") >= 0, "\"Costo x prenda\" (8.000 × 1.6 = 12.800) coincide con lo que \"Cant.\" muestra — un solo factor, no uno escondido");
+state.cotizaciones[0].referencias[0].consumoAprox = 1; // deja la referencia como la esperan las pruebas siguientes
+render();
+
 // --- guardado explícito: editar una cotización NO reescribe los datos
 // oficiales hasta confirmar; "Descartar" vuelve al último guardado ---
 assert(state.cotSucia === cotId, "editar la cotización la marca como 'cambios sin guardar'");

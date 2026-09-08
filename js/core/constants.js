@@ -138,7 +138,7 @@ export const DEFAULT_CONFIG = {
 // propósito: hacerlo obligaría a migrar todas las cotizaciones, plantillas y
 // productos que ya lo tienen guardado.
 export const TIPOS_COSTO = {
-  tela: { label: "Tela (según consumo)", ayuda: "costo = costo × consumo aprox. de la referencia × cantidad" },
+  tela: { label: "Tela (según consumo)", ayuda: "costo = costo × consumo aprox. de la referencia" },
   fijo_pedido: { label: "Fijo por referencia", ayuda: "costo = costo total ÷ cantidad de prendas de esa referencia" },
   por_prenda: { label: "Fijo por prenda", ayuda: "costo = costo × cantidad indicada" },
   // Se paga UNA vez por el pedido entero (domicilio, diseño, un envío a

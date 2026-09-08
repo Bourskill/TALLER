@@ -989,7 +989,18 @@ function renderRefCard(cotId, ref) {
       renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
-      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
+      // Para "tela", la cantidad no es un dato aparte: la determina el
+      // consumo aprox. de LA REFERENCIA (mismo valor que ya usa "Costo x
+      // prenda", ver calcCostoPrenda en core/calc.js) — mostrar acá el
+      // insumo.cantidad de siempre (que nadie toca, queda en 1) hacía ver
+      // "Costo x prenda" como si saliera de la nada. El usuario lo notó:
+      // "la cantidad en este caso debería ser la misma que el consumo de
+      // tela". Se deshabilita igual que "fijo_pedido" (tampoco tiene una
+      // cantidad propia: la determina cantidadPedida de la referencia).
+      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' +
+      (i.tipo === "tela" ? esc(ref.consumoAprox) : esc(i.cantidad)) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' +
+      (i.tipo === "fijo_pedido" || i.tipo === "tela" ? "disabled" : "") +
+      (i.tipo === "tela" ? ' title="La cantidad la da el campo \'Consumo tela (MT)\' de la referencia, arriba"' : "") + " />" +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";

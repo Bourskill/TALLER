@@ -222,6 +222,36 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimoquinta ronda: "Cant." de un insumo de tela no coincidía con "Costo x prenda")
+
+El usuario reportó: "la cantidad del insumo se mantiene en '1'... pero esta
+es afectada por... 'tipo de costo'... y en 'costo x prenda' se ve reflejado
+correctamente, sin embargo en la columna 'cant' no pasa lo mismo... la
+cantidad en este caso debería ser la misma que el consumo de tela" — con un
+ejemplo exacto: consumo 1.6, costo 1200 → "Costo x prenda" ya mostraba
+$1.920 (1200 × 1.6) correctamente, pero "Cant." seguía en 1.
+
+**Causa:** para el tipo de costo "Tela (según consumo)", `calcCostoPrenda`
+(`core/calc.js`) SIEMPRE multiplicó por tres factores: `costo × consumo
+aprox. de la referencia × insumo.cantidad` — un multiplicador extra
+(`cantidad`) que nadie edita, nace en 1 por defecto y no representa nada
+para este tipo (a diferencia de "por_prenda", donde sí es la cantidad real).
+La columna "Cant." mostraba ese `insumo.cantidad` (1, sin relación visible
+con el cálculo) mientras "Costo x prenda" ya usaba el consumo real — de ahí
+la desconexión que notó el usuario.
+
+**Fix:** se simplificó la fórmula de "tela" a un solo factor real —
+`costo × consumo aprox. de la referencia`, sin el multiplicador
+`insumo.cantidad` (también se quitó del cálculo de cantidad física para la
+lista de compras, `core/calc.js`) — y la columna "Cant." ahora muestra el
+consumo aprox. de la referencia (el mismo dato que ya usa "Costo x prenda"),
+deshabilitada, igual que ya pasaba con "Fijo por referencia" (que tampoco
+tiene una cantidad propia: la determina la cantidad pedida). Así "Cant." y
+"Costo x prenda" siempre cuentan la misma historia — un factor, no uno
+escondido.
+
+Verificado con `test/smoke.mjs` (596 aserciones en total: +3 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimocuarta ronda: pulido sobre la ronda anterior)
 
 Sexta vuelta. El usuario confirmó que las dos correcciones de la ronda

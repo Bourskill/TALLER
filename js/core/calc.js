@@ -1364,14 +1364,22 @@ export function clientesFiltrados() {
 //
 // Cada insumo tiene un `tipo` (ver TIPOS_COSTO en constants.js) que cambia cómo
 // se reparte su costo entre las prendas de la referencia:
-//   - "tela":        costo × consumo aprox. de la referencia × cantidad (multiplicador)
+//   - "tela":        costo × consumo aprox. de la referencia (no tiene cantidad propia)
 //   - "fijo_pedido":  costo total ÷ cantidad de prendas del pedido (ej. diseño, domicilio)
 //   - "por_prenda":   costo × cantidad indicada (el resto de insumos, por defecto)
+//
+// "tela" y "fijo_pedido" son los dos tipos que NO usan `insumo.cantidad`: la
+// cantidad efectiva la da otro dato (el consumo de la referencia, o su
+// cantidad pedida) — por eso el campo "Cant." se deshabilita para los dos en
+// cotizaciones.js. Antes "tela" SÍ multiplicaba además por `insumo.cantidad`
+// (un multiplicador extra que nadie tocaba, siempre en 1 por defecto): el
+// usuario notó que "Costo x prenda" ya reflejaba el consumo pero "Cant."
+// seguía en 1 sin relación visible — se simplificó a un solo factor real.
 export function calcCostoPrenda(insumo, ref) {
   var costo = num(insumo.costo);
   var cantidad = num(insumo.cantidad) || 1;
   if (insumo.tipo === "tela") {
-    return costo * (num(ref.consumoAprox) || 0) * cantidad;
+    return costo * (num(ref.consumoAprox) || 0);
   }
   if (insumo.tipo === "fijo_pedido") {
     var cantidadPedida = num(ref.cantidadPedida) || 1;
@@ -1732,7 +1740,7 @@ function agregarInsumosDeReferencias(referencias) {
       var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
       if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
-      if (ins.tipo === "tela") cantFisica = (num(ref.consumoAprox) || 0) * (num(ins.cantidad) || 1) * cantidadPedida;
+      if (ins.tipo === "tela") cantFisica = (num(ref.consumoAprox) || 0) * cantidadPedida;
       else if (ins.tipo === "por_prenda") cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;
