@@ -2767,6 +2767,53 @@ assert(cotDuplicada.referencias.length === 1 && cotDuplicada.referencias[0].nomb
 assert(cotDuplicada.referencias[0].id !== "ref-origen-dup", "...pero con id nuevo para la referencia");
 assert(cotDuplicada.referencias[0].insumos[0].nombre === "Tela" && cotDuplicada.referencias[0].insumos[0].id !== "ins-origen-dup", "...y el insumo real copiado, con su propio id nuevo (esto es justo lo que se perdía duplicando solo p.lineas)");
 assert(state.cotizaciones.some(c => c.id === "cot-origen-dup"), "la cotización ORIGINAL sigue intacta, no se modificó ni se movió");
+assert(cotDuplicada.compras.length === 0 && !cotDuplicada.estimadoTxId, "el duplicado nace SIN historial de compras/movimientos reales — todavía no ha comprado ni pagado nada (es de OTRO cliente)");
+
+// ---------------------------------------------------------------------------
+// El usuario reportó: "cuando duplico un pedido y quiero registrar los
+// movimientos, a pesar de ser los mismos movimientos pero de diferente
+// pedido se están sobreescribiendo en el historial de finanzas... tiene que
+// poderse registrar el movimiento ya que es de un pedido diferente a pesar
+// de tener los mismos datos, pero son de diferente cliente".
+//
+// Causa real: duplicarCotizacionCompleta SÍ limpia compras/estimadoTxId
+// ahora (arriba), pero cualquier cotización que el usuario ya hubiera
+// duplicado ANTES de este fix pudo quedar con un txId heredado del
+// ORIGINAL — se simula ese escenario a mano para probar la segunda capa de
+// protección: sincronizar-compras-finanzas ignora un txId que en realidad
+// pertenece a OTRA cotización, en vez de reescribir su movimiento.
+// ---------------------------------------------------------------------------
+state.cotizacionEditando = "cot-origen-dup";
+state.cotTabActiva = Object.assign({}, state.cotTabActiva, { "cot-origen-dup": "produccion" });
+render();
+var claveTelaOrigen = document.querySelector('select[data-cot="cot-origen-dup"][data-campo="estado"]').getAttribute("data-clave");
+setChange('[data-cot="cot-origen-dup"][data-clave="' + claveTelaOrigen + '"][data-campo="costoReal"]', "40000");
+setChange('[data-cot="cot-origen-dup"][data-clave="' + claveTelaOrigen + '"][data-campo="estado"]', "si");
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-origen-dup"]');
+var cotOrigenTrasSync = state.cotizaciones.find(c => c.id === "cot-origen-dup");
+var txIdOriginal = cotOrigenTrasSync.compras[0].txId;
+assert(!!txIdOriginal, "sanity: el pedido ORIGINAL sí registró su movimiento real en Finanzas");
+var txOriginal = state.tx.find(t => t.id === txIdOriginal);
+assert(txOriginal.cotizacionId === "cot-origen-dup" && txOriginal.monto === 40000, "sanity: ese movimiento le pertenece a la cotización ORIGINAL");
+
+// Se simula el bug: el duplicado "hereda" (a mano, como haría un JSON.parse/
+// stringify sin limpiar) el mismo txId del original para la misma línea.
+state.cotizaciones = state.cotizaciones.map(c => c.id === cotDuplicada.id
+  ? Object.assign({}, c, { compras: [{ clave: claveTelaOrigen, estado: "si", costoReal: 40000, txId: txIdOriginal }] })
+  : c);
+state.cotizacionEditando = cotDuplicada.id;
+state.cotTabActiva = Object.assign({}, state.cotTabActiva, { [cotDuplicada.id]: "produccion" });
+render();
+var txsAntesDeSincronizarDuplicado = state.tx.length;
+click('[data-action="sincronizar-compras-finanzas"][data-id="' + cotDuplicada.id + '"]');
+assert(state.tx.length === txsAntesDeSincronizarDuplicado + 1, "sincronizar desde el DUPLICADO crea un movimiento NUEVO — no reutiliza el txId heredado, aunque apunte a un tx que sí existe");
+var txOriginalTrasSync = state.tx.find(t => t.id === txIdOriginal);
+assert(txOriginalTrasSync.cotizacionId === "cot-origen-dup" && txOriginalTrasSync.monto === 40000, "...y el movimiento del ORIGINAL queda intacto — no se sobreescribió con los datos del duplicado");
+var cotDuplicadaTrasSync = state.cotizaciones.find(c => c.id === cotDuplicada.id);
+var txIdDuplicado = cotDuplicadaTrasSync.compras[0].txId;
+assert(!!txIdDuplicado && txIdDuplicado !== txIdOriginal, "el duplicado queda apuntando a SU PROPIO movimiento nuevo, distinto del original");
+assert(state.tx.find(t => t.id === txIdDuplicado).cotizacionId === cotDuplicada.id, "...correctamente vinculado a la cotización del duplicado, no a la del original");
+assert(movimientosGeneradosPorCotizacion(cotOrigenTrasSync).every(t => t.cotizacionId === "cot-origen-dup"), "movimientosGeneradosPorCotizacion (usado al ELIMINAR una cotización) tampoco confunde un txId ajeno con uno propio");
 
 // ---------- Distintivo en contactos ----------
 state.clientes = [];

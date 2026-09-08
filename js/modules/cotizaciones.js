@@ -34,6 +34,21 @@ export function duplicarCotizacionCompleta(cot) {
     r.id = uid();
     (r.insumos || []).forEach(function (i) { i.id = uid(); });
   });
+  // `compras` (estado/costoReal/cantidadReal/txId por línea) y
+  // `estimadoTxId` son el historial REAL de compras/movimientos de ESTE
+  // pedido — no del duplicado, que todavía no ha comprado ni pagado nada.
+  // Sin este reset, el duplicado nacía "ya pagado" con los números reales
+  // del original, y el `txId` copiado seguía apuntando al movimiento del
+  // original: la próxima vez que se sincronizara Finanzas desde el
+  // duplicado, encontraba ese tx "ya existente" y lo REESCRIBÍA en vez de
+  // crear uno nuevo — el pedido original perdía su propio movimiento en
+  // Finanzas sin que nadie lo borrara a propósito. Reportado por el
+  // usuario: "tiene que poderse registrar el movimiento... son de
+  // diferente cliente". Ver también el chequeo de cotizacionId en
+  // sincronizar-compras-finanzas/add-cot-estimado-movimiento, que protege
+  // igual a cotizaciones YA duplicadas antes de este fix.
+  copia.compras = [];
+  copia.estimadoTxId = "";
   return copia;
 }
 
@@ -1834,7 +1849,14 @@ export var actions = {
         origenCompraClave: compra.clave
       };
 
-      var existente = compra.txId ? state.tx.filter(function (t) { return t.id === compra.txId; })[0] : null;
+      // El chequeo de cotizacionId es a propósito, no redundante: una
+      // cotización duplicada ANTES de este fix pudo quedar con un txId
+      // heredado del original (ver duplicarCotizacionCompleta) — sin esto,
+      // "sincronizar" desde el duplicado encontraba el tx del original (por
+      // id) y lo reescribía en vez de crear uno nuevo, dejando al original
+      // sin su propio movimiento. Un txId que apunta a un tx de OTRA
+      // cotización se trata como si no existiera: se crea uno nuevo, propio.
+      var existente = compra.txId ? state.tx.filter(function (t) { return t.id === compra.txId && t.cotizacionId === cot.id; })[0] : null;
       if (existente) {
         Object.assign(existente, datos);
         actualizados++;
@@ -2083,7 +2105,12 @@ export var actions = {
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cot) return;
     var totales = calcCotizacionTotales(cot);
-    var existente = cot.estimadoTxId ? state.tx.filter(function (t) { return t.id === cot.estimadoTxId; })[0] : null;
+    // Mismo chequeo de cotizacionId que en sincronizar-compras-finanzas: un
+    // estimadoTxId heredado de ANTES de que duplicarCotizacionCompleta lo
+    // limpiara podía apuntar al movimiento de OTRA cotización — se trata
+    // como si no existiera, y se crea uno nuevo propio en vez de reescribir
+    // el ajeno.
+    var existente = cot.estimadoTxId ? state.tx.filter(function (t) { return t.id === cot.estimadoTxId && t.cotizacionId === cot.id; })[0] : null;
     var yaHayCompras = (cot.compras || []).some(function (c) { return c.txId; });
 
     if (existente) {

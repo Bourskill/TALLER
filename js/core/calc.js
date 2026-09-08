@@ -426,8 +426,13 @@ export function movimientosGeneradosPorCotizacion(cot) {
   var idsCompra = (cot.compras || []).map(function (c) { return c.txId; }).filter(Boolean);
   return state.tx.filter(function (t) {
     if (t.origenComisionCotId === cot.id) return true;
-    if (cot.estimadoTxId && t.id === cot.estimadoTxId) return true;
-    if (idsCompra.indexOf(t.id) !== -1) return true;
+    // t.cotizacionId === cot.id de más en las dos siguientes: una cotización
+    // duplicada ANTES del fix de duplicarCotizacionCompleta pudo quedar con
+    // un estimadoTxId/compras[].txId heredado del ORIGINAL — sin este
+    // chequeo, borrar esa cotización duplicada se llevaba por delante el
+    // movimiento real del original, que nada tenía que ver.
+    if (cot.estimadoTxId && t.id === cot.estimadoTxId && t.cotizacionId === cot.id) return true;
+    if (idsCompra.indexOf(t.id) !== -1 && t.cotizacionId === cot.id) return true;
     return !!(t.origenCompraClave && t.cotizacionId === cot.id);
   });
 }

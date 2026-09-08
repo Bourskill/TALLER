@@ -222,6 +222,46 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimoctava ronda: duplicar un pedido podía pisar el movimiento de Finanzas del ORIGINAL)
+
+Bug real, con riesgo de plata: "cuando duplico un pedido y quiero registrar
+los movimientos, a pesar de ser los mismos movimientos pero de diferente
+pedido se están sobreescribiendo en el historial de finanzas... tiene que
+poderse registrar el movimiento ya que es de un pedido diferente, a pesar de
+tener los mismos datos, pero son de diferente cliente".
+
+**Causa:** `duplicarCotizacionCompleta` (clona una cotización para "Duplicar
+pedido") regeneraba ids nuevos para la cotización/referencias/insumos, pero
+**nunca tocaba `compras` ni `estimadoTxId`** — los dos campos que apuntan
+("por id") al movimiento real que esa línea generó en Finanzas. El duplicado
+nacía con el `txId` del ORIGINAL todavía puesto. Al pulsar "Actualizar
+movimientos financieros" (o "Registrar estimado completo") sobre el
+duplicado, el código encontraba ese `txId` como "ya existe" y lo
+**reescribía en el sitio** (`Object.assign(existente, datos)`) con los datos
+del duplicado — el pedido ORIGINAL perdía su propio movimiento sin que nadie
+lo borrara a propósito. Ninguno de los dos puntos de sincronización
+verificaba que el tx encontrado en verdad perteneciera a ESA cotización
+(`cotizacionId`), solo que el id existiera.
+
+**Fix, en dos capas** (`js/modules/cotizaciones.js`, `js/core/calc.js`):
+1. `duplicarCotizacionCompleta` ahora limpia `compras: []` y
+   `estimadoTxId: ""` en la copia — un duplicado nace sin ningún historial
+   de compras/movimientos reales, que es lo correcto: todavía no ha
+   comprado ni pagado nada, es de OTRO cliente.
+2. Defensa en profundidad, para cotizaciones que ya se hubieran duplicado
+   ANTES de este fix (con el `txId` ajeno ya guardado): `sincronizar-
+   compras-finanzas`, `add-cot-estimado-movimiento` y
+   `movimientosGeneradosPorCotizacion` (esta última se usa al ELIMINAR una
+   cotización — sin el chequeo, borrar el duplicado se llevaba por delante
+   el movimiento del original) ahora exigen que el tx encontrado tenga el
+   `cotizacionId` correcto; si no coincide, se trata como si no existiera y
+   se crea uno nuevo, propio. Con esto, una cotización YA afectada se
+   autocorrige la próxima vez que se sincroniza — no hace falta ninguna
+   migración de datos.
+
+Verificado con `test/smoke.mjs` (635 aserciones en total: +8 de esta ronda,
+reproduciendo el escenario exacto reportado).
+
 ## Registro de cambios — septiembre 2026 (vigesimoséptima ronda: la Ganancia contaba un servicio pagado dos veces, + historial por servicio)
 
 Corrección real + una extensión, sobre la ronda anterior (asignar un gasto/
