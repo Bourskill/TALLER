@@ -276,6 +276,43 @@ var coreActions = {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }
   },
+  // Ver renderAsignarServicios en core/components.js. Genéricas (no viven en
+  // finanzas.js ni en pendientes.js) porque las usan los dos: `data-form-
+  // destino` dice sobre cuál borrador de `state` actuar (ej. "formTx",
+  // "formNominaPago"), así ninguno de los dos módulos necesita conocer al
+  // otro. El monto de cada fila NO se topa acá a lo disponible del servicio
+  // elegido — eso se revisa una sola vez, al guardar de verdad (ver
+  // validarServiciosAsignados en core/calc.js), para no pelear con el
+  // usuario mientras todavía está escribiendo.
+  "agregar-fila-servicio": function (el) {
+    var formKey = el.getAttribute("data-form-destino");
+    if (!state[formKey]) return;
+    state[formKey].servicios = (state[formKey].servicios || []).concat([{ nombre: "", monto: "" }]);
+    notify();
+  },
+  "quitar-fila-servicio": function (el) {
+    var formKey = el.getAttribute("data-form-destino");
+    var idx = Number(el.getAttribute("data-idx"));
+    if (!state[formKey] || !state[formKey].servicios) return;
+    state[formKey].servicios = state[formKey].servicios.filter(function (_, i) { return i !== idx; });
+    notify();
+  },
+  "set-fila-servicio-nombre": function (el) {
+    var formKey = el.getAttribute("data-form-destino");
+    var idx = Number(el.getAttribute("data-idx"));
+    var fila = state[formKey] && state[formKey].servicios && state[formKey].servicios[idx];
+    if (!fila) return;
+    fila.nombre = el.value;
+    notify();
+  },
+  "set-fila-servicio-monto": function (el) {
+    var formKey = el.getAttribute("data-form-destino");
+    var idx = Number(el.getAttribute("data-idx"));
+    var fila = state[formKey] && state[formKey].servicios && state[formKey].servicios[idx];
+    if (!fila) return;
+    fila.monto = el.value;
+    notify();
+  },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
     // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.

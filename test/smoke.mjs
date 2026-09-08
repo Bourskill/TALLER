@@ -421,6 +421,117 @@ setInput('[data-form="emp"][data-field="salario"]', "1200000");
 click('[data-action="add-emp"]');
 assert(state.config.nomina.length === 1, "agrega persona a nómina");
 
+// ---------------------------------------------------------------------------
+// "Asignar a servicio(s)" a un gasto o a un pago de nómina (2026-09). El
+// usuario lo pidió así: al comprar medias, poder descontarlo de la plata que
+// YA se cobró por el "servicio Medias" (marcado así en "Compras del pedido"
+// de una cotización — ver calcServiciosPorCategoriaRango en core/calc.js) en
+// vez de que cuente como un gasto nuevo sin relación; "si no alcanza, poder
+// seleccionar varios"; y el único monto que puede quedar negativo es la
+// Ganancia (lo que no se cubre con ningún servicio).
+// ---------------------------------------------------------------------------
+const { calcListaCompras: calcListaComprasServ, calcServiciosDisponibles: calcServDisp } = await import("../js/core/calc.js");
+var cotServicios = {
+  id: "cot-servicios-test", cliente: "Cliente Servicios", descripcion: "Prueba servicios", fecha: "2026-09-01",
+  estado: "borrador", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "csrv1",
+  referencias: [{
+    id: "ref-serv-1", nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 40000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [{ id: "ins-conf", nombre: "Confección", unidad: "servicio", costo: 5000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+};
+state.cotizaciones = state.cotizaciones.concat([cotServicios]);
+var claveConfeccion = calcListaComprasServ(cotServicios).filter(function (l) { return l.nombre === "Confección"; })[0].clave;
+// 10 prendas x $5.000 estimado = $50.000, pero se marca "servicio" con un
+// costoReal distinto ($50.000 igual, a propósito, para no complicar el
+// ejemplo) — mano de obra propia, ya cobrada al cliente, todavía sin pagar.
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  return c.id === "cot-servicios-test" ? Object.assign({}, c, { compras: [{ clave: claveConfeccion, estado: "servicio", costoReal: 50000 }] }) : c;
+});
+render();
+assert(calcServDisp().some(function (s) { return s.nombre === "Confección" && s.disponible === 50000; }), "calcServiciosDisponibles: \"Confección\" acumula 50.000 (marcado \"servicio\" en Compras del pedido)");
+
+// --- Finanzas: registrar un GASTO asignado a un servicio ---
+click('[data-action="tab"][data-tab="finanzas"]');
+click('[data-action="finanzas-vista"][data-val="nuevo"]');
+click('[data-action="set-tx-tipo"][data-val="gasto"]');
+assert(!!document.querySelector('[data-action="agregar-fila-servicio"][data-form-destino="formTx"]'), "el formulario de gasto ofrece \"Asignar a servicio(s)\" — hay plata disponible en \"Confección\"");
+setInput('[data-form="tx"][data-field="concepto"]', "Botones para el pedido");
+setInput('[data-form="tx"][data-field="monto"]', "30000");
+click('[data-action="agregar-fila-servicio"][data-form-destino="formTx"]');
+assert(state.formTx.servicios.length === 1, "agrega una fila de asignación");
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formTx"][data-idx="0"]', "Confección");
+assert(state.formTx.servicios[0].nombre === "Confección", "elige \"Confección\" en la fila");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formTx"][data-idx="0"]', "30000");
+click('[data-action="add-tx"]');
+var gastoConServicio = state.tx[0];
+assert(gastoConServicio.tipo === "gasto" && gastoConServicio.monto === 30000, "crea el gasto con su monto de siempre");
+assert(gastoConServicio.serviciosDescuento.length === 1 && gastoConServicio.serviciosDescuento[0].nombre === "Confección" && gastoConServicio.serviciosDescuento[0].monto === 30000, "...y guarda de qué servicio se descontó y cuánto");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Confección"; })[0].disponible === 20000, "\"Confección\" queda con 20.000 disponibles (50.000 − 30.000)");
+click('[data-action="finanzas-vista"][data-val="historial"]');
+assert(!!document.querySelector('[title="Descontado de: Confección $30.000"]'), "el historial de Finanzas muestra de qué servicio se descontó este gasto");
+
+// --- Validación: ningún servicio puede quedar negativo (el aviso bloquea el guardado) ---
+click('[data-action="finanzas-vista"][data-val="nuevo"]');
+click('[data-action="set-tx-tipo"][data-val="gasto"]');
+setInput('[data-form="tx"][data-field="concepto"]', "Gasto de más");
+setInput('[data-form="tx"][data-field="monto"]', "999999");
+click('[data-action="agregar-fila-servicio"][data-form-destino="formTx"]');
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formTx"][data-idx="0"]', "Confección");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formTx"][data-idx="0"]', "999999");
+var txAntesDelRechazo = state.tx.length;
+var alertaOriginal = global.alert;
+var alertaCapturada = "";
+global.window.alert = global.alert = function (msg) { alertaCapturada = msg; };
+click('[data-action="add-tx"]');
+assert(state.tx.length === txAntesDelRechazo, "asignar más de lo disponible NO guarda el gasto");
+assert(alertaCapturada.indexOf("Confección") >= 0, "...y avisa cuál servicio no alcanza");
+global.window.alert = global.alert = alertaOriginal;
+state.formTx.servicios = []; // limpia el intento fallido para no arrastrarlo a la próxima prueba
+
+// --- Nómina: servicio por defecto de un empleado + "si no alcanza, varios" ---
+click('[data-action="tab"][data-tab="pendientes"]');
+var costurera = state.config.nomina[0];
+click('[data-action="editar-emp"][data-id="' + costurera.id + '"]');
+var selectServDefault = document.querySelector('[data-emp-edit-row="' + costurera.id + '"] [data-role="edit-servicio-default"]');
+assert(!!selectServDefault, "el modo edición de una persona en nómina ofrece un servicio por defecto");
+selectServDefault.value = "Confección";
+selectServDefault.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="guardar-emp-edit"][data-id="' + costurera.id + '"]');
+assert(state.config.nomina[0].servicioDefault === "Confección", "guarda el servicio por defecto de la persona");
+click('[data-action="toggle-nomina-pago"][data-id="' + costurera.id + '"]');
+assert(state.formNominaPago.servicios.length === 1 && state.formNominaPago.servicios[0].nombre === "Confección", "\"Pagar\" precarga el servicio por defecto de esa persona");
+// A la costurera se le paga $1.200.000, pero "Confección" solo tiene 20.000
+// disponibles — el usuario pidió justo esto: "si no me alcanza, seleccionar
+// otro monto". Se agrega una segunda fila con OTRO servicio para cubrir el
+// resto; lo que siga faltando sale de Ganancia sin más.
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  if (c.id !== "cot-servicios-test") return c;
+  var refConMedias = Object.assign({}, c.referencias[0], { insumos: c.referencias[0].insumos.concat([{ id: "ins-medias", nombre: "Medias", unidad: "servicio", costo: 200000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }]) });
+  return Object.assign({}, c, { referencias: [refConMedias] });
+});
+var claveMedias = calcListaComprasServ(state.cotizaciones.find(function (c) { return c.id === "cot-servicios-test"; })).filter(function (l) { return l.nombre === "Medias"; })[0].clave;
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  return c.id === "cot-servicios-test" ? Object.assign({}, c, { compras: c.compras.concat([{ clave: claveMedias, estado: "servicio", costoReal: 2000000 }]) }) : c;
+});
+render();
+click('[data-action="agregar-fila-servicio"][data-form-destino="formNominaPago"]');
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formNominaPago"][data-idx="1"]', "Medias");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formNominaPago"][data-idx="1"]', "1000000");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formNominaPago"][data-idx="0"]', "20000");
+var txAntesDePagar = state.tx.length;
+click('[data-action="pagar-nomina"][data-id="' + costurera.id + '"]');
+assert(state.tx.length === txAntesDePagar + 1, "el pago de nómina se registra: cubrir con VARIOS servicios sí alcanza aunque uno solo no bastara");
+var pagoNomina = state.tx[0];
+assert(pagoNomina.tipo === "nomina" && pagoNomina.monto === 1200000, "el monto pagado sigue siendo el salario completo");
+assert(pagoNomina.serviciosDescuento.length === 2, "queda registrado que se cubrió con LOS DOS servicios");
+var totalCubierto = pagoNomina.serviciosDescuento.reduce(function (a, s) { return a + s.monto; }, 0);
+assert(totalCubierto === 1020000, "cubierto por servicios: 20.000 (Confección, todo lo que tenía) + 1.000.000 (Medias)");
+assert(1200000 - totalCubierto === 180000, "y los 180.000 restantes, al no venir de ningún servicio, salen de la Ganancia (el único monto que puede quedar negativo)");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Confección"; })[0].disponible === 0, "\"Confección\" queda en 0 (no negativo)");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Medias"; })[0].disponible === 1000000, "\"Medias\" queda con 1.000.000 disponibles (2.000.000 − 1.000.000)");
+
 click('[data-action="toggle-pend-form"][data-key="gastoFijo"]');
 setInput('[data-form="gastoFijo"][data-field="nombre"]', "Arriendo");
 setInput('[data-form="gastoFijo"][data-field="monto"]', "500000");

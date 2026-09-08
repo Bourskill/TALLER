@@ -4,7 +4,7 @@
 // sin arrastrar código de HTML.
 
 import { state } from "./store.js";
-import { num, norm, todayStr, diasPagoDe } from "./utils.js";
+import { num, norm, todayStr, diasPagoDe, fmt } from "./utils.js";
 import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
 // Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
@@ -611,6 +611,64 @@ export function calcServiciosPorCategoriaRango(desde, hasta) {
   return Object.keys(porNombre)
     .map(function (nombre) { return { nombre: nombre, monto: porNombre[nombre] }; })
     .sort(function (a, b) { return b.monto - a.monto; });
+}
+
+// Cuánto queda "disponible" de cada servicio, de SIEMPRE (sin filtro de
+// fecha — llamar a calcServiciosPorCategoriaRango() sin argumentos trae el
+// acumulado total), después de restar lo que ya se le ha asignado a un
+// gasto o a un pago de nómina (ver tx.serviciosDescuento, escrito por
+// "add-tx" en modules/finanzas.js y "pagar-nomina" en modules/pendientes.js).
+//
+// El usuario lo pidió con este ejemplo: comprar medias es un gasto real,
+// pero si esa compra "tiene que ver con el servicio medias" (ya se le cobró
+// al cliente, esa plata vive en caja sin haber salido todavía — ver
+// calcServiciosPorCategoriaRango arriba), quiere poder descontarla de ahí en
+// vez de que cuente como un gasto nuevo sin relación con nada. Mismo criterio
+// para nómina: pagarle a la operaria de confección se descuenta del servicio
+// "Confección" ya acumulado.
+export function calcServiciosDisponibles() {
+  var acumulados = calcServiciosPorCategoriaRango();
+  var usados = {};
+  (state.tx || []).forEach(function (t) {
+    (t.serviciosDescuento || []).forEach(function (d) {
+      usados[d.nombre] = (usados[d.nombre] || 0) + num(d.monto);
+    });
+  });
+  return acumulados.map(function (s) {
+    var usado = usados[s.nombre] || 0;
+    return { nombre: s.nombre, acumulado: s.monto, usado: usado, disponible: s.monto - usado };
+  });
+}
+
+// Valida las filas de "asignar a servicio(s)" de un formulario de gasto o
+// nómina ANTES de guardarlo — pura, no toca el DOM ni avisa nada: quien
+// llama (add-tx en finanzas.js, pagar-nomina en pendientes.js) decide cómo
+// mostrar el error. Descarta filas vacías (sin servicio o sin monto) y
+// revisa dos reglas, las dos pedidas explícitamente por el usuario:
+//   1. Ningún servicio puede quedar negativo — lo que se le asigna nunca
+//      puede pasar de lo que tiene disponible AHORA MISMO (el único monto
+//      que sí puede quedar negativo es "la ganancia": lo que no se cubre
+//      con ningún servicio, simplemente no se registra acá, y sale de ahí).
+//   2. Lo asignado en total no puede pasar del monto del propio pago —
+//      asignar de más no tendría a dónde ir.
+export function validarServiciosAsignados(filas, montoTotal) {
+  var limpias = (filas || [])
+    .filter(function (f) { return f.nombre && num(f.monto) > 0; })
+    .map(function (f) { return { nombre: f.nombre, monto: num(f.monto) }; }); // normaliza a número antes de guardar
+  if (!limpias.length) return { ok: true, error: null, limpias: [] };
+  var disponibles = calcServiciosDisponibles();
+  for (var i = 0; i < limpias.length; i++) {
+    var d = disponibles.filter(function (s) { return s.nombre === limpias[i].nombre; })[0];
+    var disponible = d ? d.disponible : 0;
+    if (num(limpias[i].monto) > disponible + 0.5) {
+      return { ok: false, error: '"' + limpias[i].nombre + '" solo tiene ' + fmt(disponible) + " disponible.", limpias: null };
+    }
+  }
+  var asignado = limpias.reduce(function (a, f) { return a + num(f.monto); }, 0);
+  if (asignado > num(montoTotal) + 0.5) {
+    return { ok: false, error: "Lo asignado a servicios (" + fmt(asignado) + ") no puede ser más que el total del pago (" + fmt(montoTotal) + ").", limpias: null };
+  }
+  return { ok: true, error: null, limpias: limpias };
 }
 
 // Desglose de "Por pagar" por categoría, con el detalle de cada obligación

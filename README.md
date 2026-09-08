@@ -222,6 +222,51 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimosexta ronda: asignar un gasto/nómina a un "servicio")
+
+Feature nueva, no un bug. El usuario la pidió con dos ejemplos: "si compro
+medias, pero ese gasto tiene que ver con el 'servicio medias', poder elegir
+medias como el monto que se va a descontar — y si no alcanza, poder
+seleccionar varios"; y "cuando pague la nómina de la operaria de confección,
+que se descuente automáticamente del monto 'confección' — el único monto que
+puede quedar en negativo es la ganancia".
+
+**El concepto de "servicio" ya existía — esto lo conecta con gastos/nómina
+reales.** `calcServiciosPorCategoriaRango` (`core/calc.js`) ya agrupaba, por
+nombre, toda línea de "Compras del pedido" que el usuario marca "Servicio"
+(mano de obra propia o material aún sin comprar de verdad — ej. Confección,
+Medias): plata que un cliente YA pagó (cuenta en "Entró"/caja) pero que el
+taller no ha desembolsado todavía. Ya alimentaba el KPI "Ganancia" del
+Resumen (`Balance − servicios`). Lo que faltaba: poder **descontar** un
+gasto o un pago de nómina de esa plata acumulada, en vez de que cuente como
+una salida nueva sin relación con nada.
+
+- **`calcServiciosDisponibles()`** (nuevo, `core/calc.js`): el acumulado de
+  siempre (no por periodo) menos lo que ya se le ha asignado a algún
+  gasto/nómina (`tx.serviciosDescuento`, columna nueva `servicios_descuento`
+  en la hoja de Movimientos — JSON, `[{nombre, monto}]`).
+- **`renderAsignarServicios`** (nuevo, `core/components.js`): bloque
+  "Asignar a servicio(s) (opcional)" con filas de servicio+monto —
+  reutilizado tal cual entre **Finanzas** (Registrar gasto/nómina) y
+  **Pendientes** (Pagar nómina) vía `opts.formKey` (el borrador de `state`
+  sobre el que actúan las 4 acciones compartidas nuevas de `core/dom.js`:
+  agregar/quitar fila, elegir servicio, escribir monto). "Si no alcanza,
+  varios": se pueden agregar tantas filas como servicios existan.
+- **`validarServiciosAsignados`** (nuevo, `core/calc.js`): al guardar de
+  verdad (no en cada tecla), revisa que ningún servicio quede negativo
+  (topado a lo que tiene disponible EN ESE MOMENTO) y que lo asignado no
+  pase del monto del pago — si falla, avisa cuál y no guarda nada. Lo que no
+  se cubre con ningún servicio simplemente no se registra ahí: sale de la
+  Ganancia sin más, que es el único monto que sí puede quedar negativo.
+- **Servicio por defecto por empleado** (`config.nomina[].servicioDefault`,
+  nuevo): al pulsar "Pagar" en Pendientes, el pago se precarga con el
+  servicio de esa persona (ej. la operaria de confección con "Confección")
+  — se puede cambiar o completar con más filas antes de confirmar.
+- El historial de Finanzas muestra de qué servicio(s) se descontó cada
+  gasto/nómina (etiqueta 📋, con el detalle en el `title`).
+
+Verificado con `test/smoke.mjs` (616 aserciones en total: +20 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimoquinta ronda: "Cant." de un insumo de tela no coincidía con "Costo x prenda")
 
 El usuario reportó: "la cantidad del insumo se mantiene en '1'... pero esta

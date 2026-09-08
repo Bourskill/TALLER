@@ -11,10 +11,11 @@ import { esc, num, uid, fmt, opt, val, todayStr, parseDias, diasPagoDe, exigirCa
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
   calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor,
-  calcSalarioPorPeriodo, salarioBaseDe, rangoPeriodoActual, periodoDeEmpleado, diasPagoDeEmpleado
+  calcSalarioPorPeriodo, salarioBaseDe, rangoPeriodoActual, periodoDeEmpleado, diasPagoDeEmpleado,
+  calcServiciosDisponibles, validarServiciosAsignados
 } from "../core/calc.js";
 import { PERIODOS_PAGO, DIAS_SEMANA } from "../core/constants.js";
-import { renderHelp } from "../core/components.js";
+import { renderHelp, renderAsignarServicios } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 
@@ -93,6 +94,9 @@ export function render() {
     '<div class="field"><label>Salario ' + esc(etiquetaFormEmp) +
     renderHelp("El valor de UN periodo de pago completo, según el periodo que elegiste arriba para esta persona. No lo conviertas a mano: si le pagas semanal, escribe lo de la semana.") +
     '</label><input type="number" data-form="emp" data-field="salario" value="' + esc(fe.salario) + '" placeholder="0" /></div>' +
+    '<div class="field"><label>Servicio por defecto (opcional)' +
+    renderHelp('Al pagarle a esta persona, su pago se preselecciona con este servicio en "Asignar a servicio(s)" — se puede cambiar antes de confirmar. Útil si siempre hace lo mismo, ej. "Confección".') +
+    '</label><select data-form="emp" data-field="servicioDefault">' + renderOpcionesServicio(fe.servicioDefault) + "</select></div>" +
     '<button class="btn" data-action="add-emp">Agregar a nómina</button>' +
     "</div>");
   html += "</div>";
@@ -340,6 +344,18 @@ function renderFilaEmp(e) {
 // el TIPO de selector de día depende de qué periodo esté elegido AHORA MISMO
 // en el formulario — sin esto, cambiar de "mensual" a "quincenal" en la
 // edición no alcanzaría a mostrar el segundo día hasta guardar y reabrir.
+// Opciones para el <select> de "servicio por defecto" de una persona en
+// nómina — TODOS los servicios conocidos alguna vez (no solo los que hoy
+// tienen plata disponible): es una preferencia de a quién se le suele pagar
+// con qué servicio, no una asignación real en el momento (esa se hace al
+// pagar, ver renderFormNominaPago).
+function renderOpcionesServicio(valorActual) {
+  return '<option value="">Sin servicio por defecto</option>' +
+    calcServiciosDisponibles().map(function (s) {
+      return '<option value="' + esc(s.nombre) + '" ' + (valorActual === s.nombre ? "selected" : "") + ">" + esc(s.nombre) + "</option>";
+    }).join("");
+}
+
 function renderFilaEdicionEmp(e) {
   var draft = state.empEditDraft || { periodo: periodoDeEmpleado(e), diasPago: diasPagoDeEmpleado(e).slice() };
   var periodoEdit = draft.periodo || "mensual";
@@ -355,6 +371,7 @@ function renderFilaEdicionEmp(e) {
     '<div class="field"><label>Salario ' + esc(ETIQ_PERIODO[periodoEdit]) +
     renderHelp("Si cambiaste el periodo, este valor ya viene convertido — ajústalo si hace falta. Al guardar, este número queda como el salario base en la nueva periodicidad.") +
     '</label><input type="number" class="mini-input" data-role="edit-salario" value="' + Math.round(calcSalarioPorPeriodo(e, periodoEdit)) + '" /></div>' +
+    '<div class="field"><label>Servicio por defecto</label><select class="mini-input" data-role="edit-servicio-default">' + renderOpcionesServicio(e.servicioDefault || "") + "</select></div>" +
     "</div>" +
     '<div class="pedido-actions" style="margin-top:10px;">' +
     '<button class="btn small" data-action="guardar-emp-edit" data-id="' + e.id + '">Guardar</button>' +
@@ -380,6 +397,7 @@ function renderFormNominaPago(e, periodoPago, rango) {
     '<div class="field"><label>Fecha del pago</label><input type="date" data-form="nominaPago" data-field="fecha" value="' + esc(fp.fecha || todayStr()) + '" /></div>' +
     "</div>" +
     '<div class="section-sub" style="margin:10px 0;">Total a pagar: <b style="color:var(--ink);font-size:14px;">' + fmt(total) + "</b> <span style=\"color:var(--ink-faint);\">= " + fmt(base) + " salario" + (bono ? " + " + fmt(bono) + " bono" : "") + (descuento ? " − " + fmt(descuento) + " descuento" : "") + "</span></div>" +
+    renderAsignarServicios({ formKey: "formNominaPago", filas: fp.servicios || [], monto: total }) +
     '<div class="pedido-actions">' +
     '<button class="btn small" data-action="pagar-nomina" data-id="' + e.id + '">Confirmar pago</button>' +
     '<button class="btn ghost small" data-action="toggle-nomina-pago" data-id="' + e.id + '">Cancelar</button>' +
@@ -592,9 +610,10 @@ export var actions = {
     // (un semanal de 300.000 pasaría a leerse como mensual).
     state.config.nomina = (state.config.nomina || []).concat([{
       id: uid(), nombre: fe.nombre, cargo: fe.cargo, salario: num(fe.salario),
-      salarioPeriodo: periodoElegido, periodo: periodoElegido, diasPago: diasElegidos
+      salarioPeriodo: periodoElegido, periodo: periodoElegido, diasPago: diasElegidos,
+      servicioDefault: fe.servicioDefault || ""
     }]);
-    state.formEmp = { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [] };
+    state.formEmp = { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [], servicioDefault: "" };
     persist("config"); notify();
   },
   "remove-emp": function (el) {
@@ -607,8 +626,12 @@ export var actions = {
   },
   "toggle-nomina-pago": function (el) {
     var id = el.getAttribute("data-id");
-    state.nominaPagoId = state.nominaPagoId === id ? "" : id;
-    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr() };
+    var abriendo = state.nominaPagoId !== id;
+    state.nominaPagoId = abriendo ? id : "";
+    // Precarga el servicio por defecto de ESTA persona (si tiene uno) — se
+    // puede cambiar o quitar antes de confirmar, es solo un punto de partida.
+    var e = abriendo ? (state.config.nomina || []).filter(function (x) { return x.id === id; })[0] : null;
+    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr(), servicios: (e && e.servicioDefault) ? [{ nombre: e.servicioDefault, monto: "" }] : [] };
     notify();
   },
   "pagar-nomina": function (el) {
@@ -623,11 +646,15 @@ export var actions = {
     // y exigía el mes completo aunque el pago fuera semanal.
     var monto = Math.max(0, calcSalarioPorPeriodo(e, periodoPago) + bono - descuento);
     if (monto <= 0) return;
+    // Ver validarServiciosAsignados en core/calc.js: ningún servicio puede
+    // quedar negativo, lo que no se cubra sale de Ganancia sin más.
+    var validacion = validarServiciosAsignados(fp.servicios, monto);
+    if (!validacion.ok) { window.alert(validacion.error); return; }
     var rango = rangoPeriodoActual(periodoPago);
     var concepto = "Nómina " + rangoTexto(rango) + " — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
-    state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, fecha: fp.fecha || todayStr(), pedidoId: "" });
+    state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, fecha: fp.fecha || todayStr(), pedidoId: "", serviciosDescuento: validacion.limpias });
     state.nominaPagoId = "";
-    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr() };
+    state.formNominaPago = { bono: "", descuento: "", fecha: todayStr(), servicios: [] };
     persist("tx"); notify();
   },
   // ---------- Edición de una persona en nómina (Editar/Guardar/Cancelar) ----------
@@ -669,12 +696,14 @@ export var actions = {
     var periodoNuevo = draft.periodo || "mensual";
     var diasNuevo = (draft.diasPago || []).filter(function (d) { return d !== undefined && d !== null && !isNaN(d); });
     var salarioNuevo = num(val(fila, "edit-salario"));
+    var servicioDefaultNuevo = val(fila, "edit-servicio-default") || "";
     state.config.nomina = (state.config.nomina || []).map(function (e) {
       if (e.id !== id) return e;
       return Object.assign({}, e, {
         nombre: nombre, cargo: val(fila, "edit-cargo"),
         periodo: periodoNuevo, diasPago: diasNuevo, diaPago: "",
-        salario: salarioNuevo, salarioPeriodo: periodoNuevo
+        salario: salarioNuevo, salarioPeriodo: periodoNuevo,
+        servicioDefault: servicioDefaultNuevo
       });
     });
     state.empEditando = ""; state.empEditDraft = null;

@@ -1,7 +1,7 @@
 import { state, persist, notify } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos } from "../core/calc.js";
-import { renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados } from "../core/calc.js";
+import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios } from "../core/components.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -113,6 +113,12 @@ function renderFormMovimiento() {
       '<div class="field"><label>Unidad</label><span class="insumo-unidad-cell"><input class="insumo-unidad" id="tx-unidad" data-form="tx" data-field="unidad" value="' + esc(f.unidad) + '" placeholder="MT, UND…" />' +
       renderComboUnidad({ id: "tx-unidad" }) + "</span></div>" +
       "</div>";
+  }
+
+  // ---- 4. Asignar a servicio(s) (solo tiene sentido para plata que SALE) ----
+  if (f.tipo === "gasto" || f.tipo === "nomina") {
+    html += '<hr class="stitch" />';
+    html += renderAsignarServicios({ formKey: "formTx", filas: f.servicios || [], monto: num(f.monto) });
   }
 
   html += '<div class="pedido-actions" style="margin-top:var(--sp-4);">' +
@@ -265,6 +271,9 @@ function renderFila(t) {
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) +
     (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde.">origen eliminado</span>' : "") +
+    ((t.serviciosDescuento || []).length
+      ? ' <span class="tag" title="Descontado de: ' + (t.serviciosDescuento || []).map(function (d) { return esc(d.nombre) + " " + fmt(d.monto); }).join(", ") + '">📋 ' + (t.serviciosDescuento.length === 1 ? esc(t.serviciosDescuento[0].nombre) : t.serviciosDescuento.length + " servicios") + "</span>"
+      : "") +
     "</span>" +
     '<span class="mobile-th">Persona</span><span style="color:var(--ink-soft);">' + esc(t.contraparte || "—") + "</span>" +
     '<span class="mobile-th">Tipo</span><span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
@@ -375,6 +384,16 @@ export var actions = {
   "add-tx": function () {
     var f = state.formTx;
     if (!exigirCampos([["Concepto", f.concepto], ["Monto", f.monto]])) return;
+    // Solo gasto/nómina asignan servicios — el resto de tipos ni muestra el
+    // bloque, así que ni vale la pena revisarlo (ver validarServiciosAsignados
+    // en core/calc.js: ningún servicio puede quedar negativo, el sobrante sin
+    // cubrir sale de Ganancia sin necesitar su propio registro acá).
+    var serviciosDescuento = [];
+    if (f.tipo === "gasto" || f.tipo === "nomina") {
+      var validacion = validarServiciosAsignados(f.servicios, num(f.monto));
+      if (!validacion.ok) { window.alert(validacion.error); return; }
+      serviciosDescuento = validacion.limpias;
+    }
     // Todo sale del borrador (state.formTx), no de leer el DOM: es lo que
     // permite que los campos de insumo existan solo cuando la casilla está
     // marcada sin que el guardado dependa de que estén en pantalla.
@@ -385,9 +404,10 @@ export var actions = {
       insumoNombre: f.esInsumo ? (f.insumoNombre || "") : "",
       proveedorId: f.esInsumo ? (f.proveedorId || "") : "",
       cantidad: f.esInsumo ? (f.cantidad || "") : "",
-      unidad: f.esInsumo ? (f.unidad || "") : ""
+      unidad: f.esInsumo ? (f.unidad || "") : "",
+      serviciosDescuento: serviciosDescuento
     });
-    state.formTx = { tipo: f.tipo, concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "" };
+    state.formTx = { tipo: f.tipo, concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
     persist("tx"); notify();
   },

@@ -29,7 +29,11 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   // Cuánto se compró (no solo cuánto costó): alimenta la columna "Cantidad"
   // del desglose de insumos del reporte financiero.
   { key: "cantidad", header: "cantidad", numero: true },
-  { key: "unidad", header: "unidad" }
+  { key: "unidad", header: "unidad" },
+  // [{nombre, monto}] — a qué servicio(s) se le descontó este gasto/pago de
+  // nómina (ver calcServiciosDisponibles en core/calc.js). Solo aplica a
+  // tipo "gasto"/"nomina"; el resto de tx no lo usa y queda como "[]".
+  { key: "serviciosDescuento", header: "servicios_descuento", json: true }
 ]);
 
 export var tablaClientes = crearTablaSheet("Clientes", [

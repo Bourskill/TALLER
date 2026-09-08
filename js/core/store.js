@@ -249,7 +249,9 @@ export const state = {
   // unidad) viven en el borrador y no se leen del DOM al enviar: de eso depende
   // que el formulario pueda MOSTRARLOS solo cuando aplican, en vez de tener
   // cuatro campos vacíos ahí siempre.
-  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "" },
+  // `servicios`: [{nombre, monto}] — igual que en formNominaPago, solo se
+  // ofrece para tipo "gasto"/"nomina" (ver renderAsignarServicios).
+  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -299,11 +301,15 @@ export const state = {
   // Qué apartados del reporte están desplegados. El resumen financiero no
   // está acá porque va siempre visible: es el titular, no un detalle.
   reporteSecciones: {},
-  formEmp: { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [] },
+  formEmp: { nombre: "", cargo: "", salario: "", periodo: "", diasPago: [], servicioDefault: "" },
   nominaPagoId: "", // id de la persona con el mini-formulario de "Pagar" abierto (o "")
   empEditando: "", // id de la persona en nómina actualmente en modo edición (o "")
   empEditDraft: null, // { periodo, diasPago } — borrador reactivo del periodo/día mientras se edita (ver renderFilaEdicionEmp)
-  formNominaPago: { bono: "", descuento: "", fecha: "" },
+  // `servicios`: [{nombre, monto}] — a qué "servicio(s)" se le descuenta este
+  // pago (ver renderAsignarServicios en core/components.js). Se precarga con
+  // el servicio por defecto de la persona al abrir "Pagar" (ver
+  // toggle-nomina-pago en modules/pendientes.js).
+  formNominaPago: { bono: "", descuento: "", fecha: "", servicios: [] },
   formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: [] },
   formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [] },
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")

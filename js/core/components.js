@@ -2,8 +2,8 @@
 // Si mañana un tercer módulo necesita buscar/crear un cliente, se reutiliza esto
 // en vez de duplicar el combobox.
 
-import { esc, norm } from "./utils.js";
-import { clienteById, unidadesConocidas } from "./calc.js";
+import { esc, norm, fmt, num } from "./utils.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -342,4 +342,65 @@ export function renderClientePicker(opts) {
     '<button class="btn ghost small" data-action="' + opts.accionCerrar + '">Cancelar</button>' +
     "</div></div></div>";
   return html;
+}
+
+// "Asignar a servicio(s)" un gasto o un pago de nómina — descontarlo de la
+// plata que ya se cobró por un "servicio" (una línea marcada así en
+// "Compras del pedido" de una cotización, ver calcServiciosPorCategoriaRango
+// en core/calc.js), en vez de que cuente como una salida nueva sin relación
+// con nada. El usuario lo pidió con dos ejemplos: comprar medias descontado
+// del servicio "Medias", pagarle a la operaria de confección descontado de
+// "Confección" — y "si no alcanza, poder seleccionar varios".
+//
+// Reutilizado entre Finanzas (Registrar gasto/nómina) y Pendientes (Pagar
+// nómina): `opts.formKey` es el nombre del borrador en `state` (ej.
+// "formTx", "formNominaPago") que las acciones compartidas de core/dom.js
+// leen y escriben — así una sola implementación sirve para los dos lugares
+// sin que ninguno conozca los detalles del otro.
+//
+// Ningún servicio puede quedar negativo (los montos ya vienen topados a lo
+// disponible, ver validarServiciosAsignados en core/calc.js); lo que no se
+// cubra acá sale de "Ganancia" — el único monto que sí puede quedar
+// negativo — así que no hace falta "agotar" nada para poder guardar.
+export function renderAsignarServicios(opts) {
+  var disponibles = calcServiciosDisponibles();
+  var filas = opts.filas || [];
+  if (!disponibles.length && !filas.length) return "";
+  var montoTotal = num(opts.monto) || 0;
+  var cubierto = filas.reduce(function (a, f) { return a + (num(f.monto) || 0); }, 0);
+  var falta = Math.max(0, montoTotal - cubierto);
+
+  var html = '<div class="field wide"><label>Asignar a servicio(s) (opcional)' +
+    renderHelp('Descuenta este pago de la plata que un cliente ya pagó por un "servicio" (marcado así en "Compras del pedido" de una cotización — ej. Confección, Medias), en vez de contarlo como una salida nueva sin relación. Ningún servicio puede quedar negativo: lo que no alcances a cubrir aquí sale de la Ganancia.') +
+    "</label>";
+
+  if (!disponibles.length) {
+    html += '<div class="empty" style="padding:6px 0;">Aún no hay plata acumulada en ningún servicio.</div>';
+  } else {
+    filas.forEach(function (fila, idx) {
+      html += renderFilaAsignacionServicio(opts.formKey, idx, fila, disponibles);
+    });
+    if (filas.length < disponibles.length) {
+      html += '<button type="button" class="btn ghost small" data-action="agregar-fila-servicio" data-form-destino="' + opts.formKey + '">+ Agregar servicio</button>';
+    }
+  }
+
+  html += '<div class="section-sub" style="margin-top:6px;">' +
+    (cubierto ? "Cubierto por servicios: <b>" + fmt(cubierto) + "</b> · " : "") +
+    'Sale de Ganancia: <b style="color:' + (falta > 0 ? "var(--warning-ink)" : "var(--ink)") + ';">' + fmt(falta) + "</b>" +
+    "</div></div>";
+  return html;
+}
+
+function renderFilaAsignacionServicio(formKey, idx, fila, disponibles) {
+  return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+    '<select class="mini-input" style="flex:1;" data-action-change="set-fila-servicio-nombre" data-form-destino="' + formKey + '" data-idx="' + idx + '">' +
+    '<option value="">Elegir servicio…</option>' +
+    disponibles.map(function (s) {
+      return '<option value="' + esc(s.nombre) + '" ' + (fila.nombre === s.nombre ? "selected" : "") + ">" + esc(s.nombre) + " — disponible " + fmt(s.disponible) + "</option>";
+    }).join("") +
+    "</select>" +
+    '<input type="number" class="mini-input" style="width:130px;" placeholder="Monto" value="' + esc(fila.monto) + '" data-action-change="set-fila-servicio-monto" data-form-destino="' + formKey + '" data-idx="' + idx + '" />' +
+    '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" data-form-destino="' + formKey + '" data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
+    "</div>";
 }
