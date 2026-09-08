@@ -259,6 +259,14 @@ para compartir con este el recorrido de "toda entrada por servicio"
 (`listaEntradasServicio`, privada) — antes solo agregaba, sin poder listar
 el detalle línea por línea.
 
+**Ajuste pedido de inmediato: "que no desaparezcan cuando estén en 0".** La
+primera versión de `calcServiciosPendientesPorCategoriaRango` filtraba los
+servicios ya pagados por completo (monto pendiente = 0) fuera de la lista —
+se sentía como que la app "se olvidaba" del servicio justo al terminar de
+pagarlo. Ahora se queda en la lista con su tile en $0 (sigue siendo el
+botón para ver su historial completo); solo deja de RESTAR de la Ganancia,
+que es lo único que en realidad tenía que dejar de pasar.
+
 Verificado con `test/smoke.mjs` (627 aserciones en total: +11 de esta ronda).
 
 ## Registro de cambios — septiembre 2026 (vigesimosexta ronda: asignar un gasto/nómina a un "servicio")

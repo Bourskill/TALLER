@@ -540,7 +540,8 @@ assert(calcServDisp().filter(function (s) { return s.nombre === "Medias"; })[0].
 // contando ese pago dos veces (una vez como el gasto/nómina real, otra vez
 // como si TODAVÍA estuviera pendiente). ---
 var pendientesHoy = calcServPendientes(fechaCotServicios, fechaCotServicios);
-assert(!pendientesHoy.some(function (s) { return s.nombre === "Confección"; }), "\"Confección\" ya no resta de Ganancia: se pagó por completo, así que ya no está \"pendiente\"");
+var confeccionPendiente = pendientesHoy.filter(function (s) { return s.nombre === "Confección"; })[0];
+assert(!!confeccionPendiente && confeccionPendiente.monto === 0, "\"Confección\" ya no resta de Ganancia (se pagó por completo)... pero SIGUE en la lista, en $0 — no se olvida de ella");
 var mediasPendiente = pendientesHoy.filter(function (s) { return s.nombre === "Medias"; })[0];
 assert(!!mediasPendiente && mediasPendiente.monto === 1000000, "\"Medias\" solo resta lo que TODAVÍA está pendiente (1.000.000), no el acumulado bruto (2.000.000) — ese millón ya salió de Balance por su cuenta, vía la nómina");
 
@@ -552,7 +553,8 @@ assert(historialMedias[1].tipo === "salida" && historialMedias[1].monto === 1000
 assert(historialMedias[1].saldo === 1000000, "...con el saldo corriente ya descontado (2.000.000 − 1.000.000)");
 
 click('[data-action="tab"][data-tab="resumen"]');
-assert(!document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Confección"]'), "el dashboard de Resumen ya no muestra un tile para \"Confección\" (nada pendiente que explicar)");
+var tileConfeccion = document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Confección"]');
+assert(!!tileConfeccion && tileConfeccion.textContent.indexOf("$0") >= 0, "el dashboard de Resumen SIGUE mostrando el tile de \"Confección\" en $0 — no desaparece por quedar pagado del todo");
 var tileMedias = document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Medias"]');
 assert(!!tileMedias && tileMedias.textContent.indexOf("1.000.000") >= 0, "...pero sí uno para \"Medias\", mostrando lo pendiente (1.000.000), no el acumulado bruto");
 click('[data-action="abrir-historial-servicio"][data-nombre="Medias"]');

@@ -695,13 +695,16 @@ export function calcServiciosDisponibles() {
 export function calcServiciosPendientesPorCategoriaRango(desde, hasta) {
   var acumuladosPeriodo = calcServiciosPorCategoriaRango(desde, hasta);
   var disponibles = calcServiciosDisponibles();
-  return acumuladosPeriodo
-    .map(function (s) {
-      var d = disponibles.filter(function (x) { return x.nombre === s.nombre; })[0];
-      var disponible = d ? d.disponible : s.monto;
-      return { nombre: s.nombre, monto: Math.max(0, Math.min(s.monto, disponible)) };
-    })
-    .filter(function (s) { return s.monto > 0; });
+  // Un servicio ya pagado por completo queda en $0 pero SIGUE en la lista
+  // (no se filtra): el usuario pidió explícito que su tile no desaparezca
+  // al llegar a cero — sigue siendo el botón para ver su historial completo,
+  // y desaparecerlo justo cuando se termina de pagar se sentiría como que
+  // la app "se olvidó" de él.
+  return acumuladosPeriodo.map(function (s) {
+    var d = disponibles.filter(function (x) { return x.nombre === s.nombre; })[0];
+    var disponible = d ? d.disponible : s.monto;
+    return { nombre: s.nombre, monto: Math.max(0, Math.min(s.monto, disponible)) };
+  });
 }
 
 // Valida las filas de "asignar a servicio(s)" de un formulario de gasto o
