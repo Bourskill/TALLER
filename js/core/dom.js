@@ -313,6 +313,18 @@ var coreActions = {
     fila.monto = el.value;
     notify();
   },
+  // Ver renderHistorialServicio en core/components.js. El botón que abre
+  // esto vive en más de un lado (los tiles de "Ganancia" en Resumen, cada
+  // fila ya elegida de "Asignar a servicio(s)"), así que el estado y las
+  // acciones son genéricos, no de un módulo en particular.
+  "abrir-historial-servicio": function (el) {
+    state.historialServicioAbierto = el.getAttribute("data-nombre");
+    notify();
+  },
+  "cerrar-historial-servicio": function () {
+    state.historialServicioAbierto = "";
+    notify();
+  },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
     // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.

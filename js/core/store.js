@@ -384,6 +384,12 @@ export const state = {
   // cerrarlo, para que nunca quede una cotización vieja "enganchada" por
   // error en la próxima vez que se abra el buscador desde un formulario.
   clientePickerCotizacionId: "",
+  // Nombre del servicio con el historial de entradas/salidas abierto (ver
+  // renderHistorialServicio en core/components.js), o "" si está cerrado.
+  // Genérico (no vive en resumen.js ni en finanzas.js) porque el botón que
+  // lo abre aparece en varios lados: los tiles de "Ganancia" en Resumen y
+  // cada fila ya elegida de "Asignar a servicio(s)" en Finanzas/Pendientes.
+  historialServicioAbierto: "",
   // { [cotId + "|" + claveLinea]: true } — qué filas de la tabla de compras
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.

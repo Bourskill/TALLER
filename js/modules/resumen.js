@@ -9,8 +9,8 @@ import {
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
   calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
-  calcServiciosPorCategoriaRango } from "../core/calc.js";
-import { renderHelp } from "../core/components.js";
+  calcServiciosPendientesPorCategoriaRango } from "../core/calc.js";
+import { renderHelp, renderHistorialServicio } from "../core/components.js";
 import {
   configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
 } from "../core/graficas.js";
@@ -82,6 +82,7 @@ export function render() {
   }
 
   html += renderReportePeriodo();
+  html += renderHistorialServicio(state.historialServicioAbierto);
   return html;
 }
 
@@ -233,8 +234,11 @@ function renderGraficaResumen() {
   // mismo (servicios — corte, confección...), nunca pagado de verdad y por
   // eso ya incluido en Balance sin restar. El usuario lo pidió con sus
   // palabras: "la ganancia es lo que queda cuando del dinero de la caja se
-  // le resta lo de los servicios". Ver calcServiciosPorCategoriaRango.
-  var servicios = calcServiciosPorCategoriaRango(serie.desde, serie.hasta);
+  // le resta lo de los servicios". Usa la versión "pendientes" (no la bruta):
+  // un servicio que ya se pagó de verdad (ver renderAsignarServicios) generó
+  // su propio gasto/nómina, que YA bajó el Balance ese día — restarlo
+  // también acá lo contaría dos veces. Ver calcServiciosPendientesPorCategoriaRango.
+  var servicios = calcServiciosPendientesPorCategoriaRango(serie.desde, serie.hasta);
   var totalServicios = servicios.reduce(function (a, s) { return a + s.monto; }, 0);
   var ganancia = t.balance - totalServicios;
   var cifras = [
@@ -254,14 +258,21 @@ function renderGraficaResumen() {
 // arriba, a propósito: son un detalle de por qué "Ganancia" es menor que
 // "Balance", no otro número que compita por atención. Solo aparecen si hubo
 // algo: sin servicios en el periodo, no hay nada que desglosar.
+//
+// Cada tile es un botón (no un <div> suelto): el usuario pidió poder ver
+// "el historial de entradas y salidas" de un servicio, no solo su total —
+// ver renderHistorialServicio en core/components.js. El monto ya viene
+// topado a lo que ese servicio TODAVÍA tiene pendiente (ver
+// calcServiciosPendientesPorCategoriaRango): si ya se pagó, deja de
+// aparecer acá, aunque siga en el historial completo del botón.
 function renderServiciosMini(servicios) {
   if (!servicios.length) return "";
-  return '<div class="section-sub" style="margin:14px 0 6px;">De "Balance" a "Ganancia" se restó esto (trabajo propio, nunca pagado aparte)' +
-    renderHelp("Cada una de estas es una línea marcada \"Servicio\" en la lista de compras de una cotización: algo que el cliente sí pagó (va dentro de \"Entró\") pero que el taller hizo con su propia gente, sin pagarle a nadie aparte por eso. Sigue siendo plata disponible en caja — solo que no es utilidad del negocio, así que se resta de la ganancia real.") +
+  return '<div class="section-sub" style="margin:14px 0 6px;">De "Balance" a "Ganancia" se restó esto (trabajo propio, todavía sin pagar aparte)' +
+    renderHelp("Cada una de estas es una línea marcada \"Servicio\" en la lista de compras de una cotización, que todavía no se ha pagado de verdad: algo que el cliente sí pagó (va dentro de \"Entró\") pero que el taller hizo con su propia gente, sin pagarle a nadie aparte por eso — sigue siendo plata disponible en caja, solo que no es utilidad del negocio, así que se resta de la ganancia real. Haz clic en cualquiera para ver su historial completo de entradas y salidas.") +
     "</div>" +
     '<div class="kpis-mini">' +
     servicios.map(function (s) {
-      return '<div class="kpi-mini"><div class="kpi-mini-label" title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</div><div class="kpi-mini-value">' + fmt(s.monto) + "</div></div>";
+      return '<button type="button" class="kpi-mini" data-action="abrir-historial-servicio" data-nombre="' + esc(s.nombre) + '"><div class="kpi-mini-label" title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</div><div class="kpi-mini-value">' + fmt(s.monto) + "</div></button>";
     }).join("") +
     "</div>";
 }

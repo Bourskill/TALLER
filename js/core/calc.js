@@ -588,11 +588,15 @@ export function calcPorPagar() {
 // calcResumenCompras), así que no tiene su propia fecha de tx contra la cual
 // filtrar — la fecha en que se cotizó/vendió es el dato disponible más
 // cercano a "cuándo entró esa plata a la caja".
-export function calcServiciosPorCategoriaRango(desde, hasta) {
-  var porNombre = {};
+// Lista CRUDA (sin agrupar, sin filtrar por nombre ni fecha) de toda entrada
+// de dinero por "servicio" en TODAS las cotizaciones — la comparten
+// calcServiciosPorCategoriaRango (agregada, para el KPI de Ganancia) y
+// calcHistorialServicio (detallada, línea por línea, para el botón "ver
+// historial" de un servicio). Una sola fuente para no tener dos versiones
+// del mismo recorrido que puedan divergir.
+function listaEntradasServicio() {
+  var entradas = [];
   (state.cotizaciones || []).forEach(function (cot) {
-    var fecha = cot.fecha || "";
-    if ((desde && fecha < desde) || (hasta && fecha > hasta)) return;
     if (!(cot.compras || []).length) return;
     var lineas = calcListaCompras(cot);
     cot.compras.forEach(function (compra) {
@@ -605,12 +609,49 @@ export function calcServiciosPorCategoriaRango(desde, hasta) {
       var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
       var monto = hayCostoReal ? num(compra.costoReal) : (linea ? linea.costoTotal : 0);
       if (monto <= 0) return;
-      porNombre[nombre] = (porNombre[nombre] || 0) + monto;
+      entradas.push({ nombre: nombre, fecha: cot.fecha || "", cotizacionId: cot.id, cliente: cot.cliente || "", descripcion: cot.descripcion || "", monto: monto });
     });
+  });
+  return entradas;
+}
+
+export function calcServiciosPorCategoriaRango(desde, hasta) {
+  var porNombre = {};
+  listaEntradasServicio().forEach(function (e) {
+    if ((desde && e.fecha < desde) || (hasta && e.fecha > hasta)) return;
+    porNombre[e.nombre] = (porNombre[e.nombre] || 0) + e.monto;
   });
   return Object.keys(porNombre)
     .map(function (nombre) { return { nombre: nombre, monto: porNombre[nombre] }; })
     .sort(function (a, b) { return b.monto - a.monto; });
+}
+
+// Historial completo de un servicio — cada ENTRADA (una cotización que lo
+// marcó "servicio" en Compras del pedido) y cada SALIDA (un gasto o pago de
+// nómina que se le asignó, ver tx.serviciosDescuento), en orden cronológico
+// con saldo corriente. El usuario lo pidió para que el "campo" de cada
+// servicio sea un botón que muestre "el historial de entradas y salidas",
+// no solo el número final.
+export function calcHistorialServicio(nombre) {
+  var movimientos = listaEntradasServicio()
+    .filter(function (e) { return e.nombre === nombre; })
+    .map(function (e) {
+      return {
+        tipo: "entrada", fecha: e.fecha, cotizacionId: e.cotizacionId,
+        concepto: "Cotización — " + (e.cliente || "Sin cliente") + (e.descripcion ? " (" + e.descripcion + ")" : ""),
+        monto: e.monto
+      };
+    });
+  (state.tx || []).forEach(function (t) {
+    (t.serviciosDescuento || []).forEach(function (d) {
+      if (d.nombre !== nombre) return;
+      movimientos.push({ tipo: "salida", fecha: t.fecha || "", txId: t.id, concepto: t.concepto, monto: num(d.monto) });
+    });
+  });
+  movimientos.sort(function (a, b) { return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); });
+  var saldo = 0;
+  movimientos.forEach(function (m) { saldo += m.tipo === "entrada" ? m.monto : -m.monto; m.saldo = saldo; });
+  return movimientos;
 }
 
 // Cuánto queda "disponible" de cada servicio, de SIEMPRE (sin filtro de
@@ -638,6 +679,29 @@ export function calcServiciosDisponibles() {
     var usado = usados[s.nombre] || 0;
     return { nombre: s.nombre, acumulado: s.monto, usado: usado, disponible: s.monto - usado };
   });
+}
+
+// Lo que TODAVÍA resta de "Ganancia" por cada servicio del periodo — ya no
+// puede ser el acumulado bruto de calcServiciosPorCategoriaRango sin más:
+// ahora que un servicio se puede pagar de verdad (ver
+// calcServiciosDisponibles/renderAsignarServicios), ese pago es un gasto o
+// una nómina con su propia fecha, que YA reduce el Balance por su cuenta el
+// día que se paga — restarlo TAMBIÉN acá lo contaría dos veces. Se topa el
+// acumulado de cada servicio a lo que de verdad tiene disponible AHORA
+// MISMO: si ya se pagó todo, no resta nada; si se pagó una parte, resta solo
+// lo que sigue pendiente. (Con nada pagado todavía, disponible >= acumulado
+// del periodo y el resultado es idéntico a antes — no cambia nada para
+// quien no use la asignación a servicios.)
+export function calcServiciosPendientesPorCategoriaRango(desde, hasta) {
+  var acumuladosPeriodo = calcServiciosPorCategoriaRango(desde, hasta);
+  var disponibles = calcServiciosDisponibles();
+  return acumuladosPeriodo
+    .map(function (s) {
+      var d = disponibles.filter(function (x) { return x.nombre === s.nombre; })[0];
+      var disponible = d ? d.disponible : s.monto;
+      return { nombre: s.nombre, monto: Math.max(0, Math.min(s.monto, disponible)) };
+    })
+    .filter(function (s) { return s.monto > 0; });
 }
 
 // Valida las filas de "asignar a servicio(s)" de un formulario de gasto o

@@ -82,7 +82,10 @@
    entre "Balance" y "Ganancia" en Resumen) que no debe competir visualmente
    con los KPI principales de arriba. */
 .kpis-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;}
-.kpi-mini{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:8px 12px;min-width:0;}
+/* Es un <button> (abre el historial del servicio) pero se ve como el <div>
+   de antes: reset de lo que el navegador le pone a un botón por defecto. */
+.kpi-mini{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);padding:8px 12px;min-width:0;width:100%;text-align:left;cursor:pointer;font:inherit;transition:border-color .12s ease;}
+.kpi-mini:hover{border-color:var(--accent);}
 .kpi-mini-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .kpi-mini-value{font-family:'IBM Plex Mono',monospace;font-size:14.5px;font-weight:600;color:var(--ink-soft);margin-top:3px;font-variant-numeric:tabular-nums;}
 

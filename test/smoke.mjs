@@ -430,9 +430,11 @@ assert(state.config.nomina.length === 1, "agrega persona a nómina");
 // seleccionar varios"; y el único monto que puede quedar negativo es la
 // Ganancia (lo que no se cubre con ningún servicio).
 // ---------------------------------------------------------------------------
-const { calcListaCompras: calcListaComprasServ, calcServiciosDisponibles: calcServDisp } = await import("../js/core/calc.js");
+const { calcListaCompras: calcListaComprasServ, calcServiciosDisponibles: calcServDisp, calcServiciosPendientesPorCategoriaRango: calcServPendientes, calcHistorialServicio } = await import("../js/core/calc.js");
+const { todayStr: hoyStrServicios } = await import("../js/core/utils.js");
+var fechaCotServicios = hoyStrServicios(); // hoy: para que el tile del dashboard de 30 días la vea, sin depender de una fecha fija
 var cotServicios = {
-  id: "cot-servicios-test", cliente: "Cliente Servicios", descripcion: "Prueba servicios", fecha: "2026-09-01",
+  id: "cot-servicios-test", cliente: "Cliente Servicios", descripcion: "Prueba servicios", fecha: fechaCotServicios,
   estado: "borrador", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "csrv1",
   referencias: [{
     id: "ref-serv-1", nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 40000, origen: "taller", costoCompra: 0, proveedorId: "",
@@ -532,6 +534,35 @@ assert(1200000 - totalCubierto === 180000, "y los 180.000 restantes, al no venir
 assert(calcServDisp().filter(function (s) { return s.nombre === "Confección"; })[0].disponible === 0, "\"Confección\" queda en 0 (no negativo)");
 assert(calcServDisp().filter(function (s) { return s.nombre === "Medias"; })[0].disponible === 1000000, "\"Medias\" queda con 1.000.000 disponibles (2.000.000 − 1.000.000)");
 
+// --- El usuario reportó: "en resumen no se está viendo reflejado estos
+// cambios en sus KPIs de servicios" — el KPI "Ganancia" restaba el
+// acumulado BRUTO de cada servicio sin importar si ya se había pagado,
+// contando ese pago dos veces (una vez como el gasto/nómina real, otra vez
+// como si TODAVÍA estuviera pendiente). ---
+var pendientesHoy = calcServPendientes(fechaCotServicios, fechaCotServicios);
+assert(!pendientesHoy.some(function (s) { return s.nombre === "Confección"; }), "\"Confección\" ya no resta de Ganancia: se pagó por completo, así que ya no está \"pendiente\"");
+var mediasPendiente = pendientesHoy.filter(function (s) { return s.nombre === "Medias"; })[0];
+assert(!!mediasPendiente && mediasPendiente.monto === 1000000, "\"Medias\" solo resta lo que TODAVÍA está pendiente (1.000.000), no el acumulado bruto (2.000.000) — ese millón ya salió de Balance por su cuenta, vía la nómina");
+
+// --- El usuario también pidió: "que los campos de servicios sean botones
+// que muestren el historial de entradas y salidas". ---
+var historialMedias = calcHistorialServicio("Medias");
+assert(historialMedias.length === 2 && historialMedias[0].tipo === "entrada" && historialMedias[0].monto === 2000000, "calcHistorialServicio: la entrada es la cotización que marcó \"Medias\" como servicio");
+assert(historialMedias[1].tipo === "salida" && historialMedias[1].monto === 1000000, "...y la salida es la nómina que se le asignó");
+assert(historialMedias[1].saldo === 1000000, "...con el saldo corriente ya descontado (2.000.000 − 1.000.000)");
+
+click('[data-action="tab"][data-tab="resumen"]');
+assert(!document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Confección"]'), "el dashboard de Resumen ya no muestra un tile para \"Confección\" (nada pendiente que explicar)");
+var tileMedias = document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Medias"]');
+assert(!!tileMedias && tileMedias.textContent.indexOf("1.000.000") >= 0, "...pero sí uno para \"Medias\", mostrando lo pendiente (1.000.000), no el acumulado bruto");
+click('[data-action="abrir-historial-servicio"][data-nombre="Medias"]');
+assert(state.historialServicioAbierto === "Medias", "el tile es un botón: hace clic y abre el historial de ese servicio");
+assert(!!document.querySelector(".picker-overlay"), "...con su propio overlay");
+assert(document.querySelectorAll(".picker-overlay .tx-row").length >= 3, "...listando la entrada y la salida (más la fila de encabezado)");
+click('[data-action="cerrar-historial-servicio"]');
+assert(state.historialServicioAbierto === "", "y se cierra igual que los demás pickers de la app");
+
+click('[data-action="tab"][data-tab="pendientes"]');
 click('[data-action="toggle-pend-form"][data-key="gastoFijo"]');
 setInput('[data-form="gastoFijo"][data-field="nombre"]', "Arriendo");
 setInput('[data-form="gastoFijo"][data-field="monto"]', "500000");

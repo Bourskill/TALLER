@@ -3,7 +3,7 @@
 // en vez de duplicar el combobox.
 
 import { esc, norm, fmt, num } from "./utils.js";
-import { clienteById, unidadesConocidas, calcServiciosDisponibles } from "./calc.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -401,6 +401,49 @@ function renderFilaAsignacionServicio(formKey, idx, fila, disponibles) {
     }).join("") +
     "</select>" +
     '<input type="number" class="mini-input" style="width:130px;" placeholder="Monto" value="' + esc(fila.monto) + '" data-action-change="set-fila-servicio-monto" data-form-destino="' + formKey + '" data-idx="' + idx + '" />' +
+    (fila.nombre ? '<button type="button" class="btn ghost small" data-action="abrir-historial-servicio" data-nombre="' + esc(fila.nombre) + '" title="Ver historial de entradas y salidas">🕘</button>' : "") +
     '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" data-form-destino="' + formKey + '" data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
     "</div>";
+}
+
+// Historial de entradas y salidas de UN servicio — el usuario pidió que
+// "los campos de servicios sean botones que muestren el historial de
+// entradas y salidas": cada entrada es una cotización que lo marcó
+// "servicio" en Compras del pedido (ver calcHistorialServicio en
+// core/calc.js); cada salida, un gasto o pago de nómina que se le asignó.
+// `nombre` es el servicio abierto, o "" si el panel está cerrado — mismo
+// patrón que renderInsumoPicker (una sola clave en vez de un booleano
+// aparte, para no poder tener "abierto=true" sin saber de cuál).
+export function renderHistorialServicio(nombre) {
+  if (!nombre) return "";
+  var movimientos = calcHistorialServicio(nombre);
+  var saldoActual = movimientos.length ? movimientos[movimientos.length - 1].saldo : 0;
+  var cols = "90px 1fr 110px 110px";
+  var html = '<div class="picker-overlay" data-action="cerrar-historial-servicio">' +
+    '<div class="picker-modal" style="max-width:560px;" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Historial de "' + esc(nombre) + '"</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-historial-servicio" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    '<div class="cliente-picker-lista">';
+
+  if (!movimientos.length) {
+    html += '<div class="empty">Sin movimientos todavía.</div>';
+  } else {
+    html += '<div class="tx-row head" style="grid-template-columns:' + cols + ';padding:0 14px;"><span>Fecha</span><span>Concepto</span><span>Monto</span><span>Saldo</span></div>';
+    movimientos.forEach(function (m) {
+      html += '<div class="tx-row" style="grid-template-columns:' + cols + ';padding:8px 14px;">' +
+        "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(m.fecha) + "</span>" +
+        '<span class="mobile-th">Concepto</span><span>' + esc(m.concepto) + "</span>" +
+        '<span class="mobile-th">Monto</span><span class="amount ' + (m.tipo === "entrada" ? "pos" : "neg") + '">' + (m.tipo === "entrada" ? "+" : "−") + fmt(m.monto) + "</span>" +
+        '<span class="mobile-th">Saldo</span><span class="amount">' + fmt(m.saldo) + "</span>" +
+        "</div>";
+    });
+  }
+  html += "</div>" +
+    '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">Disponible ahora: <b style="color:var(--ink);">' + fmt(saldoActual) + "</b></span>" +
+    '<button class="btn ghost small" data-action="cerrar-historial-servicio">Cerrar</button>' +
+    "</div></div></div>";
+  return html;
 }

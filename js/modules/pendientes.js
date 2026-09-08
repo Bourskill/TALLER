@@ -15,7 +15,7 @@ import {
   calcServiciosDisponibles, validarServiciosAsignados
 } from "../core/calc.js";
 import { PERIODOS_PAGO, DIAS_SEMANA } from "../core/constants.js";
-import { renderHelp, renderAsignarServicios } from "../core/components.js";
+import { renderHelp, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 
@@ -171,6 +171,7 @@ export function render() {
   // cada comisión, se sigue haciendo desde la tarjeta del pedido o cotización
   // correspondiente.
 
+  html += renderHistorialServicio(state.historialServicioAbierto);
   return html;
 }
 

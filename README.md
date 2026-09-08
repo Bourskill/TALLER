@@ -222,6 +222,45 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimoséptima ronda: la Ganancia contaba un servicio pagado dos veces, + historial por servicio)
+
+Corrección real + una extensión, sobre la ronda anterior (asignar un gasto/
+nómina a un servicio). El usuario reportó: "ya en pendiente puedo asignarlos
+montos de servicio y todo, hasta ahí todo bien, pero en resumen no se está
+viendo reflejado estos cambios en sus KPIs de servicios".
+
+**Bug real: el KPI "Ganancia" restaba un servicio ya pagado, dos veces.**
+`ganancia = Balance − totalServicios`, donde `totalServicios` era el
+acumulado BRUTO de `calcServiciosPorCategoriaRango` — sin importar si ya se
+había pagado de verdad. Con la ronda anterior, pagar una nómina asignada a
+"Confección" YA reduce el Balance ese día (es un gasto/nómina real, con su
+propia fecha). Pero la fórmula de Ganancia seguía restando el acumulado
+completo de "Confección" COMO SI siguiera pendiente — contando el mismo pago
+dos veces (una como gasto real, otra como si todavía no se hubiera pagado) y
+mostrando una Ganancia más baja de la real.
+
+**Fix:** `calcServiciosPendientesPorCategoriaRango` (nuevo, `core/calc.js`)
+topa el acumulado de cada servicio del periodo a lo que TODAVÍA tiene
+disponible ahora mismo (ver `calcServiciosDisponibles`): si ya se pagó todo,
+resta 0; si se pagó una parte, resta solo lo pendiente. Sin nada pagado
+(caso de siempre, para quien no use la asignación a servicios), el resultado
+es idéntico al de antes — no cambia nada para nadie más.
+
+**Extensión pedida junto con el reporte: "quiero que los campos de servicios
+sean botones que muestren el historial de entradas y salidas".** Cada tile
+de servicio en Resumen (y cada fila ya elegida en "Asignar a servicio(s)",
+con un botón 🕘 aparte) ahora es un botón que abre un historial completo:
+toda ENTRADA (una cotización que lo marcó "Servicio" en Compras del pedido)
+y toda SALIDA (un gasto/nómina que se le asignó), en orden cronológico con
+saldo corriente — `calcHistorialServicio` en `core/calc.js`,
+`renderHistorialServicio` en `core/components.js` (mismo "chrome" de picker
+que el resto de la app). Se refactorizó `calcServiciosPorCategoriaRango`
+para compartir con este el recorrido de "toda entrada por servicio"
+(`listaEntradasServicio`, privada) — antes solo agregaba, sin poder listar
+el detalle línea por línea.
+
+Verificado con `test/smoke.mjs` (627 aserciones en total: +11 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (vigesimosexta ronda: asignar un gasto/nómina a un "servicio")
 
 Feature nueva, no un bug. El usuario la pidió con dos ejemplos: "si compro
