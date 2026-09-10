@@ -277,6 +277,27 @@ referencia y luego pasas a la siguiente". Tres retoques sobre lo de arriba:
   a los DOS documentos (orden de producción y cuenta de cobro), no solo a
   la cuenta de cobro — es la misma pieza compartida.
 
+**AJUSTE 2 (mismo día, regla para no cortar una referencia por la mitad):**
+antes, el salto de página solo se evaluaba línea por línea, así que el
+título de una referencia podía quedar solo al final de una hoja y su foto
++ tabla empezar recién en la siguiente — antiestético. Ahora, antes de
+dibujar cada referencia, se calcula su "alto mínimo garantizado" (nombre +
+foto, si tiene + encabezado de tabla + hasta 3 filas de jugadores) y si ese
+mínimo no cabe en lo que queda de la hoja actual, se salta de página ANTES
+de dibujar nada de esa referencia — así el nombre, la foto y al menos las
+primeras 3 filas siempre quedan juntos. Si la referencia tiene más de 3
+jugadores, esas filas de más sí pueden seguir en la siguiente hoja (ahí
+jsPDF-autoTable repite el encabezado de la tabla automáticamente), pero ya
+con el bloque principal a salvo de quedar partido. Aplica a los dos
+documentos igual que el punto anterior.
+
+Nota de honestidad sobre las pruebas: igual que el resto de estos cambios
+de PDF, esto no se pudo cubrir con pruebas automáticas porque jsPDF no
+está disponible en el entorno de pruebas (jsdom) — se verificó solo con
+lectura cuidadosa del código y con que la suite completa siga en 687/687
+sin errores de carga. Si al probarlo en la app real algo se ve distinto a
+lo descrito, avisa para ajustarlo.
+
 ## Registro de cambios — septiembre 2026 (trigésimo sexta ronda: Tab saltaba el botón "Guardar" de un insumo nuevo)
 
 Reporte del usuario: "cuando creo un insumo, puedo desplazarme con el tap

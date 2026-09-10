@@ -1087,6 +1087,19 @@ function hayInfoProduccion(refs) {
 // otro (con una columna "Referencia" para saber de cuál era cada una),
 // obligando a ir y venir entre las dos secciones para armar el cuadro
 // completo de una sola referencia.
+// Alto estimado de una fila de la tabla de tallas (fuente 9, cellPadding 6
+// arriba/abajo) — no hace falta que sea exacto: solo sirve para decidir SI
+// hay que saltar de página ANTES de empezar a dibujar, no para el layout
+// real (eso lo sigue calculando jsPDF-autoTable solo). Un poco generoso a
+// propósito: preferible saltar una página de más que subestimar y terminar
+// partiendo igual.
+var ALTO_FILA_TABLA_EST = 26;
+// Cuántas filas de la tabla tienen que caber SÍ O SÍ junto con el nombre y
+// la foto de su referencia para que valga la pena empezar el bloque en la
+// página actual — si no entran ni estas, se manda TODO el bloque a la
+// siguiente, en vez de partirlo justo después del título o de la foto.
+var FILAS_MINIMAS_JUNTO_A_FOTO = 3;
+
 async function dibujarInfoProduccion(doc, y, marginX, pageH, titulo, numeroMostrado, logoDataUrl, refs) {
   var refsConAlgo = refs.filter(function (r) { return r.imagenUrl || (r.detalle || []).length; });
   if (!refsConAlgo.length) return y;
@@ -1099,26 +1112,46 @@ async function dibujarInfoProduccion(doc, y, marginX, pageH, titulo, numeroMostr
 
   for (var i = 0; i < refsConAlgo.length; i++) {
     var ref = refsConAlgo[i];
-    if (y + 16 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
-    doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
-    y += 14;
+    var detalleRef = ref.detalle || [];
 
+    // La imagen se mide ANTES de decidir si hace falta saltar de página: el
+    // "bloque mínimo" de esta referencia (nombre + foto + primeras filas de
+    // su tabla) tiene que caber ENTERO en lo que quede de la página actual,
+    // o se manda entero a la siguiente. El usuario lo pidió explícito: "se
+    // ve antiestético cuando el título queda en una hoja y el resto en la
+    // siguiente" — más allá de esas primeras filas SÍ se deja partir la
+    // tabla ("entiendo que a veces toca dividir, pero de manera más
+    // estética"): jsPDF-autoTable repite el encabezado de la tabla solo en
+    // cada página que siga, así que el resto de jugadores nunca queda sin
+    // saber a qué columna corresponde.
+    var durl = null, altoImg = 0;
     if (ref.imagenUrl) {
-      var durl = await cargarImagenDataUrl(ref.imagenUrl);
+      durl = await cargarImagenDataUrl(ref.imagenUrl);
       if (durl) {
-        var altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
+        altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
         try {
           var props = doc.getImageProperties(durl);
           if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
         } catch (e) { /* se usa el alto por defecto */ }
-        if (y + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
-        try { doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg); } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
-        y += altoImg + 14;
       }
     }
+    var filasMinimas = Math.min(FILAS_MINIMAS_JUNTO_A_FOTO, detalleRef.length);
+    var altoTablaMinima = detalleRef.length ? ALTO_FILA_TABLA_EST * (1 + filasMinimas) : 0; // +1 por el encabezado
+    var altoBloqueMinimo = 14 /* nombre */ + (durl ? altoImg + 14 : 0) + altoTablaMinima;
+    if (y + altoBloqueMinimo > pageH - margenInferior) {
+      doc.addPage();
+      y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y;
+    }
 
-    var detalleRef = ref.detalle || [];
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
+    doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
+    y += 14;
+
+    if (durl) {
+      try { doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg); } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
+      y += altoImg + 14;
+    }
+
     if (detalleRef.length) {
       var pagDet = opcionesPaginacion(doc, titulo, numeroMostrado, logoDataUrl);
       doc.autoTable({
