@@ -222,6 +222,76 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo quinta ronda: se perdía trabajo real al recargar — el mismo problema de fondo, más grande de lo que parecía)
+
+Reporte serio del usuario: "la app me volvió a dejar perder los datos...
+cotizaciones, insumos, moviendo plata... cuando tuve que actualizar se
+perdió el progreso... no pienso volver a pasar por lo mismo, solucionalo si
+o si" — más, por separado, "noto que me pide iniciar sesión muchas veces...
+a veces para ingresar por primera vez tengo que iniciar 2 veces".
+
+**Investigación, no parche rápido.** Ya existía un sistema serio para esto
+(ver [[incidente_perdida_borrador_2026-08]] y [[conflicto_multi_dispositivo_2026-09]]):
+espejo local en cada guardado, cola de reintento, y "borradores" (edición
+que NUNCA se intentó guardar) para dos casos puntuales — una cotización en
+modo "guardado explícito" y un "Nuevo pedido rápido" a medio llenar. La
+pregunta real era: ¿por qué el usuario volvió a perder algo si esto ya
+existía?
+
+**Causa encontrada:** ese sistema de "borradores" SOLO cubría esos dos
+casos. Cualquier otro formulario de "+ Nuevo" de la app — un movimiento de
+Finanzas (exactamente "moviendo plata"), un contacto nuevo, un gasto fijo,
+una deuda, una cotización TODAVÍA sin crear, un producto, un pago de
+nómina, un reembolso, un abono, una nota — vivía SOLO en `state`, en
+memoria, hasta pulsar el botón de "Crear"/"Registrar". Si la pestaña se
+cerraba antes (recarga por sesión vencida, se cayó, se actualizó el
+navegador) esas horas de trabajo desaparecían SIN NINGÚN AVISO — y, más
+grave todavía: el propio mensaje de "Sesión por vencer" de la app le
+PROMETE al usuario "no vas a perder tu trabajo... se te va a ofrecer
+recuperarlo" (ver `renovar-sesion`, `core/dom.js`) — una promesa que hasta
+ahora solo era cierta para cotizaciones/pedido rápido.
+
+**Fix, generalizando el mecanismo que YA funcionaba bien** (`core/store.js`):
+`FORMULARIOS_CON_BORRADOR` extiende exactamente el mismo camino
+(`marcarBorrador`/espejo local/`state.recuperacion`) a los 11 formularios
+restantes (`formTx`, `formCliente`, `formEmp`, `formGastoFijo`, `formDeuda`,
+`formCotizacion`, `formProducto`, `formNominaPago`, `formReembolso`,
+`formAbono`, `formPend`) — cada uno con su propio criterio mínimo de "esto
+sí es contenido real" (ej. `concepto`/`monto` para un movimiento, no solo
+sus valores por defecto como la fecha de hoy). No se tocó `detectarRecuperacion`/
+`recuperarDelEspejo`/`descartarRecuperacion`: esas funciones YA eran
+genéricas (funcionan con cualquier clave de `state`), el hueco real estaba
+solo en QUÉ claves se marcaban como borrador. Queda sin la parte de
+"borrador en la nube" que sí tienen cotizaciones/formPedido (pensada para
+recuperar desde OTRO dispositivo) — lo que de verdad pasó acá fue una
+recarga en ESTE mismo navegador, que el espejo local ya resuelve solo.
+
+**Segundo hallazgo, en el login:** `js/app.js` dispara DOS intentos de
+inicio de sesión en paralelo cuando no hay sesión guardada — uno silencioso
+(por si Google ya puede resolverlo solo, sin pantalla) y la pantalla normal
+con el botón "Continuar con Google", clickeable de una. Los dos compartían
+el MISMO `tokenClient` de Google (`ensureTokenClient()` es un singleton en
+`core/auth.js`) — si el clic real del usuario llegaba mientras el intento
+silencioso seguía en curso, los dos competían por el mismo objeto (mismo
+`.callback` sobrescrito, mismo estado interno de Google Identity Services,
+que no está pensado para dos solicitudes concurrentes en un mismo cliente).
+Encaja con "para ingresar por primera vez tengo que iniciar 2 veces": el
+primer clic real no lograba nada porque competía con el intento automático.
+Fix: `loginSilencioso()` (nuevo, `core/auth.js`) usa su PROPIO `tokenClient`
+independiente para el intento automático — nunca vuelve a compartir estado
+con el que dispara el botón. **Nota de honestidad:** este segundo fix no se
+pudo probar en vivo contra Google de verdad (`test/smoke.mjs` no puede: no
+hay forma de simular `window.google.accounts.oauth2` sin una cuenta real de
+por medio) — el diagnóstico es sólido y el fix es correcto en su diseño,
+pero confirmar que de verdad desaparece el "doble clic" depende de usarlo
+un tiempo.
+
+Verificado con `test/smoke.mjs` (684 aserciones en total: +6 de esta ronda
+para la parte de borradores, probadas de la misma forma rigurosa que ya
+usaban cotizaciones/formPedido — incluye confirmar que un formulario recién
+abierto y NUNCA tocado no cuenta como borrador, y que recuperar uno nunca
+intenta escribirlo a la Sheet).
+
 ## Registro de cambios — septiembre 2026 (trigésimo cuarta ronda: "Factura" pasa a llamarse "Cuenta de cobro")
 
 El usuario preguntó: "¿qué otro término uso en vez de 'factura' ya que

@@ -204,6 +204,48 @@ export function login() {
   });
 }
 
+// Intento de login SIN mostrar ninguna pantalla, para "entrar directo si ya
+// se puede" al arrancar sin sesión guardada (ver app.js: se dispara EN
+// PARALELO con la pantalla de login normal ya clickeable, por si este
+// resuelve solo antes de que el usuario llegue a hacer clic).
+//
+// Usa su PROPIO tokenClient, nunca el compartido de login() — antes los dos
+// caminos (este intento automático y el clic real del usuario en "Continuar
+// con Google") llamaban a requestAccessToken() sobre el MISMO tokenClient
+// (ensureTokenClient() es un singleton). Si el clic real llegaba mientras el
+// intento silencioso todavía estaba en curso, los dos competían por el
+// mismo objeto (mismo `.callback` sobrescrito, mismo estado interno de
+// Google Identity Services, que no está pensado para dos solicitudes
+// concurrentes en un mismo cliente) — eso era lo que a veces hacía que el
+// primer clic real "no hiciera nada" y tocara volver a hacer clic.
+// Reportado como "para ingresar por primera vez tengo que iniciar 2 veces".
+// Con clientes de Google completamente independientes, el intento
+// silencioso y el clic real del botón nunca vuelven a pisarse.
+export function loginSilencioso() {
+  return new Promise(function (resolve, reject) {
+    if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+      reject(new Error("No se pudo cargar el script de Google."));
+      return;
+    }
+    var clientePropio = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_SCOPES,
+      callback: async function (resp) {
+        if (resp.error) { reject(new Error(resp.error)); return; }
+        accessToken = resp.access_token;
+        try {
+          session = await resolverSesion(accessToken);
+          guardarSesion(resp.expires_in);
+          resolve(session);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    });
+    clientePropio.requestAccessToken({ prompt: "" });
+  });
+}
+
 // Pide un token nuevo SIN mostrar ninguna pantalla: como el consentimiento ya
 // fue otorgado antes, Google lo renueva en silencio (no es el mismo popup de
 // login()). Se usa cuando una llamada a una API de Google responde 401

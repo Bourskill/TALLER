@@ -10,7 +10,7 @@
 // importara con un `import` estático arriba de este archivo, se evaluaría
 // antes del login y STORAGE_OK quedaría en `false` para siempre.
 
-import { login, restaurarSesion } from "./core/auth.js";
+import { login, loginSilencioso, restaurarSesion } from "./core/auth.js";
 import { sheetsStorage } from "./core/sheetsStorage.js";
 import { esc } from "./core/utils.js";
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID } from "./core/google-config.js";
@@ -97,8 +97,14 @@ if (GOOGLE_CLIENT_ID.indexOf("PENDIENTE") === 0 || SPREADSHEET_ID.indexOf("PENDI
     // abierta). Si el navegador bloquea el intento por no venir de un clic
     // real, o hace falta elegir cuenta, esta promesa simplemente no resuelve
     // y el usuario se queda con la pantalla de login normal, sin notar nada.
+    //
+    // loginSilencioso() (NO login()) a propósito: usa su propio tokenClient
+    // de Google, independiente del que usará el botón si el usuario hace
+    // clic mientras este intento sigue en curso — compartir uno solo entre
+    // los dos era lo que a veces hacía que el primer clic real "no hiciera
+    // nada" (ver el comentario grande en core/auth.js).
     intentarLogin();
-    login().then(function (session) {
+    loginSilencioso().then(function (session) {
       if (!session.rol) { mostrarAccesoDenegado(session.email); return; }
       entrarConSesion(session);
     }).catch(function () { /* se queda con la pantalla de login ya visible */ });

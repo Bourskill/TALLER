@@ -789,7 +789,21 @@ export var ETIQUETA_CLAVE = {
   // abajo) — es el formulario de "Nuevo pedido rápido" a medio llenar. Se
   // recupera igual que cualquier otra, solo que sin volver a escribirla a la
   // Sheet (recuperarDelEspejo lo sabe).
-  formPedido: "un pedido rápido a medio llenar"
+  formPedido: "un pedido rápido a medio llenar",
+  // El resto de "formularios de + Nuevo" (ver FORMULARIOS_CON_BORRADOR más
+  // abajo) — tampoco tienen fila propia en la Sheet, mismo criterio que
+  // formPedido.
+  formTx: "un movimiento de Finanzas a medio llenar",
+  formCliente: "un contacto nuevo a medio llenar",
+  formEmp: "una persona de nómina a medio llenar",
+  formGastoFijo: "un gasto fijo a medio llenar",
+  formDeuda: "una deuda a medio llenar",
+  formCotizacion: "una cotización nueva a medio llenar (todavía sin crear)",
+  formProducto: "un producto nuevo a medio llenar",
+  formNominaPago: "un pago de nómina a medio llenar",
+  formReembolso: "un reembolso a medio llenar",
+  formAbono: "un abono a medio llenar",
+  formPend: "una nota a medio llenar"
 };
 
 // Únicas claves que de verdad viven en la Sheet (ver KEYS en constants.js).
@@ -1040,6 +1054,44 @@ export function descartarRecuperacion() {
   notify();
 }
 
+// Qué formularios de "algo nuevo" cuentan como con contenido real que valga
+// la pena proteger — no solo sus valores por defecto (ej. formTx nace con
+// tipo:"ingreso" y la fecha de hoy sin que el usuario haya tocado nada; eso
+// no es trabajo que se pueda perder). Mismo criterio puntual que ya usaba
+// formPedido (ver fpTieneContenido más abajo) para el resto de los
+// formularios de "+ Nuevo" de la app.
+//
+// POR QUÉ ESTO EXISTE: el usuario reportó perder trabajo en curso —
+// cotizaciones, insumos, "moviendo plata"— justo al tener que recargar la
+// página (ej. cuando "Sesión por vencer" no se pudo renovar sola, ver
+// renovar-sesion en core/dom.js — ese mismo aviso le PROMETE "no vas a
+// perder tu trabajo", una promesa que antes solo era cierta para
+// cotizaciones/formPedido). Cualquier otro formulario a medio llenar
+// (un movimiento de Finanzas, un cliente nuevo, un gasto fijo, una
+// cotización todavía sin crear...) vivía SOLO en memoria hasta pulsar
+// "Crear"/"Registrar" — si la pestaña se cerraba antes, esas horas de
+// trabajo desaparecían sin ningún aviso ni forma de recuperarlas, exactamente
+// el hueco que ya se había cerrado para cotizaciones/pedido rápido pero
+// seguía abierto en todos los demás. Local únicamente (sin el borrador en la
+// nube que sí tienen cotizaciones/formPedido, pensado para recuperar desde
+// OTRO dispositivo) — lo que de verdad pasó acá fue una recarga en ESTE
+// mismo navegador, que es lo que el espejo local ya resuelve solo.
+var FORMULARIOS_CON_BORRADOR = {
+  formTx: function (f) { return !!((f.concepto || "").trim() || String(f.monto || "").trim()); },
+  formCliente: function (f) { return !!(f.nombre || "").trim(); },
+  formEmp: function (f) { return !!(f.nombre || "").trim(); },
+  formGastoFijo: function (f) { return !!((f.nombre || "").trim() || String(f.monto || "").trim()); },
+  formDeuda: function (f) { return !!((f.concepto || "").trim() || String(f.monto || "").trim()); },
+  formCotizacion: function (f) { return !!((f.clienteId || "").trim() || (f.cliente || "").trim() || (f.descripcion || "").trim()); },
+  formProducto: function (f) { return !!(f.nombre || "").trim(); },
+  formNominaPago: function (f) { return !!(String(f.bono || "").trim() || String(f.descuento || "").trim()); },
+  formReembolso: function (f) { return !!(String(f.monto || "").trim() || (f.motivo || "").trim()); },
+  formAbono: function (f) { return !!String(f.monto || "").trim(); },
+  formPend: function (f) { return !!((f.titulo || "").trim() || (f.texto || "").trim()); }
+  // formReporte queda afuera a propósito: es un filtro de fechas para
+  // consultar, no trabajo que se pueda perder.
+};
+
 // Se llama en CADA render (ver core/dom.js) — no en cada acción de edición
 // una por una, que son decenas de sitios distintos y fácil olvidar alguno.
 // Mirando el estado mismo en vez de instrumentar cada mutación, esto no
@@ -1086,6 +1138,19 @@ export function revisarBorradoresSinGuardar() {
       idBorradorNubeActivo.formPedido = false;
     }
   }
+
+  // El resto de los formularios de "+ Nuevo" (ver FORMULARIOS_CON_BORRADOR
+  // arriba) — mismo mecanismo de espejo local que cotizaciones/formPedido,
+  // sin la parte de "nube" (esos dos existen para recuperar desde OTRO
+  // dispositivo; acá el caso real es "se recargó ESTA pestaña").
+  Object.keys(FORMULARIOS_CON_BORRADOR).forEach(function (clave) {
+    var f = state[clave];
+    if (f && FORMULARIOS_CON_BORRADOR[clave](f)) {
+      marcarBorrador(clave, function () { return JSON.stringify(state[clave]); });
+    } else {
+      olvidarBorrador(clave);
+    }
+  });
 }
 
 // La escritura de verdad de UNA clave. Se pasa a core/guardado.js, que se

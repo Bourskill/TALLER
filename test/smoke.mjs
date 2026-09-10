@@ -2698,6 +2698,58 @@ assert(state.formPedido.cliente === "Cliente desde otro navegador" && state.form
 assert(state.recuperacion === null, "y cierra el aviso");
 
 // ---------------------------------------------------------------------------
+// El mismo mecanismo de arriba (marcar borrador + espejo local + ofrecer
+// recuperar), generalizado al RESTO de los formularios de "+ Nuevo" — antes
+// SOLO cotizaciones/formPedido lo tenían. El usuario reportó perder trabajo
+// real haciendo "cotizaciones, insumos, moviendo plata" justo al tener que
+// recargar la página: un movimiento de Finanzas a medio llenar (formTx)
+// vivía SOLO en memoria hasta pulsar "Registrar" — el mismo hueco que ya se
+// había cerrado para formPedido, pero seguía abierto ahí (y en formCliente/
+// formEmp/formGastoFijo/formDeuda/formCotizacion/formProducto/
+// formNominaPago/formReembolso/formAbono/formPend). Se prueba con formTx
+// ("moviendo plata") y formCliente (un formulario cualquiera) — el resto
+// comparte la misma función genérica (FORMULARIOS_CON_BORRADOR en
+// core/store.js), probar dos alcanza para confiar en el mecanismo
+// compartido sin repetir la misma prueba once veces.
+// ---------------------------------------------------------------------------
+const formTxVacio = { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: hoyStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] };
+state.formTx = Object.assign({}, formTxVacio, { concepto: "Compra de tela urgente", monto: "150000" });
+render(); // dispara revisarBorradoresSinGuardar()
+assert(guardadoMod.borradoresDeSesionAnterior().indexOf("formTx") !== -1, "escribir en 'Nuevo movimiento' de Finanzas marca de inmediato que hay un borrador sin guardar (antes NUNCA pasaba para este formulario)");
+await new Promise(r => setTimeout(r, 2000)); // pasa el tiempo de espera del espejo de borradores (1500ms) con margen
+const espejoFormTx = guardadoMod.leerEspejo("formTx");
+assert(!!espejoFormTx && espejoFormTx.indexOf("Compra de tela urgente") !== -1, "y unos segundos después esa edición ya quedó en el espejo local, sin que nadie pulse 'Registrar'");
+
+// Un formulario vacío (solo con sus valores por defecto — tipo:"ingreso", la
+// fecha de hoy) NO cuenta como borrador: abrir el formulario y no escribir
+// nada no debe quedar marcado como "algo que recuperar".
+state.formTx = formTxVacio;
+render();
+assert(guardadoMod.borradoresDeSesionAnterior().indexOf("formTx") === -1, "un formulario vacío (solo con sus valores por defecto) no cuenta como borrador");
+
+// Recuperación: mismo camino que ya se probó arriba para formPedido — nunca
+// intenta escribir a la Sheet una clave que no tiene fila propia ahí.
+guardadoMod.espejar("formTx", JSON.stringify(Object.assign({}, formTxVacio, { tipo: "gasto", concepto: "Recuperado de un cierre accidental", monto: "80000" })));
+state.recuperacion = { claves: ["formTx"], etiquetas: [storeMod2.ETIQUETA_CLAVE.formTx] };
+const setCallsFormTx = [];
+const originalSetFormTx = window.storage.set;
+window.storage.set = async function (key, value, arg2) { setCallsFormTx.push(key); return originalSetFormTx(key, value, arg2); };
+await storeMod2.recuperarDelEspejo();
+window.storage.set = originalSetFormTx;
+assert(state.formTx.concepto === "Recuperado de un cierre accidental" && state.formTx.monto === "80000", "recuperarDelEspejo también restaura un movimiento de Finanzas a medio llenar EN PANTALLA...");
+assert(setCallsFormTx.length === 0, "...sin escribir nada a la Sheet (formTx tampoco tiene fila propia ahí)");
+state.formTx = formTxVacio;
+render();
+
+// Un segundo formulario cualquiera (Contactos → nuevo cliente), para
+// confirmar que esto no fue una casualidad de formTx en particular.
+state.formCliente = Object.assign({}, state.formCliente, { nombre: "Cliente a medio registrar" });
+render();
+assert(guardadoMod.borradoresDeSesionAnterior().indexOf("formCliente") !== -1, "lo mismo aplica a 'Nuevo contacto' (formCliente) — y al resto de la lista en FORMULARIOS_CON_BORRADOR, core/store.js");
+state.formCliente = Object.assign({}, state.formCliente, { nombre: "" });
+render();
+
+// ---------------------------------------------------------------------------
 // "Rendimiento de planta" no reflejaba nada: el usuario reportó "ya despaché
 // algo y no refleja nada". Causa: solo contaba salidas de stock de Catálogo
 // (movimientosStock), que solo existen para pedidos con un producto de
