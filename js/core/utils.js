@@ -140,8 +140,9 @@ export function exigirCampos(pares) {
 
 // Parser de CSV simple (soporta separador coma o punto y coma, y comillas para
 // valores con separadores dentro). Pensado para archivos exportados desde
-// Excel/Sheets con columnas: nombre, talla, numero, tipo, observaciones —
-// usado para importar tallas/observaciones por referencia en cotizaciones.
+// Excel/Sheets con columnas: nombre, talla, numero, tipo, prendas,
+// observaciones — usado para importar tallas/observaciones por referencia en
+// cotizaciones.
 export function parseDetalleCSV(text) {
   var lines = text.replace(/^\uFEFF/, "").split(/\r\n|\n|\r/).filter(function (l) { return l.trim().length; });
   if (lines.length < 2) return [];
@@ -175,11 +176,11 @@ export function parseDetalleFilas(matriz) {
   function normHead(h) {
     return String(h == null ? "" : h).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   }
-  var mapaCampos = { nombre: "nombre", talla: "talla", numero: "numero", num: "numero", tipo: "tipo", observaciones: "observaciones", obs: "observaciones", nota: "observaciones", notas: "observaciones" };
+  var mapaCampos = { nombre: "nombre", talla: "talla", numero: "numero", num: "numero", tipo: "tipo", prendas: "prendas", prenda: "prendas", observaciones: "observaciones", obs: "observaciones", nota: "observaciones", notas: "observaciones" };
   var header = matriz[0].map(normHead);
 
   return matriz.slice(1).map(function (cols) {
-    var fila = { id: uid(), nombre: "", talla: "", numero: "", tipo: "", observaciones: "" };
+    var fila = { id: uid(), nombre: "", talla: "", numero: "", tipo: "", prendas: "", observaciones: "" };
     header.forEach(function (h, i) {
       var campo = mapaCampos[h];
       if (campo) fila[campo] = String(cols[i] == null ? "" : cols[i]).trim();

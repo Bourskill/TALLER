@@ -1129,12 +1129,12 @@ export async function generarPDFPedido(p) {
     doc.autoTable({
       startY: y,
       head: multiplesRefs
-        ? [["#", "Referencia", "Nombre", "Talla", "Número", "Tipo", "Observaciones"]]
-        : [["#", "Nombre", "Talla", "Número", "Tipo", "Observaciones"]],
+        ? [["#", "Referencia", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]]
+        : [["#", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]],
       body: detalle.map(function (d, i) {
         return multiplesRefs
-          ? [i + 1, d._ref || "—", d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.observaciones || "—"]
-          : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.observaciones || "—"];
+          ? [i + 1, d._ref || "—", d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"]
+          : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"];
       }),
       styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
       headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },

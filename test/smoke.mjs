@@ -783,6 +783,27 @@ click('[data-action="toggle-pedido-panel"][data-id="' + pedidoUnico.id + '"]');
 click('[data-action="remove-pedido"][data-id="' + pedidoUnico.id + '"]');
 assert(state.productos.find(p => p.id === prodUnicoId).variantesTalla[0].stock === 1, "al cancelar el pedido, el stock vuelve EXACTO a 1 (no 2, no 3)");
 
+// --- "Tallas y observaciones": columna "Prendas" (2026-09, se agregó para
+// poder importar listados de equipos que traen, además de nombre/talla/
+// número/tipo, qué prendas le corresponden a cada integrante — ej. un
+// arquero que solo lleva "Camiseta" mientras el resto lleva "Conjunto").
+// parseDetalleFilas es la ÚNICA puerta de entrada tanto para el CSV como
+// para el Excel (ver utils.js) — probarla directo alcanza para cubrir ambos
+// caminos de importación sin necesitar un stub de SheetJS. ---
+{
+  const { parseDetalleFilas } = await import("../js/core/utils.js");
+  const filas = parseDetalleFilas([
+    ["#", "Nombre", "Talla", "Numero", "Tipo", "Prendas", "Observaciones"],
+    [1, "Reinaldo.G", "M", 11, "jugador", "Conjunto", ""],
+    [2, "G.Arias", "L", 8, "jugador", "Camiseta", "Solo camiseta"]
+  ]);
+  assert(filas.length === 2, "parseDetalleFilas reconoce las dos filas con datos");
+  assert(filas[0].prendas === "Conjunto" && filas[1].prendas === "Camiseta", "la columna 'Prendas' (con mayúscula, como la exportan las plantillas de equipos) se mapea al campo prendas de cada fila");
+  assert(filas[0].nombre === "Reinaldo.G" && filas[0].talla === "M" && filas[0].numero === "11", "el resto de columnas sigue mapeando igual que antes de agregar 'Prendas'");
+  const filaSingular = parseDetalleFilas([["nombre", "prenda"], ["Ana", "Pantaloneta"]]);
+  assert(filaSingular[0].prendas === "Pantaloneta", "también acepta el encabezado en singular 'prenda'");
+}
+
 // --- cotizaciones: aplicar un producto del catálogo a una referencia también
 // descuenta stock — pero solo al convertir en pedido, agrupando las filas de
 // "Tallas y observaciones" por talla ---
@@ -808,10 +829,17 @@ assert(state.cotizaciones[0].referencias[0].seccionOpcionalesAbierta === true, "
 assert(state.cotSucia === "", "pero abrirla NO marca la cotización como 'cambios sin guardar' — antes sí, y aparecía el botón de Guardar solo con mirar");
 document.querySelector('[data-role="det-nombre-' + refProdId + '"]').value = "Talla M unidad 1";
 document.querySelector('[data-role="det-talla-' + refProdId + '"]').value = "M";
+document.querySelector('[data-role="det-prendas-' + refProdId + '"]').value = "Conjunto";
 click('[data-action="add-ref-detalle"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
 document.querySelector('[data-role="det-nombre-' + refProdId + '"]').value = "Talla M unidad 2";
 document.querySelector('[data-role="det-talla-' + refProdId + '"]').value = "M";
+document.querySelector('[data-role="det-prendas-' + refProdId + '"]').value = "Camiseta";
 click('[data-action="add-ref-detalle"][data-cot="' + cotProdId + '"][data-ref="' + refProdId + '"]');
+var detalleProdTrasAgregar = state.cotizaciones[0].referencias[0].detalle;
+assert(detalleProdTrasAgregar[0].prendas === "Conjunto" && detalleProdTrasAgregar[1].prendas === "Camiseta", "el formulario manual de 'Agregar fila' guarda la columna Prendas por fila");
+assert(document.querySelector('input[data-campo="prendas"][data-item="' + detalleProdTrasAgregar[0].id + '"]').value === "Conjunto", "la tabla de Tallas y observaciones muestra la columna Prendas ya guardada, no solo en el state");
+setChange('input[data-campo="prendas"][data-item="' + detalleProdTrasAgregar[0].id + '"]', "Conjunto + medias");
+assert(state.cotizaciones[0].referencias[0].detalle[0].prendas === "Conjunto + medias", "editar la celda 'Prendas' en el sitio actualiza esa fila, igual que ya podía hacerse con tipo/observaciones");
 click('[data-action="convertir-cotizacion"][data-id="' + cotProdId + '"]');
 producto = state.productos.find(p => p.id === productoId);
 assert(producto.variantesTalla[0].stock === 18, "convertir la cotización descuenta 2 unidades de stock (20 - 2 = 18) según las filas de talla M");

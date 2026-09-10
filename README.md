@@ -222,6 +222,43 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (vigesimonovena ronda: columna "Prendas" en el listado de tallas/observaciones)
+
+Pedido del usuario: "acabo de añadir una columna más [a la plantilla de
+Excel], para las cotizaciones y los demás pasos" — el archivo que subió
+(`listado_jugadores.xlsx`) traía, además de `nombre/talla/numero/tipo/
+observaciones`, una columna nueva `Prendas` (qué le corresponde a cada
+integrante: "Conjunto", solo "Camiseta", etc.).
+
+**Dónde vive el dato:** cada referencia de una cotización tiene
+`detalle: [{nombre, talla, numero, tipo, observaciones}]` — "Tallas y
+observaciones" en pantalla, importable por CSV o Excel (SheetJS) y editable
+fila por fila. Ese mismo arreglo alimenta la tabla de la orden de producción
+en el PDF de un pedido (`generarPDFPedido`, `core/pdf.js`).
+
+**Fix — un solo campo `prendas` agregado en TODOS los puntos de entrada y
+salida de ese dato**, sin tocar el esquema de Sheets (las cotizaciones se
+guardan como JSON completo, así que un campo nuevo viaja solo, sin migración):
+- `parseDetalleFilas` (`core/utils.js`, la única puerta de entrada tanto para
+  CSV como para Excel — mapea el encabezado `prendas`/`prenda`, sin importar
+  mayúsculas ni tildes).
+- La tabla "Tallas y observaciones" y su formulario de "Agregar fila"
+  (`modules/cotizaciones.js`): columna nueva, editable in-place igual que
+  tipo/observaciones.
+- La plantilla descargable (`descargar-plantilla-csv`, vía ExcelJS) y el
+  mensaje de ayuda/error del importador.
+- La tabla de tallas de la orden de producción en el PDF del pedido
+  (`core/pdf.js`) — es el paso final que de verdad se lee en el taller.
+
+Se dejó FUERA a propósito: el modo "Repartir entre referencias" (ya omitía
+`tipo`/`observaciones` por espacio, mismo criterio) y el roster guardado por
+cliente (`modules/clientes.js`, es genérico entre pedidos — no tiene sentido
+fijarle una prenda de una vez).
+
+Verificado con `test/smoke.mjs` (642 aserciones en total: +7 de esta ronda —
+`parseDetalleFilas` con encabezado en mayúscula/singular, el formulario
+manual guardándolo, la tabla mostrándolo ya guardado, y la edición in-place).
+
 ## Registro de cambios — septiembre 2026 (vigesimoctava ronda: duplicar un pedido podía pisar el movimiento de Finanzas del ORIGINAL)
 
 Bug real, con riesgo de plata: "cuando duplico un pedido y quiero registrar

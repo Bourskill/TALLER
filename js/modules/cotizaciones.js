@@ -1117,7 +1117,7 @@ function renderDetalleReferencia(cotId, ref) {
   if (repartiendo) return html + renderRepartoReferencias(cotId);
   if (detalle.length > 0) {
     html += '<div class="detalle-table">' +
-      '<div class="det-row head"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Tipo</span><span>Observaciones</span><span></span></div>';
+      '<div class="det-row head"><span>#</span><span>Nombre</span><span>Talla</span><span>Número</span><span>Tipo</span><span>Prendas</span><span>Observaciones</span><span></span></div>';
     detalle.forEach(function (d, i) {
       html += '<div class="det-row">' +
         '<span class="mobile-th">#</span><span>' + (i + 1) + "</span>" +
@@ -1125,6 +1125,7 @@ function renderDetalleReferencia(cotId, ref) {
         '<span class="mobile-th">Talla</span><input class="mini-input" value="' + esc(d.talla || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="talla" />' +
         '<span class="mobile-th">Número</span><input class="mini-input" value="' + esc(d.numero || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="numero" />' +
         '<span class="mobile-th">Tipo</span><input class="mini-input" value="' + esc(d.tipo || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="tipo" />' +
+        '<span class="mobile-th">Prendas</span><input class="mini-input" value="' + esc(d.prendas || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="prendas" />' +
         '<span class="mobile-th">Observaciones</span><input class="mini-input" value="' + esc(d.observaciones || "") + '" data-action-change="set-ref-detalle-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '" data-campo="observaciones" />' +
         '<button class="btn danger small" data-action="remove-ref-detalle" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-item="' + d.id + '">✕</button>' +
         "</div>";
@@ -1138,13 +1139,14 @@ function renderDetalleReferencia(cotId, ref) {
     '<input class="mini-input" data-role="det-talla-' + ref.id + '" placeholder="Talla" style="width:60px" />' +
     '<input class="mini-input" data-role="det-numero-' + ref.id + '" placeholder="Número" style="width:60px" />' +
     '<input class="mini-input" data-role="det-tipo-' + ref.id + '" placeholder="Tipo (jugador, arquero...)" style="width:150px" />' +
+    '<input class="mini-input" data-role="det-prendas-' + ref.id + '" placeholder="Prendas (Conjunto, Camiseta...)" style="width:170px" />' +
     '<input class="mini-input" data-role="det-obs-' + ref.id + '" placeholder="Observaciones" style="width:160px" />' +
     '<button class="btn ghost small" data-action="add-ref-detalle" data-cot="' + cotId + '" data-ref="' + ref.id + '">Agregar fila</button>' +
     "</div>";
   html += '<div class="inline-form" style="margin-top:6px;">' +
     '<label class="btn ghost small" style="cursor:pointer;">📥 Importar Excel<input type="file" accept=".xlsx,.xls,.csv" data-action-change="import-ref-detalle-csv" data-cot="' + cotId + '" data-ref="' + ref.id + '" style="display:none" /></label>' +
     '<button class="btn ghost small" data-action="descargar-plantilla-csv">Descargar plantilla Excel</button>' +
-    renderHelp("El archivo debe tener columnas: nombre, talla, numero, tipo, observaciones (en cualquier orden). Descarga la plantilla para verlo con un ejemplo — es un .xlsx normal, se abre bien tanto en Excel como en Sheets. También aceptamos CSV si lo prefieres.") +
+    renderHelp("El archivo debe tener columnas: nombre, talla, numero, tipo, prendas, observaciones (en cualquier orden, y las últimas tres son opcionales). Descarga la plantilla para verlo con un ejemplo — es un .xlsx normal, se abre bien tanto en Excel como en Sheets. También aceptamos CSV si lo prefieres.") +
     "</div>";
   return html;
 }
@@ -2155,7 +2157,7 @@ export var actions = {
     var card = el.closest(".cot-card");
     var nombreD = val(card, "det-nombre-" + refId);
     if (!nombreD) return;
-    var fila = { id: uid(), nombre: nombreD, talla: val(card, "det-talla-" + refId), numero: val(card, "det-numero-" + refId), tipo: val(card, "det-tipo-" + refId), observaciones: val(card, "det-obs-" + refId) };
+    var fila = { id: uid(), nombre: nombreD, talla: val(card, "det-talla-" + refId), numero: val(card, "det-numero-" + refId), tipo: val(card, "det-tipo-" + refId), prendas: val(card, "det-prendas-" + refId), observaciones: val(card, "det-obs-" + refId) };
     mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, [fila]); });
   },
   // Trae de una vez el roster guardado en el cliente (nombre+número+talla,
@@ -2198,7 +2200,7 @@ export var actions = {
     var esCsv = /\.csv$/i.test(file.name);
     function aplicar(filas) {
       if (!filas.length) {
-        window.alert("No se encontraron filas válidas en el archivo. Revisa que tenga columnas: nombre, talla, numero, tipo, observaciones (y que 'nombre' no esté vacío).");
+        window.alert("No se encontraron filas válidas en el archivo. Revisa que tenga columnas: nombre, talla, numero, tipo, prendas, observaciones (y que 'nombre' no esté vacío).");
         return;
       }
       mapRef(cotId, refId, function (r) { return conDetalleAgregado(r, filas); });
@@ -2230,14 +2232,15 @@ export var actions = {
       { header: "talla", key: "talla", width: 10 },
       { header: "numero", key: "numero", width: 10 },
       { header: "tipo", key: "tipo", width: 16 },
+      { header: "prendas", key: "prendas", width: 18 },
       { header: "observaciones", key: "observaciones", width: 26 }
     ];
     hoja.getRow(1).eachCell(function (cell) {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E1E1E" } };
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
     });
-    hoja.addRow({ nombre: "Juan Pérez", talla: "M", numero: "10", tipo: "Jugador", observaciones: "" });
-    hoja.addRow({ nombre: "María López", talla: "S", numero: "7", tipo: "Arquero", observaciones: "Pedido especial" });
+    hoja.addRow({ nombre: "Juan Pérez", talla: "M", numero: "10", tipo: "Jugador", prendas: "Conjunto", observaciones: "" });
+    hoja.addRow({ nombre: "María López", talla: "S", numero: "7", tipo: "Arquero", prendas: "Conjunto", observaciones: "Pedido especial" });
     var buffer = await libro.xlsx.writeBuffer();
     var blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     var url = URL.createObjectURL(blob);
