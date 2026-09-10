@@ -503,7 +503,7 @@ export function calcIvaPedido(p) {
   if (!iva || !iva.activo) return 0;
   return num(p.total) * (num(iva.porcentaje) / 100);
 }
-// Lo que dice la factura: es el número contra el que se cobra.
+// Lo que dice la cuenta de cobro: es el número contra el que se cobra.
 export function calcTotalConIvaPedido(p) {
   return num(p && p.total) + calcIvaPedido(p);
 }

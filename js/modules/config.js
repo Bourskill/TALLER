@@ -30,7 +30,7 @@ export function render() {
     '<div class="pedido-actions"><button class="btn small" data-action="save-marca">Guardar nombre y emoji</button></div></div>';
 
   html += '<div class="card"><div class="section-title small">Datos del negocio para el PDF' +
-    renderHelp("Aparecen como remitente (\"DE\") en las cotizaciones, recibos y facturas que generas en PDF para tus clientes. No aparecen en la orden de producción.") +
+    renderHelp("Aparecen como remitente (\"DE\") en las cotizaciones, recibos y cuentas de cobro que generas en PDF para tus clientes. No aparecen en la orden de producción.") +
     '</div><div class="form-grid">' +
     '<div class="field"><label>NIT o cédula</label><input value="' + esc(cfg.nit) + '" data-action-change="set-config-campo" data-campo="nit" /></div>' +
     '<div class="field"><label>Dirección</label><input value="' + esc(cfg.direccion) + '" data-action-change="set-config-campo" data-campo="direccion" /></div>' +
@@ -39,11 +39,11 @@ export function render() {
     "</div></div>";
 
   html += '<div class="card"><div class="section-title small">Personalización de PDF y correos' +
-    renderHelp("La imagen (logo, sello, firma) y el texto del pie de página se imprimen al final de cotizaciones, facturas, recibos y la orden de producción. El color de acento se usa en el encabezado de los correos HTML que le llegan al cliente cuando envías un PDF por correo.") +
+    renderHelp("La imagen (logo, sello, firma) y el texto del pie de página se imprimen al final de cotizaciones, cuentas de cobro, recibos y la orden de producción. El color de acento se usa en el encabezado de los correos HTML que le llegan al cliente cuando envías un PDF por correo.") +
     '</div><div class="form-grid">' +
     '<div class="field"><label>Imagen del pie de página (PDF)</label>' + renderPiePaginaImg(cfg) + "</div>" +
     '<div class="field wide"><label>Texto del pie de página (PDF)</label><input value="' + esc(cfg.pdfPiePagina) + '" data-action-change="set-config-campo" data-campo="pdfPiePagina" placeholder="Ej. Garantía de 30 días · Síguenos @criyeak" /></div>' +
-    '<div class="field"><label>Color del taller' + renderHelp("El color de tu marca: se usa en el encabezado de los correos que le llegan al cliente y también en los títulos y encabezados de tabla de todos los PDF (cotización, factura, recibo, remisión, reportes). Si eliges un color muy claro, el texto encima se pone oscuro solo para que siga leyéndose.") + '</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
+    '<div class="field"><label>Color del taller' + renderHelp("El color de tu marca: se usa en el encabezado de los correos que le llegan al cliente y también en los títulos y encabezados de tabla de todos los PDF (cotización, cuenta de cobro, recibo, remisión, reportes). Si eliges un color muy claro, el texto encima se pone oscuro solo para que siga leyéndose.") + '</label><input type="color" value="' + esc(cfg.colorAcento || "#6a59f0") + '" data-action-change="set-config-campo" data-campo="colorAcento" /></div>' +
     "</div></div>";
 
   html += '<div class="card"><div class="section-title small">Equipo' +

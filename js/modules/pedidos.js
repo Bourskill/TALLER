@@ -4,7 +4,7 @@ import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
-import { generarPDFPedido, generarPDFRecibo, generarPDFFactura, generarPDFRemision } from "../core/pdf.js";
+import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
 import { getSession } from "../core/auth.js";
@@ -1054,8 +1054,8 @@ function renderPanelPedido(p, saldo) {
 
   html += '<div class="pedido-panel-col"><div class="cot-col-title">📄 PDF y documentos</div>' +
     '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-pedido" data-id="' + p.id + '">📋 Orden de producción</button>' +
-    '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-factura" data-id="' + p.id + '">🧾 Factura</button>' +
-    '<button class="btn ghost cot-doc-btn" data-action="enviar-factura-correo" data-id="' + p.id + '" title="Envía la factura al correo del cliente (debe estar registrado en Contactos)">✉ Enviar factura</button>';
+    '<button class="btn ghost cot-doc-btn" data-action="generar-pdf-cuenta-cobro" data-id="' + p.id + '">🧾 Cuenta de cobro</button>' +
+    '<button class="btn ghost cot-doc-btn" data-action="enviar-cuenta-cobro-correo" data-id="' + p.id + '" title="Envía la cuenta de cobro al correo del cliente (debe estar registrado en Contactos)">✉ Enviar cuenta de cobro</button>';
   // Un pedido convertido desde una cotización nace SIN fecha de entrega (la
   // cotización no la captura) y, hasta ahora, no había forma de agregarla
   // después de creado — quedaba fuera de "Próximas entregas" para siempre.
@@ -2466,10 +2466,10 @@ export var actions = {
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (ped) generarPDFPedido(ped);
   },
-  "generar-pdf-factura": function (el) {
+  "generar-pdf-cuenta-cobro": function (el) {
     var id = el.getAttribute("data-id");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
-    if (ped) generarPDFFactura(ped);
+    if (ped) generarPDFCuentaCobro(ped);
   },
   "generar-pdf-recibo": function (el) {
     var id = el.getAttribute("data-id"), abonoId = el.getAttribute("data-abono");
@@ -2478,7 +2478,7 @@ export var actions = {
     var abono = (ped.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
     if (abono) generarPDFRecibo(ped, abono);
   },
-  "enviar-factura-correo": async function (el) {
+  "enviar-cuenta-cobro-correo": async function (el) {
     var id = el.getAttribute("data-id");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!ped) return;
@@ -2486,14 +2486,14 @@ export var actions = {
     var correo = cliente && cliente.correo;
     if (!correo) { window.alert('Este cliente no tiene correo registrado. Agrégaselo en la pestaña Contactos para poder enviarle el PDF.'); return; }
     try {
-      var pdf = await generarPDFFactura(ped, { enviarPorCorreo: true });
+      var pdf = await generarPDFCuentaCobro(ped, { enviarPorCorreo: true });
       await enviarCorreoConAdjunto({
         to: correo,
-        subject: "Factura — " + (ped.descripcion || state.config.nombre),
+        subject: "Cuenta de cobro — " + (ped.descripcion || state.config.nombre),
         bodyHtml: plantillaCorreoHtml({
           cfg: state.config,
           saludo: "Hola " + (ped.cliente || "") + ",",
-          mensaje: "Adjuntamos la factura de \"" + (ped.descripcion || "tu pedido") + "\". Gracias por tu confianza."
+          mensaje: "Adjuntamos la cuenta de cobro de \"" + (ped.descripcion || "tu pedido") + "\". Gracias por tu confianza."
         }),
         filename: pdf.nombreArchivo,
         bytes: pdf.bytes

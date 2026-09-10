@@ -204,7 +204,7 @@ function mostrarPdfEnApp(doc, nombreArchivo) {
   notify();
 }
 
-// Los PDF que le van al cliente (cotización, factura, recibo — no los
+// Los PDF que le van al cliente (cotización, cuenta de cobro, recibo — no los
 // internos ni los reportes) terminan acá: por defecto se muestran en el
 // visor de la app, pero con opts.enviarPorCorreo devuelven los bytes en vez
 // de eso, para adjuntarlos a un correo (ver "Enviar por correo" en
@@ -217,7 +217,7 @@ function finalizarPDF(doc, nombreArchivo, opts) {
   return null;
 }
 
-// Los documentos que le llegan al cliente (cotización, factura, recibo) NO
+// Los documentos que le llegan al cliente (cotización, cuenta de cobro, recibo) NO
 // muestran el N.º de PDF secuencial ni el N.º de OP interno — en su lugar
 // usan un código corto no secuencial (ver utils.js: codigoPublico()) para
 // que nadie pueda deducir cuántos documentos se han generado. Se genera UNA
@@ -410,7 +410,7 @@ export async function generarPDFCotizacion(cot, opts) {
   return finalizarPDF(doc, codigo.replace("#", "") + "-" + nombreSeguro + ".pdf", opts);
 }
 
-// ---------- helpers compartidos por los demás PDFs (pedido, recibo, factura, interno) ----------
+// ---------- helpers compartidos por los demás PDFs (pedido, recibo, cuenta de cobro, interno) ----------
 
 // DE/PARA: dos columnas dentro de un panel gris clarito (antes flotaban
 // directo sobre la hoja en blanco) — el mismo truco de agrupar visualmente
@@ -442,8 +442,8 @@ function negocioLinesFrom(cfg) {
   var nombreConIcono = (logo && !logoEsImagen ? logo + " " : "") + cfg.nombre;
   return [nombreConIcono, cfg.nit && ("NIT/CC " + cfg.nit), cfg.direccion, cfg.ciudad, cfg.telefono].filter(Boolean);
 }
-// Antes solo la cotización llevaba el logo en el encabezado — factura, recibo
-// y remisión (igual de documentos "de cara al cliente") se quedaban sin él.
+// Antes solo la cotización llevaba el logo en el encabezado — cuenta de
+// cobro, recibo y remisión (igual de documentos "de cara al cliente") se quedaban sin él.
 // Este helper es lo que ahora comparten los cuatro (ver drawHeaderBasic).
 function cargarLogoDataUrl(cfg) {
   var logo = (cfg.logoUrl || "").trim();
@@ -1258,16 +1258,22 @@ export async function generarPDFRecibo(p, abono, opts) {
   return finalizarPDF(doc, codigo.replace("#", "") + "-recibo-" + nombreSeguro + ".pdf", opts);
 }
 
-// PDF de FACTURA: documento final, con desglose (si viene de una cotización
-// usa sus referencias como líneas), IVA si aplica, y saldo pendiente/pagado.
-export async function generarPDFFactura(p, opts) {
+// PDF de CUENTA DE COBRO: documento final, con desglose (si viene de una
+// cotización usa sus referencias como líneas), IVA si aplica, y saldo
+// pendiente/pagado. Se llama "cuenta de cobro", no "factura": una factura
+// de venta es un documento con peso fiscal en Colombia (numeración
+// autorizada por la DIAN, CUFE si es electrónica) — este PDF no pasa por
+// nada de eso, así que llamarlo "factura" sería un nombre que promete algo
+// que no cumple. "Cuenta de cobro" es el término que sí usan los negocios
+// que piden el pago sin facturar electrónicamente.
+export async function generarPDFCuentaCobro(p, opts) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
   var doc = new jsPDF({ unit: "pt", format: "letter" });
   var codigo = await asegurarCodigoPublico(p, "pedidos");
   var cfg = state.config;
   var logoDataUrl = await cargarLogoDataUrl(cfg);
-  var head = drawHeaderBasic(doc, "FACTURA", codigo, logoDataUrl);
+  var head = drawHeaderBasic(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
   var pageW = head.pageW, marginX = head.marginX, y = head.y;
   var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
   var clienteLines = [p.cliente, clienteInfo && clienteInfo.cedula && ("NIT/CC " + clienteInfo.cedula), clienteInfo && clienteInfo.direccion, clienteInfo && clienteInfo.ciudad].filter(Boolean);
@@ -1282,7 +1288,7 @@ export async function generarPDFFactura(p, opts) {
       return [numFmt(ref.cantidadPedida), ref.nombre || "Referencia", money(c.precioUnit), money(c.precioTotal)];
     });
   } else if ((p.lineas || []).length) {
-    // Venta directa: cada línea del pedido es una línea de la factura, con su
+    // Venta directa: cada línea del pedido es una línea de la cuenta de cobro, con su
     // precio propio. Antes se imprimía UNA sola fila con toda la descripción
     // amontonada y un "valor unitario" que era el total dividido entre las
     // unidades — un promedio que no le habían cobrado a nadie, y que en un
@@ -1295,7 +1301,7 @@ export async function generarPDFFactura(p, opts) {
     filas = [[String(p.cantidad || 1), p.descripcion || "Pedido", money(num(p.total) / (num(p.cantidad) || 1)), money(p.total)]];
   }
 
-  var pagFact = opcionesPaginacion(doc, "FACTURA", codigo, logoDataUrl);
+  var pagFact = opcionesPaginacion(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
   doc.autoTable({
     startY: y,
     head: [["CANTIDAD", "DESCRIPCIÓN", "VALOR UNITARIO", "TOTAL"]],
@@ -1318,7 +1324,7 @@ export async function generarPDFFactura(p, opts) {
   var totalConIva = subtotal + ivaMonto;
   // El saldo sale de calcSaldoPedido, que YA cobra con IVA (ver la sección
   // "IVA" de core/calc.js). Antes ese cálculo era total - abono SIN IVA
-  // mientras el TOTAL impreso arriba sí lo llevaba, así que la factura se
+  // mientras el TOTAL impreso arriba sí lo llevaba, así que la cuenta de cobro se
   // contradecía a sí misma delante del cliente: "TOTAL $1.190.000 / Abonado $0
   // / SALDO PENDIENTE $1.000.000". Ahora el documento y la pantalla dicen
   // exactamente el mismo número.
@@ -1352,14 +1358,14 @@ export async function generarPDFFactura(p, opts) {
   await drawPiePagina(doc, finalY, marginX, pageW);
   pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su confianza");
 
-  var nombreSeguro = slugify(p.cliente || "factura");
-  return finalizarPDF(doc, codigo.replace("#", "") + "-factura-" + nombreSeguro + ".pdf", opts);
+  var nombreSeguro = slugify(p.cliente || "cuenta-de-cobro");
+  return finalizarPDF(doc, codigo.replace("#", "") + "-cuenta-cobro-" + nombreSeguro + ".pdf", opts);
 }
 
 // PDF de REMISIÓN: sustento de qué se entregó/recibió en UNA entrega puntual
 // de consignación (un pedido puede acumular varias remisiones en el tiempo —
 // cada reposición de stock al punto genera la suya, ver modules/pedidos.js
-// "Agregar remisión"). No es una factura: los valores son de referencia para
+// "Agregar remisión"). No es una cuenta de cobro: los valores son de referencia para
 // dejar constancia de lo entregado — el cobro real nace cuando el punto
 // reporte ventas. Termina con dos líneas en blanco para firma, como soporte
 // físico de que el punto recibió conforme.
@@ -1405,7 +1411,7 @@ export async function generarPDFRemision(p, remision, opts) {
   finalY = drawTotalBox(doc, marginX, finalY, pageW - marginX * 2, "VALOR DE REFERENCIA TOTAL", money(totalRef));
   finalY += 14;
   doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(140, 140, 140);
-  var nota = doc.splitTextToSize("Documento de entrega en consignación — no es una factura. El cobro nace solo cuando el punto reporte ventas reales.", pageW - marginX * 2);
+  var nota = doc.splitTextToSize("Documento de entrega en consignación — no es una cuenta de cobro. El cobro nace solo cuando el punto reporte ventas reales.", pageW - marginX * 2);
   nota.forEach(function (l) { finalY += 12; doc.text(l, marginX, finalY); });
 
   finalY += 46;

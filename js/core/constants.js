@@ -113,7 +113,7 @@ export const DEFAULT_CONFIG = {
   // abre la app).
   ultimoBackupISO: "",
   // Texto libre que se imprime al final de los PDF que le llegan al cliente
-  // o a producción (cotización, factura, recibo, orden de producción).
+  // o a producción (cotización, cuenta de cobro, recibo, orden de producción).
   pdfPiePagina: "",
   // Imagen/vector (logo, sello, firma...) que se imprime centrada al final
   // de esos mismos PDF, arriba del texto del pie de página si también hay

@@ -222,6 +222,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo cuarta ronda: "Factura" pasa a llamarse "Cuenta de cobro")
+
+El usuario preguntó: "¿qué otro término uso en vez de 'factura' ya que
+realmente no es una factura porque no está conectada a la DIAN?" — correcto:
+en Colombia "factura" (de venta o electrónica) es un documento con peso
+fiscal (numeración autorizada por la DIAN, CUFE si es electrónica); este PDF
+no pasa por nada de eso, así que llamarlo así prometía un cumplimiento que
+no tiene. Se renombró a **"Cuenta de cobro"** — el término real que usan los
+negocios que piden el pago sin facturar electrónicamente.
+
+Cambiado en todo lo que lo nombraba como documento (no en el vocabulario
+genérico de "facturar"/"lo facturado" que sigue significando lo mismo en
+español): `generarPDFFactura` → `generarPDFCuentaCobro` (`core/pdf.js`,
+título impreso en el PDF incluido), el botón y su acción en Pedidos
+(`generar-pdf-factura` → `generar-pdf-cuenta-cobro`, "🧾 Factura" → "🧾
+Cuenta de cobro"), "Enviar factura" → "Enviar cuenta de cobro" (botón,
+acción, asunto y cuerpo del correo), y el nombre del archivo descargado
+(`...-factura-....pdf` → `...-cuenta-cobro-....pdf`). Las menciones a
+"factura" en el Registro de cambios de rondas ANTERIORES a esta se dejaron
+tal cual — documentan cómo se llamaba el documento en su momento, no cómo
+se llama ahora.
+
+Verificado con `test/smoke.mjs` (678 aserciones en total: +5 de esta ronda).
+
 ## Registro de cambios — septiembre 2026 (trigésimo tercera ronda: arrastrar insumos en Plantillas + subcategorías de insumos)
 
 Dos pedidos del usuario en un mismo mensaje:

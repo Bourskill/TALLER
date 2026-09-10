@@ -220,6 +220,17 @@ const pedidoId = state.pedidos[0].id;
 click('[data-action="advance"][data-id="' + pedidoId + '"]');
 assert(state.pedidos[0].estado === "cortado", "avanza estado del pedido");
 
+// "Factura" se renombró a "Cuenta de cobro": no es una factura de verdad
+// (no pasa por la DIAN, sin CUFE ni resolución de numeración) — el usuario
+// lo señaló y pidió el cambio de nombre para no prometer algo que el
+// documento no cumple.
+click('[data-action="toggle-pedido-panel"][data-id="' + pedidoId + '"]');
+assert(!!document.querySelector('[data-action="generar-pdf-cuenta-cobro"][data-id="' + pedidoId + '"]'), "el botón ahora dice/hace 'Cuenta de cobro', no 'Factura'");
+assert(!document.querySelector('[data-action="generar-pdf-factura"]'), "la acción vieja 'generar-pdf-factura' ya no existe en ningún lado");
+assert(!document.querySelector('[data-action="enviar-factura-correo"]'), "...ni 'enviar-factura-correo'");
+click('[data-action="generar-pdf-cuenta-cobro"][data-id="' + pedidoId + '"]');
+assert(!state.lastError, "generar la cuenta de cobro no rompe el render aunque jsPDF no esté cargado en este entorno de prueba");
+
 // --- catálogo: agrega un insumo reutilizable ---
 click('[data-action="tab"][data-tab="catalogo"]');
 click('[data-action="add-cat-item"]');
