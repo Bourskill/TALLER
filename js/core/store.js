@@ -226,12 +226,6 @@ export const state = {
   // renderFormNuevoProducto en modules/productos.js).
   formProducto: { nombre: "", categoria: "", referencia: "", precioVenta: "", origen: "taller", proveedorId: "", costoCompra: "" },
   filtroProductosCategoria: "todos",
-  // Picker de "Insumos predeterminados" al armar un producto del catálogo
-  // (mismo patrón ventana-explorador que insumoPicker* de Cotizaciones).
-  productoInsumoPickerAbierto: "", // id del producto con el picker abierto (o "")
-  productoInsumoPickerCategoria: "todos",
-  productoInsumoPickerBusqueda: "",
-  productoInsumoPickerSeleccion: [],
   pedidoProductoBusqueda: "", // texto de búsqueda del picker de producto en el formulario de pedido (nombre/referencia/categoría)
   pedidoProductoPickerAbierto: false, // ventana del picker de producto (formulario de pedido) abierta/cerrada — nunca se persiste
   pedidoProductoCategoria: "todos", // "todos" | "sin" | nombre de categoría — panel izquierdo del picker de productos
@@ -357,11 +351,17 @@ export const state = {
   // que "Descartar" restaura. Ninguno se persiste.
   cotSucia: "",
   cotSnapshot: null,
-  // Explorador de insumos (modal de Cotizaciones): reemplaza al <select> que
-  // no escalaba con un catálogo grande. Nada de esto se persiste — es estado
-  // de UI que debe arrancar cerrado en cada carga.
-  insumoPickerAbierto: "", // id de la cotización que lo abrió, o "" (cerrado)
-  insumoPickerRef: "", // id de la referencia a la que se le van a agregar los insumos
+  // Explorador de insumos (modal): reemplaza al <select> plano que no
+  // escalaba con un catálogo grande — UNA sola implementación compartida
+  // entre Cotizaciones, Productos y Plantillas (ver renderExploradorInsumos
+  // en core/components.js y las acciones "insumo-picker" en core/dom.js).
+  // Antes cada módulo tenía su propia copia casi idéntica de este picker (y
+  // Plantillas ni eso: un <select> plano). Nada de esto se persiste — es
+  // estado de UI que debe arrancar cerrado en cada carga.
+  insumoPickerAbierto: "", // "" (cerrado) | "cotizacion" | "producto" | "plantilla"
+  insumoPickerCotId: "", insumoPickerRefId: "", // destino cuando abierto === "cotizacion"
+  insumoPickerProductoId: "", // destino cuando abierto === "producto"
+  insumoPickerPlantillaId: "", // destino cuando abierto === "plantilla"
   insumoPickerCategoria: "todos", // "todos" | "sin" | id de categoría
   insumoPickerBusqueda: "",
   insumoPickerSeleccion: [], // ids de insumos marcados (selección múltiple)

@@ -15,7 +15,7 @@
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
-import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderBuscador, renderToggleSeccion } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderToggleSeccion, renderExploradorInsumos } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
@@ -372,88 +372,37 @@ function renderCosteoProduccion(p) {
   return html;
 }
 
-// Mismo patrón de "ventana tipo explorador" que el selector de insumos en
-// Cotizaciones (categorías a la izquierda, búsqueda arriba, selección
-// múltiple con checkbox) — antes acá era un <select> plano que, con decenas
-// de insumos, obligaba a leer una lista larga sin poder filtrar ni ver el
-// costo antes de elegir.
+// Explorador de insumos (modal, ver renderExploradorInsumos en
+// core/components.js — compartido con Cotizaciones y Plantillas). Antes acá
+// era un <select> plano que, con decenas de insumos, obligaba a leer una
+// lista larga sin poder filtrar ni ver el costo antes de elegir.
 function renderInsumoPickerProducto() {
-  var proId = state.productoInsumoPickerAbierto;
-  if (!proId) return "";
-  var categorias = state.catalogoCategorias || [];
-  var lista = state.catalogoInsumos || [];
-  var catActiva = state.productoInsumoPickerCategoria || "todos";
-  var q = norm(state.productoInsumoPickerBusqueda || "").trim();
-  var seleccion = state.productoInsumoPickerSeleccion || [];
+  if (state.insumoPickerAbierto !== "producto") return "";
+  var proId = state.insumoPickerProductoId;
 
-  function enCategoria(i, catId) {
-    if (catId === "todos") return true;
-    if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
-    return i.categoriaId === catId;
-  }
-  function cuenta(catId) {
-    return lista.filter(function (i) { return enCategoria(i, catId) && (!q || norm(i.nombre).indexOf(q) >= 0); }).length;
-  }
-  var visibles = lista.filter(function (i) {
-    return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
+  // "Ya está en este producto" — mismo aviso que Cotizaciones, para no
+  // agregar el mismo insumo dos veces sin darse cuenta.
+  var producto = state.productos.filter(function (p) { return p.id === proId; })[0];
+  var yaEnProducto = {};
+  ((producto && producto.insumos) || []).forEach(function (ins) {
+    var k = norm(ins.nombre || "");
+    if (!yaEnProducto[k]) yaEnProducto[k] = { total: 0, ubicaciones: [] };
+    yaEnProducto[k].total++;
   });
 
-  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
-    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
-    .concat([{ id: "sin", nombre: "Sin categoría" }]);
-
-  var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker-producto">' +
-    '<div class="picker-modal" data-action="picker-stop">' +
-    '<div class="picker-head">' +
-    '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
-    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker-producto" aria-label="Cerrar">✕</button>' +
-    "</div>" +
-    // Misma barra de búsqueda que el resto de la app (ver renderBuscador en
-    // core/components.js). Antes cada explorador tenía su propio <input>
-    // suelto: sin lupa, sin botón de limpiar y con un aspecto distinto al
-    // de los buscadores de las listas.
-    '<div class="picker-search">' + renderBuscador({
-      id: "inp-insumo-picker-producto-buscar",
-      filtro: "productoInsumoPickerBusqueda",
-      valor: state.productoInsumoPickerBusqueda,
-      placeholder: "Buscar insumo por nombre o unidad…",
-      ancho: "full",
-      compacto: true
-    }) + "</div>" +
-    '<div class="picker-body">' +
-    '<div class="picker-side">' +
-    itemsCat.map(function (c) {
-      var n = cuenta(c.id);
-      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-producto-categoria" data-val="' + esc(c.id) + '">' +
-        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
-    }).join("") +
-    "</div>" +
-    '<div class="picker-list">';
-
-  if (!lista.length) {
-    html += '<div class="empty">Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Catálogo</b> para poder reutilizarlos acá.</div>';
-  } else if (!visibles.length) {
-    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.productoInsumoPickerBusqueda) + '"' : "") + ".</div>";
-  } else {
-    visibles.forEach(function (i) {
-      var marcado = seleccion.indexOf(i.id) !== -1;
-      html += '<label class="picker-item ' + (marcado ? "sel" : "") + '">' +
-        '<input type="checkbox" data-action="toggle-insumo-picker-producto-item" data-id="' + i.id + '" ' + (marcado ? "checked" : "") + " />" +
-        '<span class="picker-item-info"><b>' + esc(i.nombre) + "</b><small>" + esc(i.unidad || "UND") + " · " + esc((TIPOS_COSTO[i.tipo] || {}).label || i.tipo || "") + "</small></span>" +
-        '<span class="amount">' + fmtMoney(i.costo) + "</span>" +
-        "</label>";
-    });
-  }
-
-  html += "</div></div>" +
-    '<div class="picker-foot">' +
-    '<span class="section-sub" style="margin:0;">' + (seleccion.length ? seleccion.length + (seleccion.length === 1 ? " insumo seleccionado" : " insumos seleccionados") : "Marca los insumos que quieras agregar") + "</span>" +
-    '<span style="display:flex;gap:8px;">' +
-    '<button class="btn ghost small" data-action="cerrar-insumo-picker-producto">Cancelar</button>' +
-    '<button class="btn" ' + (seleccion.length ? "" : "disabled") + ' data-action="confirmar-insumo-picker-producto" data-pro="' + proId + '">Agregar' + (seleccion.length ? " (" + seleccion.length + ")" : "") + "</button>" +
-    "</span></div>" +
-    "</div></div>";
-  return html;
+  return renderExploradorInsumos({
+    abierto: true,
+    idBuscador: "inp-insumo-picker-producto-buscar",
+    categorias: state.catalogoCategorias,
+    lista: state.catalogoInsumos,
+    categoriaActiva: state.insumoPickerCategoria,
+    busqueda: state.insumoPickerBusqueda,
+    seleccion: state.insumoPickerSeleccion,
+    yaPresentes: yaEnProducto,
+    textoCatalogoVacio: 'Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Insumos</b> para poder reutilizarlos acá.',
+    accionConfirmar: "confirmar-insumo-picker-producto",
+    confirmarAttrs: ' data-pro="' + proId + '"'
+  });
 }
 
 // Bitácora de entradas/salidas de stock — colapsada por defecto (puede
@@ -605,30 +554,19 @@ export var actions = {
       return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", cantidad: 1 }]) });
     });
   },
+  // Cerrar/categoría/marcar son transversales — ver "insumo-picker" en
+  // core/dom.js (compartidas con Cotizaciones y Plantillas).
   "abrir-insumo-picker-producto": function (el) {
-    state.productoInsumoPickerAbierto = el.getAttribute("data-pro");
-    state.productoInsumoPickerCategoria = "todos";
-    state.productoInsumoPickerBusqueda = "";
-    state.productoInsumoPickerSeleccion = [];
-    notify();
-  },
-  "cerrar-insumo-picker-producto": function () {
-    state.productoInsumoPickerAbierto = "";
-    notify();
-  },
-  "set-insumo-picker-producto-categoria": function (el) {
-    state.productoInsumoPickerCategoria = el.getAttribute("data-val");
-    notify();
-  },
-  "toggle-insumo-picker-producto-item": function (el) {
-    var id = el.getAttribute("data-id");
-    var seleccion = state.productoInsumoPickerSeleccion || [];
-    state.productoInsumoPickerSeleccion = seleccion.indexOf(id) === -1 ? seleccion.concat([id]) : seleccion.filter(function (s) { return s !== id; });
+    state.insumoPickerAbierto = "producto";
+    state.insumoPickerProductoId = el.getAttribute("data-pro");
+    state.insumoPickerCategoria = "todos";
+    state.insumoPickerBusqueda = "";
+    state.insumoPickerSeleccion = [];
     notify();
   },
   "confirmar-insumo-picker-producto": function (el) {
     var id = el.getAttribute("data-pro");
-    var seleccion = state.productoInsumoPickerSeleccion || [];
+    var seleccion = state.insumoPickerSeleccion || [];
     var items = (state.catalogoInsumos || []).filter(function (i) { return seleccion.indexOf(i.id) !== -1; });
     if (items.length) {
       mapPro(id, function (p) {
@@ -639,7 +577,8 @@ export var actions = {
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }
-    state.productoInsumoPickerAbierto = "";
+    state.insumoPickerAbierto = "";
+    state.insumoPickerProductoId = "";
     notify();
   },
   "remove-pro-insumo": function (el) {

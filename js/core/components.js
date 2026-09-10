@@ -344,6 +344,107 @@ export function renderClientePicker(opts) {
   return html;
 }
 
+// Explorador de insumos (modal): categorías a la izquierda, búsqueda arriba,
+// selección múltiple con checkbox. Reemplaza al <select> plano de "+
+// Insumos predeterminados", que con un catálogo grande obligaba a leer una
+// lista larga sin poder filtrar ni ver el costo antes de elegir.
+//
+// Reutilizado entre Cotizaciones, Productos y Plantillas — antes cada uno
+// tenía su propia copia casi idéntica (y Plantillas ni eso: ahí seguía
+// siendo el <select> plano, que fue lo que el usuario reportó). Abrir/cerrar,
+// el filtro de categoría y marcar/desmarcar un ítem son acciones GENÉRICAS
+// (ver "insumo-picker" en core/dom.js, transversales) porque solo tocan el
+// estado compartido del picker — nunca varían según quién lo abrió. Lo único
+// que sí es propio de cada destino es "Agregar" (`accionConfirmar` +
+// `confirmarAttrs`, ya armados por quien llama), porque fusionar los
+// insumos elegidos es distinto en cada uno (una referencia de cotización,
+// un producto, una plantilla).
+export function renderExploradorInsumos(opts) {
+  if (!opts.abierto) return "";
+  var categorias = opts.categorias || [];
+  var lista = opts.lista || [];
+  var catActiva = opts.categoriaActiva || "todos";
+  var q = norm(opts.busqueda || "").trim();
+  var seleccion = opts.seleccion || [];
+  var yaPresentes = opts.yaPresentes || {};
+
+  function enCategoria(i, catId) {
+    if (catId === "todos") return true;
+    if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
+    return i.categoriaId === catId;
+  }
+  // El contador de cada categoría respeta la búsqueda activa: si buscas
+  // "hilo", cada categoría muestra cuántos hilos tiene, no su total.
+  function cuenta(catId) {
+    return lista.filter(function (i) { return enCategoria(i, catId) && (!q || norm(i.nombre).indexOf(q) >= 0); }).length;
+  }
+  var visibles = lista.filter(function (i) {
+    return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
+  });
+  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
+    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
+    .concat([{ id: "sin", nombre: "Sin categoría" }]);
+
+  var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker">' +
+    '<div class="picker-modal" data-action="picker-stop">' +
+    '<div class="picker-head">' +
+    '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
+    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker" aria-label="Cerrar">✕</button>' +
+    "</div>" +
+    // Misma barra de búsqueda que el resto de la app (ver renderBuscador
+    // arriba). Antes cada explorador tenía su propio <input> suelto: sin
+    // lupa, sin botón de limpiar y con un aspecto distinto al de los
+    // buscadores de las listas.
+    '<div class="picker-search">' + renderBuscador({
+      id: opts.idBuscador,
+      filtro: "insumoPickerBusqueda",
+      valor: opts.busqueda,
+      placeholder: "Buscar insumo por nombre o unidad…",
+      ancho: "full",
+      compacto: true
+    }) + "</div>" +
+    '<div class="picker-body">' +
+    '<div class="picker-side">' +
+    itemsCat.map(function (c) {
+      var n = cuenta(c.id);
+      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-categoria" data-val="' + esc(c.id) + '">' +
+        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
+    }).join("") +
+    "</div>" +
+    '<div class="picker-list">';
+
+  if (!lista.length) {
+    html += '<div class="empty">' + (opts.textoCatalogoVacio || "Tu catálogo de insumos está vacío.") + "</div>";
+  } else if (!visibles.length) {
+    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(opts.busqueda) + '"' : "") + ".</div>";
+  } else {
+    visibles.forEach(function (i) {
+      var marcado = seleccion.indexOf(i.id) !== -1;
+      var yaEsta = yaPresentes[norm(i.nombre || "")];
+      var meta = [esc(i.unidad || "UND"), esc((TIPOS_COSTO[i.tipo] || {}).label || i.tipo || "")];
+      if (i.esServicio) meta.push("servicio");
+      html += '<label class="picker-item ' + (marcado ? "sel" : "") + (yaEsta ? " ya-agregado" : "") + '">' +
+        '<input type="checkbox" data-action="toggle-insumo-picker-item" data-id="' + i.id + '" ' + (marcado ? "checked" : "") + " />" +
+        '<span class="picker-item-info"><b>' + esc(i.nombre) +
+        (yaEsta ? ' <span class="tag" title="Ya está' + (yaEsta.ubicaciones.length ? " en " + esc(yaEsta.ubicaciones.join(", ")) : "") + ' — puedes agregarlo otra vez si lo necesitas">✓ ya agregado' + (yaEsta.total > 1 ? " ×" + yaEsta.total : "") + "</span>" : "") +
+        "</b><small>" + meta.join(" · ") +
+        (yaEsta && yaEsta.ubicaciones.length ? " · en " + esc(yaEsta.ubicaciones.join(", ")) : "") + "</small></span>" +
+        '<span class="amount">' + fmt(i.costo) + "</span>" +
+        "</label>";
+    });
+  }
+
+  html += "</div></div>" +
+    '<div class="picker-foot">' +
+    '<span class="section-sub" style="margin:0;">' + (seleccion.length ? seleccion.length + (seleccion.length === 1 ? " insumo seleccionado" : " insumos seleccionados") : "Marca los insumos que quieras agregar") + "</span>" +
+    '<span style="display:flex;gap:8px;">' +
+    '<button class="btn ghost small" data-action="cerrar-insumo-picker">Cancelar</button>' +
+    '<button class="btn" ' + (seleccion.length ? "" : "disabled") + ' data-action="' + opts.accionConfirmar + '"' + (opts.confirmarAttrs || "") + ">Agregar" + (seleccion.length ? " (" + seleccion.length + ")" : "") + "</button>" +
+    "</span></div>" +
+    "</div></div>";
+  return html;
+}
+
 // "Asignar a servicio(s)" un gasto o un pago de nómina — descontarlo de la
 // plata que ya se cobró por un "servicio" (una línea marcada así en
 // "Compras del pedido" de una cotización, ver calcServiciosPorCategoriaRango

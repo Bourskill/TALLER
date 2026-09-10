@@ -326,6 +326,34 @@ var coreActions = {
     state.historialServicioAbierto = "";
     notify();
   },
+  // Ver renderExploradorInsumos en core/components.js. Genéricas (no viven en
+  // cotizaciones.js, productos.js ni plantillas.js) porque los tres abren el
+  // MISMO picker sobre el MISMO estado compartido (insumoPicker*, ver
+  // core/store.js) — solo "abrir" y "confirmar" quedan en cada módulo,
+  // porque fusionar la selección es distinto en cada destino.
+  "cerrar-insumo-picker": function () {
+    state.insumoPickerAbierto = "";
+    state.insumoPickerCotId = ""; state.insumoPickerRefId = "";
+    state.insumoPickerProductoId = "";
+    state.insumoPickerPlantillaId = "";
+    state.insumoPickerSeleccion = [];
+    state.insumoPickerBusqueda = "";
+    notify();
+  },
+  // El overlay cierra al hacer clic FUERA del modal; este no-op va sobre el
+  // modal en sí para que un clic adentro no burbujee hasta el overlay y lo
+  // cierre a mitad de la selección.
+  "picker-stop": function () {},
+  "set-insumo-picker-categoria": function (el) {
+    state.insumoPickerCategoria = el.getAttribute("data-val");
+    notify();
+  },
+  "toggle-insumo-picker-item": function (el) {
+    var id = el.getAttribute("data-id");
+    var sel = state.insumoPickerSeleccion || [];
+    state.insumoPickerSeleccion = sel.indexOf(id) === -1 ? sel.concat([id]) : sel.filter(function (x) { return x !== id; });
+    notify();
+  },
   "logout": function () {
     // Cerrar sesión con cambios sin guardar sería tirarlos a la basura: el
     // espejo local sobrevive, pero la sesión siguiente no sabría de quién es.

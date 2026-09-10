@@ -245,16 +245,23 @@ assert(ordenNombres.indexOf("ins-nombre-" + catItemId) < ordenNombres.indexOf("i
 state.catalogoInsumos = state.catalogoInsumos.filter(c => c.id !== "ins-zzz-test");
 render();
 
-// --- plantillas: agrega una plantilla con un insumo desde el catálogo ---
+// --- plantillas: agrega una plantilla con un insumo desde el catálogo —
+// el usuario reportó que acá seguía siendo un <select> plano en vez del
+// mismo explorador (modal con categorías/buscador/selección múltiple) que
+// ya tenían Cotizaciones y Productos. Ahora las tres pestañas comparten UNA
+// sola implementación (ver renderExploradorInsumos en core/components.js). ---
 click('[data-action="tab"][data-tab="plantillas"]');
 const plantillasPrevias = state.plantillasPrendas.length;
 click('[data-action="add-plantilla"]');
 assert(state.plantillasPrendas.length === plantillasPrevias + 1, "agrega plantilla");
 const nuevaPlaId = state.plantillasPrendas[state.plantillasPrendas.length - 1].id;
-const plaCard = document.querySelector('[data-plantilla-id="' + nuevaPlaId + '"]');
-const plaSelect = plaCard.querySelector('select[data-action-change="add-pla-insumo-catalogo"]');
-plaSelect.value = catItemId;
-plaSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(!document.querySelector('select[data-action-change="add-pla-insumo-catalogo"]'), "el <select> plano de insumos predeterminados ya no existe en Plantillas");
+click('[data-action="abrir-insumo-picker-plantilla"][data-pla="' + nuevaPlaId + '"]');
+assert(state.insumoPickerAbierto === "plantilla" && state.insumoPickerPlantillaId === nuevaPlaId, "abre el MISMO explorador de insumos que Cotizaciones y Productos, sobre esta plantilla");
+assert(!!document.querySelector(".picker-modal"), "el modal del explorador se renderiza en Plantillas");
+click('[data-action="toggle-insumo-picker-item"][data-id="' + catItemId + '"]');
+click('[data-action="confirmar-insumo-picker-plantilla"][data-pla="' + nuevaPlaId + '"]');
+assert(state.insumoPickerAbierto === "", "confirmar cierra el explorador");
 assert(
   state.plantillasPrendas.find(p => p.id === nuevaPlaId).insumos.length === 1,
   "agrega insumo del catálogo a la plantilla"
@@ -369,7 +376,7 @@ assert(state.cotizaciones[0].referencias[0].insumos[0].costo === 8000, "descarta
 // panel de categorías, buscador y selección múltiple) en vez del <select>
 // plano, que no escalaba con un catálogo grande.
 click('[data-action="abrir-insumo-picker"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');
-assert(state.insumoPickerAbierto === cotId, "el explorador de insumos se abre sobre la referencia elegida");
+assert(state.insumoPickerAbierto === "cotizacion" && state.insumoPickerCotId === cotId && state.insumoPickerRefId === refId, "el explorador de insumos se abre sobre la referencia elegida");
 assert(!!document.querySelector(".picker-modal"), "el modal del explorador se renderiza");
 assert(!!document.querySelector('[data-action="set-insumo-picker-categoria"][data-val="todos"]'), "el explorador lista las categorías en el panel lateral");
 assert(!!document.querySelector("#inp-insumo-picker-buscar"), "el explorador tiene barra de búsqueda");
@@ -2315,12 +2322,11 @@ const plantillasAntesServ = state.plantillasPrendas.length;
 click('[data-action="add-plantilla"]');
 const plaServId = state.plantillasPrendas[state.plantillasPrendas.length - 1].id;
 assert(state.plantillasPrendas.length === plantillasAntesServ + 1, "sanity: se crea la plantilla de prueba");
-const plaCardServ = document.querySelector('[data-plantilla-id="' + plaServId + '"]');
-const plaSelectServ = plaCardServ.querySelector('select[data-action-change="add-pla-insumo-catalogo"]');
-plaSelectServ.value = insConfeccion.id;
-plaSelectServ.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+click('[data-action="abrir-insumo-picker-plantilla"][data-pla="' + plaServId + '"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="' + insConfeccion.id + '"]');
+click('[data-action="confirmar-insumo-picker-plantilla"][data-pla="' + plaServId + '"]');
 const plaInsServ = state.plantillasPrendas.find(p => p.id === plaServId).insumos[0];
-assert(plaInsServ.esServicio === true, "add-pla-insumo-catalogo (plantillas.js) también resuelve 'servicio' al copiar del catálogo, no solo el picker de una referencia");
+assert(plaInsServ.esServicio === true, "confirmar-insumo-picker-plantilla (plantillas.js) también resuelve 'servicio' al copiar del catálogo, no solo el picker de una referencia");
 
 state.tab = "productos";
 state.productosVista = "nueva";
@@ -2331,7 +2337,7 @@ click('[data-action="add-producto"]');
 const proServId = state.productos[state.productos.length - 1].id;
 click('[data-action="toggle-producto-costeo"][data-id="' + proServId + '"]'); // la sección de insumos nace colapsada
 click('[data-action="abrir-insumo-picker-producto"][data-pro="' + proServId + '"]');
-click('[data-action="toggle-insumo-picker-producto-item"][data-id="' + insConfeccion.id + '"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="' + insConfeccion.id + '"]');
 click('[data-action="confirmar-insumo-picker-producto"][data-pro="' + proServId + '"]');
 const proInsServ = state.productos.find(p => p.id === proServId).insumos[0];
 assert(proInsServ.esServicio === true, "confirmar-insumo-picker-producto (productos.js) también resuelve 'servicio' al copiar del catálogo");

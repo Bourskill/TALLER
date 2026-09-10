@@ -16,7 +16,7 @@
 // para armar una variación de algo que ya existe.
 import { state, persist, notify } from "../core/store.js";
 import { esc, fmt, num, uid, val, norm } from "../core/utils.js";
-import { renderTipoCostoOptions, renderHelp, renderBuscador, renderTarjetaMini } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderBuscador, renderTarjetaMini, renderExploradorInsumos } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { calcCostoUnitarioRef, esInsumoServicio } from "../core/calc.js";
 
@@ -30,7 +30,40 @@ export function render() {
   if (vista === "flujos") return html + renderFlujosEstados();
   var abierta = plantillaAbierta();
   html += abierta ? renderDetallePlantilla(abierta) : renderIndicePlantillas();
+  html += renderInsumoPickerPlantilla();
   return html;
+}
+
+// Explorador de insumos (modal, ver renderExploradorInsumos en
+// core/components.js — compartido con Cotizaciones y Productos). Antes acá
+// era un <select> plano de "+ Insumos predeterminados…", el único de los
+// tres que ni siquiera tenía buscador ni categorías.
+function renderInsumoPickerPlantilla() {
+  if (state.insumoPickerAbierto !== "plantilla") return "";
+  var plaId = state.insumoPickerPlantillaId;
+
+  // "Ya está en esta plantilla" — mismo aviso que Cotizaciones y Productos.
+  var pla = (state.plantillasPrendas || []).filter(function (p) { return p.id === plaId; })[0];
+  var yaEnPlantilla = {};
+  ((pla && pla.insumos) || []).forEach(function (ins) {
+    var k = norm(ins.nombre || "");
+    if (!yaEnPlantilla[k]) yaEnPlantilla[k] = { total: 0, ubicaciones: [] };
+    yaEnPlantilla[k].total++;
+  });
+
+  return renderExploradorInsumos({
+    abierto: true,
+    idBuscador: "inp-insumo-picker-plantilla-buscar",
+    categorias: state.catalogoCategorias,
+    lista: state.catalogoInsumos,
+    categoriaActiva: state.insumoPickerCategoria,
+    busqueda: state.insumoPickerBusqueda,
+    seleccion: state.insumoPickerSeleccion,
+    yaPresentes: yaEnPlantilla,
+    textoCatalogoVacio: 'Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Insumos</b> para poder reutilizarlos acá.',
+    accionConfirmar: "confirmar-insumo-picker-plantilla",
+    confirmarAttrs: ' data-pla="' + plaId + '"'
+  });
 }
 
 // Las dos vistas llevan su conteo en la propia pestaña: sin él no hay forma de
@@ -260,10 +293,7 @@ function renderPlantillaCard(p) {
   html += "</div>";
 
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' +
-    '<select class="mini-input" style="max-width:240px" data-action-change="add-pla-insumo-catalogo" data-pla="' + p.id + '">' +
-    '<option value="">+ Insumos predeterminados…</option>' +
-    (state.catalogoInsumos || []).map(function (item) { return '<option value="' + item.id + '">' + esc(item.nombre) + "</option>"; }).join("") +
-    "</select>" +
+    '<button class="btn ghost small" data-action="abrir-insumo-picker-plantilla" data-pla="' + p.id + '">📂 Insumos predeterminados…</button>' +
     '<button class="btn ghost small" data-action="add-pla-insumo-custom" data-pla="' + p.id + '">+ Insumo personalizado</button>' +
     "</div>";
 
@@ -487,19 +517,34 @@ export var actions = {
       return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: "Nuevo insumo", unidad: "UND", costo: 0, tipo: "por_prenda", cantidad: 1 }]) });
     });
   },
-  "add-pla-insumo-catalogo": function (el) {
-    if (!el.value) return;
+  // Cerrar/categoría/marcar son transversales — ver "insumo-picker" en
+  // core/dom.js (compartidas con Cotizaciones y Productos).
+  "abrir-insumo-picker-plantilla": function (el) {
+    state.insumoPickerAbierto = "plantilla";
+    state.insumoPickerPlantillaId = el.getAttribute("data-pla");
+    state.insumoPickerCategoria = "todos";
+    state.insumoPickerBusqueda = "";
+    state.insumoPickerSeleccion = [];
+    notify();
+  },
+  "confirmar-insumo-picker-plantilla": function (el) {
     var id = el.getAttribute("data-pla");
-    var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === el.value; })[0];
-    if (!item) return;
-    mapPla(id, function (p) {
-      // Igual que al copiar del catálogo a una referencia (ver nuevoInsumo en
-      // modules/cotizaciones.js): "servicio" se resuelve UNA vez, acá, porque
-      // el insumo de la plantilla no guarda categoriaId — sin esto, un
-      // insumo marcado servicio por su CATEGORÍA (no por su Unidad) llegaba a
-      // la plantilla sin ninguna forma de saberlo.
-      return Object.assign({}, p, { insumos: (p.insumos || []).concat([{ id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }]) });
-    });
+    var seleccion = state.insumoPickerSeleccion || [];
+    var items = (state.catalogoInsumos || []).filter(function (i) { return seleccion.indexOf(i.id) !== -1; });
+    if (items.length) {
+      mapPla(id, function (p) {
+        // Igual que al copiar del catálogo a una referencia (ver nuevoInsumo
+        // en modules/cotizaciones.js): "servicio" se resuelve UNA vez, acá,
+        // porque el insumo de la plantilla no guarda categoriaId — sin esto,
+        // un insumo marcado servicio por su CATEGORÍA (no por su Unidad)
+        // llegaba a la plantilla sin ninguna forma de saberlo.
+        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }; });
+        return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
+      });
+    }
+    state.insumoPickerAbierto = "";
+    state.insumoPickerPlantillaId = "";
+    notify();
   },
   "remove-pla-insumo": function (el) {
     var id = el.getAttribute("data-pla"), insId = el.getAttribute("data-ins");

@@ -222,6 +222,40 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo primera ronda: un solo explorador de insumos para Cotizaciones, Productos y Plantillas)
+
+Reporte del usuario: "en plantillas, a la hora de crear una plantilla y
+agregar un insumo sale una lista en vez del explorador, debería de mostrar
+el explorador, se supone que está en tus memorias el reutilizar elementos".
+
+**Lo que había:** Cotizaciones tenía el "explorador de insumos" de verdad
+(modal con categorías, buscador y selección múltiple). Productos ya lo
+había DUPLICADO casi entero para su propio catálogo (mismo HTML, mismas
+acciones, con otro nombre cada una). Plantillas se quedó atrás y seguía con
+el `<select>` plano original — el que Cotizaciones y Productos ya habían
+reemplazado hace rondas.
+
+**Fix — de 2 copias casi idénticas + 1 rezagada, a 1 sola** (exactamente lo
+que pide [[reutilizar-antes-de-crear]]): se extrajo `renderExploradorInsumos`
+a `core/components.js`, agnóstico de a quién le agrega los insumos —
+Cotizaciones, Productos y Plantillas le pasan sus propios datos (el
+catálogo, qué ya tiene ESE destino para el aviso "✓ ya agregado", y los
+atributos del botón "Agregar"). Abrir/cerrar, filtrar por categoría y
+marcar/desmarcar un ítem son ahora acciones ÚNICAS y transversales (ver
+"insumo-picker" en `core/dom.js`) sobre un solo bloque de estado compartido
+(`insumoPickerAbierto` + sus ids de destino, `core/store.js`) — antes eran
+9 acciones casi-copia-y-pega repartidas en dos módulos. Solo "abrir" (qué
+destino) y "confirmar" (cómo fusionar la selección en SU estructura de
+datos) siguen siendo propios de cada módulo, porque ahí sí son
+legítimamente distintos. Productos y Plantillas ganaron de regalo el aviso
+de "ya agregado" que antes solo tenía Cotizaciones.
+
+Verificado con `test/smoke.mjs` (655 aserciones en total): se actualizaron
+las pruebas existentes del picker de Cotizaciones/Productos a los nuevos
+nombres de campo, y se agregaron las de Plantillas (que no tenía ninguna,
+porque antes era un `<select>` sin nada que probar más allá de "cambia el
+valor").
+
 ## Registro de cambios — septiembre 2026 (trigésima ronda: el favicon/ícono de la app ahora sigue al "Icono del taller")
 
 Malentendido de la ronda anterior: al pedir "poder añadir un ícono para la

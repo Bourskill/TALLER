@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra } from "../core/calc.js";
-import { renderTipoCostoOptions, renderHelp, renderBuscador, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
+import { renderTipoCostoOptions, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
@@ -96,7 +96,7 @@ export function render() {
   var vista = state.cotizacionesVista || "nueva";
   var html = renderTabsCotizaciones(vista);
   html += vista === "historial" ? renderHistorial() : renderEditor();
-  html += renderInsumoPicker();
+  html += renderInsumoPickerCotizacion();
   html += renderClientePicker({
     abierto: state.clientePickerAbierto, busqueda: state.clientePickerBusqueda, clientes: state.clientes,
     inputId: "inp-cliente-picker-buscar", filtroBusqueda: "clientePickerBusqueda",
@@ -110,39 +110,13 @@ export function render() {
   return html;
 }
 
-// Explorador de insumos (modal): reemplaza al <select> plano de "+ Insumos
-// predeterminados", que solo escalaba mientras el catálogo cupiera en un
-// desplegable — con decenas de insumos obligaba a leer una lista larga sin
-// poder filtrar ni ver el costo antes de elegir. Acá hay panel de categorías
-// a la izquierda, búsqueda arriba y selección MÚLTIPLE (agregar cinco
-// insumos era abrir el select cinco veces).
-function renderInsumoPicker() {
-  var cotId = state.insumoPickerAbierto;
-  if (!cotId) return "";
-  var refId = state.insumoPickerRef;
-  var categorias = state.catalogoCategorias || [];
-  var lista = state.catalogoInsumos || [];
-  var catActiva = state.insumoPickerCategoria || "todos";
-  var q = norm(state.insumoPickerBusqueda || "").trim();
-  var seleccion = state.insumoPickerSeleccion || [];
-
-  function enCategoria(i, catId) {
-    if (catId === "todos") return true;
-    if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
-    return i.categoriaId === catId;
-  }
-  // El contador de cada categoría respeta la búsqueda activa: si buscas
-  // "hilo", cada categoría muestra cuántos hilos tiene, no su total.
-  function cuenta(catId) {
-    return lista.filter(function (i) { return enCategoria(i, catId) && (!q || norm(i.nombre).indexOf(q) >= 0); }).length;
-  }
-  var visibles = lista.filter(function (i) {
-    return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
-  });
-
-  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
-    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
-    .concat([{ id: "sin", nombre: "Sin categoría" }]);
+// Explorador de insumos (modal, ver renderExploradorInsumos en
+// core/components.js — compartido con Productos y Plantillas). Acá solo se
+// arma lo que le es propio a Cotizaciones: sobre qué referencia aplicar
+// (data-cot/data-ref) y "ya está en la cotización", el aviso de duplicado.
+function renderInsumoPickerCotizacion() {
+  if (state.insumoPickerAbierto !== "cotizacion") return "";
+  var cotId = state.insumoPickerCotId, refId = state.insumoPickerRefId;
 
   // Cuántas veces está ya cada insumo del catálogo en ESTA cotización (en
   // cualquiera de sus referencias). Sirve para avisar "ya lo tienes" sin
@@ -156,71 +130,26 @@ function renderInsumoPicker() {
   ((cotActual && cotActual.referencias) || []).forEach(function (r) {
     (r.insumos || []).forEach(function (ins) {
       var k = norm(ins.nombre || "");
-      if (!yaEnCotizacion[k]) yaEnCotizacion[k] = { total: 0, refs: [] };
+      if (!yaEnCotizacion[k]) yaEnCotizacion[k] = { total: 0, ubicaciones: [] };
       yaEnCotizacion[k].total++;
       var nombreRef = r.nombre || "Sin nombre";
-      if (yaEnCotizacion[k].refs.indexOf(nombreRef) === -1) yaEnCotizacion[k].refs.push(nombreRef);
+      if (yaEnCotizacion[k].ubicaciones.indexOf(nombreRef) === -1) yaEnCotizacion[k].ubicaciones.push(nombreRef);
     });
   });
 
-  var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker">' +
-    '<div class="picker-modal" data-action="picker-stop">' +
-    '<div class="picker-head">' +
-    '<div class="section-title small" style="margin:0;">Insumos predeterminados</div>' +
-    '<button class="imgprev-close" style="position:static;width:32px;height:32px;background:var(--surface-3);color:var(--ink-soft);" data-action="cerrar-insumo-picker" aria-label="Cerrar">✕</button>' +
-    "</div>" +
-    // Misma barra de búsqueda que el resto de la app (ver renderBuscador en
-    // core/components.js). Antes cada explorador tenía su propio <input>
-    // suelto: sin lupa, sin botón de limpiar y con un aspecto distinto al
-    // de los buscadores de las listas.
-    '<div class="picker-search">' + renderBuscador({
-      id: "inp-insumo-picker-buscar",
-      filtro: "insumoPickerBusqueda",
-      valor: state.insumoPickerBusqueda,
-      placeholder: "Buscar insumo por nombre o unidad…",
-      ancho: "full",
-      compacto: true
-    }) + "</div>" +
-    '<div class="picker-body">' +
-    '<div class="picker-side">' +
-    itemsCat.map(function (c) {
-      var n = cuenta(c.id);
-      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-categoria" data-val="' + esc(c.id) + '">' +
-        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
-    }).join("") +
-    "</div>" +
-    '<div class="picker-list">';
-
-  if (!lista.length) {
-    html += '<div class="empty">Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Insumos</b> para poder reutilizarlos acá.</div>';
-  } else if (!visibles.length) {
-    html += '<div class="empty">Sin coincidencias' + (q ? ' para "' + esc(state.insumoPickerBusqueda) + '"' : "") + ".</div>";
-  } else {
-    visibles.forEach(function (i) {
-      var marcado = seleccion.indexOf(i.id) !== -1;
-      var yaEsta = yaEnCotizacion[norm(i.nombre || "")];
-      var meta = [esc(i.unidad || "UND"), esc((TIPOS_COSTO[i.tipo] || {}).label || i.tipo || "")];
-      if (i.esServicio) meta.push("servicio");
-      html += '<label class="picker-item ' + (marcado ? "sel" : "") + (yaEsta ? " ya-agregado" : "") + '">' +
-        '<input type="checkbox" data-action="toggle-insumo-picker-item" data-id="' + i.id + '" ' + (marcado ? "checked" : "") + " />" +
-        '<span class="picker-item-info"><b>' + esc(i.nombre) +
-        (yaEsta ? ' <span class="tag" title="Ya está en ' + esc(yaEsta.refs.join(", ")) + ' — puedes agregarlo otra vez si lo necesitas">✓ ya en la cotización' + (yaEsta.total > 1 ? " ×" + yaEsta.total : "") + "</span>" : "") +
-        "</b><small>" + meta.join(" · ") +
-        (yaEsta ? " · en " + esc(yaEsta.refs.join(", ")) : "") + "</small></span>" +
-        '<span class="amount">' + fmt(i.costo) + "</span>" +
-        "</label>";
-    });
-  }
-
-  html += "</div></div>" +
-    '<div class="picker-foot">' +
-    '<span class="section-sub" style="margin:0;">' + (seleccion.length ? seleccion.length + (seleccion.length === 1 ? " insumo seleccionado" : " insumos seleccionados") : "Marca los insumos que quieras agregar") + "</span>" +
-    '<span style="display:flex;gap:8px;">' +
-    '<button class="btn ghost small" data-action="cerrar-insumo-picker">Cancelar</button>' +
-    '<button class="btn" ' + (seleccion.length ? "" : "disabled") + ' data-action="confirmar-insumo-picker" data-cot="' + cotId + '" data-ref="' + refId + '">Agregar' + (seleccion.length ? " (" + seleccion.length + ")" : "") + "</button>" +
-    "</span></div>" +
-    "</div></div>";
-  return html;
+  return renderExploradorInsumos({
+    abierto: true,
+    idBuscador: "inp-insumo-picker-buscar",
+    categorias: state.catalogoCategorias,
+    lista: state.catalogoInsumos,
+    categoriaActiva: state.insumoPickerCategoria,
+    busqueda: state.insumoPickerBusqueda,
+    seleccion: state.insumoPickerSeleccion,
+    yaPresentes: yaEnCotizacion,
+    textoCatalogoVacio: 'Tu catálogo de insumos está vacío. Agrégalos en la pestaña <b>Insumos</b> para poder reutilizarlos acá.',
+    accionConfirmar: "confirmar-insumo-picker",
+    confirmarAttrs: ' data-cot="' + cotId + '" data-ref="' + refId + '"'
+  });
 }
 
 function renderTabsCotizaciones(vista) {
@@ -1571,34 +1500,15 @@ export var actions = {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).concat([nuevoInsumo(null)]) }); });
   },
-  // ---------- explorador de insumos (modal) ----------
+  // ---------- explorador de insumos (modal, ver core/dom.js para el resto
+  // de las acciones — cerrar/categoría/marcar son transversales) ----------
   "abrir-insumo-picker": function (el) {
-    state.insumoPickerAbierto = el.getAttribute("data-cot");
-    state.insumoPickerRef = el.getAttribute("data-ref");
+    state.insumoPickerAbierto = "cotizacion";
+    state.insumoPickerCotId = el.getAttribute("data-cot");
+    state.insumoPickerRefId = el.getAttribute("data-ref");
     state.insumoPickerCategoria = "todos";
     state.insumoPickerBusqueda = "";
     state.insumoPickerSeleccion = [];
-    notify();
-  },
-  "cerrar-insumo-picker": function () {
-    state.insumoPickerAbierto = "";
-    state.insumoPickerRef = "";
-    state.insumoPickerSeleccion = [];
-    state.insumoPickerBusqueda = "";
-    notify();
-  },
-  // El overlay cierra al hacer clic FUERA del modal; este no-op va sobre el
-  // modal en sí para que un clic adentro no burbujee hasta el overlay y lo
-  // cierre a mitad de la selección.
-  "picker-stop": function () {},
-  "set-insumo-picker-categoria": function (el) {
-    state.insumoPickerCategoria = el.getAttribute("data-val");
-    notify();
-  },
-  "toggle-insumo-picker-item": function (el) {
-    var id = el.getAttribute("data-id");
-    var sel = state.insumoPickerSeleccion || [];
-    state.insumoPickerSeleccion = sel.indexOf(id) === -1 ? sel.concat([id]) : sel.filter(function (x) { return x !== id; });
     notify();
   },
   "confirmar-insumo-picker": function (el) {
@@ -1611,7 +1521,7 @@ export var actions = {
       .filter(function (i) { return ids.indexOf(i.id) !== -1; })
       .map(function (i) { return nuevoInsumo(i); });
     state.insumoPickerAbierto = "";
-    state.insumoPickerRef = "";
+    state.insumoPickerCotId = ""; state.insumoPickerRefId = "";
     state.insumoPickerSeleccion = [];
     state.insumoPickerBusqueda = "";
     mapRef(cotId, refId, function (r) { return Object.assign({}, r, { insumos: (r.insumos || []).concat(nuevos) }); });
