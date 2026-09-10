@@ -3184,6 +3184,34 @@ render();
 assert(document.getElementById("link-favicon-32").getAttribute("href") === "icons/favicon-32.png", "quitar el logo devuelve el favicon de 32px al archivo de fábrica");
 assert(document.getElementById("link-manifest").getAttribute("href") === "manifest.json", "...y el manifest vuelve a apuntar al archivo estático, no se queda con el Blob URL del logo ya quitado");
 
+// --- core/dom.js: restaurar el foco tras un render NO puede saltar a un
+// botón vecino solo porque comparte data-cot+data-ref (el usuario reportó
+// "presiono click y me sube, me manda al inicio, en muchas áreas"). En la
+// tarjeta de una referencia, "🧵 Se fabrica en el taller" (set-ref-origen)
+// y "+ Insumo personalizado" (add-insumo-personalizado) NO tienen ningún
+// atributo propio de fila — los dos se identifican SOLO por data-cot+
+// data-ref, que comparten. selectorEstableParaFoco() debe notar que ese
+// selector es ambiguo (matchea a los dos) y NO restaurar por él, en vez de
+// devolver el primero que aparece en el documento (el de "taller", más
+// arriba en la tarjeta) como si fuera el que en verdad se clicó. ---
+state.tab = "cotizaciones";
+state.cotizacionesVista = "nueva";
+state.cotizacionEditando = "";
+render();
+elegirClienteCotizacion("Cliente Foco Ambiguo");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba de foco ambiguo");
+click('[data-action="add-cotizacion"]');
+const cotFocoId = state.cotizaciones[0].id;
+const refFocoId = state.cotizaciones[0].referencias[0].id;
+const selectorCompartido = 'button[data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]';
+assert(document.querySelectorAll(selectorCompartido).length > 1, "sanity: varios botones de la tarjeta comparten data-cot+data-ref sin nada más que los distinga");
+const botonOrigenTaller = document.querySelector('[data-action="set-ref-origen"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"][data-val="taller"]');
+const botonInsumoPersonalizado = document.querySelector('[data-action="add-insumo-personalizado"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
+assert(!!botonOrigenTaller && !!botonInsumoPersonalizado && botonOrigenTaller !== botonInsumoPersonalizado, "sanity: son dos botones DISTINTOS, uno arriba (origen) y otro abajo (insumo) de la misma tarjeta");
+botonInsumoPersonalizado.focus();
+click('[data-action="add-insumo-personalizado"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
+assert((document.activeElement && document.activeElement.getAttribute("data-action")) !== "set-ref-origen", "clicar 'Insumo personalizado' NO deja el foco saltando al botón de 'origen' de arriba, solo porque los dos comparten data-cot+data-ref");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

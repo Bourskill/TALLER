@@ -489,7 +489,27 @@ function selectorEstableParaFoco(el) {
   // encontrarlo entre varios hermanos iguales (ej. dos <select> sueltos sin
   // marcar) — se deja pasar en vez de arriesgar enfocar el elemento
   // equivocado, que sería peor que no restaurar nada.
-  return partes.length > 1 ? partes.join("") : null;
+  if (partes.length <= 1) return null;
+  var selector = partes.join("");
+  // Tener atributos no basta: dos botones DISTINTOS dentro de la misma
+  // referencia/plantilla/producto (ej. el encabezado "Opciones adicionales"
+  // y el botón "Cargar roster", los dos con el mismo data-cot+data-ref
+  // porque ninguno tiene un id propio de fila) comparten EXACTAMENTE los
+  // mismos atributos de la lista de arriba. Sin este chequeo, el
+  // querySelector() de después de redibujar devolvía el PRIMER elemento que
+  // calzara con ese selector en TODO el documento — casi siempre uno más
+  // arriba en la página, no el que en realidad se había clicado — y el
+  // foco (con el scroll que trae consigo un focus() de verdad) saltaba ahí.
+  // Reportado como "presiono click y me sube, me manda al inicio, en
+  // muchas áreas": pasaba con cualquier botón que solo se identificara por
+  // el "padre" al que pertenece (cotización+referencia, plantilla,
+  // producto), no por algo propio de ESA fila/botón puntual. Se verifica
+  // ACÁ, contra el DOM todavía viejo (antes de reconstruirlo): si el
+  // selector ya matchea más de un elemento ahora mismo, restaurar por él
+  // después sería apostar a cuál de los dos aparece primero.
+  var candidatos = document.querySelectorAll(selector);
+  if (candidatos.length !== 1) return null;
+  return selector;
 }
 // Vuelve a poner el foco (y la posición del cursor, si aplica) en `el`,
 // compartido por las tres vías de restauración (por Tab pendiente, por id y

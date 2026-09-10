@@ -222,6 +222,41 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo segunda ronda: click te mandaba al inicio "en muchas áreas")
+
+Reporte del usuario: "pasa mucho que presiono click y me sube, me envía al
+inicio, en muchas áreas" — sin un botón puntual señalado, transversal a la
+app.
+
+**Causa:** `render()` reconstruye TODO el HTML en cada cambio (`app.innerHTML
+= html`) y restaura el foco después usando `id` o, si el campo no tiene uno,
+un selector armado con sus atributos `data-*` (`selectorEstableParaFoco`,
+`core/dom.js` — ver [[ronda_seis_pedidos_2026-09]] para las dos correcciones
+anteriores sobre esta misma función). Esa función solo comprobaba que el
+selector tuviera ALGÚN atributo, nunca que fuera ÚNICO. Un botón identificado
+solo por "a qué referencia/plantilla/producto pertenece" (data-cot+data-ref,
+data-pla, data-pro), sin nada propio de esa fila puntual, comparte ese mismo
+selector con CUALQUIER otro botón de la misma tarjeta en la misma situación
+— y eso es común: en una tarjeta de referencia, "🧵 Se fabrica en el
+taller", "+ Insumo personalizado", "📂 Insumos predeterminados…", "Eliminar
+referencia" y "Cargar roster" comparten exactamente data-cot+data-ref.
+Después de redibujar, `querySelector` devolvía el PRIMERO que apareciera en
+el documento — casi siempre uno más arriba en la página que el que en
+realidad se había clicado — y enfocarlo (`.focus()`) arrastra consigo un
+scroll de verdad hacia ese punto equivocado.
+
+**Fix** (`core/dom.js`): antes de devolver el selector armado, se verifica
+contra el DOM todavía viejo que matchee EXACTAMENTE 1 elemento; si matchea 0
+o 2+, se descarta (mismo criterio que ya usaba el caso de "sin ningún
+atributo": mejor no restaurar el foco que restaurarlo mal). No se tocó el
+resto del mecanismo (Tab-pendiente, restauración por id) — solo se le agregó
+esta verificación de unicidad que le faltaba.
+
+Verificado con `test/smoke.mjs` (658 aserciones en total: +3 de esta ronda,
+reproduciendo el choque real entre dos botones de una misma tarjeta de
+referencia — confirmado revirtiendo el fix a propósito y viendo el `assert`
+fallar antes de restaurarlo).
+
 ## Registro de cambios — septiembre 2026 (trigésimo primera ronda: un solo explorador de insumos para Cotizaciones, Productos y Plantillas)
 
 Reporte del usuario: "en plantillas, a la hora de crear una plantilla y
