@@ -222,6 +222,54 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo tercera ronda: arrastrar insumos en Plantillas + subcategorías de insumos)
+
+Dos pedidos del usuario en un mismo mensaje:
+
+**1. "Poder arrastrar los insumos para reorganizarlos, en Plantillas, así
+como se hace en Cotizaciones".** Cotizaciones ya tenía esto (SortableJS,
+manijo "⠿") desde una ronda anterior; Plantillas se quedó atrás. Fix: la
+fila de insumo de una plantilla gana el mismo manijo y los mismos atributos
+(`data-ins-row`, `data-ins`) — como ambas usan la clase `.ins-table`, el
+mismo inicializador de SortableJS en `core/dom.js` ("patrón genérico 5") ya
+las encuentra a las dos; su `onEnd` ahora distingue por `data-pla` (nuevo:
+`plantillas.reordenarInsumosPlantilla`) vs. `data-cot`+`data-ref` (el de
+siempre) para saber a cuál de los dos aplicar el nuevo orden. A diferencia
+de Cotizaciones, Plantillas no tiene un dock de "sin guardar" propio —
+`mapPla()` ya persiste de una en cualquier edición, así que reordenar no
+necesitó replicar esa lógica de auto-guardado condicional.
+
+**2. "Agregar subcategorías para los insumos — ej. en TELAS, tener
+DEPORTIVAS, POLOS, LICRADAS".** Antes `catalogoCategorias` era una lista
+plana de un solo nivel. Se agregó un `parentId` opcional a cada categoría
+("" = categoría madre) — se sigue guardando FLAT, no como un árbol anidado,
+así que un insumo sigue apuntando a un solo `categoriaId` (de cualquiera de
+los dos niveles) y no hizo falta ninguna migración. Nuevas funciones
+compartidas en `core/calc.js` (`categoriasMadre`, `subcategoriasDe`,
+`categoriasAplanadas`, `idsConSubcategorias`) — usadas tanto por
+`modules/catalogo.js` como por el explorador de insumos compartido
+(`renderExploradorInsumos`, `core/components.js` — la misma pieza que ya
+usan Cotizaciones, Productos y Plantillas, ver la ronda anterior):
+- Filtrar/agrupar/contar por la categoría MADRE también trae lo clasificado
+  en sus subcategorías (Telas incluye lo de Deportivas); filtrar por una
+  subcategoría sigue siendo exacto.
+- El panel "⚙ Categorías" muestra cada madre con sus subcategorías
+  indentadas debajo y su propio "+ Agregar subcategoría" (nueva acción
+  `add-cat-subcategoria`) — solo dos niveles a propósito, una subcategoría
+  no tiene ese botón.
+- El `<select>` de categoría de un insumo ofrece la madre como opción por su
+  cuenta Y sus subcategorías agrupadas con `<optgroup>` (jerarquía nativa
+  del `<select>`, sin indentación a mano).
+- Eliminar una categoría madre NO borra sus subcategorías: quedan
+  promovidas a categoría propia (`parentId` limpio), mismo criterio de "no
+  destruir nada en cascada" que ya usaban sus insumos al perder categoría.
+- `esInsumoServicio` no cambió: una subcategoría es una categoría más, con
+  su propio "Servicio" independiente, no heredado de la madre.
+
+Verificado con `test/smoke.mjs` (674 aserciones en total: +3 del arrastre en
+Plantillas, +11 de las subcategorías, incluyendo el explorador de insumos
+compartido).
+
 ## Registro de cambios — septiembre 2026 (trigésimo segunda ronda: click te mandaba al inicio "en muchas áreas")
 
 Reporte del usuario: "pasa mucho que presiono click y me sube, me envía al

@@ -3,7 +3,7 @@ import { esc, num, uid } from "../core/utils.js";
 import { TIPOS_COSTO } from "../core/constants.js";
 import { renderTipoCostoOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
-import { proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
+import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categoriasMadre, subcategoriasDe, idsConSubcategorias } from "../core/calc.js";
 
 // Orden de las columnas por IMPORTANCIA, no por historia: primero el nombre
 // (por el que se reconoce la fila), inmediatamente despues el costo (el dato
@@ -93,20 +93,29 @@ export function render() {
 function enCategoriaActiva(lista, categorias) {
   var cat = state.filtroCatalogoCategoria;
   if (cat === "todos") return lista;
-  return lista.filter(function (i) {
-    var tiene = i.categoriaId && categorias.some(function (c) { return c.id === i.categoriaId; });
-    return cat === "sin" ? !tiene : i.categoriaId === cat;
-  });
+  if (cat === "sin") {
+    return lista.filter(function (i) {
+      var tiene = i.categoriaId && categorias.some(function (c) { return c.id === i.categoriaId; });
+      return !tiene;
+    });
+  }
+  // Filtrar por una categoría MADRE también trae lo clasificado en
+  // cualquiera de sus subcategorías (ej. "Telas" incluye "Deportivas"); para
+  // una subcategoría (o una madre sin hijas), idsConSubcategorias devuelve
+  // solo su propio id, así que el filtro sigue siendo exacto como antes.
+  var idsValidos = idsConSubcategorias(categorias, cat);
+  return lista.filter(function (i) { return idsValidos.indexOf(i.categoriaId) !== -1; });
 }
 
 function insumosFiltrados(lista, categorias) {
   var q = (state.buscarCatalogo || "").trim().toLowerCase();
   var cat = state.filtroCatalogoCategoria;
   var proveedores = proveedoresDeContactos();
+  var idsValidos = cat !== "todos" && cat !== "sin" ? idsConSubcategorias(categorias, cat) : null;
   var out = lista.filter(function (i) {
     if (cat === "sin") {
       if (i.categoriaId && categorias.some(function (c) { return c.id === i.categoriaId; })) return false;
-    } else if (cat !== "todos" && i.categoriaId !== cat) {
+    } else if (cat !== "todos" && idsValidos.indexOf(i.categoriaId) === -1) {
       return false;
     }
     if (!q) return true;
@@ -202,14 +211,21 @@ function renderBarraFiltros(todos, visibles, categorias) {
     if (id === "sin") {
       return todos.filter(function (i) { return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; }); }).length;
     }
-    return todos.filter(function (i) { return i.categoriaId === id; }).length;
+    // Una madre cuenta también lo clasificado en sus subcategorías; una
+    // subcategoría (o una madre sin hijas) sigue siendo un conteo exacto —
+    // ver idsConSubcategorias en core/calc.js.
+    var idsValidos = idsConSubcategorias(categorias, id);
+    return todos.filter(function (i) { return idsValidos.indexOf(i.categoriaId) !== -1; }).length;
   }
 
   html += '<div class="filters cat-filters">' +
     '<button class="chip ' + (state.filtroCatalogoCategoria === "todos" ? "active" : "") + '" data-action="filtro-cat-categoria" data-val="todos">Todas <span class="chip-n">' + cuenta("todos") + "</span></button>";
-  categorias.forEach(function (cat) {
-    html += '<button class="chip ' + (state.filtroCatalogoCategoria === cat.id ? "active" : "") + '" data-action="filtro-cat-categoria" data-val="' + cat.id + '">' +
-      esc(cat.nombre) + ' <span class="chip-n">' + cuenta(cat.id) + "</span></button>";
+  // Aplanado (madre, luego cada una de sus subcategorías) para que el chip
+  // de una subcategoría quede visualmente junto al de su madre — "↳" marca
+  // que es una subcategoría, no una categoría más al mismo nivel.
+  categoriasAplanadas(categorias).forEach(function (cat) {
+    html += '<button class="chip' + (cat.nivel ? " chip-sub" : "") + " " + (state.filtroCatalogoCategoria === cat.id ? "active" : "") + '" data-action="filtro-cat-categoria" data-val="' + cat.id + '">' +
+      (cat.nivel ? "↳ " : "") + esc(cat.nombre) + ' <span class="chip-n">' + cuenta(cat.id) + "</span></button>";
   });
   var sinN = cuenta("sin");
   html += '<button class="chip ' + (state.filtroCatalogoCategoria === "sin" ? "active" : "") + (sinN ? " chip-aviso" : "") + '" data-action="filtro-cat-categoria" data-val="sin">Sin categoría <span class="chip-n">' + sinN + "</span></button>";
@@ -218,28 +234,50 @@ function renderBarraFiltros(todos, visibles, categorias) {
   return html;
 }
 
+// Una fila de categoría (madre o subcategoría) — mismos tres controles en
+// los dos casos (renombrar, marcar "de servicio", eliminar), la subcategoría
+// solo se ve indentada (.cat-admin-sub) y con su nombre pisando el mismo
+// data-id: los tres actions ya operan genérico por id sobre
+// state.catalogoCategorias, sin saber ni les importa de qué nivel es.
+function renderFilaAdminCategoria(cat, todos, esSub) {
+  var n = todos.filter(function (i) { return i.categoriaId === cat.id; }).length;
+  return '<div class="cat-admin-fila' + (esSub ? " cat-admin-sub" : "") + '">' +
+    '<input class="mini-input" style="flex:1;min-width:0;" value="' + esc(cat.nombre) + '" data-action-change="set-cat-categoria-nombre" data-id="' + cat.id + '" aria-label="Nombre de la ' + (esSub ? "subcategoría" : "categoría") + '" />' +
+    '<label class="mini-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;" title="Sus insumos cuentan como servicio (mano de obra que no se compra en ningún lado, ej. corte, confección) en vez de algo físico que hay que comprar — así queda marcado UNA vez para toda la categoría, sin escribir \'servicio\' a mano en cada insumo.">' +
+    '<input type="checkbox" ' + (cat.esServicio ? "checked" : "") + ' data-action-change="toggle-cat-categoria-servicio" data-id="' + cat.id + '" /> Servicio</label>' +
+    '<span class="cat-admin-n">' + n + (n === 1 ? " insumo" : " insumos") + "</span>" +
+    '<button class="btn danger small" data-action="remove-cat-categoria" data-id="' + cat.id + '" title="Eliminar la ' + (esSub ? "subcategoría" : "categoría") + ' (sus insumos quedan sin categoría, no se borran)">✕</button>' +
+    "</div>";
+}
+
 // Administrar categorías: plegado por defecto porque se hace de vez en
 // cuando, no todos los días. Acá está lo que antes NO se podía hacer:
 // renombrar una categoría. Antes solo se podía crearla o borrarla, así que un
 // nombre mal escrito obligaba a borrar (dejando todos sus insumos sueltos) y
 // volver a clasificarlos uno por uno.
+//
+// Dos niveles nada más (madre → subcategorías, ej. Telas → Deportivas/Polos/
+// Licradas): cada madre trae debajo sus subcategorías (mismos 3 controles,
+// indentados) y su propio "+ agregar subcategoría" — una subcategoría no
+// tiene ese botón, a propósito, no hay un tercer nivel.
 function renderAdminCategorias(categorias, todos) {
   if (!state.catalogoCategoriasAbierto) return "";
   var html = '<div class="cat-admin">' +
     '<div class="cat-admin-titulo">Categorías' +
-    renderHelp("Eliminar una categoría NO borra sus insumos: quedan como “sin categoría” y se pueden reclasificar. Renombrar es seguro, los insumos siguen apuntando a la misma categoría.") +
+    renderHelp("Eliminar una categoría NO borra sus insumos: quedan como “sin categoría” y se pueden reclasificar. Renombrar es seguro, los insumos siguen apuntando a la misma categoría. Una categoría puede tener subcategorías (ej. Telas → Deportivas, Polos, Licradas) — un insumo se clasifica en cualquiera de los dos niveles.") +
     "</div>";
-  if (!categorias.length) {
+  var madres = categoriasMadre(categorias);
+  if (!madres.length) {
     html += '<div class="empty" style="padding:6px 0;">Todavía no hay categorías. Crea la primera abajo (ej. Telas, Hilos, Empaques).</div>';
   }
-  categorias.forEach(function (cat) {
-    var n = todos.filter(function (i) { return i.categoriaId === cat.id; }).length;
-    html += '<div class="cat-admin-fila">' +
-      '<input class="mini-input" style="flex:1;min-width:0;" value="' + esc(cat.nombre) + '" data-action-change="set-cat-categoria-nombre" data-id="' + cat.id + '" aria-label="Nombre de la categoría" />' +
-      '<label class="mini-label" style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;" title="Sus insumos cuentan como servicio (mano de obra que no se compra en ningún lado, ej. corte, confección) en vez de algo físico que hay que comprar — así queda marcado UNA vez para toda la categoría, sin escribir \'servicio\' a mano en cada insumo.">' +
-      '<input type="checkbox" ' + (cat.esServicio ? "checked" : "") + ' data-action-change="toggle-cat-categoria-servicio" data-id="' + cat.id + '" /> Servicio</label>' +
-      '<span class="cat-admin-n">' + n + (n === 1 ? " insumo" : " insumos") + "</span>" +
-      '<button class="btn danger small" data-action="remove-cat-categoria" data-id="' + cat.id + '" title="Eliminar la categoría (sus insumos quedan sin categoría, no se borran)">✕</button>' +
+  madres.forEach(function (madre) {
+    html += renderFilaAdminCategoria(madre, todos, false);
+    subcategoriasDe(categorias, madre.id).forEach(function (sub) {
+      html += renderFilaAdminCategoria(sub, todos, true);
+    });
+    html += '<div class="inline-form cat-admin-subform">' +
+      '<input class="mini-input" id="inp-nueva-subcategoria-' + madre.id + '" data-enter-action="add-cat-subcategoria" data-padre="' + madre.id + '" placeholder="Subcategoría de ' + esc(madre.nombre) + "…" + '" style="width:200px" />' +
+      '<button class="btn ghost small" data-action="add-cat-subcategoria" data-padre="' + madre.id + '">+ Agregar subcategoría</button>' +
       "</div>";
   });
   html += '<div class="inline-form" style="margin-top:10px;">' +
@@ -268,18 +306,23 @@ function renderGrupos(visibles, categorias, todos) {
   if (!agrupar) return renderTablaInsumos(visibles, categorias) + renderAgregarInsumoMini(categoriaDelFiltroActivo(categorias));
 
   var html = "";
-  var grupos = categorias.map(function (cat) {
-    return { nombre: cat.nombre, categoriaId: cat.id, items: visibles.filter(function (i) { return i.categoriaId === cat.id; }) };
+  // Aplanado (madre, luego cada una de sus subcategorías): un insumo pegado
+  // directo a la madre sigue en el grupo de la madre, uno en "Deportivas"
+  // cae en su propio grupo, indentado justo debajo — no hace falta anidar
+  // nada, solo dibujar el nivel-1 con su propio modificador visual.
+  var grupos = categoriasAplanadas(categorias).map(function (cat) {
+    return { nombre: cat.nombre, categoriaId: cat.id, nivel: cat.nivel, items: visibles.filter(function (i) { return i.categoriaId === cat.id; }) };
   });
   grupos.push({
     nombre: "Sin categoría",
     categoriaId: "",
+    nivel: 0,
     items: visibles.filter(function (i) { return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; }); })
   });
   grupos.forEach(function (g) {
     if (!g.items.length) return; // un grupo vacío en la vista "Todas" es solo ruido
-    html += '<div class="cat-grupo">' +
-      '<div class="cat-grupo-head"><span class="cat-grupo-nombre">' + esc(g.nombre) + "</span>" +
+    html += '<div class="cat-grupo' + (g.nivel ? " cat-grupo-sub" : "") + '">' +
+      '<div class="cat-grupo-head"><span class="cat-grupo-nombre">' + (g.nivel ? "↳ " : "") + esc(g.nombre) + "</span>" +
       '<span class="cat-grupo-meta">' + g.items.length + (g.items.length === 1 ? " insumo" : " insumos") + "</span></div>" +
       renderTablaInsumos(g.items, categorias) +
       // El "+" de la sección va AL FINAL de su tabla, no en el encabezado:
@@ -376,7 +419,18 @@ function renderFilaInsumo(c, categorias) {
 
     '<span class="mobile-th">Categoría</span><select class="mini-input insumo-categoria" style="width:100%"' + attrs + ' data-campo="categoriaId">' +
     '<option value="">Sin categoría</option>' +
-    categorias.map(function (cat) { return '<option value="' + cat.id + '" ' + (c.categoriaId === cat.id ? "selected" : "") + ">" + esc(cat.nombre) + "</option>"; }).join("") +
+    // La madre es una opción seleccionable por su cuenta (un insumo puede
+    // clasificarse ahí directo, sin subcategoría); sus subcategorías van
+    // agrupadas debajo con <optgroup> — jerarquía nativa del <select>, sin
+    // inventar indentación a mano.
+    categoriasMadre(categorias).map(function (madre) {
+      var opcionMadre = '<option value="' + madre.id + '" ' + (c.categoriaId === madre.id ? "selected" : "") + ">" + esc(madre.nombre) + "</option>";
+      var hijas = subcategoriasDe(categorias, madre.id);
+      if (!hijas.length) return opcionMadre;
+      return opcionMadre + '<optgroup label="' + esc(madre.nombre) + '">' +
+        hijas.map(function (h) { return '<option value="' + h.id + '" ' + (c.categoriaId === h.id ? "selected" : "") + ">" + esc(h.nombre) + "</option>"; }).join("") +
+        "</optgroup>";
+    }).join("") +
     "</select>" +
 
     // Un insumo recién creado no se guarda solo con escribir: se ve un botón
@@ -532,17 +586,44 @@ export var actions = {
     var input = document.getElementById("inp-nueva-categoria");
     var nombre = input ? input.value.trim() : "";
     if (!nombre) return;
-    state.catalogoCategorias = (state.catalogoCategorias || []).concat([{ id: uid(), nombre: nombre }]);
+    state.catalogoCategorias = (state.catalogoCategorias || []).concat([{ id: uid(), nombre: nombre, parentId: "" }]);
+    if (input) input.value = "";
+    persist("catalogoCategorias"); notify();
+  },
+  // Subcategoría de una madre puntual (ej. "Deportivas" dentro de "Telas") —
+  // mismo campo `nombre`, con `parentId` apuntando a la madre. `el` puede ser
+  // el botón (clic) o el input (Enter, ver data-enter-action/teclado.js): los
+  // dos llevan el mismo data-padre, así que sirve cualquiera para saber de
+  // cuál madre es y para encontrar el input de texto correcto.
+  "add-cat-subcategoria": function (el) {
+    var padreId = el.getAttribute("data-padre");
+    if (!padreId) return;
+    var input = document.getElementById("inp-nueva-subcategoria-" + padreId);
+    var nombre = input ? input.value.trim() : "";
+    if (!nombre) return;
+    state.catalogoCategorias = (state.catalogoCategorias || []).concat([{ id: uid(), nombre: nombre, parentId: padreId }]);
     if (input) input.value = "";
     persist("catalogoCategorias"); notify();
   },
   // No borra los insumos que tenía esa categoría — solo los deja "sin
   // categoría" (evitar que borrar por error una categoría se lleve insumos
   // de verdad, ya que aquí vive el costo de producción de todo el taller).
+  // Si tenía subcategorías, tampoco se las lleva: quedan como categoría
+  // propia (se les limpia el parentId) en vez de perderse o quedar huérfanas
+  // apuntando a una madre que ya no existe.
   "remove-cat-categoria": function (el) {
     var id = el.getAttribute("data-id");
-    if (!window.confirm("¿Eliminar esta categoría? Los insumos que tenía quedan sin categoría (no se eliminan).")) return;
-    state.catalogoCategorias = (state.catalogoCategorias || []).filter(function (c) { return c.id !== id; });
+    var hijas = subcategoriasDe(state.catalogoCategorias || [], id);
+    var aviso = "¿Eliminar esta categoría? Los insumos que tenía quedan sin categoría (no se eliminan).";
+    if (hijas.length) {
+      aviso += "\n\nTiene " + hijas.length + (hijas.length === 1 ? " subcategoría (" : " subcategorías (") +
+        hijas.map(function (h) { return h.nombre; }).join(", ") + ") — no se borra" + (hijas.length === 1 ? "" : "n") +
+        ", pasa" + (hijas.length === 1 ? "" : "n") + " a quedar como categoría propia.";
+    }
+    if (!window.confirm(aviso)) return;
+    state.catalogoCategorias = (state.catalogoCategorias || [])
+      .filter(function (c) { return c.id !== id; })
+      .map(function (c) { return c.parentId === id ? Object.assign({}, c, { parentId: "" }) : c; });
     if (state.filtroCatalogoCategoria === id) state.filtroCatalogoCategoria = "todos";
     persist("catalogoCategorias"); persist("catalogoInsumos"); notify();
   },

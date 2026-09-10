@@ -280,7 +280,12 @@ function renderPlantillaCard(p) {
   html += '<div class="cot-col-title">Insumos de la plantilla</div>';
   html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
   insumos.forEach(function (i) {
-    html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';">' +
+    // Reordenar por arrastre con SortableJS (ver bindEvents en core/dom.js y
+    // reordenarInsumosPlantilla más abajo) — mismo mecanismo y misma clase
+    // .ins-table que ya usa Cotizaciones, el manijo se posiciona ABSOLUTO
+    // así que no participa del grid (ver css/cotizaciones.css, compartido).
+    html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';" data-ins-row data-pla="' + p.id + '" data-ins="' + i.id + '">' +
+      '<span class="ins-drag-handle" title="Arrastra para reordenar">⠿</span>' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-pla-ins-campo" data-pla="' + p.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
@@ -646,6 +651,28 @@ export var actions = {
 function mapPla(id, transform) {
   state.plantillasPrendas = (state.plantillasPrendas || []).map(function (p) { return p.id === id ? transform(p) : p; });
   persist("plantillasPrendas"); notify();
+}
+
+// Reordena los insumos de una plantilla tras arrastrar y soltar con
+// SortableJS (ver "patrón genérico 5" en bindEvents, core/dom.js) — mismo
+// mecanismo que ya usa Cotizaciones (reordenarInsumos, modules/
+// cotizaciones.js), pero sin referencias de por medio: acá los insumos
+// cuelgan directo de la plantilla. A diferencia de Cotizaciones, Plantillas
+// no tiene un dock de "sin guardar" propio — mapPla() ya persiste de una en
+// CUALQUIER edición, así que no hace falta replicar la lógica de
+// auto-guardado condicional que sí necesita cotizaciones.js.
+export function reordenarInsumosPlantilla(plaId, nuevoOrdenIds) {
+  mapPla(plaId, function (p) {
+    var actuales = p.insumos || [];
+    var porId = {};
+    actuales.forEach(function (i) { porId[i.id] = i; });
+    var reordenado = nuevoOrdenIds.map(function (id) { return porId[id]; }).filter(Boolean);
+    // Cualquier insumo que no vino en nuevoOrdenIds (no debería pasar, pero
+    // por seguridad) se agrega al final en vez de perderse.
+    actuales.forEach(function (i) { if (reordenado.indexOf(i) === -1) reordenado.push(i); });
+    if (reordenado.length !== actuales.length) return p; // algo no calzó: se deja tal cual, sin arriesgar perder un insumo
+    return Object.assign({}, p, { insumos: reordenado });
+  });
 }
 
 function mapFlujo(id, transform) {

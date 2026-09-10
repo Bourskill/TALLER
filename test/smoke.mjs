@@ -2202,6 +2202,76 @@ click('[data-action="add-cat-item"][data-categoria="' + catTelas.id + '"]');
 const insTela = state.catalogoInsumos[state.catalogoInsumos.length - 1];
 assert(!calcMod2.esInsumoServicio(state.catalogoInsumos.find(i => i.id === insTela.id)), "un insumo en una categoría NO marcada como servicio sigue sin serlo");
 
+// --- Subcategorías (2026-09): una categoría puede tener sus propias
+// subcategorías (el usuario dio el ejemplo exacto: "Telas" -> "Deportivas"/
+// "Polos"/"Licradas"). Se guardan FLAT con parentId (ver
+// categoriasAplanadas/idsConSubcategorias en core/calc.js), no como un
+// árbol anidado — así un insumo sigue apuntando a un solo categoriaId,
+// de cualquiera de los dos niveles. ---
+setInput("#inp-nueva-subcategoria-" + catTelas.id, "Deportivas");
+click('[data-action="add-cat-subcategoria"][data-padre="' + catTelas.id + '"]');
+const subDeportivas = state.catalogoCategorias.find(c => c.nombre === "Deportivas");
+assert(!!subDeportivas && subDeportivas.parentId === catTelas.id, "se crea 'Deportivas' como subcategoría de 'Telas' (parentId apunta a la madre)");
+setInput("#inp-nueva-subcategoria-" + catTelas.id, "Polos");
+click('[data-action="add-cat-subcategoria"][data-padre="' + catTelas.id + '"]');
+const subPolos = state.catalogoCategorias.find(c => c.nombre === "Polos");
+assert(!!subPolos && subPolos.parentId === catTelas.id, "y 'Polos', otra subcategoría de la misma madre");
+assert(!!document.querySelector('.cat-admin-fila.cat-admin-sub input[data-id="' + subDeportivas.id + '"]'), "el panel de administrar categorías muestra la subcategoría indentada bajo su madre");
+
+// Un insumo puede clasificarse directo en la subcategoría, no solo en la madre.
+click('[data-action="filtro-cat-categoria"][data-val="' + subDeportivas.id + '"]');
+click('[data-action="add-cat-item"][data-categoria="' + subDeportivas.id + '"]');
+const insLycra = state.catalogoInsumos[state.catalogoInsumos.length - 1];
+assert(insLycra.categoriaId === subDeportivas.id, "el insumo nuevo queda clasificado directo en la subcategoría 'Deportivas', no en 'Telas'");
+
+// Filtrar por la categoría MADRE también trae lo clasificado en sus
+// subcategorías, no solo lo pegado directo a ella.
+click('[data-action="filtro-cat-categoria"][data-val="' + catTelas.id + '"]');
+render();
+assert(!!document.querySelector("#ins-nombre-" + insTela.id) && !!document.querySelector("#ins-nombre-" + insLycra.id), "filtrar por la categoría MADRE 'Telas' también trae lo clasificado en su subcategoría 'Deportivas'");
+
+// Filtrar por la SUBCATEGORÍA en sí sigue siendo exacto (no trae el resto de la madre).
+click('[data-action="filtro-cat-categoria"][data-val="' + subDeportivas.id + '"]');
+render();
+assert(!document.querySelector("#ins-nombre-" + insTela.id) && !!document.querySelector("#ins-nombre-" + insLycra.id), "filtrar por la SUBCATEGORÍA 'Deportivas' en sí solo trae lo de ella, no el resto de 'Telas'");
+
+// El <select> de categoría de una fila ofrece la madre como opción por su
+// cuenta Y sus subcategorías agrupadas con <optgroup> (jerarquía nativa).
+click('[data-action="filtro-cat-categoria"][data-val="todos"]');
+render();
+const selectCategoriaLycra = document.querySelector('select.insumo-categoria[data-id="' + insLycra.id + '"]');
+assert(!!selectCategoriaLycra.querySelector('option[value="' + catTelas.id + '"]'), "el <select> de categoría de un insumo ofrece la madre 'Telas' como opción seleccionable por su cuenta");
+assert(!!selectCategoriaLycra.querySelector('optgroup[label="Telas"] option[value="' + subDeportivas.id + '"]'), "...y sus subcategorías agrupadas bajo un <optgroup> con el nombre de la madre");
+
+// El explorador de insumos compartido (Cotizaciones/Productos/Plantillas,
+// ver renderExploradorInsumos en core/components.js) hereda la misma
+// jerarquía — se prueba una vez acá, ya que las tres pestañas reusan la
+// misma función.
+state.tab = "cotizaciones";
+state.cotizacionesVista = "nueva";
+state.cotizacionEditando = "";
+render();
+elegirClienteCotizacion("Cliente Picker Subcategoria");
+setInput('[data-form="cotizacion"][data-field="descripcion"]', "Prueba picker subcategoria");
+click('[data-action="add-cotizacion"]');
+const cotSubId = state.cotizaciones[0].id;
+const refSubId = state.cotizaciones[0].referencias[0].id;
+click('[data-action="abrir-insumo-picker"][data-cot="' + cotSubId + '"][data-ref="' + refSubId + '"]');
+assert(!!document.querySelector('.picker-cat.picker-cat-sub[data-val="' + subDeportivas.id + '"]'), "el explorador de insumos compartido también muestra la subcategoría indentada (↳) en su panel lateral");
+click('[data-action="set-insumo-picker-categoria"][data-val="' + catTelas.id + '"]');
+assert(!!document.querySelector('.picker-item input[data-id="' + insLycra.id + '"]'), "filtrar el explorador por la madre 'Telas' también trae el insumo clasificado en su subcategoría 'Deportivas'");
+click('[data-action="cerrar-insumo-picker"]');
+state.tab = "catalogo";
+render();
+
+// Eliminar la MADRE no se lleva las subcategorías: quedan como categoría
+// propia (mismo criterio que ya usan los insumos al perder su categoría —
+// nada se borra en cascada sin que el usuario lo pida explícito).
+click('[data-action="remove-cat-categoria"][data-id="' + catTelas.id + '"]');
+assert(!state.catalogoCategorias.some(c => c.id === catTelas.id), "eliminar 'Telas' sí la quita a ella");
+assert(state.catalogoCategorias.some(c => c.id === subDeportivas.id), "...pero 'Deportivas' NO se borra junto con su madre");
+assert(state.catalogoCategorias.find(c => c.id === subDeportivas.id).parentId === "", "...queda promovida a categoría propia (parentId vacío), no huérfana apuntando a una madre que ya no existe");
+
 // La cotización: la referencia hereda "servicio" al copiar el insumo desde
 // el catálogo (por el picker), aunque la copia no guarde categoriaId.
 state.tab = "cotizaciones";
@@ -2944,6 +3014,30 @@ cotizacionesMod.reordenarInsumos("cot-reorder-1", "ref-reorder-1", ["ins-B", "in
 assert(state.cotSucia === "cot-reorder-1", "si ya había otra edición pendiente en la misma cotización, reordenar NO se auto-guarda — se suma a lo ya pendiente de confirmar");
 state.cotSucia = "";
 state.cotizacionEditando = "";
+
+// ---------- Reordenar insumos de una PLANTILLA (mismo mecanismo que
+// Cotizaciones, sin referencias de por medio — el usuario pidió "poder
+// también arrastrar los insumos para reorganizarlos, en el apartado de
+// plantillas, así como se hace en cotizaciones") ----------
+var plantillasMod = await import("../js/modules/plantillas.js");
+state.plantillasPrendas = [{
+  id: "pla-reorder-1", nombre: "Plantilla reorder", categoria: "", consumoSugerido: "", flujoEstadosId: "", imagenUrl: "",
+  insumos: [
+    { id: "plains-A", nombre: "Tela", unidad: "MT", costo: 1000, tipo: "por_prenda", cantidad: 1 },
+    { id: "plains-B", nombre: "Hilo", unidad: "UND", costo: 500, tipo: "por_prenda", cantidad: 1 },
+    { id: "plains-C", nombre: "Botón", unidad: "UND", costo: 200, tipo: "por_prenda", cantidad: 4 }
+  ]
+}];
+state.tab = "plantillas";
+state.plantillasVista = "plantillas";
+state.plantillaEditando = "pla-reorder-1";
+render();
+assert(!!document.querySelector('.ins-row[data-ins-row][data-pla="pla-reorder-1"][data-ins="plains-A"] .ins-drag-handle'), "cada fila de insumo de una plantilla trae el mismo manijo de arrastre (⠿) que Cotizaciones");
+plantillasMod.reordenarInsumosPlantilla("pla-reorder-1", ["plains-C", "plains-A", "plains-B"]);
+assert(state.plantillasPrendas[0].insumos.map(function (i) { return i.id; }).join(",") === "plains-C,plains-A,plains-B", "reordenarInsumosPlantilla aplica el nuevo orden leído del DOM tras soltar, igual que en Cotizaciones");
+plantillasMod.reordenarInsumosPlantilla("pla-reorder-1", ["plains-C", "plains-A", "plains-B"]);
+assert(state.plantillasPrendas[0].insumos.map(function (i) { return i.id; }).join(",") === "plains-C,plains-A,plains-B", "aplicar el mismo orden de nuevo no cambia nada");
+state.plantillaEditando = "";
 
 // ---------- Buscador de cliente en Cotizaciones (ya no es texto libre) ----------
 // El usuario aclaró: una cotización SIEMPRE es de un contacto real ya

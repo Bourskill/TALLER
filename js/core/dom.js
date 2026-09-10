@@ -1110,7 +1110,16 @@ function bindEvents() {
           var fila = evt.item;
           var ids = Array.prototype.slice.call(tabla.querySelectorAll('.ins-row[data-ins-row]'))
             .map(function (el) { return el.getAttribute("data-ins"); });
-          cotizaciones.reordenarInsumos(fila.getAttribute("data-cot"), fila.getAttribute("data-ref"), ids);
+          // Misma tabla (.ins-table), dos dueños posibles: los insumos de una
+          // REFERENCIA de cotización (data-cot+data-ref en la fila) o los de
+          // una PLANTILLA (data-pla) — se distingue por cuál de los dos trae
+          // la fila que se soltó, en vez de una tabla por dueño.
+          var plaId = fila.getAttribute("data-pla");
+          if (plaId) {
+            plantillas.reordenarInsumosPlantilla(plaId, ids);
+          } else {
+            cotizaciones.reordenarInsumos(fila.getAttribute("data-cot"), fila.getAttribute("data-ref"), ids);
+          }
         }
       });
     });

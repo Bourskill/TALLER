@@ -3,7 +3,7 @@
 // en vez de duplicar el combobox.
 
 import { esc, norm, fmt, num } from "./utils.js";
-import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio } from "./calc.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -368,10 +368,14 @@ export function renderExploradorInsumos(opts) {
   var seleccion = opts.seleccion || [];
   var yaPresentes = opts.yaPresentes || {};
 
+  // Filtrar por una categoría MADRE también trae lo clasificado en
+  // cualquiera de sus subcategorías (ej. "Telas" incluye "Deportivas"); para
+  // una subcategoría (o una madre sin hijas) sigue siendo exacto — ver
+  // idsConSubcategorias en core/calc.js.
   function enCategoria(i, catId) {
     if (catId === "todos") return true;
     if (catId === "sin") return !i.categoriaId || !categorias.some(function (c) { return c.id === i.categoriaId; });
-    return i.categoriaId === catId;
+    return idsConSubcategorias(categorias, catId).indexOf(i.categoriaId) !== -1;
   }
   // El contador de cada categoría respeta la búsqueda activa: si buscas
   // "hilo", cada categoría muestra cuántos hilos tiene, no su total.
@@ -381,9 +385,11 @@ export function renderExploradorInsumos(opts) {
   var visibles = lista.filter(function (i) {
     return enCategoria(i, catActiva) && (!q || norm(i.nombre).indexOf(q) >= 0 || norm(i.unidad || "").indexOf(q) >= 0);
   });
-  var itemsCat = [{ id: "todos", nombre: "Todos los insumos" }]
-    .concat(categorias.map(function (c) { return { id: c.id, nombre: c.nombre }; }))
-    .concat([{ id: "sin", nombre: "Sin categoría" }]);
+  // Aplanado (madre, luego cada una de sus subcategorías) para que el panel
+  // lateral muestre la jerarquía — "↳" en el nivel 1, ver nivel más abajo.
+  var itemsCat = [{ id: "todos", nombre: "Todos los insumos", nivel: 0 }]
+    .concat(categoriasAplanadas(categorias).map(function (c) { return { id: c.id, nombre: c.nombre, nivel: c.nivel }; }))
+    .concat([{ id: "sin", nombre: "Sin categoría", nivel: 0 }]);
 
   var html = '<div class="picker-overlay" data-action="cerrar-insumo-picker">' +
     '<div class="picker-modal" data-action="picker-stop">' +
@@ -407,8 +413,8 @@ export function renderExploradorInsumos(opts) {
     '<div class="picker-side">' +
     itemsCat.map(function (c) {
       var n = cuenta(c.id);
-      return '<button class="picker-cat ' + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-categoria" data-val="' + esc(c.id) + '">' +
-        "<span>" + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
+      return '<button class="picker-cat' + (c.nivel ? " picker-cat-sub" : "") + " " + (catActiva === c.id ? "active" : "") + '" data-action="set-insumo-picker-categoria" data-val="' + esc(c.id) + '">' +
+        "<span>" + (c.nivel ? "↳ " : "") + esc(c.nombre) + '</span><span class="picker-cat-n">' + n + "</span></button>";
     }).join("") +
     "</div>" +
     '<div class="picker-list">';

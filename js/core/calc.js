@@ -1538,6 +1538,45 @@ export function esInsumoServicio(ins) {
   return !!ins.esServicio;
 }
 
+// ---------------------------------------------------------------------------
+// Categorías de insumos: dos niveles (una categoría "madre" y sus
+// subcategorías, ej. Telas → Deportivas/Polos/Licradas) — se guardan FLAT en
+// state.catalogoCategorias con un `parentId` opcional ("" = madre), no como
+// un árbol anidado. Así un insumo sigue apuntando a un solo `categoriaId`
+// (el de cualquiera de los dos niveles) y no hace falta migrar cómo se
+// persisten ni cómo esInsumoServicio() las busca (arriba, sin cambios: una
+// subcategoría es una categoría más, con su propio esServicio independiente,
+// no heredado de la madre). Solo dos niveles a propósito, sin subcategorías
+// de subcategorías — es lo que se pidió y lo que alcanza para organizar un
+// catálogo de insumos sin volverlo un árbol difícil de navegar.
+export function subcategoriasDe(categorias, padreId) {
+  return (categorias || []).filter(function (c) { return (c.parentId || "") === padreId; });
+}
+
+export function categoriasMadre(categorias) {
+  return subcategoriasDe(categorias, "");
+}
+
+// El árbol aplanado en el mismo orden en que se muestra: cada madre seguida
+// de sus subcategorías, cada entrada con su `nivel` (0 o 1) para que quien
+// pinte sepa cuánto indentar.
+export function categoriasAplanadas(categorias) {
+  var out = [];
+  categoriasMadre(categorias).forEach(function (m) {
+    out.push(Object.assign({}, m, { nivel: 0 }));
+    subcategoriasDe(categorias, m.id).forEach(function (h) { out.push(Object.assign({}, h, { nivel: 1 })); });
+  });
+  return out;
+}
+
+// Ids de una categoría Y de todas sus subcategorías — filtrar por la madre
+// "Telas" también tiene que traer lo clasificado en "Deportivas"/"Polos"
+// (sus hijas), no solo lo pegado directo a "Telas". Para una subcategoría
+// (o una categoría sin hijas) devuelve solo su propio id, sin cambiar nada.
+export function idsConSubcategorias(categorias, categoriaId) {
+  return [categoriaId].concat(subcategoriasDe(categorias, categoriaId).map(function (c) { return c.id; }));
+}
+
 // Todas las unidades de medida que ya se han escrito en algún lugar de la
 // app, para que el campo "Unidad" (renderComboUnidad, ver core/components.js)
 // las ofrezca como sugerencia — así "MT", "docena" o cualquier cosa rara que
