@@ -1072,60 +1072,71 @@ export async function generarPDFInternoCotizacion(cot, opts) {
 // cuenta de cobro (el documento que le llega al cliente) también las lleve
 // "tal cual como está guardada" — así que es UNA sola implementación,
 // reutilizada por los dos documentos, no una copia aparte para cada uno.
-function detalleDeRefsProduccion(refs) {
-  var detalle = [];
-  refs.forEach(function (ref) {
-    (ref.detalle || []).forEach(function (d) { detalle.push(Object.assign({ _ref: ref.nombre || "" }, d)); });
-  });
-  return detalle;
+// ¿Hay algo que mostrar en esta sección para alguna referencia? (imagen o
+// tallas/observaciones) — lo usa cada documento para decidir si entra a
+// este bloque o cae a su propio fallback (ver generarPDFPedido).
+function hayInfoProduccion(refs) {
+  return refs.some(function (r) { return r.imagenUrl || (r.detalle || []).length; });
 }
 
-function dibujarTablaDetalleProduccion(doc, y, marginX, titulo, numeroMostrado, logoDataUrl, detalle, multiplesRefs) {
-  var pagDet = opcionesPaginacion(doc, titulo, numeroMostrado, logoDataUrl);
-  doc.autoTable({
-    startY: y,
-    head: multiplesRefs
-      ? [["#", "Referencia", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]]
-      : [["#", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]],
-    body: detalle.map(function (d, i) {
-      return multiplesRefs
-        ? [i + 1, d._ref || "—", d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"]
-        : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"];
-    }),
-    styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
-    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
-    margin: Object.assign({ left: marginX, right: marginX }, pagDet.margin),
-    didDrawPage: pagDet.didDrawPage,
-    theme: "grid"
-  });
-  return doc.lastAutoTable.finalY + 24;
-}
-
-async function dibujarImagenesReferencia(doc, y, marginX, pageH, titulo, numeroMostrado, logoDataUrl, refs) {
-  var refsConImagen = refs.filter(function (r) { return r.imagenUrl; });
-  if (!refsConImagen.length) return y;
+// Por cada referencia: su nombre, la foto (si tiene) y justo debajo SU
+// PROPIA tabla de tallas/observaciones — una referencia completa antes de
+// pasar a la siguiente. El usuario lo pidió explícito: "imagen después
+// tabla, ahí abarca 1 referencia y luego pasas a la siguiente" — antes
+// todas las fotos iban juntas en un bloque y todas las filas de tallas en
+// otro (con una columna "Referencia" para saber de cuál era cada una),
+// obligando a ir y venir entre las dos secciones para armar el cuadro
+// completo de una sola referencia.
+async function dibujarInfoProduccion(doc, y, marginX, pageH, titulo, numeroMostrado, logoDataUrl, refs) {
+  var refsConAlgo = refs.filter(function (r) { return r.imagenUrl || (r.detalle || []).length; });
+  if (!refsConAlgo.length) return y;
   var anchoImg = 141.73; // ~5cm de ancho; el alto se calcula según la proporción real de cada imagen
   var margenInferior = 50;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+
   if (y + 20 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
-  doc.text("IMÁGENES DE REFERENCIA", marginX, y); y += 18;
-  for (var i = 0; i < refsConImagen.length; i++) {
-    var ref = refsConImagen[i];
-    var durl = await cargarImagenDataUrl(ref.imagenUrl);
-    if (!durl) continue;
-    var altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
-    try {
-      var props = doc.getImageProperties(durl);
-      if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
-    } catch (e) { /* se usa el alto por defecto */ }
-    if (y + 14 + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(70, 70, 70);
+  doc.text("INFORMACIÓN DE PRODUCCIÓN", marginX, y); y += 20;
+
+  for (var i = 0; i < refsConAlgo.length; i++) {
+    var ref = refsConAlgo[i];
+    if (y + 16 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(40, 40, 40);
     doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
-    y += 8;
-    try {
-      doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg);
-    } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
-    y += altoImg + 20;
+    y += 14;
+
+    if (ref.imagenUrl) {
+      var durl = await cargarImagenDataUrl(ref.imagenUrl);
+      if (durl) {
+        var altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
+        try {
+          var props = doc.getImageProperties(durl);
+          if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
+        } catch (e) { /* se usa el alto por defecto */ }
+        if (y + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
+        try { doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg); } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
+        y += altoImg + 14;
+      }
+    }
+
+    var detalleRef = ref.detalle || [];
+    if (detalleRef.length) {
+      var pagDet = opcionesPaginacion(doc, titulo, numeroMostrado, logoDataUrl);
+      doc.autoTable({
+        startY: y,
+        head: [["#", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]],
+        body: detalleRef.map(function (d, idx) {
+          return [idx + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"];
+        }),
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
+        headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
+        margin: Object.assign({ left: marginX, right: marginX }, pagDet.margin),
+        didDrawPage: pagDet.didDrawPage,
+        theme: "grid"
+      });
+      y = doc.lastAutoTable.finalY + 20;
+    } else {
+      y += 6;
+    }
   }
   return y;
 }
@@ -1184,10 +1195,9 @@ export async function generarPDFPedido(p) {
   // distintas mantiene sus listados separados.
   var cot = p.cotizacionId ? state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0] : null;
   var refs = cot ? (cot.referencias || []) : [];
-  var detalle = detalleDeRefsProduccion(refs);
 
-  if (detalle.length) {
-    y = dibujarTablaDetalleProduccion(doc, y, marginX, TITULO_PED, docNum, null, detalle, refs.length > 1);
+  if (hayInfoProduccion(refs)) {
+    y = await dibujarInfoProduccion(doc, y, marginX, pageH, TITULO_PED, docNum, null, refs);
   } else if ((p.lineas || []).length) {
     // Pedido rápido (sin cotización de origen): el detalle son sus propias
     // líneas, con la observación y los campos propios que se les hayan puesto
@@ -1225,9 +1235,6 @@ export async function generarPDFPedido(p) {
     obsLines.forEach(function (l) { doc.text(l, marginX, y); y += 13; });
     y += 12;
   }
-
-  // ---------- Imágenes de referencia (de la cotización, si el pedido viene de una) ----------
-  y = await dibujarImagenesReferencia(doc, y, marginX, pageH, TITULO_PED, docNum, null, refs);
 
   // Sin el aviso "documento de uso interno" que llevaba antes (pedido
   // explícito: no hacía falta) — el pie personalizado de Configuración, si
@@ -1357,7 +1364,40 @@ export async function generarPDFCuentaCobro(p, opts) {
     doc.text(row[1], pageW - marginX, finalY, { align: "right" });
     finalY += 16;
   });
-  finalY += 8;
+  finalY += 12;
+
+  // ---------- Abonos: fecha, método y monto de cada pago registrado (más
+  // los reembolsos, si hubo) — antes esto solo se veía en pantalla o en el
+  // recibo individual de CADA abono; acá queda uno solo con todo el
+  // historial junto. El usuario lo pidió explícito: "tampoco hay guardado
+  // el historial de abonos, fechas, monto y método" (el dato ya vivía en
+  // p.abonos, solo no se imprimía) — y "los abonos los quiero antes de
+  // total, y un título Abonos": va ANTES del total (no después del saldo,
+  // como en el primer intento) y con su propio título, igual que
+  // "INFORMACIÓN DE PRODUCCIÓN" más abajo. ----------
+  var abonosPed = p.abonos || [];
+  if (abonosPed.length) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(70, 70, 70);
+    doc.text("ABONOS", marginX, finalY); finalY += 16;
+    var pagAbonos = opcionesPaginacion(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
+    doc.autoTable({
+      startY: finalY,
+      head: [["FECHA", "MÉTODO", "MONTO"]],
+      body: abonosPed.map(function (a) {
+        var esReembolso = a.tipo === "reembolso";
+        var metodo = esReembolso ? ("Reembolso" + (a.motivo ? " — " + a.motivo : "")) : (a.metodoPago || "—");
+        return [a.fecha || "—", metodo, (esReembolso ? "-" : "") + money(a.monto)];
+      }),
+      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 6 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: Object.assign({ left: marginX, right: marginX }, pagAbonos.margin),
+      didDrawPage: pagAbonos.didDrawPage,
+      theme: "grid"
+    });
+    finalY = doc.lastAutoTable.finalY + 20;
+  }
+
   finalY = drawTotalBox(doc, pageW - marginX - 190, finalY, 190, "TOTAL", money(totalConIva));
   finalY += 22;
   doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(80, 80, 80);
@@ -1378,45 +1418,16 @@ export async function generarPDFCuentaCobro(p, opts) {
   if (saldo !== 0) doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
   finalY += 24;
 
-  // ---------- Historial de abonos: fecha, método y monto de cada pago
-  // registrado (más los reembolsos, si hubo) — antes esto solo se veía en
-  // pantalla o en el recibo individual de CADA abono; acá queda uno solo con
-  // todo el historial junto. El usuario lo pidió explícito: "tampoco hay
-  // guardado el historial de abonos, fechas, monto y método" (el dato ya
-  // vivía en p.abonos, solo no se imprimía). ----------
-  var abonosPed = p.abonos || [];
-  if (abonosPed.length) {
-    var pagAbonos = opcionesPaginacion(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
-    doc.autoTable({
-      startY: finalY,
-      head: [["FECHA", "MÉTODO", "MONTO"]],
-      body: abonosPed.map(function (a) {
-        var esReembolso = a.tipo === "reembolso";
-        var metodo = esReembolso ? ("Reembolso" + (a.motivo ? " — " + a.motivo : "")) : (a.metodoPago || "—");
-        return [a.fecha || "—", metodo, (esReembolso ? "-" : "") + money(a.monto)];
-      }),
-      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 6 },
-      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
-      columnStyles: { 2: { halign: "right" } },
-      margin: Object.assign({ left: marginX, right: marginX }, pagAbonos.margin),
-      didDrawPage: pagAbonos.didDrawPage,
-      theme: "grid"
-    });
-    finalY = doc.lastAutoTable.finalY + 24;
-  }
-
   // ---------- Info de producción: mismo detalle de tallas/observaciones y
-  // fotos de referencia que la orden de producción (ver dibujarTabla
-  // DetalleProduccion/dibujarImagenesReferencia arriba) — el usuario pidió
-  // que la cuenta de cobro también las lleve "tal cual como está guardada".
+  // fotos de referencia que la orden de producción (ver dibujarInfoProduccion
+  // arriba), una referencia completa a la vez — el usuario pidió que la
+  // cuenta de cobro también las lleve "tal cual como está guardada".
   // Reusa el mismo `cot` que ya se calculó arriba para armar la tabla de
   // CANTIDAD/DESCRIPCIÓN — no hace falta volver a buscarla.
   var refsCC = cot ? (cot.referencias || []) : [];
-  var detalleCC = detalleDeRefsProduccion(refsCC);
-  if (detalleCC.length) {
-    finalY = dibujarTablaDetalleProduccion(doc, finalY, marginX, "CUENTA DE COBRO", codigo, logoDataUrl, detalleCC, refsCC.length > 1);
+  if (hayInfoProduccion(refsCC)) {
+    finalY = await dibujarInfoProduccion(doc, finalY, marginX, pageH, "CUENTA DE COBRO", codigo, logoDataUrl, refsCC);
   }
-  finalY = await dibujarImagenesReferencia(doc, finalY, marginX, pageH, "CUENTA DE COBRO", codigo, logoDataUrl, refsCC);
 
   await drawPiePagina(doc, finalY, marginX, pageW);
   pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su confianza");

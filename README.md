@@ -258,6 +258,25 @@ Se verificó con una revisión manual cuidadosa del código en vez de una
 prueba automática — 687 aserciones siguen pasando (sin cambio, ya que
 ninguna prueba nueva podía alcanzar este código).
 
+**AJUSTE (mismo día, feedback directo sobre esta ronda):** "le falta algo
+de contexto al pdf... los abonos los quiero antes de total, y un título
+Abono, y para las tablas que se indique es información de producción, y
+que cada [una] se divida por referencia: imagen después tabla, ahí abarca 1
+referencia y luego pasas a la siguiente". Tres retoques sobre lo de arriba:
+- La tabla de abonos se movió de DESPUÉS del saldo a ANTES del total (entre
+  IVA y TOTAL), con su propio título "ABONOS".
+- El bloque de producción ahora lleva el título "INFORMACIÓN DE
+  PRODUCCIÓN" antes de la primera referencia.
+- Las dos funciones separadas (`dibujarTablaDetalleProduccion` con TODAS
+  las filas juntas + una columna "Referencia", y `dibujarImagenesReferencia`
+  con TODAS las fotos en su propio bloque aparte) se fusionaron en una sola
+  (`dibujarInfoProduccion`): por cada referencia, su nombre, su foto y
+  justo debajo SU propia tabla de tallas — una referencia completa antes de
+  pasar a la siguiente, en vez de tener que ir y venir entre el bloque de
+  fotos y el de tablas para armar el cuadro de una sola referencia. Aplica
+  a los DOS documentos (orden de producción y cuenta de cobro), no solo a
+  la cuenta de cobro — es la misma pieza compartida.
+
 ## Registro de cambios — septiembre 2026 (trigésimo sexta ronda: Tab saltaba el botón "Guardar" de un insumo nuevo)
 
 Reporte del usuario: "cuando creo un insumo, puedo desplazarme con el tap
