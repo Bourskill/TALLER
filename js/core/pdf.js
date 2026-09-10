@@ -1064,6 +1064,72 @@ export async function generarPDFInternoCotizacion(cot, opts) {
 // solo lo que hace falta para coser: número de OP, entrega, estado, tallas/
 // observaciones, y ahora también las imágenes de referencia de la cotización
 // (si el pedido viene de una), para que quede clarísimo qué se está haciendo.
+// ---------- info de producción, compartida por la orden de producción Y la
+// cuenta de cobro ----------
+// El detalle de tallas/observaciones y las fotos de referencia viven en la
+// cotización de origen (por referencia) — antes solo se imprimían en la
+// orden de producción (uso interno del taller). El usuario pidió que la
+// cuenta de cobro (el documento que le llega al cliente) también las lleve
+// "tal cual como está guardada" — así que es UNA sola implementación,
+// reutilizada por los dos documentos, no una copia aparte para cada uno.
+function detalleDeRefsProduccion(refs) {
+  var detalle = [];
+  refs.forEach(function (ref) {
+    (ref.detalle || []).forEach(function (d) { detalle.push(Object.assign({ _ref: ref.nombre || "" }, d)); });
+  });
+  return detalle;
+}
+
+function dibujarTablaDetalleProduccion(doc, y, marginX, titulo, numeroMostrado, logoDataUrl, detalle, multiplesRefs) {
+  var pagDet = opcionesPaginacion(doc, titulo, numeroMostrado, logoDataUrl);
+  doc.autoTable({
+    startY: y,
+    head: multiplesRefs
+      ? [["#", "Referencia", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]]
+      : [["#", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]],
+    body: detalle.map(function (d, i) {
+      return multiplesRefs
+        ? [i + 1, d._ref || "—", d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"]
+        : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"];
+    }),
+    styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
+    headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
+    margin: Object.assign({ left: marginX, right: marginX }, pagDet.margin),
+    didDrawPage: pagDet.didDrawPage,
+    theme: "grid"
+  });
+  return doc.lastAutoTable.finalY + 24;
+}
+
+async function dibujarImagenesReferencia(doc, y, marginX, pageH, titulo, numeroMostrado, logoDataUrl, refs) {
+  var refsConImagen = refs.filter(function (r) { return r.imagenUrl; });
+  if (!refsConImagen.length) return y;
+  var anchoImg = 141.73; // ~5cm de ancho; el alto se calcula según la proporción real de cada imagen
+  var margenInferior = 50;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+  if (y + 20 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
+  doc.text("IMÁGENES DE REFERENCIA", marginX, y); y += 18;
+  for (var i = 0; i < refsConImagen.length; i++) {
+    var ref = refsConImagen[i];
+    var durl = await cargarImagenDataUrl(ref.imagenUrl);
+    if (!durl) continue;
+    var altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
+    try {
+      var props = doc.getImageProperties(durl);
+      if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
+    } catch (e) { /* se usa el alto por defecto */ }
+    if (y + 14 + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, titulo, numeroMostrado, logoDataUrl).y; }
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+    doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
+    y += 8;
+    try {
+      doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg);
+    } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
+    y += altoImg + 20;
+  }
+  return y;
+}
+
 export async function generarPDFPedido(p) {
   if (!window.jspdf) { window.alert("No se pudo cargar el generador de PDF (revisa tu conexión a internet)."); return; }
   var jsPDF = window.jspdf.jsPDF;
@@ -1118,31 +1184,10 @@ export async function generarPDFPedido(p) {
   // distintas mantiene sus listados separados.
   var cot = p.cotizacionId ? state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0] : null;
   var refs = cot ? (cot.referencias || []) : [];
-  var multiplesRefs = refs.length > 1;
-  var detalle = [];
-  refs.forEach(function (ref) {
-    (ref.detalle || []).forEach(function (d) { detalle.push(Object.assign({ _ref: ref.nombre || "" }, d)); });
-  });
+  var detalle = detalleDeRefsProduccion(refs);
 
   if (detalle.length) {
-    var pagDetPed = opcionesPaginacion(doc, TITULO_PED, docNum);
-    doc.autoTable({
-      startY: y,
-      head: multiplesRefs
-        ? [["#", "Referencia", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]]
-        : [["#", "Nombre", "Talla", "Número", "Tipo", "Prendas", "Observaciones"]],
-      body: detalle.map(function (d, i) {
-        return multiplesRefs
-          ? [i + 1, d._ref || "—", d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"]
-          : [i + 1, d.nombre || "—", d.talla || "—", d.numero || "—", d.tipo || "—", d.prendas || "—", d.observaciones || "—"];
-      }),
-      styles: { font: "helvetica", fontSize: 9, cellPadding: 6 },
-      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
-      margin: Object.assign({ left: marginX, right: marginX }, pagDetPed.margin),
-      didDrawPage: pagDetPed.didDrawPage,
-      theme: "grid"
-    });
-    y = doc.lastAutoTable.finalY + 24;
+    y = dibujarTablaDetalleProduccion(doc, y, marginX, TITULO_PED, docNum, null, detalle, refs.length > 1);
   } else if ((p.lineas || []).length) {
     // Pedido rápido (sin cotización de origen): el detalle son sus propias
     // líneas, con la observación y los campos propios que se les hayan puesto
@@ -1182,32 +1227,7 @@ export async function generarPDFPedido(p) {
   }
 
   // ---------- Imágenes de referencia (de la cotización, si el pedido viene de una) ----------
-  var refsConImagen = refs.filter(function (r) { return r.imagenUrl; });
-  if (refsConImagen.length) {
-    var anchoImg = 141.73; // ~5cm de ancho; el alto se calcula según la proporción real de cada imagen
-    var margenInferior = 50;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
-    if (y + 20 > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_PED, docNum).y; }
-    doc.text("IMÁGENES DE REFERENCIA", marginX, y); y += 18;
-    for (var i = 0; i < refsConImagen.length; i++) {
-      var ref = refsConImagen[i];
-      var durl = await cargarImagenDataUrl(ref.imagenUrl);
-      if (!durl) continue;
-      var altoImg = anchoImg; // fallback cuadrado si no se puede leer la proporción real
-      try {
-        var props = doc.getImageProperties(durl);
-        if (props && props.width && props.height) altoImg = anchoImg * (props.height / props.width);
-      } catch (e) { /* se usa el alto por defecto */ }
-      if (y + 14 + altoImg > pageH - margenInferior) { doc.addPage(); y = drawHeaderBasic(doc, TITULO_PED, docNum).y; }
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
-      doc.text(ref.nombre || ("Referencia " + (i + 1)), marginX, y);
-      y += 8;
-      try {
-        doc.addImage(durl, formatoImagen(durl), marginX, y, anchoImg, altoImg);
-      } catch (e) { /* imagen no soportada, se omite sin bloquear el PDF */ }
-      y += altoImg + 20;
-    }
-  }
+  y = await dibujarImagenesReferencia(doc, y, marginX, pageH, TITULO_PED, docNum, null, refs);
 
   // Sin el aviso "documento de uso interno" que llevaba antes (pedido
   // explícito: no hacía falta) — el pie personalizado de Configuración, si
@@ -1274,7 +1294,7 @@ export async function generarPDFCuentaCobro(p, opts) {
   var cfg = state.config;
   var logoDataUrl = await cargarLogoDataUrl(cfg);
   var head = drawHeaderBasic(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
-  var pageW = head.pageW, marginX = head.marginX, y = head.y;
+  var pageW = head.pageW, marginX = head.marginX, y = head.y, pageH = doc.internal.pageSize.getHeight();
   var clienteInfo = p.clienteId ? clienteById(p.clienteId) : null;
   var clienteLines = [p.cliente, clienteInfo && clienteInfo.cedula && ("NIT/CC " + clienteInfo.cedula), clienteInfo && clienteInfo.direccion, clienteInfo && clienteInfo.ciudad].filter(Boolean);
 
@@ -1348,13 +1368,56 @@ export async function generarPDFCuentaCobro(p, opts) {
   // Tres casos, no dos: antes un pedido con plata cobrada de más imprimía
   // "PAGADO COMPLETO" seguido de un monto NEGATIVO — la etiqueta decía una
   // cosa y la cifra otra. Se imprime siempre el valor absoluto y la etiqueta
-  // que le corresponde.
+  // que le corresponde. Y cuando el saldo es CERO, ya no se imprime "$0" al
+  // lado — el usuario lo reportó como confuso (¿$0 es lo que se pagó o lo
+  // que falta? "Abonado" ya dice cuánto se pagó, justo arriba): la etiqueta
+  // "PAGADO COMPLETO" sola ya dice todo lo que hace falta decir.
   var etiquetaSaldo = saldo > 0 ? "SALDO PENDIENTE" : (saldo < 0 ? "SALDO A FAVOR DEL CLIENTE" : "PAGADO COMPLETO");
   if (saldo > 0) doc.setTextColor(190, 60, 40); else doc.setTextColor(30, 140, 40);
   doc.text(etiquetaSaldo, pageW - marginX - 160, finalY);
-  doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
-
+  if (saldo !== 0) doc.text(money(Math.abs(saldo)), pageW - marginX, finalY, { align: "right" });
   finalY += 24;
+
+  // ---------- Historial de abonos: fecha, método y monto de cada pago
+  // registrado (más los reembolsos, si hubo) — antes esto solo se veía en
+  // pantalla o en el recibo individual de CADA abono; acá queda uno solo con
+  // todo el historial junto. El usuario lo pidió explícito: "tampoco hay
+  // guardado el historial de abonos, fechas, monto y método" (el dato ya
+  // vivía en p.abonos, solo no se imprimía). ----------
+  var abonosPed = p.abonos || [];
+  if (abonosPed.length) {
+    var pagAbonos = opcionesPaginacion(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
+    doc.autoTable({
+      startY: finalY,
+      head: [["FECHA", "MÉTODO", "MONTO"]],
+      body: abonosPed.map(function (a) {
+        var esReembolso = a.tipo === "reembolso";
+        var metodo = esReembolso ? ("Reembolso" + (a.motivo ? " — " + a.motivo : "")) : (a.metodoPago || "—");
+        return [a.fecha || "—", metodo, (esReembolso ? "-" : "") + money(a.monto)];
+      }),
+      styles: { font: "helvetica", fontSize: 9.5, cellPadding: 6 },
+      headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontSize: 8.5 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: Object.assign({ left: marginX, right: marginX }, pagAbonos.margin),
+      didDrawPage: pagAbonos.didDrawPage,
+      theme: "grid"
+    });
+    finalY = doc.lastAutoTable.finalY + 24;
+  }
+
+  // ---------- Info de producción: mismo detalle de tallas/observaciones y
+  // fotos de referencia que la orden de producción (ver dibujarTabla
+  // DetalleProduccion/dibujarImagenesReferencia arriba) — el usuario pidió
+  // que la cuenta de cobro también las lleve "tal cual como está guardada".
+  // Reusa el mismo `cot` que ya se calculó arriba para armar la tabla de
+  // CANTIDAD/DESCRIPCIÓN — no hace falta volver a buscarla.
+  var refsCC = cot ? (cot.referencias || []) : [];
+  var detalleCC = detalleDeRefsProduccion(refsCC);
+  if (detalleCC.length) {
+    finalY = dibujarTablaDetalleProduccion(doc, finalY, marginX, "CUENTA DE COBRO", codigo, logoDataUrl, detalleCC, refsCC.length > 1);
+  }
+  finalY = await dibujarImagenesReferencia(doc, finalY, marginX, pageH, "CUENTA DE COBRO", codigo, logoDataUrl, refsCC);
+
   await drawPiePagina(doc, finalY, marginX, pageW);
   pintarPieEnTodasLasPaginas(doc, marginX, pageW, "Gracias por su confianza");
 

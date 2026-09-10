@@ -222,6 +222,42 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo séptima ronda: la Cuenta de cobro lleva info de producción + historial de abonos)
+
+Dos pedidos del usuario:
+
+**1. "Agregar la info de producción [a la Cuenta de cobro]: las fotos de
+referencia y la tabla excel con los jugadores, tal cual como está
+guardada".** Ese detalle (tallas/observaciones, con la columna Prendas) y
+las fotos de referencia YA se imprimían en la orden de producción
+(`generarPDFPedido`) — nunca en la Cuenta de cobro, el documento que de
+verdad le llega al cliente. Se extrajeron las dos piezas a funciones
+compartidas (`detalleDeRefsProduccion`, `dibujarTablaDetalleProduccion`,
+`dibujarImagenesReferencia`, `core/pdf.js`) — literalmente "tal cual está
+guardada": la misma tabla, las mismas fotos, sin reimplementar nada — y se
+agregaron también a `generarPDFCuentaCobro`, al final del documento,
+después del resumen financiero.
+
+**2. "'Pagado completo' es confuso porque sale \\$0; tampoco hay guardado
+el historial de abonos, fechas, monto y método".** Dos cosas:
+- El dato de abonos (fecha, monto, método) YA vivía en `p.abonos` (se usa,
+  por ejemplo, en el recibo de un abono individual) — solo nunca se
+  imprimía junto en la Cuenta de cobro. Se agregó una tabla "Historial de
+  abonos" (Fecha/Método/Monto, incluye reembolsos con signo negativo) justo
+  después del saldo.
+- "PAGADO COMPLETO" ya no imprime "\\$0" al lado: la cifra era redundante
+  con "Abonado" (justo arriba) y leía ambiguo (¿es lo pagado o lo
+  pendiente?). Con saldo en cero, la etiqueta sola ya dice todo.
+
+**Nota de honestidad sobre las pruebas:** `test/smoke.mjs` no puede
+verificar el CONTENIDO de ningún PDF — jsPDF no está cargado en el entorno
+de pruebas (jsdom), así que toda esta familia de funciones corta con un
+`return` apenas se llaman, antes de llegar a una sola línea nueva de este
+cambio (mismo límite ya documentado para el resto de los PDF de la app).
+Se verificó con una revisión manual cuidadosa del código en vez de una
+prueba automática — 687 aserciones siguen pasando (sin cambio, ya que
+ninguna prueba nueva podía alcanzar este código).
+
 ## Registro de cambios — septiembre 2026 (trigésimo sexta ronda: Tab saltaba el botón "Guardar" de un insumo nuevo)
 
 Reporte del usuario: "cuando creo un insumo, puedo desplazarme con el tap
