@@ -6,7 +6,7 @@
 // "Pendientes" (ver modules/pendientes.js).
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, fmt, num } from "../core/utils.js";
+import { esc, fmt, num, esUrlImagen } from "../core/utils.js";
 import { calcBalancePeriodo } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
@@ -87,7 +87,7 @@ export function render() {
 // medias (y en el que un descuido borraba el icono sin querer).
 function esEmoji(valor) {
   var v = (valor || "").trim();
-  return !!v && !/^(https?:|data:)/.test(v);
+  return !!v && !esUrlImagen(v);
 }
 
 // Icono del taller: la misma miniatura con subida a Drive que ya usan el pie

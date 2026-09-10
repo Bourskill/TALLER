@@ -222,6 +222,48 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésima ronda: el favicon/ícono de la app ahora sigue al "Icono del taller")
+
+Malentendido de la ronda anterior: al pedir "poder añadir un ícono para la
+aplicación, que no solo salga 'MT'" el usuario quería la POSIBILIDAD de
+subir uno o reutilizar el que ya existe como icono del taller — no que se
+le entregara uno ya elegido. Ese "MT" que veía no era el favicon estático:
+es el mismo que sale en el sidebar (`renderSidebar`, `core/dom.js`) cuando
+`config.logoUrl` está vacío — las iniciales de `config.nombre`. La app YA
+tiene, desde hace rato, "Icono del taller" en Configuración → Marca (imagen
+subida a Drive, o un emoji) — pero ese logo solo se reflejaba ADENTRO de la
+app (sidebar, PDF); el favicon/manifest.json seguían siendo un archivo
+estático aparte, sin relación con lo que el usuario configurara.
+
+**Fix — se conecta lo que ya existía en vez de crear un campo nuevo**
+(`core/appIcon.js`, nuevo): en cada render, si `config.logoUrl` tiene algo
+(imagen o emoji), se aplica en caliente sobre el favicon real (`<link
+rel="icon">` ×2, `<link rel="apple-touch-icon">`) y sobre un manifest.json
+armado en memoria (Blob URL) para que la PWA instalada en el futuro también
+lo lleve. Un emoji no tiene archivo de imagen: se dibuja una vez sobre un
+`<canvas>` (mismo degradado morado de marca) y se exporta como PNG en
+memoria. Si el usuario quita el logo, los 4 `<link>` vuelven exactamente al
+archivo de fábrica (se capturan sus hrefs originales la primera vez, antes
+de tocar nada). Si nunca configuró nada, no se toca nada: se queda el ícono
+de tijeras de la ronda pasada — de fábrica, no las iniciales "MT".
+
+**Límite real, no arreglable desde la app:** un acceso directo YA instalado
+(ícono en el escritorio o pantalla de inicio) tiene su ícono cacheado por el
+sistema operativo desde el momento en que se instaló — ni este cambio ni
+ningún otro lo actualiza retroactivamente. Hay que quitarlo y volver a
+"Instalar app"/"Agregar a inicio" para que tome el que esté vigente en ese
+momento (el logo propio si ya lo configuró, o las tijeras si no).
+
+Se extrajo `esUrlImagen` a `core/utils.js` como única fuente para distinguir
+"esto es una URL de imagen" de "esto es un emoji" — antes `config.js`
+(`esEmoji`) y `core/dom.js` (`renderSidebar`) tenían cada uno su propia
+copia de la misma regex.
+
+Verificado con `test/smoke.mjs` (651 aserciones en total: +9 de esta ronda —
+imagen aplicada a los 3 `<link>` y al manifest, memoización de renders
+repetidos, emoji sin romper el render aunque jsdom no soporte `<canvas>`, y
+el round-trip completo de quitar el logo y volver al ícono de fábrica).
+
 ## Registro de cambios — septiembre 2026 (vigesimonovena ronda: columna "Prendas" en el listado de tallas/observaciones)
 
 Pedido del usuario: "acabo de añadir una columna más [a la plantilla de

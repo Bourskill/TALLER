@@ -11,17 +11,21 @@
      app ABRA sin conexión en vez de mostrar el error del navegador; el
      manejo de que los DATOS sigan funcionando sin red vive aparte, en
      core/guardado.js y core/store.js (ver el comentario al inicio de sw.js). -->
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json" id="link-manifest">
 <!-- Sin "media": se actualiza a mano según el tema que la app tenga activo
      (ver render()/"toggle-tema" en core/dom.js) — así el color de la barra
      del sistema sigue al tema que el usuario ELIGIÓ adentro, no al del
      sistema operativo, que puede no coincidir. -->
 <meta name="theme-color" id="meta-theme-color" content="#0e1015">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<!-- Estos 3 (+ el manifest de arriba) son el ícono DE FÁBRICA. Si el usuario
+     configura un logo/emoji propio en Configuración → Marca, core/appIcon.js
+     los reemplaza en caliente por esos ids — ver el comentario ahí para las
+     limitaciones (no alcanza a un acceso directo ya instalado). -->
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" id="link-favicon-32">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png" id="link-favicon-16">
 <!-- iOS no lee el manifest para el ícono de "Agregar a inicio": necesita este
      link aparte, en PNG (no sirve un SVG ni el manifest.json de arriba). -->
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" id="link-apple-touch-icon">
 <script>
   // Registro del service worker: aislado, sin dependencias de core/app.js —
   // si falla (navegador viejo, bloqueado por una extensión) no afecta en

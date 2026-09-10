@@ -11,13 +11,14 @@
 // Nada más necesita cambiar.
 
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, ETIQUETA_CLAVE } from "./store.js";
-import { esc } from "./utils.js";
+import { esc, esUrlImagen } from "./utils.js";
 import { calcNotificaciones } from "./calc.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout, haySesionPorVencer, renovarSesionAhora } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
 import { subirImagenReferencia } from "./drive.js";
 import { initTeclado, renderAtajos, atajosActions } from "./teclado.js";
+import { actualizarIconoApp } from "./appIcon.js";
 
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
@@ -542,6 +543,7 @@ export function render() {
   revisarBorradoresSinGuardar();
 
   aplicarTema();
+  actualizarIconoApp();
   var active = document.activeElement;
   var activeId = active && active.id ? active.id : null;
   // Sin id propio: se guarda un selector armado con sus atributos data-*
@@ -661,7 +663,7 @@ function renderSidebar() {
   var collapsed = state.ui.sidebarCollapsed;
   var initials = (state.config.nombre || "MT").trim().split(/\s+/).slice(0, 2).map(function (w) { return w[0]; }).join("").toUpperCase();
   var logo = (state.config.logoUrl || "").trim();
-  var isImg = /^(https?:|data:)/.test(logo);
+  var isImg = esUrlImagen(logo);
   var logoInner = isImg ? '<img src="' + esc(logo) + '" alt="" />' : esc(logo || initials || "MT");
 
   // El ícono y el nombre del taller son de marca del negocio — un vendedor

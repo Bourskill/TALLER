@@ -1,6 +1,18 @@
 import { JSDOM } from "jsdom";
 
-const dom = new JSDOM("<!DOCTYPE html><div id=\"app\"></div>", { url: "http://localhost/" });
+// Los 4 <link> del <head> (ver index.html) se replican acá con sus mismos
+// ids e hrefs de fábrica porque core/appIcon.js los busca por id — sin ellos
+// esa función no tiene nada que tocar (no rompe: setHref no hace nada si el
+// elemento no existe) y su comportamiento quedaría totalmente sin probar.
+const dom = new JSDOM(
+  "<!DOCTYPE html><head>" +
+  '<link rel="icon" sizes="32x32" href="icons/favicon-32.png" id="link-favicon-32">' +
+  '<link rel="icon" sizes="16x16" href="icons/favicon-16.png" id="link-favicon-16">' +
+  '<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" id="link-apple-touch-icon">' +
+  '<link rel="manifest" href="manifest.json" id="link-manifest">' +
+  '</head><body><div id="app"></div></body>',
+  { url: "http://localhost/" }
+);
 global.window = dom.window;
 global.document = dom.window.document;
 global.CustomEvent = dom.window.CustomEvent;
@@ -3137,6 +3149,34 @@ tecla("Escape");
 assert(panelUnidadTrasElegir.hidden === true, "Escape cierra el panel");
 assert(state.catalogoInsumos[0].unidad === "ROLLO", "...sin haber cambiado la unidad");
 state.productos = productosPreviosFlecha; state.plantillasPrendas = plantillasPreviasFlecha; state.cotizaciones = cotizacionesPreviasFlecha;
+
+// --- core/appIcon.js: el favicon/manifest de verdad sigue al "Icono del
+// taller" que ya existe en Configuración → Marca (o el logo del sidebar),
+// en vez de quedarse siempre en el archivo estático. Se prueba en su forma
+// pura (mutar state.config + render()) porque no depende de ninguna acción
+// nueva: reutiliza el mismo campo logoUrl de siempre. ---
+state.config.logoUrl = "https://drive.google.com/uc?id=logo-de-prueba";
+render();
+assert(document.getElementById("link-favicon-32").getAttribute("href") === "https://drive.google.com/uc?id=logo-de-prueba", "una imagen en 'Icono del taller' se aplica directo al favicon de 32px");
+assert(document.getElementById("link-favicon-16").getAttribute("href") === "https://drive.google.com/uc?id=logo-de-prueba", "...también al de 16px");
+assert(document.getElementById("link-apple-touch-icon").getAttribute("href") === "https://drive.google.com/uc?id=logo-de-prueba", "...y al apple-touch-icon (lo único que iOS lee para 'Agregar a inicio')");
+assert(document.getElementById("link-manifest").getAttribute("href") !== "manifest.json", "el manifest se reemplaza por uno armado en memoria con ese mismo logo (deja de apuntar al archivo estático)");
+const hrefFaviconConLogo = document.getElementById("link-favicon-32").getAttribute("href");
+render();
+assert(document.getElementById("link-favicon-32").getAttribute("href") === hrefFaviconConLogo, "volver a renderizar sin cambiar el logo no repite el trabajo (misma firma, no se recalcula)");
+// Un emoji no es una URL de imagen: se dibuja a mano en un <canvas>. jsdom no
+// trae soporte real de <canvas> (getContext('2d') da null) — el código debe
+// notar eso y no romper el render, simplemente no tener nada que aplicar.
+state.config.logoUrl = "🧵";
+render();
+assert(!state.lastError, "un emoji como ícono no rompe el render aunque este entorno de pruebas no pueda dibujar en <canvas>");
+assert(document.getElementById("link-favicon-32").getAttribute("href") === hrefFaviconConLogo, "...y sin <canvas> disponible, deja el último favicon aplicado tal cual (no lo deja a medias ni lo borra)");
+// Quitar el logo (botón ✕ de la miniatura, ver "quitar-logo" en modules/config.js)
+// debe devolver el favicon/manifest al de fábrica, no dejar pegado el último aplicado.
+state.config.logoUrl = "";
+render();
+assert(document.getElementById("link-favicon-32").getAttribute("href") === "icons/favicon-32.png", "quitar el logo devuelve el favicon de 32px al archivo de fábrica");
+assert(document.getElementById("link-manifest").getAttribute("href") === "manifest.json", "...y el manifest vuelve a apuntar al archivo estático, no se queda con el Blob URL del logo ya quitado");
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

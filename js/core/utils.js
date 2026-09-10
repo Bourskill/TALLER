@@ -1,6 +1,16 @@
 // Funciones puras y reutilizables. No tocan estado ni el DOM (salvo `val`,
 // que lee un input dentro de un contenedor ya renderizado).
 
+// `config.logoUrl` (y otros campos "imagen o emoji" del mismo estilo) guardan
+// dos cosas distintas con un solo campo de texto: una URL de imagen subida a
+// Drive, o un emoji corto. Esta es la única fuente de verdad para distinguir
+// cuál es cuál — antes cada sitio que lo necesitaba (el sidebar, Config, y
+// ahora el ícono real del navegador/PWA) reescribía su propia variante de
+// esta misma regex por separado.
+export function esUrlImagen(valor) {
+  return /^(https?:|data:)/.test((valor || "").trim());
+}
+
 // Convierte un Date a "YYYY-MM-DD" en hora LOCAL (a diferencia de
 // Date#toISOString, que usa UTC y puede correr la fecha un día según la
 // zona horaria del navegador). Se usa para mandar fechas de un solo día a
