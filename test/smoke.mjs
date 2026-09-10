@@ -243,6 +243,25 @@ const catItemId = state.catalogoInsumos[state.catalogoInsumos.length - 1].id;
 // que escribir la primera letra del nombre ya reubicaba la fila en su lugar
 // alfabético real, lejos de donde se seguía trabajando.
 assert(state.catalogoInsumoNuevoId === catItemId, "el insumo recién creado queda marcado como borrador sin guardar todavía");
+
+// El usuario reportó: "el botón de guardar se lo salta [con Tab], sí o sí
+// me toca con el mouse". Causa: el botón nacía con `disabled` hasta que
+// hubiera un nombre — pero un botón deshabilitado desaparece de los
+// candidatos a Tab justo en el momento en que Tab decide "a dónde voy"
+// (antes de que el cambio en Nombre termine de redibujar y lo habilite), así
+// que Tab lo saltaba siempre, sin importar qué tan rápido o lento se
+// escribiera. Fix: el botón ya nace SIN disabled (tabulable de una), y si de
+// verdad falta el nombre, avisa en vez de guardar en silencio.
+const botonGuardarNuevo = document.querySelector('[data-action="guardar-cat-item-nuevo"][data-id="' + catItemId + '"]');
+assert(!!botonGuardarNuevo && !botonGuardarNuevo.hasAttribute("disabled"), "el botón 'Guardar' de un insumo nuevo NUNCA se deshabilita — así Tab no lo salta esperando a que el nombre se termine de escribir");
+var alertaGuardarVacio = "";
+var alertaOriginalGuardarVacio = global.alert;
+global.window.alert = global.alert = function (msg) { alertaGuardarVacio = msg; };
+click('[data-action="guardar-cat-item-nuevo"][data-id="' + catItemId + '"]');
+global.window.alert = global.alert = alertaOriginalGuardarVacio;
+assert(state.catalogoInsumoNuevoId === catItemId, "clicar 'Guardar' sin nombre NO lo confirma (sigue siendo el borrador sin guardar)");
+assert(alertaGuardarVacio.toLowerCase().indexOf("nombre") !== -1, "...y avisa qué falta, en vez de no hacer nada en silencio");
+
 state.catalogoInsumos.unshift({ id: "ins-zzz-test", nombre: "Zíper", unidad: "UND", costo: 500, tipo: "por_prenda", categoriaId: "", proveedorId: "" });
 render();
 setChange("#ins-nombre-" + catItemId, "Algodón"); // alfabéticamente antes que "Zíper"

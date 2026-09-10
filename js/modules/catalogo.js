@@ -1,5 +1,5 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
-import { esc, num, uid } from "../core/utils.js";
+import { esc, num, uid, exigirCampos } from "../core/utils.js";
 import { TIPOS_COSTO } from "../core/constants.js";
 import { renderTipoCostoOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
@@ -446,7 +446,15 @@ function renderFilaInsumo(c, categorias) {
     // pelearle espacio a ninguna columna.
     (esNuevoSinGuardar
       ? '<div class="insumo-nuevo-acciones">' +
-        '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '" title="' + (c.nombre.trim() ? "" : "Ponle un nombre primero") + '"' + (c.nombre.trim() ? "" : " disabled") + '>✓ Guardar</button>' +
+        // Sin "disabled" a propósito (aunque le falte el nombre): un botón
+        // deshabilitado desaparece de los candidatos a Tab (ver
+        // CAMPOS_TABULABLES en core/dom.js) justo en el momento en que Tab
+        // decide "a dónde voy" — ANTES de que el cambio en el campo Nombre
+        // termine de redibujar y lo habilite. El usuario lo reportó: "el
+        // botón de guardar se lo salta, sí o sí me toca con el mouse". Ahora
+        // siempre es tabulable; si de verdad falta el nombre, la propia
+        // acción avisa en vez de silenciarse (ver "guardar-cat-item-nuevo").
+        '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '">✓ Guardar</button>' +
         '<button class="btn ghost small" data-action="remove-cat-item" data-id="' + c.id + '" title="Descartar, no se guarda" aria-label="Descartar insumo">Descartar</button>' +
         "</div>"
       : '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>') +
@@ -517,7 +525,10 @@ export var actions = {
   "guardar-cat-item-nuevo": function (el) {
     var id = el.getAttribute("data-id");
     var item = (state.catalogoInsumos || []).filter(function (c) { return c.id === id; })[0];
-    if (!item || !item.nombre.trim()) return;
+    if (!item) return;
+    // El botón ya no se deshabilita solo (ver renderFilaInsumo) — si falta el
+    // nombre, se avisa en vez de no hacer nada en silencio.
+    if (!exigirCampos([["Nombre del insumo", item.nombre]])) return;
     if (state.catalogoInsumoNuevoId === id) state.catalogoInsumoNuevoId = "";
     notify();
   },

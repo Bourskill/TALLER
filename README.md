@@ -222,6 +222,41 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo sexta ronda: Tab saltaba el botón "Guardar" de un insumo nuevo)
+
+Reporte del usuario: "cuando creo un insumo, puedo desplazarme con el tap
+[Tab]... pero pasa que el botón de guardar se lo salta, sí o sí me toca con
+el mouse".
+
+**Causa:** el botón "✓ Guardar" de un insumo recién creado nacía con
+`disabled` hasta que hubiera un nombre (`renderFilaInsumo`,
+`modules/catalogo.js`). El mecanismo que calcula "a dónde va Tab" (ver
+[[ronda_seis_pedidos_2026-09]], `core/dom.js`) corre en la fase de CAPTURA
+de `keydown` — es decir, ANTES de que el campo que se está dejando dispare
+su "change" y redibuje. En ese instante el nombre todavía no se había
+confirmado en `state`, así que el botón SEGUÍA apareciendo deshabilitado en
+el DOM de ese momento, y `CAMPOS_TABULABLES` (que excluye explícitamente los
+botones deshabilitados) lo descartaba como candidato — Tab lo saltaba
+siempre, sin importar qué tan rápido o lento se escribiera el nombre.
+
+**Fix** (`modules/catalogo.js`): el botón ya no se deshabilita — es tabulable
+desde que aparece. Si de verdad falta el nombre, `guardar-cat-item-nuevo`
+avisa con `exigirCampos` (el mismo mecanismo de "falta completar este dato"
+que usa el resto de la app) en vez de no hacer nada en silencio.
+
+Sobre el otro punto de la misma sesión ("se actualiza mucho... falta
+optimización" al tabular entre campos): es un costo real y conocido de
+cómo está armado el motor de render de toda la app — cada campo dispara un
+redibujado completo de la pestaña, no un parche puntual. Ya se evaluó antes
+migrar a una librería de diffing de DOM (morphdom) para resolver esto de
+raíz (ver [[ronda_seis_pedidos_2026-09]]) y se dejó como mejora a futuro, no
+aplicada, por el riesgo de terminar con manejadores de eventos duplicados en
+una app que mueve plata real — no se tocó de nuevo acá.
+
+Verificado con `test/smoke.mjs` (687 aserciones en total: +3 de esta ronda,
+confirmando que el botón nunca lleva `disabled` y que "Guardar" sin nombre
+avisa en vez de confirmar el insumo).
+
 ## Registro de cambios — septiembre 2026 (trigésimo quinta ronda: se perdía trabajo real al recargar — el mismo problema de fondo, más grande de lo que parecía)
 
 Reporte serio del usuario: "la app me volvió a dejar perder los datos...
