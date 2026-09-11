@@ -246,6 +246,12 @@ function renderDeudasActivas() {
     "</select></div>" +
     '<div class="field' + (fd.periodo === "quincenal" ? " wide" : "") + '"><label>Día(s) de pago (opcional)</label>' + renderSelectorDiaPago("set-deuda-form-dia", "", fd.periodo || "mensual", fd.diasPago || []) + "</div>" +
     '<div class="field"><label>Vence (opcional, si no usas periodo)</label><input type="date" data-form="deuda" data-field="fechaVencimiento" value="' + esc(fd.fechaVencimiento) + '" /></div>' +
+    '<div class="field wide"><label style="display:flex;align-items:center;gap:6px;font-weight:400;">' +
+    '<input type="checkbox" ' + (fd.trajoDineroEfectivo ? "checked" : "") + ' data-action-change="toggle-deuda-trajo-dinero" /> ' +
+    "Esta deuda trajo dinero en EFECTIVO a la caja (ej. un préstamo) — se registra de una vez como ingreso en Finanzas" +
+    "</label>" +
+    renderHelp("Déjalo SIN marcar si es una deuda con un proveedor u otra obligación que no metió plata a la caja (ej. te fiaron mercancía) — ahí no hay ningún ingreso real que registrar.") +
+    "</div>" +
     '<button class="btn" data-action="add-deuda">Agregar deuda</button>' +
     "</div>");
   html += "</div>";
@@ -832,14 +838,33 @@ export var actions = {
     var fd = state.formDeuda;
     if (!exigirCampos([["Concepto", fd.concepto], ["Monto total", fd.monto]])) return;
     var diasElegidos = (fd.diasPago || []).filter(function (d) { return d !== undefined && d !== null && !isNaN(d); });
-    state.deudas.unshift({
+    var nuevaDeuda = {
       id: uid(), concepto: fd.concepto, contraparte: fd.contraparte, monto: num(fd.monto),
       fechaVencimiento: fd.fechaVencimiento || "", cuotas: num(fd.cuotas) || 1, cuotasPagadas: 0,
       periodo: fd.periodo || "mensual", diasPago: diasElegidos, historial: [], calendarEventId: ""
-    });
-    state.formDeuda = { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [] };
+    };
+    state.deudas.unshift(nuevaDeuda);
+    // Solo si el usuario marcó que esta deuda de verdad metió plata a la
+    // caja (un préstamo, no una deuda con un proveedor que fio mercancía):
+    // antes NINGUNA deuda generaba su ingreso — el préstamo quedaba
+    // registrado como obligación futura pero la plata que sí entró nunca
+    // aparecía en Finanzas, así que gastarla después dejaba Caja/Balance/
+    // Ganancia negativos sin explicación. Ver CONTABILIDAD.md.
+    if (fd.trajoDineroEfectivo) {
+      state.tx.unshift({
+        id: uid(), tipo: "ingreso", concepto: "Préstamo recibido — " + fd.concepto,
+        monto: num(fd.monto), contraparte: fd.contraparte, fecha: todayStr(), pedidoId: "",
+        origenDeudaIngresoId: nuevaDeuda.id
+      });
+      persist("tx");
+    }
+    state.formDeuda = { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [], trajoDineroEfectivo: false };
     persist("deudas"); notify();
     sincronizarEventoDeuda(state.deudas[0]);
+  },
+  "toggle-deuda-trajo-dinero": function (el) {
+    state.formDeuda.trajoDineroEfectivo = !!el.checked;
+    notify();
   },
   "set-deuda-form-periodo": function (el) {
     state.formDeuda.periodo = el.value;
@@ -884,6 +909,19 @@ export var actions = {
       });
     });
     state.deudaEditando = "";
+    // Si esta deuda había generado su ingreso de caja (checkbox marcado al
+    // crearla), el monto/concepto/contraparte editados acá NO pueden
+    // quedarse solo en state.deudas — el tx vinculado tiene que reflejar
+    // el mismo número, igual que guardar-abono-edit sincroniza el tx del
+    // abono. Sin esto, corregir un monto mal digitado dejaría la deuda
+    // diciendo una cosa y Finanzas otra.
+    var txIngreso = state.tx.filter(function (t) { return t.origenDeudaIngresoId === id; })[0];
+    if (txIngreso) {
+      txIngreso.monto = monto;
+      txIngreso.concepto = "Préstamo recibido — " + concepto;
+      txIngreso.contraparte = g("edit-contraparte");
+      persist("tx");
+    }
     persist("deudas"); notify();
     var actualizada = state.deudas.filter(function (d) { return d.id === id; })[0];
     if (actualizada) sincronizarEventoDeuda(actualizada);
@@ -893,8 +931,10 @@ export var actions = {
     var d = state.deudas.filter(function (d) { return d.id === id; })[0];
     if (!d) return;
     var tieneHistorial = d.historial && d.historial.length;
+    var tieneIngreso = state.tx.some(function (t) { return t.origenDeudaIngresoId === id; });
     var msg = '¿Eliminar la deuda "' + d.concepto + '"?\n\nNo se puede deshacer.' +
-      (tieneHistorial ? " Se pierde su historial de " + d.historial.length + (d.historial.length === 1 ? " pago registrado" : " pagos registrados") + " (los movimientos ya creados en Finanzas NO se eliminan)." : "");
+      (tieneHistorial ? " Se pierde su historial de " + d.historial.length + (d.historial.length === 1 ? " pago registrado" : " pagos registrados") + " (los movimientos ya creados en Finanzas NO se eliminan)." : "") +
+      (tieneIngreso ? " El ingreso que esta deuda registró en Finanzas tampoco se elimina: queda suelto, se puede borrar aparte desde ahí si ya no corresponde." : "");
     if (!window.confirm(msg)) return;
     state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
     persist("deudas"); notify();

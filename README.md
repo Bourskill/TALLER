@@ -228,6 +228,42 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésima ronda: primeros dos riesgos de la auditoría financiera corregidos)
+
+El usuario pidió "empieza a corregir" sobre los 9 riesgos de
+[CONTABILIDAD.md](CONTABILIDAD.md). Primeros dos:
+
+**1. Registrar una deuda (préstamo) no generaba el ingreso de caja
+correspondiente.** Antes de escribir el fix se encontró un matiz que
+cambiaba todo: el formulario dice explícito "Préstamos, **proveedores**
+u otras deudas" — no toda deuda trae plata en efectivo (un crédito de
+proveedor no la trae, solo mercancía fiada). Automatizarlo sin preguntar
+habría cambiado un descuadre por otro. Se le preguntó al usuario y eligió
+un checkbox explícito: "¿Agregar deuda" ahora tiene "¿Esta deuda trajo
+dinero en efectivo a la caja?" — sin marcar (default), no pasa nada
+nuevo; marcado, crea el `tx` ingreso correspondiente, protegido con una
+nueva marca de origen (`origenDeudaIngresoId`) y sincronizado si se edita
+el monto de la deuda después. Al implementarlo se descubrió (y corrigió
+de una vez, por ser el mismo mecanismo) que 4 campos de marca de origen
+ya existentes (`origenReembolsoId`, `origenVentaConsignacionId`,
+`origenComisionConsignacionId`, `origenCompraClave`) faltaban en el
+esquema de columnas de la hoja "Movimientos" — se perdían en silencio en
+cada guardado/recarga, dejando esos movimientos sin protección de borrado
+después de recargar la página. Este último hallazgo no estaba en la
+auditoría original; se sumó a CONTABILIDAD.md.
+
+**2. `calcPedidosRango` calculaba su propio saldo SIN IVA**, con una
+fórmula paralela e independiente de `calcSaldoPedido` — reproducía tal
+cual el bug ya corregido una vez (un pedido pagado por completo con IVA
+activo daba saldo NEGATIVO por el monto exacto del IVA). Fix de una
+línea: usar `calcSaldoPedido(p)` en vez de `total - abonado` crudo. Como
+"Desglose de pedidos" del Resumen y el PDF de reporte financiero leen de
+la misma función, el fix corrige los dos documentos a la vez.
+
+Ambos verificados con pruebas nuevas en `test/smoke.mjs` (revirtiendo el
+fix a propósito para confirmar que fallaban antes de dejarlo así) —
+711/711 pasando. Quedan 7 riesgos por corregir.
+
 ## Registro de cambios — septiembre 2026 (trigésimo novena ronda: auditoría financiera completa)
 
 El usuario preguntó si existe "una guía/librería" para el tema

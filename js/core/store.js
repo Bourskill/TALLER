@@ -305,7 +305,7 @@ export const state = {
   // toggle-nomina-pago en modules/pendientes.js).
   formNominaPago: { bono: "", descuento: "", fecha: "", servicios: [] },
   formGastoFijo: { nombre: "", monto: "", periodo: "mensual", diasPago: [] },
-  formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [] },
+  formDeuda: { concepto: "", monto: "", contraparte: "", fechaVencimiento: "", cuotas: "", periodo: "mensual", diasPago: [], trajoDineroEfectivo: false },
   deudaEditando: "", // id de la deuda actualmente en modo edición (o "")
   deudasVista: "activas", // "activas" | "historial" — pestañas de la sección Deudas en Pendientes
   comisionVendedorExpandido: "", // nombre del vendedor con el detalle desplegado en "Comisiones de vendedores" (o "")

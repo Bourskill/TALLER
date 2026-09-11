@@ -19,10 +19,26 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   { key: "gastoFijoId", header: "gasto_fijo_id" },
   { key: "deudaId", header: "deuda_id" },
   { key: "origenAbonoId", header: "origen_abono_id" },
+  // Estas cuatro faltaban en este esquema: MARCAS_ORIGEN_SISTEMA
+  // (core/calc.js) las usa para proteger el movimiento de un reembolso,
+  // una venta/comisión de consignación o una compra sincronizada desde
+  // una cotización — pero como esta tabla solo persiste las columnas que
+  // aparecen acá, esos cuatro campos se perdían en silencio en cada
+  // guardado/recarga: el movimiento quedaba SIN su marca de origen, sin
+  // protección de borrado y sin el botón "Ver origen", como si lo hubiera
+  // creado alguien a mano. Se detectó al agregar origenDeudaIngresoId (ver
+  // abajo) y revisar que el mecanismo de protección persistiera de verdad.
+  { key: "origenReembolsoId", header: "origen_reembolso_id" },
+  { key: "origenVentaConsignacionId", header: "origen_venta_consignacion_id" },
+  { key: "origenComisionConsignacionId", header: "origen_comision_consignacion_id" },
+  { key: "origenCompraClave", header: "origen_compra_clave" },
   { key: "origenGastoFijoPeriodo", header: "origen_gasto_fijo_periodo" },
   { key: "origenComisionCotId", header: "origen_comision_cotizacion_id" },
   { key: "origenComisionPedidoId", header: "origen_comision_pedido_id" },
   { key: "origenGastoId", header: "origen_gasto_real_id" },
+  // El ingreso en caja registrado al crear una deuda/préstamo marcado como
+  // "trajo dinero en efectivo" (ver "add-deuda", modules/pendientes.js).
+  { key: "origenDeudaIngresoId", header: "origen_deuda_ingreso_id" },
   { key: "esInsumo", header: "es_compra_insumo" },
   { key: "proveedorId", header: "proveedor_id" },
   { key: "insumoNombre", header: "insumo_nombre" },

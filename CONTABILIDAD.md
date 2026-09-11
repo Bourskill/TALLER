@@ -185,51 +185,62 @@ casos borde de uso real). 23 hallazgos en total.
 8. Cancelar un pedido abonado en varias partes no descuadra nada.
 9. Las fechas de abonos/movimientos usan hora LOCAL, no UTC (ya corregido un bug histórico de "se pasa al día siguiente de noche").
 
-### 🔴 Riesgos confirmados (9) — con escenario concreto, pendientes de decidir qué hacer
+### ✅ Riesgos ya corregidos (2 de 9, septiembre 2026)
+
+- **Registrar una deuda (préstamo) no generaba el ingreso de caja
+  correspondiente.** Ahora el formulario de "Agregar deuda" tiene un
+  checkbox explícito ("¿esta deuda trajo dinero en efectivo a la caja?")
+  — se preguntó al usuario en vez de adivinar, porque "deuda" también
+  cubre crédito de proveedor (mercancía fiada, sin plata real de por
+  medio) y automatizarlo siempre habría sido igual de incorrecto que no
+  hacer nada. Con el checkbox marcado, se crea el `tx` de ingreso
+  (marcado `origenDeudaIngresoId`, protegido contra borrado suelto,
+  sincronizado si se edita el monto de la deuda después). De paso se
+  encontraron y corrigieron 4 campos de marca de origen
+  (`origenReembolsoId`, `origenVentaConsignacionId`,
+  `origenComisionConsignacionId`, `origenCompraClave`) que faltaban en
+  el esquema de la hoja de Movimientos — se perdían en silencio en cada
+  guardado/recarga, dejando esos movimientos sin protección de borrado
+  después de recargar la página. (`pendientes.js`, `calc.js`,
+  `sheetsEsquemas.js`)
+- **`calcPedidosRango` calculaba su propio saldo SIN IVA**, reproduciendo
+  el mismo bug ya corregido una vez en `calcSaldoPedido`. Ahora usa
+  `calcSaldoPedido(p)` directamente — un pedido pagado por completo con
+  IVA activo da saldo $0, no un negativo del monto exacto del IVA.
+  (`calc.js:2147`)
+
+### 🔴 Riesgos pendientes (7)
 
 1. **"Por pagar" no incluye los saldos a favor del cliente.** Si tres
    pedidos quedan con $50.000, $80.000 y $120.000 pagados de más (por
    abono mal digitado o devolución de mercancía), esos $250.000 que el
    taller debe devolver NO aparecen en el KPI "Por pagar" — solo se ven
    si se revisa pedido por pedido. (`calc.js:546-572`)
-2. **Registrar una deuda (préstamo) no genera el ingreso de caja
-   correspondiente.** Tomar un préstamo de $3.000.000 lo registra
-   correctamente en "Por pagar", pero nunca crea el `tx` de ingreso por
-   la plata que de verdad entró. Si luego se gasta esa plata (registrando
-   el gasto real), Caja/Balance/Ganancia caen $3.000.000 de más sin que
-   la app explique por qué. (`pendientes.js:831-843`, contrastar con `pagar-deuda`)
-3. **`calcPedidosRango` calcula su propio saldo SIN IVA**, con una
-   fórmula independiente de `calcSaldoPedido` — reproduce tal cual el bug
-   que ya se corrigió una vez (saldo negativo exacto al IVA cuando se
-   paga todo). Afecta la tabla "Desglose de pedidos" del Resumen (la
-   pinta en verde/positivo cuando en realidad hay IVA sin cobrar) y la
-   tabla de pedidos del PDF de reporte financiero — puede mostrar un
-   número distinto al KPI "Por cobrar" para el mismo periodo. (`calc.js:2147-2168`)
-4. **Pagar la cuota de una deuda no tiene ruta real de reversión.** El
+2. **Pagar la cuota de una deuda no tiene ruta real de reversión.** El
    mensaje de bloqueo de borrado promete "Pendientes → Deudas" como
    lugar para deshacer un pago, pero no existe ningún botón "deshacer
    pago" ahí — un clic por error en "Pagar" deja el movimiento atrapado.
-5. **Marcar un gasto fijo pagado/pendiente solo actúa sobre el periodo
+3. **Marcar un gasto fijo pagado/pendiente solo actúa sobre el periodo
    ACTUAL**, pero el bloqueo de borrado del `tx` es más amplio (bloquea
    mientras el gasto fijo exista, sin mirar el periodo) — un `tx` de un
    gasto fijo pagado hace 3 meses queda bloqueado para siempre, sin una
    forma real de borrarlo.
-6. **Marcar "Sí"/"Servicio" en "Compras del pedido" de una cotización SIN
+4. **Marcar "Sí"/"Servicio" en "Compras del pedido" de una cotización SIN
    convertir puede generar un gasto real (o "disponible" para pagar
    nómina) sin que exista pedido ni cobro.** El botón alternativo
    ("registrar el estimado completo") sí está bloqueado hasta que la
    cotización esté convertida — pero el camino principal
    (`sincronizar-compras-finanzas`) no tiene ese mismo bloqueo.
-7. **Editar un abono viejo (`guardar-abono-edit`) no valida contra el
+5. **Editar un abono viejo (`guardar-abono-edit`) no valida contra el
    saldo del pedido.** Registrar un abono nuevo sí pide confirmación si
    supera el saldo — pero editar uno ya existente no, así que un error
    de digitación al editar puede inventar un "saldo a favor" grande sin
    ningún aviso.
-8. **Doble clic al registrar un abono CON comprobante adjunto puede
+6. **Doble clic al registrar un abono CON comprobante adjunto puede
    duplicarlo.** Sin archivo adjunto el formulario ya está protegido;
    con archivo, la lectura es asíncrona (`FileReader`) y dos clics rápidos
    pueden disparar dos registros del mismo pago real.
-9. **`toggle-gasto-fijo-pagado` no pide confirmación**, a diferencia de
+7. **`toggle-gasto-fijo-pagado` no pide confirmación**, a diferencia de
    `toggle-comision` que sí se corrigió por el mismo motivo (pastilla que
    parece solo una etiqueta de estado) — un doble clic crea y borra un
    movimiento real sin que el usuario se entere.
@@ -270,12 +281,9 @@ casos borde de uso real). 23 hallazgos en total.
 
 ## Próximos pasos
 
-Esto es un mapa, no una lista de tareas ya aprobadas. La sugerencia es
-revisar los 8 riesgos y decidir, con calma y no en medio de otra tarea,
-cuáles vale la pena corregir primero — probablemente empezando por el
-**#3 (saldo sin IVA en `calcPedidosRango`)** por ser el mismo bug ya
-corregido una vez en otro lugar, y el **#2 (deuda sin su ingreso de
-caja)** por el tamaño del descuadre que puede producir. Las 5 preguntas
-de negocio no tienen una respuesta "correcta" de código — son para
-conversarlas, posiblemente con un contador en el caso del IVA de
-compras.
+Esto es un mapa, no una lista de tareas ya aprobadas. Los dos riesgos más
+urgentes (saldo sin IVA en `calcPedidosRango` y la deuda sin su ingreso
+de caja) ya se corrigieron. Quedan 7 pendientes — revisarlos con calma y
+decidir cuáles priorizar. Las 5 preguntas de negocio no tienen una
+respuesta "correcta" de código — son para conversarlas, posiblemente con
+un contador en el caso del IVA de compras.

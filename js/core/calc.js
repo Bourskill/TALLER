@@ -383,6 +383,14 @@ var MARCAS_ORIGEN_SISTEMA = [
       return state.deudas.some(function (d) { return d.id === t.deudaId; }) ||
         state.deudasHistorial.some(function (d) { return d.id === t.deudaId; });
     }
+  },
+  {
+    campo: "origenDeudaIngresoId", que: "la plata que entró en efectivo al registrar un préstamo/deuda",
+    donde: "Pendientes → Deudas → eliminar la deuda completa (el movimiento queda huérfano y se puede borrar aparte, no se borra junto con ella)",
+    existe: function (t) {
+      return state.deudas.some(function (d) { return d.id === t.origenDeudaIngresoId; }) ||
+        state.deudasHistorial.some(function (d) { return d.id === t.origenDeudaIngresoId; });
+    }
   }
 ];
 
@@ -2156,8 +2164,17 @@ export function calcPedidosRango(desde, hasta) {
         id: p.id, fecha: fechaPedido(p), numeroOp: p.numeroOp || "—",
         cliente: p.cliente || "—", descripcion: p.descripcion || "—",
         cantidad: num(p.cantidad),
+        // "total"/"ganancia" se quedan SIN IVA (base) a propósito — es la
+        // misma cifra que usa "Ganancia" en toda la app, el IVA nunca es
+        // utilidad del taller (ver core/calc.js:484-500). "saldo" en
+        // cambio usa calcSaldoPedido, que SÍ suma el IVA: antes esta fila
+        // calculaba total-abonado con el total crudo, reproduciendo el
+        // mismo bug ya corregido en calcSaldoPedido — un pedido pagado
+        // por completo con IVA activo daba un saldo negativo de
+        // exactamente el IVA, y esta tabla (y el PDF que la reutiliza) lo
+        // pintaba en verde como si fuera a favor del cliente.
         total: total, costo: num(p.costo), ganancia: total - num(p.costo),
-        abonado: abonado, saldo: total - abonado,
+        abonado: abonado, saldo: calcSaldoPedido(p),
         // El cancelado SIGUE apareciendo en la lista —es el registro de que
         // existió— pero va marcado, y calcResumenPedidos lo deja fuera de los
         // totales para no contar como vendido algo que no se vendió.

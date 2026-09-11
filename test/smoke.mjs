@@ -628,6 +628,54 @@ click('[data-action="add-deuda"]');
 assert(state.deudas.length === 1, "agrega deuda");
 assert(state.deudas[0].concepto === "Préstamo máquina", "deuda nace con los datos del formulario");
 assert(state.deudasHistorial.length === 0, "deuda recién creada no aparece en el historial (sigue pendiente)");
+assert(!state.tx.some(t => t.origenDeudaIngresoId === state.deudas[0].id), "sin marcar el checkbox, la deuda NO crea ningún ingreso en Finanzas (ej. crédito de proveedor, sin plata en efectivo)");
+
+// ---------------------------------------------------------------------------
+// Registrar una deuda que SÍ trajo plata en efectivo (un préstamo real):
+// antes NINGUNA deuda generaba su ingreso, así que gastar esa plata después
+// dejaba Caja/Balance/Ganancia negativos sin explicación. Ahora un checkbox
+// explícito ("¿trajo dinero en efectivo?") decide si se crea el tx — nunca
+// automático para TODA deuda, porque "deuda" también cubre crédito de
+// proveedor (mercancía fiada, sin plata real de por medio). Ver
+// CONTABILIDAD.md y calcAbonosPendientesPorPedido para el mismo criterio de
+// "no adivinar, preguntar explícito".
+// ---------------------------------------------------------------------------
+const checkTrajoDinero = document.querySelector('[data-action-change="toggle-deuda-trajo-dinero"]');
+assert(!!checkTrajoDinero && !checkTrajoDinero.checked, "el checkbox existe y nace SIN marcar (default seguro: no inventar un ingreso)");
+checkTrajoDinero.checked = true;
+checkTrajoDinero.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.formDeuda.trajoDineroEfectivo === true, "marcar el checkbox lo guarda en el borrador");
+setInput('[data-form="deuda"][data-field="concepto"]', "Préstamo del banco");
+setInput('[data-form="deuda"][data-field="monto"]', "3000000");
+const txAntesPrestamo = state.tx.length;
+click('[data-action="add-deuda"]');
+const deudaPrestamo = state.deudas.find(d => d.concepto === "Préstamo del banco");
+assert(!!deudaPrestamo, "la deuda se crea igual, con o sin el checkbox");
+assert(state.tx.length === txAntesPrestamo + 1, "CON el checkbox marcado, sí se crea un movimiento nuevo en Finanzas");
+const txPrestamo = state.tx.find(t => t.origenDeudaIngresoId === deudaPrestamo.id);
+assert(!!txPrestamo && txPrestamo.tipo === "ingreso" && txPrestamo.monto === 3000000, "el movimiento es un INGRESO por el monto completo del préstamo");
+assert(state.formDeuda.trajoDineroEfectivo === false, "el checkbox se limpia solo después de guardar (no se queda marcado para la siguiente deuda por error)");
+
+const { origenSistemaDeTx: origenSisDeudaTx, origenSistemaHuerfano: origenHuerfanoDeudaTx } = await import("../js/core/calc.js");
+assert(!!origenSisDeudaTx(txPrestamo), "el ingreso del préstamo queda protegido contra borrado suelto mientras la deuda exista");
+
+// editar la deuda sincroniza el tx vinculado (mismo criterio que editar un abono)
+click('[data-action="editar-deuda"][data-id="' + deudaPrestamo.id + '"]');
+const filaEditDeuda = document.querySelector('[data-deuda-edit-row="' + deudaPrestamo.id + '"]');
+filaEditDeuda.querySelector('[data-role="edit-monto"]').value = "2800000";
+click('[data-action="guardar-deuda-edit"][data-id="' + deudaPrestamo.id + '"]');
+assert(state.tx.find(t => t.origenDeudaIngresoId === deudaPrestamo.id).monto === 2800000, "corregir el monto de la deuda actualiza el mismo monto en su ingreso de Finanzas, sin crear uno nuevo");
+assert(state.tx.filter(t => t.origenDeudaIngresoId === deudaPrestamo.id).length === 1, "sigue siendo un solo movimiento, no se duplicó al editar");
+
+// eliminar la deuda deja el ingreso suelto (huérfano), igual que ya pasa con
+// el historial de pagos — nunca se borra en silencio junto con la deuda.
+click('[data-action="remove-deuda"][data-id="' + deudaPrestamo.id + '"]');
+assert(!state.deudas.some(d => d.id === deudaPrestamo.id), "eliminar la deuda la saca de la lista");
+const txPrestamoTrasBorrar = state.tx.find(t => t.origenDeudaIngresoId === deudaPrestamo.id);
+assert(!!txPrestamoTrasBorrar, "...pero el ingreso que ya generó en Finanzas NO se borra con ella");
+assert(!origenSisDeudaTx(txPrestamoTrasBorrar), "ya no está protegido (su origen se borró)");
+assert(!!origenHuerfanoDeudaTx(txPrestamoTrasBorrar), "y se reconoce como huérfano, para poder borrarlo aparte si ya no corresponde");
+state.tx = state.tx.filter(t => t.id !== txPrestamoTrasBorrar.id); // limpieza para no afectar los KPIs de las pruebas siguientes
 
 // --- KPIs sincronizados: "por cobrar" debe reflejar el saldo de pedidos ---
 const { calcPorCobrar, calcPorPagar } = await import("../js/core/calc.js");
@@ -1062,6 +1110,29 @@ assert(filaCancelada.estado === "Cancelado", "el reporte lo muestra como Cancela
 const resumenRango = resumenPed(filasRango);
 assert(resumenRango.cancelados >= 1, "el resumen dice cuántos cancelados hay");
 assert(!resumenPed([filaCancelada]).total, "un cancelado no suma a lo vendido");
+
+// ---------------------------------------------------------------------------
+// calcPedidosRango calculaba su propio "saldo" SIN IVA (total - abonado con
+// el total crudo), reproduciendo el mismo bug que ya se corrigió una vez en
+// calcSaldoPedido: un pedido pagado por completo con IVA activo daba un
+// saldo NEGATIVO de exactamente el IVA, y la tabla "Desglose de pedidos" (y
+// el PDF que reutiliza esta misma función) lo pintaba en verde como si
+// fuera un saldo a favor del cliente, en vez de $0.
+// ---------------------------------------------------------------------------
+const pedidosPreviosIva = state.pedidos;
+const fechaPedIva = state.pedidos[0] ? state.pedidos[0].fechaCreacion : pc.fechaCreacion;
+state.pedidos = [{
+  id: "ped-iva-completo", numeroOp: "OP-IVA-1", cliente: "Cliente IVA", descripcion: "Uniformes con IVA",
+  cantidad: "5", total: 1000000, costo: 400000, abono: 1190000, estado: "entregado", estadosDef: null,
+  fechaCreacion: fechaPedIva, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  iva: { activo: true, porcentaje: 19 }, abonos: [{ id: "ab-iva", monto: 1190000, fecha: fechaPedIva, metodoPago: "Transferencia" }],
+  lineas: [], stockConsumido: [], vendedor: null
+}];
+const filaIva = rangoPed(fechaPedIva, fechaPedIva).find(f => f.id === "ped-iva-completo");
+assert(!!filaIva, "el pedido con IVA aparece en el reporte del rango");
+assert(filaIva.saldo === 0, "pagado por completo CON IVA, el saldo del reporte da $0 (no -190.000, el monto del IVA)");
+assert(filaIva.total === 1000000, "\"total\" del reporte se queda en la base SIN IVA a propósito (misma cifra que usa \"ganancia\", el IVA nunca es utilidad)");
+state.pedidos = pedidosPreviosIva;
 
 // reactivar lo devuelve a la circulación
 click('[data-action="reactivar-pedido"][data-id="' + pedCancel.id + '"]');
