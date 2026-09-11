@@ -621,6 +621,42 @@ click('[data-action="add-gasto-fijo"]');
 assert(state.config.gastosFijos.length === 1, "agrega gasto fijo");
 assert(state.config.gastosFijos[0].periodo === "mensual", "gasto fijo nace con periodo mensual por defecto");
 
+// ---------------------------------------------------------------------------
+// Marcar/desmarcar un gasto fijo como pagado es una pastilla chica que
+// parece solo una etiqueta de estado — igual que ya pasaba con la comisión
+// de vendedor (toggle-comision), un doble clic sin aviso crea y borra un
+// movimiento real sin que el usuario se entere. Debe preguntar en los dos
+// sentidos, igual que toggle-comision.
+// ---------------------------------------------------------------------------
+const idGastoFijo = state.config.gastosFijos[0].id;
+const confirmOriginalGastoFijo = global.confirm;
+let confirmLlamadasGastoFijo = 0, confirmMsgGastoFijo = null;
+global.window.confirm = global.confirm = function (msg) { confirmLlamadasGastoFijo++; confirmMsgGastoFijo = msg; return false; };
+const txAntesToggleGastoFijo = state.tx.length;
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="' + idGastoFijo + '"]');
+assert(confirmLlamadasGastoFijo === 1, "marcar un gasto fijo como pagado SÍ pregunta antes de crear el movimiento");
+assert(confirmMsgGastoFijo.indexOf("Arriendo") !== -1 && confirmMsgGastoFijo.indexOf("500.000") !== -1, "...con el nombre y el monto en el aviso");
+assert(state.tx.length === txAntesToggleGastoFijo, "cancelar el aviso no crea ningún movimiento");
+assert(state.config.gastosFijos[0].pagadoHasta === "", "...ni marca el gasto como pagado");
+
+global.window.confirm = global.confirm = function (msg) { confirmLlamadasGastoFijo++; confirmMsgGastoFijo = msg; return true; };
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="' + idGastoFijo + '"]');
+assert(state.tx.length === txAntesToggleGastoFijo + 1, "aceptando el aviso, sí se crea el movimiento de gasto");
+assert(state.config.gastosFijos[0].pagadoHasta !== "", "...y el gasto queda marcado pagado este periodo");
+
+confirmLlamadasGastoFijo = 0;
+global.window.confirm = global.confirm = function (msg) { confirmLlamadasGastoFijo++; confirmMsgGastoFijo = msg; return false; };
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="' + idGastoFijo + '"]');
+assert(confirmLlamadasGastoFijo === 1, "desmarcarlo (deshacer el pago) TAMBIÉN pregunta");
+assert(confirmMsgGastoFijo.indexOf("Deshacer") !== -1, "...con un mensaje distinto, que dice que se va a deshacer");
+assert(state.tx.length === txAntesToggleGastoFijo + 1, "cancelar el aviso de deshacer no borra el movimiento");
+
+global.window.confirm = global.confirm = function () { return true; };
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="' + idGastoFijo + '"]');
+assert(state.tx.length === txAntesToggleGastoFijo, "aceptando, sí se revierte: vuelve a quedar pendiente sin el movimiento");
+assert(state.config.gastosFijos[0].pagadoHasta === "", "...y el gasto vuelve a \"pendiente\"");
+global.window.confirm = global.confirm = confirmOriginalGastoFijo;
+
 click('[data-action="toggle-pend-form"][data-key="deuda"]');
 setInput('[data-form="deuda"][data-field="concepto"]', "Préstamo máquina");
 setInput('[data-form="deuda"][data-field="monto"]', "300000");
@@ -1033,6 +1069,81 @@ click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono
 pedDinero = state.pedidos.find(p => p.id === pedidoId);
 assert(pedDinero.abono === 90000, "editar un abono con un reembolso de por medio da 120.000 - 30.000 = 90.000 (el reembolso resta, no suma)");
 assert(calcSaldoPedido(pedDinero) === 310000, "el saldo por cobrar refleja ese abonado (400.000 - 90.000)");
+
+// ---------------------------------------------------------------------------
+// Editar un abono viejo por un monto mayor al saldo disponible debe avisar,
+// igual que registrar uno nuevo — antes solo el alta preguntaba, la edición
+// guardaba directo y podía inventar un "saldo a favor" grande sin aviso.
+// ---------------------------------------------------------------------------
+const confirmOriginalEditAbono = global.confirm;
+let confirmMsgEditAbono = null, confirmLlamadasEditAbono = 0;
+// el confirm cancelado deja la fila en modo edición (para poder corregir el
+// número, no la cierra de golpe) — por eso el siguiente paso NO vuelve a
+// hacer clic en "editar-abono": la fila ya está abierta.
+click('[data-action="editar-abono"][data-id="' + abonoEditableId + '"]');
+global.window.confirm = global.confirm = function (msg) { confirmLlamadasEditAbono++; confirmMsgEditAbono = msg; return false; };
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "500000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+assert(confirmLlamadasEditAbono === 1, "editar un abono por más del saldo disponible SÍ pregunta antes de guardar");
+assert(confirmMsgEditAbono.indexOf("mayor que el saldo pendiente") !== -1, "...con un mensaje que explica por qué");
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 90000, "cancelar el aviso (confirm devuelve false) NO guarda el monto editado");
+assert(state.tx.find(t => t.origenAbonoId === abonoEditableId).monto === 120000, "...y el tx vinculado en Finanzas tampoco cambia");
+assert(state.abonoEditando === abonoEditableId, "...y la fila se queda en modo edición, para poder corregir el número");
+
+global.window.confirm = global.confirm = function (msg) { confirmLlamadasEditAbono++; confirmMsgEditAbono = msg; return true; };
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "500000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 470000, "aceptando el aviso, el nuevo monto sí se guarda (500.000 - 30.000 de reembolso)");
+assert(state.tx.find(t => t.origenAbonoId === abonoEditableId).monto === 500000, "...y el tx vinculado se sincroniza con el nuevo monto");
+
+// deshacer lo anterior para no afectar las pruebas siguientes que dependen
+// de este pedido con su abono de 90.000
+click('[data-action="editar-abono"][data-id="' + abonoEditableId + '"]');
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "120000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 90000, "sanity: vuelve a 90.000 tras deshacer la prueba anterior");
+
+// dentro del saldo disponible, editar NO pregunta nada
+confirmLlamadasEditAbono = 0;
+click('[data-action="editar-abono"][data-id="' + abonoEditableId + '"]');
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "150000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+assert(confirmLlamadasEditAbono === 0, "editar dentro del saldo disponible no interrumpe con ningún aviso");
+click('[data-action="editar-abono"][data-id="' + abonoEditableId + '"]');
+setChange('[data-abono-edit-row="' + abonoEditableId + '"] [data-role="edit-abono-monto"]', "120000");
+click('[data-action="guardar-abono-edit"][data-id="' + pedidoId + '"][data-abono="' + abonoEditableId + '"]');
+global.window.confirm = global.confirm = confirmOriginalEditAbono;
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 90000, "sanity: pedido queda otra vez en 90.000 abonado para el resto de las pruebas");
+
+// ---------------------------------------------------------------------------
+// Doble clic al registrar un abono CON comprobante adjunto: la lectura del
+// archivo es asíncrona (FileReader), así que dos clics rápidos disparaban
+// dos registros del mismo pago real. El guard es state.abonosProcesando —
+// se prueba directo (sin simular la carrera real del FileReader, que jsdom
+// no reproduce de forma confiable) marcando el pedido como "ya en curso" y
+// confirmando que un segundo "add-abono" no hace nada mientras tanto.
+// ---------------------------------------------------------------------------
+const txCountAntesDobleClic = state.tx.length, abonosCountAntesDobleClic = pedDinero.abonos.length;
+setInput('#abono-monto-' + pedidoId, "50000");
+state.abonosProcesando = [pedidoId];
+click('[data-action="add-abono"][data-id="' + pedidoId + '"]');
+assert(state.tx.length === txCountAntesDobleClic, "con el pedido marcado \"en curso\", un segundo add-abono no crea ningún movimiento nuevo");
+assert(state.pedidos.find(p => p.id === pedidoId).abonos.length === abonosCountAntesDobleClic, "...ni una fila nueva de abono");
+state.abonosProcesando = [];
+click('[data-action="add-abono"][data-id="' + pedidoId + '"]');
+assert(state.tx.length === txCountAntesDobleClic + 1, "sin el guard activo, el abono se registra normal");
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abonos.length === abonosCountAntesDobleClic + 1, "...con su fila nueva");
+// deshacer el abono de prueba (eliminar-abono revierte los dos lados a la
+// vez) para no descuadrar los números que asumen las pruebas siguientes
+const abonoDePrueba = pedDinero.abonos[pedDinero.abonos.length - 1];
+click('[data-action="eliminar-abono"][data-id="' + pedidoId + '"][data-abono="' + abonoDePrueba.id + '"]');
+pedDinero = state.pedidos.find(p => p.id === pedidoId);
+assert(pedDinero.abono === 90000, "sanity: deshacer el abono de prueba deja el pedido otra vez en 90.000");
 
 // borrar en Finanzas el movimiento de un abono NO puede dejar al pedido cobrado
 const txDelAbono = state.tx.find(t => t.origenAbonoId === abonoEditableId);

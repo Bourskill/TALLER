@@ -228,6 +228,35 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo primera ronda: 3 riesgos más de la auditoría financiera corregidos)
+
+**1. Editar un abono viejo (`guardar-abono-edit`) no validaba contra el
+saldo del pedido.** Registrar un abono nuevo ya preguntaba si el monto
+superaba el saldo pendiente — editar uno ya existente no. Ahora hace la
+misma pregunta, comparando el monto nuevo contra el saldo que tendría el
+pedido SIN este abono (para no restarlo dos veces).
+
+**2. Doble clic al registrar un abono CON comprobante adjunto podía
+duplicarlo.** La lectura del archivo (`FileReader`) es asíncrona; dos
+clics rápidos disparaban dos lecturas en paralelo y cada una terminaba
+registrando su propio abono. `state.abonosProcesando` ahora bloquea un
+segundo "Registrar abono" del mismo pedido mientras el primero sigue
+leyendo su comprobante.
+
+**3. `toggle-gasto-fijo-pagado` no pedía confirmación.** Es la misma
+pastilla-que-parece-etiqueta que ya se corrigió en la comisión de
+vendedor (`toggle-comision`) — la lección no se había aplicado acá.
+Ahora pregunta en los dos sentidos (marcar pagado / deshacer), con el
+nombre y el monto en el aviso.
+
+Los tres verificados en `test/smoke.mjs` revirtiendo cada fix a
+propósito. 737/737 pasando. Van 5 de 9 riesgos corregidos, quedan 4.
+
+(De paso: se notó que `test/smoke.mjs` tiene un test preexistente con
+timing real — `setTimeout` de 2.5s esperando un debounce de 1.5s — que
+falla de forma intermitente bajo carga, sin relación con estos cambios;
+no se tocó, queda fuera del alcance de esta ronda.)
+
 ## Registro de cambios — septiembre 2026 (cuadragésima ronda: primeros dos riesgos de la auditoría financiera corregidos)
 
 El usuario pidió "empieza a corregir" sobre los 9 riesgos de

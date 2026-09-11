@@ -315,6 +315,7 @@ export const state = {
   pendFormsAbiertos: {},
   flujoEstadosAbierto: "", // id del flujo de producción con sus etapas desplegadas en Plantillas (o "")
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
+  abonosProcesando: [], // ids de pedido con un "add-abono" en curso (comprobante leyéndose) — evita registrar el mismo abono dos veces con un doble clic
   reembolsoAbierto: "", // id del pedido con el mini-formulario de reembolso abierto (o "")
   formReembolso: { monto: "", fecha: "", motivo: "" },
   // Borrador del abono. Antes vivía SOLO en el DOM (se leía con data-role al

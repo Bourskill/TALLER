@@ -2124,6 +2124,14 @@ export var actions = {
   // El comprobante sí sale del DOM y nada más: es un File, no cabe en el estado.
   "add-abono": function (el) {
     var id = el.getAttribute("data-id");
+    // Sin comprobante adjunto, todo corre síncrono (el DOM se limpia antes
+    // de que un segundo clic se procese), pero CON comprobante la lectura
+    // es asíncrona (FileReader) y dos clics rápidos disparaban dos
+    // lecturas del mismo archivo en paralelo — cada una terminaba llamando
+    // a registrarAbono() por separado, duplicando el abono y su tx. Este
+    // guard bloquea un segundo "add-abono" del MISMO pedido mientras el
+    // primero sigue leyendo su comprobante.
+    if ((state.abonosProcesando || []).indexOf(id) !== -1) return;
     var fa = state.formAbono;
     var visible = function (campo, respaldo) {
       var input = document.getElementById("abono-" + campo + "-" + id);
@@ -2138,6 +2146,7 @@ export var actions = {
     var file = fileEl && fileEl.files && fileEl.files[0];
 
     function registrarAbono(comprobanteUrl) {
+      state.abonosProcesando = (state.abonosProcesando || []).filter(function (x) { return x !== id; });
       var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
       if (!ped) return;
       var saldoDisponible = calcSaldoPedido(ped);
@@ -2172,6 +2181,7 @@ export var actions = {
     }
 
     if (file) {
+      state.abonosProcesando = (state.abonosProcesando || []).concat([id]);
       var reader = new FileReader();
       reader.onload = function () { registrarAbono(reader.result); };
       reader.onerror = function () { registrarAbono(""); };
@@ -2201,6 +2211,25 @@ export var actions = {
     var nuevaFecha = g("edit-abono-fecha");
     var nuevoMetodo = g("edit-abono-metodo");
     if (nuevoMonto <= 0 || !nuevaFecha) return;
+    // Mismo aviso que "add-abono": registrar un abono NUEVO mayor al saldo
+    // ya pregunta antes de guardar, pero editar uno YA existente no lo
+    // hacía — un error de digitación al editar podía inventar un "saldo a
+    // favor del cliente" grande sin ningún aviso. Se compara contra el
+    // saldo que tendría el pedido SIN este abono (se le vuelve a sumar lo
+    // que ya aportaba, para no contarlo dos veces), igual que add-abono
+    // compara el monto nuevo contra el saldo ANTES de agregarlo.
+    var pedidoOrig = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+    if (pedidoOrig) {
+      var abonoOrig = (pedidoOrig.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
+      var saldoSinEsteAbono = calcSaldoPedido(pedidoOrig) + (abonoOrig ? num(abonoOrig.monto) : 0);
+      if (nuevoMonto > saldoSinEsteAbono) {
+        var aviso = saldoSinEsteAbono > 0
+          ? "Este abono editado (" + fmt(nuevoMonto) + ") es mayor que el saldo pendiente del pedido (" + fmt(saldoSinEsteAbono) + ")."
+          : "Este pedido ya no tendría saldo pendiente (" + (saldoSinEsteAbono < 0 ? "quedarían " + fmt(-saldoSinEsteAbono) + " cobrados de más" : "quedaría cobrado completo") + ").";
+        if (!window.confirm(aviso + "\n\n¿Guardar igual el abono editado de " + fmt(nuevoMonto) + "?\n\n" +
+          "Se guarda tal cual (queda como saldo a favor del cliente). Si fue un error de digitación, cancela y corrige el monto.")) return;
+      }
+    }
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== pedidoId) return p;
       var abonos = (p.abonos || []).map(function (a) {

@@ -185,7 +185,7 @@ casos borde de uso real). 23 hallazgos en total.
 8. Cancelar un pedido abonado en varias partes no descuadra nada.
 9. Las fechas de abonos/movimientos usan hora LOCAL, no UTC (ya corregido un bug histórico de "se pasa al día siguiente de noche").
 
-### ✅ Riesgos ya corregidos (2 de 9, septiembre 2026)
+### ✅ Riesgos ya corregidos (5 de 9, septiembre 2026)
 
 - **Registrar una deuda (préstamo) no generaba el ingreso de caja
   correspondiente.** Ahora el formulario de "Agregar deuda" tiene un
@@ -208,8 +208,23 @@ casos borde de uso real). 23 hallazgos en total.
   `calcSaldoPedido(p)` directamente — un pedido pagado por completo con
   IVA activo da saldo $0, no un negativo del monto exacto del IVA.
   (`calc.js:2147`)
+- **Editar un abono viejo no validaba contra el saldo del pedido.**
+  Registrar un abono nuevo ya preguntaba si superaba el saldo; ahora
+  `guardar-abono-edit` hace la misma pregunta, comparando el monto nuevo
+  contra el saldo que tendría el pedido SIN este abono (para no contarlo
+  dos veces). Mismo mensaje, mismo criterio que el alta. (`pedidos.js`)
+- **Doble clic al registrar un abono CON comprobante adjunto podía
+  duplicarlo.** La lectura del archivo es asíncrona; ahora
+  `state.abonosProcesando` bloquea un segundo "Registrar abono" del mismo
+  pedido mientras el primero sigue leyendo su comprobante. (`pedidos.js`,
+  `store.js`)
+- **`toggle-gasto-fijo-pagado` no pedía confirmación**, a diferencia de
+  `toggle-comision` que ya se había corregido por el mismo motivo
+  (pastilla que parece solo una etiqueta de estado). Ahora pregunta en
+  los dos sentidos (marcar pagado / deshacer), con el nombre y el monto
+  en el aviso, igual que la comisión. (`pendientes.js`)
 
-### 🔴 Riesgos pendientes (7)
+### 🔴 Riesgos pendientes (4)
 
 1. **"Por pagar" no incluye los saldos a favor del cliente.** Si tres
    pedidos quedan con $50.000, $80.000 y $120.000 pagados de más (por
@@ -231,19 +246,6 @@ casos borde de uso real). 23 hallazgos en total.
    ("registrar el estimado completo") sí está bloqueado hasta que la
    cotización esté convertida — pero el camino principal
    (`sincronizar-compras-finanzas`) no tiene ese mismo bloqueo.
-5. **Editar un abono viejo (`guardar-abono-edit`) no valida contra el
-   saldo del pedido.** Registrar un abono nuevo sí pide confirmación si
-   supera el saldo — pero editar uno ya existente no, así que un error
-   de digitación al editar puede inventar un "saldo a favor" grande sin
-   ningún aviso.
-6. **Doble clic al registrar un abono CON comprobante adjunto puede
-   duplicarlo.** Sin archivo adjunto el formulario ya está protegido;
-   con archivo, la lectura es asíncrona (`FileReader`) y dos clics rápidos
-   pueden disparar dos registros del mismo pago real.
-7. **`toggle-gasto-fijo-pagado` no pide confirmación**, a diferencia de
-   `toggle-comision` que sí se corrigió por el mismo motivo (pastilla que
-   parece solo una etiqueta de estado) — un doble clic crea y borra un
-   movimiento real sin que el usuario se entere.
 
 ### 🟡 Decisiones de negocio pendientes (5) — no son bugs, son preguntas para el dueño
 
@@ -281,9 +283,10 @@ casos borde de uso real). 23 hallazgos en total.
 
 ## Próximos pasos
 
-Esto es un mapa, no una lista de tareas ya aprobadas. Los dos riesgos más
-urgentes (saldo sin IVA en `calcPedidosRango` y la deuda sin su ingreso
-de caja) ya se corrigieron. Quedan 7 pendientes — revisarlos con calma y
-decidir cuáles priorizar. Las 5 preguntas de negocio no tienen una
-respuesta "correcta" de código — son para conversarlas, posiblemente con
-un contador en el caso del IVA de compras.
+Esto es un mapa, no una lista de tareas ya aprobadas. 5 de 9 riesgos ya
+se corrigieron. Quedan 4 pendientes, todos relacionados con "una ruta de
+reversión que promete algo que no existe" o "un bloqueo/aviso que se
+agregó en un lugar pero no en su gemelo" — revisarlos con calma y decidir
+cuáles priorizar. Las 5 preguntas de negocio no tienen una respuesta
+"correcta" de código — son para conversarlas, posiblemente con un
+contador en el caso del IVA de compras.

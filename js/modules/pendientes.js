@@ -796,6 +796,19 @@ export var actions = {
     var gastoFijo = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
     if (!gastoFijo) return;
     var pendiente = calcGastoFijoPendiente(gastoFijo) > 0;
+    // Mismo aviso que toggle-comision (pedidos.js), por el mismo motivo: es
+    // una pastilla chica que parece solo una etiqueta de estado, fácil de
+    // tocar por accidente (o dos veces seguidas en el celular) — sin esto,
+    // un doble clic crea y borra un movimiento real en Finanzas sin que el
+    // usuario se entere de que alcanzó a pasar.
+    if (pendiente) {
+      if (!window.confirm("¿Marcar como pagado el gasto fijo \"" + gastoFijo.nombre + "\"?\n\n" +
+        "Monto: " + fmt(num(gastoFijo.monto)) + "\n\n" +
+        "Se registra un gasto de " + fmt(num(gastoFijo.monto)) + " en Finanzas (esa plata sale de la caja). Puedes deshacerlo con el mismo botón.")) return;
+    } else {
+      if (!window.confirm("¿Deshacer el pago de \"" + gastoFijo.nombre + "\" de este periodo (" + fmt(num(gastoFijo.monto)) + ")?\n\n" +
+        "Se retira de Finanzas el gasto que se había creado y vuelve a quedar pendiente.")) return;
+    }
     // Misma lógica de "clave de periodo" que periodoKey() en core/calc.js.
     var periodo = gastoFijo.periodo || "mensual";
     var hoy = new Date();
