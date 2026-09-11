@@ -228,6 +228,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo segunda ronda: gasto fijo por periodo + "Deshacer último pago" de una deuda)
+
+**1. El bloqueo de borrado de un gasto fijo pagado no distinguía el
+periodo.** Protegía el movimiento mientras el gasto fijo existiera, sin
+mirar si era del periodo ACTUAL — uno de hace 3 meses quedaba
+"protegido" para siempre, aunque el botón "pagado" solo puede deshacer
+el periodo vigente. Ahora la protección compara contra `pagadoHasta`
+del gasto fijo: solo el movimiento del periodo actual sigue protegido,
+uno de un periodo que ya quedó atrás pasa a "huérfano" y se puede borrar
+directo desde Finanzas.
+
+**2. Pagar la cuota de una deuda no tenía ruta real de reversión.** El
+mensaje de bloqueo prometía un botón en Pendientes → Deudas que no
+existía. Se agregó de verdad: **"↩ Deshacer último pago"**, disponible
+tanto en Activas como en Historial (si la deuda ya estaba saldada,
+deshacer su último pago la devuelve a Activas). Solo deshace la ÚLTIMA
+línea del historial de esa deuda — a propósito, no hay forma segura de
+saber si algo posterior ya "contó con" un pago más viejo. Cada línea del
+historial ahora guarda el id de su movimiento (`txId`) para poder
+encontrarlo; un pago de ANTES de este fix no lo tiene, así que para esos
+el botón avisa en vez de adivinar cuál movimiento borrar.
+
+Ambos verificados en `test/smoke.mjs` revirtiendo cada fix a propósito.
+761/761 pasando. Van 7 de 9 riesgos de la auditoría financiera
+corregidos, quedan 2.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo primera ronda: 3 riesgos más de la auditoría financiera corregidos)
 
 **1. Editar un abono viejo (`guardar-abono-edit`) no validaba contra el

@@ -185,7 +185,7 @@ casos borde de uso real). 23 hallazgos en total.
 8. Cancelar un pedido abonado en varias partes no descuadra nada.
 9. Las fechas de abonos/movimientos usan hora LOCAL, no UTC (ya corregido un bug histórico de "se pasa al día siguiente de noche").
 
-### ✅ Riesgos ya corregidos (5 de 9, septiembre 2026)
+### ✅ Riesgos ya corregidos (7 de 9, septiembre 2026)
 
 - **Registrar una deuda (préstamo) no generaba el ingreso de caja
   correspondiente.** Ahora el formulario de "Agregar deuda" tiene un
@@ -223,24 +223,35 @@ casos borde de uso real). 23 hallazgos en total.
   (pastilla que parece solo una etiqueta de estado). Ahora pregunta en
   los dos sentidos (marcar pagado / deshacer), con el nombre y el monto
   en el aviso, igual que la comisión. (`pendientes.js`)
+- **El bloqueo de borrado de un gasto fijo pagado no distinguía el
+  periodo.** Protegía el `tx` mientras el gasto fijo existiera, sin
+  mirar si era del periodo vigente — uno de hace 3 meses quedaba
+  "protegido" para siempre aunque no hubiera botón real que lo deshaga.
+  Ahora la protección compara contra `pagadoHasta` del gasto fijo: solo
+  el `tx` del periodo ACTUAL sigue protegido; uno de un periodo que ya
+  quedó atrás pasa a "huérfano" y se puede borrar directo desde
+  Finanzas, igual que cualquier otro movimiento sin origen vigente.
+  (`calc.js`)
+- **Pagar la cuota de una deuda no tenía ruta real de reversión.** El
+  mensaje de bloqueo prometía un botón en "Pendientes → Deudas" que no
+  existía. Se agregó de verdad: "↩ Deshacer último pago" (en Activas e
+  Historial) retira el `tx` correspondiente y resta una cuota pagada; si
+  la deuda ya estaba saldada, vuelve a Activas. Solo deshace la ÚLTIMA
+  línea del historial (una más vieja no tiene botón, a propósito — no
+  hay forma segura de saber si algo posterior ya "contó con" ese pago).
+  Un pago registrado ANTES de este fix no guardó el id de su `tx`
+  (campo `txId`, nuevo en cada línea de `historial`) — para esos casos
+  el botón avisa en vez de adivinar cuál movimiento le corresponde.
+  (`pendientes.js`)
 
-### 🔴 Riesgos pendientes (4)
+### 🔴 Riesgos pendientes (2)
 
 1. **"Por pagar" no incluye los saldos a favor del cliente.** Si tres
    pedidos quedan con $50.000, $80.000 y $120.000 pagados de más (por
    abono mal digitado o devolución de mercancía), esos $250.000 que el
    taller debe devolver NO aparecen en el KPI "Por pagar" — solo se ven
    si se revisa pedido por pedido. (`calc.js:546-572`)
-2. **Pagar la cuota de una deuda no tiene ruta real de reversión.** El
-   mensaje de bloqueo de borrado promete "Pendientes → Deudas" como
-   lugar para deshacer un pago, pero no existe ningún botón "deshacer
-   pago" ahí — un clic por error en "Pagar" deja el movimiento atrapado.
-3. **Marcar un gasto fijo pagado/pendiente solo actúa sobre el periodo
-   ACTUAL**, pero el bloqueo de borrado del `tx` es más amplio (bloquea
-   mientras el gasto fijo exista, sin mirar el periodo) — un `tx` de un
-   gasto fijo pagado hace 3 meses queda bloqueado para siempre, sin una
-   forma real de borrarlo.
-4. **Marcar "Sí"/"Servicio" en "Compras del pedido" de una cotización SIN
+2. **Marcar "Sí"/"Servicio" en "Compras del pedido" de una cotización SIN
    convertir puede generar un gasto real (o "disponible" para pagar
    nómina) sin que exista pedido ni cobro.** El botón alternativo
    ("registrar el estimado completo") sí está bloqueado hasta que la
@@ -283,10 +294,8 @@ casos borde de uso real). 23 hallazgos en total.
 
 ## Próximos pasos
 
-Esto es un mapa, no una lista de tareas ya aprobadas. 5 de 9 riesgos ya
-se corrigieron. Quedan 4 pendientes, todos relacionados con "una ruta de
-reversión que promete algo que no existe" o "un bloqueo/aviso que se
-agregó en un lugar pero no en su gemelo" — revisarlos con calma y decidir
-cuáles priorizar. Las 5 preguntas de negocio no tienen una respuesta
+Esto es un mapa, no una lista de tareas ya aprobadas. 7 de 9 riesgos ya
+se corrigieron. Quedan 2 pendientes — revisarlos con calma y decidir si
+priorizarlos. Las 5 preguntas de negocio no tienen una respuesta
 "correcta" de código — son para conversarlas, posiblemente con un
 contador en el caso del IVA de compras.

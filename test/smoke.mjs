@@ -657,6 +657,29 @@ assert(state.tx.length === txAntesToggleGastoFijo, "aceptando, sí se revierte: 
 assert(state.config.gastosFijos[0].pagadoHasta === "", "...y el gasto vuelve a \"pendiente\"");
 global.window.confirm = global.confirm = confirmOriginalGastoFijo;
 
+// ---------------------------------------------------------------------------
+// El bloqueo de borrado de un gasto fijo pagado antes solo miraba si el
+// gasto fijo EXISTÍA, sin mirar el periodo — pero el botón "pagado" solo
+// puede revertir el tx del periodo ACTUAL. Un tx de un periodo que ya
+// quedó atrás (el gasto fijo se volvió a marcar/desmarcar después, sin
+// pasar por ESE tx) debe dejar de estar protegido, igual que cualquier
+// otro movimiento cuyo origen ya no lo respalda.
+// ---------------------------------------------------------------------------
+const { origenSistemaDeTx: origenSisGastoFijoTx, origenSistemaHuerfano: origenHuerfanoGastoFijoTx } = await import("../js/core/calc.js");
+global.window.confirm = global.confirm = function () { return true; };
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="' + idGastoFijo + '"]');
+const txPeriodoViejo = state.tx.find(t => t.gastoFijoId === idGastoFijo);
+assert(!!txPeriodoViejo, "se vuelve a marcar pagado, crea su tx de este periodo");
+assert(!!origenSisGastoFijoTx(txPeriodoViejo), "protegido mientras es el periodo vigente del gasto fijo");
+// Simula que pasó el tiempo: el periodo avanzó (o alguien lo desmarcó desde
+// entonces) sin que nadie haya vuelto a tocar ESE tx viejo en particular —
+// pagadoHasta ya no coincide con lo que el tx recuerda en su marca.
+state.config.gastosFijos = state.config.gastosFijos.map(g => g.id === idGastoFijo ? Object.assign({}, g, { pagadoHasta: "" }) : g);
+assert(!origenSisGastoFijoTx(txPeriodoViejo), "un tx de un periodo que ya quedó atrás deja de estar protegido");
+assert(!!origenHuerfanoGastoFijoTx(txPeriodoViejo), "...y se reconoce como huérfano: se puede borrar aparte desde Finanzas");
+state.tx = state.tx.filter(t => t.id !== txPeriodoViejo.id); // limpieza
+global.window.confirm = global.confirm = confirmOriginalGastoFijo;
+
 click('[data-action="toggle-pend-form"][data-key="deuda"]');
 setInput('[data-form="deuda"][data-field="concepto"]', "Préstamo máquina");
 setInput('[data-form="deuda"][data-field="monto"]', "300000");
@@ -743,6 +766,71 @@ const deudaEnCuotas = state.deudas.find(d => d.concepto === "Máquina fileteador
 assert(!!deudaEnCuotas && deudaEnCuotas.cuotas === 3, "agrega deuda en 3 cuotas de $300.000 cada una");
 const incrementoPorPagar = calcPorPagar() - porPagarAntesDeudaEnCuotas;
 assert(Math.abs(incrementoPorPagar - 300000) < 1, "Por pagar sube según el valor de la cuota ($300.000), no el monto total de la deuda ($900.000)");
+
+// ---------------------------------------------------------------------------
+// "Deshacer último pago": antes el mensaje de bloqueo de Finanzas prometía
+// una ruta de reversión en Pendientes → Deudas que no existía de verdad —
+// un clic por error en "Pagar" dejaba el movimiento atrapado para siempre.
+// ---------------------------------------------------------------------------
+const confirmOriginalDeuda = global.confirm;
+global.window.confirm = global.confirm = function () { return true; };
+click('[data-action="pagar-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+let deudaCuotasTrasPago1 = state.deudas.find(d => d.id === deudaEnCuotas.id);
+assert(deudaCuotasTrasPago1.cuotasPagadas === 1, "se paga la cuota 1 de 3");
+const txCuota1 = state.tx.find(t => t.deudaId === deudaEnCuotas.id);
+assert(!!txCuota1, "y crea su movimiento en Finanzas");
+assert(deudaCuotasTrasPago1.historial[deudaCuotasTrasPago1.historial.length - 1].txId === txCuota1.id, "el historial de la deuda guarda el id de ESE movimiento");
+
+let confirmLlamadasDeuda = 0;
+global.window.confirm = global.confirm = function () { confirmLlamadasDeuda++; return false; };
+click('[data-action="deshacer-pago-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+assert(confirmLlamadasDeuda === 1, "deshacer el último pago SÍ pregunta antes de tocar nada");
+assert(state.tx.some(t => t.id === txCuota1.id), "cancelar el aviso no borra el movimiento");
+assert(state.deudas.find(d => d.id === deudaEnCuotas.id).cuotasPagadas === 1, "...ni resta la cuota pagada");
+
+global.window.confirm = global.confirm = function () { return true; };
+click('[data-action="deshacer-pago-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+assert(!state.tx.some(t => t.id === txCuota1.id), "aceptando, SÍ se retira el movimiento de Finanzas");
+deudaCuotasTrasPago1 = state.deudas.find(d => d.id === deudaEnCuotas.id);
+assert(deudaCuotasTrasPago1.cuotasPagadas === 0, "...y la cuota vuelve a quedar pendiente (0 de 3)");
+assert(deudaCuotasTrasPago1.historial.length === 0, "...con su línea de historial también retirada");
+
+// pagar las 3 cuotas hasta saldarla, y deshacer la ÚLTIMA (la que la saldó)
+// desde la vista de Historial — debe volver a Activas, no quedarse a medias
+click('[data-action="pagar-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+click('[data-action="pagar-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+click('[data-action="pagar-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+assert(!state.deudas.some(d => d.id === deudaEnCuotas.id), "al pagar la 3ª cuota, la deuda sale de \"activas\"");
+let deudaSaldada = state.deudasHistorial.find(d => d.id === deudaEnCuotas.id);
+assert(!!deudaSaldada && !!deudaSaldada.fechaCompletada, "...y se mueve entera al historial, saldada");
+const txCuota3 = state.tx.find(t => t.deudaId === deudaEnCuotas.id);
+assert(!!txCuota3, "la 3ª cuota también dejó su movimiento en Finanzas");
+
+click('[data-action="deudas-vista"][data-val="historial"]');
+click('[data-action="deshacer-pago-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+assert(!state.tx.some(t => t.id === txCuota3.id), "deshacer desde el Historial retira el movimiento de la 3ª cuota");
+assert(!state.deudasHistorial.some(d => d.id === deudaEnCuotas.id), "...saca la deuda del historial de saldadas");
+const deudaDeVueltaActiva = state.deudas.find(d => d.id === deudaEnCuotas.id);
+assert(!!deudaDeVueltaActiva, "...y la devuelve a \"activas\"");
+assert(deudaDeVueltaActiva.cuotasPagadas === 2, "con 2 de 3 cuotas pagadas (la 3ª es la que se deshizo)");
+assert(deudaDeVueltaActiva.fechaCompletada === "", "y ya no figura como saldada");
+click('[data-action="deudas-vista"][data-val="activas"]');
+
+// un pago de ANTES de que existiera este botón (sin txId en su línea de
+// historial) no se debe adivinar ni descuadrar: se avisa y no se toca nada.
+const alertOriginalDeuda = global.alert;
+let alertMsgDeuda = null;
+state.deudas = state.deudas.map(d => d.id === deudaEnCuotas.id
+  ? Object.assign({}, d, { historial: d.historial.concat([{ fecha: "2020-01-01", monto: 300000 }]) })
+  : d);
+const txCountAntesAlertaDeuda = state.tx.length;
+global.window.alert = global.alert = function (msg) { alertMsgDeuda = msg; };
+click('[data-action="deshacer-pago-deuda"][data-id="' + deudaEnCuotas.id + '"]');
+assert(!!alertMsgDeuda && alertMsgDeuda.indexOf("antes de que existiera") !== -1, "un pago viejo sin txId avisa que no se puede deshacer solo, en vez de adivinar cuál movimiento le corresponde");
+assert(state.tx.length === txCountAntesAlertaDeuda, "...y no toca ningún movimiento de Finanzas");
+assert(state.deudas.find(d => d.id === deudaEnCuotas.id).cuotasPagadas === 2, "...ni cambia las cuotas pagadas");
+global.window.alert = global.alert = alertOriginalDeuda;
+global.window.confirm = global.confirm = confirmOriginalDeuda;
 
 // --- cotizaciones: Historial es siempre un resumen chico; abrirlo manda al
 // detalle completo en la otra pestaña (state.cotizacionEditando) ---

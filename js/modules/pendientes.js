@@ -226,6 +226,7 @@ function renderDeudasActivas() {
       '<span class="mobile-th">Periodo</span><span>' + (dias.length ? (PERIODOS_PAGO[periodo] + " · " + dias.join(",")) : PERIODOS_PAGO[periodo]) + "</span>" +
       '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
       '<button class="btn small" data-action="pagar-deuda" data-id="' + d.id + '">Pagar</button>' +
+      ((d.historial || []).length ? '<button class="btn ghost small" data-action="deshacer-pago-deuda" data-id="' + d.id + '" title="Retira de Finanzas el último pago registrado y la cuota vuelve a quedar pendiente">↩ Deshacer último pago</button>' : "") +
       '<button class="btn ghost small" data-action="editar-deuda" data-id="' + d.id + '">Editar</button>' +
       '<button class="btn danger small" data-action="remove-deuda" data-id="' + d.id + '">✕</button>' +
       "</span></div>";
@@ -286,6 +287,7 @@ function renderDeudasHistorial() {
       "</div></div>" +
       '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">' +
       '<span class="amount">' + fmt(d.monto) + "</span>" +
+      '<button class="btn ghost small" data-action="deshacer-pago-deuda" data-id="' + d.id + '" title="Retira de Finanzas el último pago (el que la saldó) y la deuda vuelve a Activas">↩ Deshacer último pago</button>' +
       '<button class="btn ghost small" data-action="remove-deuda-historial" data-id="' + d.id + '" title="Quitar del historial (no borra los movimientos ya creados en Finanzas)">✕</button>' +
       "</div></div>";
   });
@@ -971,13 +973,18 @@ export var actions = {
     if (!window.confirm('¿Registrar el pago de ' + etiqueta + " (" + fmt(valor) + ') de "' + deuda.concepto + '"?\n\nEsto crea un movimiento de gasto en Finanzas.' + (esUltima ? " Al quedar saldada, la deuda se mueve al historial." : ""))) return;
     var nuevasPagadas = pagadas + 1;
     var fechaPago = todayStr();
-    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "", deudaId: deuda.id });
+    var txPagoId = uid();
+    // El id del tx queda guardado en la propia línea del historial (txId):
+    // es lo único que permite después identificar CUÁL movimiento de
+    // Finanzas corresponde a ESE pago puntual, para poder deshacerlo. Ver
+    // "deshacer-pago-deuda" más abajo.
+    state.tx.unshift({ id: txPagoId, tipo: "gasto", concepto: (cuotas > 1 ? "Cuota " + nuevasPagadas + "/" + cuotas + " — " : "Pago — ") + deuda.concepto, monto: valor, contraparte: deuda.contraparte, fecha: fechaPago, pedidoId: "", deudaId: deuda.id });
     if (nuevasPagadas >= cuotas) {
       // Deuda saldada por completo: sale de "deudas" y se mueve entera (no
       // solo un renglón de bitácora) al historial de deudas pagadas. Ya no
       // tiene sentido un recordatorio de vencimiento, así que el evento de
       // Calendar (si existía) se borra en vez de moverse al historial.
-      var historial = (deuda.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
+      var historial = (deuda.historial || []).concat([{ fecha: fechaPago, monto: valor, txId: txPagoId }]);
       state.deudasHistorial = state.deudasHistorial.concat([Object.assign({}, deuda, {
         cuotasPagadas: nuevasPagadas, historial: historial, fechaCompletada: fechaPago, calendarEventId: ""
       })]);
@@ -987,13 +994,55 @@ export var actions = {
     } else {
       state.deudas = state.deudas.map(function (d) {
         if (d.id !== id) return d;
-        var historial = (d.historial || []).concat([{ fecha: fechaPago, monto: valor }]);
+        var historial = (d.historial || []).concat([{ fecha: fechaPago, monto: valor, txId: txPagoId }]);
         return Object.assign({}, d, { cuotasPagadas: nuevasPagadas, historial: historial });
       });
       var actualizada = state.deudas.filter(function (d) { return d.id === id; })[0];
       if (actualizada) sincronizarEventoDeuda(actualizada);
     }
     persist("tx"); persist("deudas"); notify();
+  },
+  // Deshace ÚNICAMENTE el último pago registrado de una deuda (cuota o pago
+  // único) — la ruta de reversión que el mensaje de bloqueo de Finanzas
+  // prometía ("Pendientes → Deudas") pero que antes no existía de verdad:
+  // un clic por error en "Pagar" dejaba el movimiento atrapado para
+  // siempre. Revierte los dos lados a la vez, igual que eliminar-abono:
+  // retira el tx (por el txId guardado en la línea del historial), resta
+  // una cuota pagada, y si la deuda ya se había movido al historial de
+  // saldadas, la trae de vuelta a "activas" (fechaCompletada deja de
+  // aplicar). Solo deshace la ÚLTIMA línea del historial — un pago más
+  // viejo ya no tiene botón para tocarlo, a propósito: no hay forma de
+  // saber si algo posterior ya "contó con" ese pago sin desordenar todo.
+  "deshacer-pago-deuda": function (el) {
+    var id = el.getAttribute("data-id");
+    var deSaldadas = (state.deudasHistorial || []).filter(function (d) { return d.id === id; })[0];
+    var deuda = deSaldadas || (state.deudas || []).filter(function (d) { return d.id === id; })[0];
+    if (!deuda) return;
+    var historial = deuda.historial || [];
+    var ultimoPago = historial[historial.length - 1];
+    if (!ultimoPago) return;
+    // Un pago de ANTES de que existiera este botón no guardó el id del tx
+    // que le corresponde (ver pagar-deuda) — no hay forma segura de saber
+    // cuál movimiento de Finanzas es, así que no se adivina: se avisa y no
+    // se toca nada, en vez de dejar cuotasPagadas y Finanzas descuadrados.
+    if (!ultimoPago.txId) { window.alert('Este pago es de antes de que existiera "Deshacer último pago" y no quedó guardado cuál movimiento de Finanzas le corresponde. Para corregirlo, edita o borra el gasto correspondiente directo en Finanzas y ajusta las cuotas pagadas con "Editar" en esta deuda.'); return; }
+    if (!window.confirm('¿Deshacer el último pago de "' + deuda.concepto + '" (' + fmt(num(ultimoPago.monto)) + ', ' + (ultimoPago.fecha || "sin fecha") + ')?\n\nSe retira ese movimiento de Finanzas y la cuota vuelve a quedar pendiente.')) return;
+    state.tx = state.tx.filter(function (t) { return t.id !== ultimoPago.txId; });
+    var actualizada = Object.assign({}, deuda, {
+      cuotasPagadas: Math.max(0, (num(deuda.cuotasPagadas) || 0) - 1),
+      historial: historial.slice(0, -1),
+      fechaCompletada: "", calendarEventId: ""
+    });
+    if (deSaldadas) {
+      // Estaba saldada: vuelve a "activas" — ya no está completa.
+      state.deudasHistorial = state.deudasHistorial.filter(function (d) { return d.id !== id; });
+      state.deudas = state.deudas.concat([actualizada]);
+      persist("deudasHistorial");
+    } else {
+      state.deudas = state.deudas.map(function (d) { return d.id === id ? actualizada : d; });
+    }
+    persist("tx"); persist("deudas"); notify();
+    sincronizarEventoDeuda(actualizada);
   },
   // Quita una deuda del historial de deudas pagadas (solo el registro; los
   // movimientos de gasto que ya se crearon en Finanzas NO se tocan).

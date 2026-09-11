@@ -362,10 +362,21 @@ var MARCAS_ORIGEN_SISTEMA = [
     existe: function (t) { return existeVentaConsignacion(t.pedidoId, t.origenComisionConsignacionId); }
   },
   {
-    campo: "origenGastoFijoPeriodo", que: "el pago de un gasto fijo",
+    campo: "origenGastoFijoPeriodo", que: "el pago de un gasto fijo de ESTE periodo",
     donde: "Pendientes → Gastos fijos → botón \"pagado\" (vuelve a dejarlo pendiente)",
+    // El botón "pagado"/"pendiente" (toggle-gasto-fijo-pagado) SOLO revierte
+    // el tx del periodo ACTUAL de ese gasto fijo (compara contra
+    // config.pagadoHasta) — nunca los de periodos anteriores ya cerrados.
+    // Antes esta protección bloqueaba el borrado MIENTRAS el gasto fijo
+    // existiera, sin mirar el periodo: un tx de hace 3 meses quedaba
+    // "protegido" para siempre aunque no hubiera ningún botón real que
+    // lo deshaga. Ahora solo se protege el tx del periodo que el gasto
+    // fijo tiene marcado AHORA MISMO; uno de un periodo viejo (o de uno
+    // que ya se desmarcó) queda huérfano y se puede borrar directo desde
+    // Finanzas, igual que cualquier otro movimiento sin origen vigente.
     existe: function (t) {
-      return (state.config.gastosFijos || []).some(function (g) { return g.id === t.gastoFijoId; });
+      var g = (state.config.gastosFijos || []).filter(function (x) { return x.id === t.gastoFijoId; })[0];
+      return !!(g && g.pagadoHasta && (g.id + "|" + g.pagadoHasta) === t.origenGastoFijoPeriodo);
     }
   },
   {
@@ -378,7 +389,7 @@ var MARCAS_ORIGEN_SISTEMA = [
   },
   {
     campo: "deudaId", que: "el pago de una cuota de una deuda",
-    donde: "Pendientes → Deudas (o su historial, si ya quedó saldada)",
+    donde: "Pendientes → Deudas (o su historial, si ya quedó saldada) → botón \"↩ Deshacer último pago\"",
     existe: function (t) {
       return state.deudas.some(function (d) { return d.id === t.deudaId; }) ||
         state.deudasHistorial.some(function (d) { return d.id === t.deudaId; });
