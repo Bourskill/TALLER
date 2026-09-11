@@ -1848,6 +1848,61 @@ state.tx = txPreviosGan; state.cotizaciones = cotizacionesPreviasGan;
 render();
 
 // ---------------------------------------------------------------------------
+// "Ganancia" también debe excluir el abonado de pedidos SIN terminar de
+// pagar — reporte real del usuario: "acabo de recibir un abono pero la app
+// lo detectó como ganancia... no es ganancia, de ahí tengo que empezar a
+// comprar los insumos". Mismo criterio que los servicios de arriba: se
+// resta de Balance hasta que el pedido quede pagado por completo. Ver
+// calcAbonosPendientesPorPedido.
+// ---------------------------------------------------------------------------
+const txPreviosAbo = state.tx, pedidosPreviosAbo = state.pedidos, cotizacionesPreviasAbo = state.cotizaciones;
+const hoyAbo = hoyStr();
+state.tx = [
+  { id: "tx-abo-1", tipo: "ingreso", monto: 300000, concepto: "Abono pedido sin terminar", fecha: hoyAbo, contraparte: "" },
+  { id: "tx-abo-2", tipo: "ingreso", monto: 500000, concepto: "Abono pedido ya pagado", fecha: hoyAbo, contraparte: "" }
+];
+state.pedidos = [
+  { id: "ped-abo-pend", numeroOp: "OP-ABO-1", cliente: "Cliente Sin Terminar", descripcion: "Camisetas", cantidad: "5",
+    total: 1000000, costo: 400000, abono: 300000, estado: "corte", estadosDef: null,
+    fechaCreacion: hoyAbo, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+    abonos: [{ id: "ab-1", monto: 300000, fecha: hoyAbo, metodoPago: "Transferencia" }], lineas: [], stockConsumido: [], vendedor: null },
+  { id: "ped-abo-pagado", numeroOp: "OP-ABO-2", cliente: "Cliente Ya Pagó", descripcion: "Buzos", cantidad: "3",
+    total: 500000, costo: 200000, abono: 500000, estado: "entregado", estadosDef: null,
+    fechaCreacion: hoyAbo, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+    abonos: [{ id: "ab-2", monto: 500000, fecha: hoyAbo, metodoPago: "Efectivo" }], lineas: [], stockConsumido: [], vendedor: null }
+];
+state.cotizaciones = [];
+
+const abonosPend = calcMod.calcAbonosPendientesPorPedido(hoyAbo, hoyAbo);
+assert(abonosPend.length === 1 && abonosPend[0].nombre === "Cliente Sin Terminar" && abonosPend[0].monto === 300000, "calcAbonosPendientesPorPedido solo cuenta el abono del pedido con saldo pendiente, no el del que ya pagó completo");
+
+state.tab = "resumen";
+render();
+const textoResumenAbo = document.body.textContent;
+assert(textoResumenAbo.includes("Cliente Sin Terminar"), "el Resumen muestra un tile por el pedido sin terminar de pagar");
+assert(!textoResumenAbo.includes("Cliente Ya Pagó"), "...pero no por el que ya se pagó por completo: ese abono ya es ganancia real");
+const botonAbonoPend = [...document.querySelectorAll(".kpi-mini")].find(function (b) { return b.textContent.includes("Cliente Sin Terminar"); });
+assert(!!botonAbonoPend && botonAbonoPend.getAttribute("data-action") === "kpi-nav" && botonAbonoPend.getAttribute("data-filtro-saldo") === "1", "el tile navega a Pedidos filtrado por saldo, igual que el KPI \"Por cobrar\"");
+
+// Un pedido CANCELADO no resta de Ganancia aunque tenga saldo sin cubrir:
+// esa venta no se va a completar, no tiene sentido reservarle plata.
+state.pedidos[0].cancelado = true;
+assert(!calcMod.calcAbonosPendientesPorPedido(hoyAbo, hoyAbo).length, "un pedido cancelado no cuenta en calcAbonosPendientesPorPedido");
+state.pedidos[0].cancelado = false;
+
+// Un reembolso dentro de los abonos no se suma como plata pendiente: ya
+// salió de caja por su cuenta y ya bajó calcAbonadoDeLista/p.abono — sumarlo
+// también acá lo contaría dos veces.
+state.pedidos[0].abonos.push({ id: "reemb-1", monto: 50000, fecha: hoyAbo, tipo: "reembolso", motivo: "Prueba" });
+assert(calcMod.calcAbonosPendientesPorPedido(hoyAbo, hoyAbo)[0].monto === 300000, "un reembolso en la lista de abonos no se suma al monto pendiente");
+
+// Fuera del rango de fechas, no cuenta — mismo criterio que los servicios.
+assert(!calcMod.calcAbonosPendientesPorPedido("2000-01-01", "2000-01-01").length, "y fuera del rango del abono, calcAbonosPendientesPorPedido no cuenta nada");
+
+state.tx = txPreviosAbo; state.pedidos = pedidosPreviosAbo; state.cotizaciones = cotizacionesPreviasAbo;
+render();
+
+// ---------------------------------------------------------------------------
 // Ajustes de feedback (Insumos + estados de producción).
 // ---------------------------------------------------------------------------
 

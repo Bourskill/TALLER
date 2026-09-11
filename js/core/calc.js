@@ -712,6 +712,42 @@ export function calcServiciosPendientesPorCategoriaRango(desde, hasta) {
   });
 }
 
+// Abonos que "todavía no son Ganancia": el dinero que un cliente abonó de un
+// pedido que AÚN no está pagado por completo. El usuario lo pidió con sus
+// palabras: "no es ganancia, de ahí tengo que empezar a comprar los
+// insumos" — ese abono sí es plata real en caja (ya cuenta en "Entró"/
+// Balance, es un tx normal con origenAbonoId) pero todavía no es utilidad
+// del negocio: falta terminar de cobrar el pedido, y con eso saber si lo
+// que costó producirlo de verdad deja margen. Mismo criterio que
+// calcServiciosPendientesPorCategoriaRango: se resta de "Balance" para
+// armar "Ganancia" en renderGraficaResumen.
+//
+// Se agrupa por PEDIDO (no por nombre, como los servicios) porque cada
+// pedido es su propia "bolsa" pendiente de completar. Un pedido que ya se
+// pagó por completo (calcSaldoPedido(p) === 0) deja de restar — igual que
+// un servicio ya pagado — aunque sus abonos hayan caído en un periodo
+// anterior: se mira el estado ACTUAL del pedido, no una foto congelada del
+// día del abono, para no dejar un pedido cerrado restando Ganancia para
+// siempre.
+export function calcAbonosPendientesPorPedido(desde, hasta) {
+  var lista = [];
+  (state.pedidos || []).forEach(function (p) {
+    if (pedidoCancelado(p)) return; // cancelado: esa venta no se va a completar
+    if (calcSaldoPedido(p) <= 0) return; // ya pagado por completo: su abono ya es ganancia real
+    var monto = (p.abonos || []).reduce(function (a, x) {
+      // un reembolso no es "abono pendiente de completar": ya salió de caja
+      // por su cuenta (tx propio) y ya bajó calcAbonadoDeLista, no se resta
+      // dos veces acá.
+      if (x.tipo === "reembolso") return a;
+      if ((desde && x.fecha < desde) || (hasta && x.fecha > hasta)) return a;
+      return a + num(x.monto);
+    }, 0);
+    if (monto <= 0) return;
+    lista.push({ nombre: p.cliente || "Pedido sin cliente", pedidoId: p.id, monto: monto });
+  });
+  return lista.sort(function (a, b) { return b.monto - a.monto; });
+}
+
 // Valida las filas de "asignar a servicio(s)" de un formulario de gasto o
 // nómina ANTES de guardarlo — pura, no toca el DOM ni avisa nada: quien
 // llama (add-tx en finanzas.js, pagar-nomina en pendientes.js) decide cómo

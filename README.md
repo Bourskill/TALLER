@@ -222,6 +222,43 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (trigésimo octava ronda: el KPI "Ganancia" ya no cuenta el abonado de pedidos sin terminar de pagar)
+
+Reporte real del usuario: "acabo de recibir un abono pero la app lo detectó
+como ganancia en los kpi de resumen, no es ganancia de ahi tengo que
+empezar a comprar los insumos... crea un kpi como los de servicio que
+separe el dinero abonado, ganancia es cuando el pago del pedido está pagado
+por completo".
+
+El KPI "Ganancia" del Resumen (tarjeta "Ingresos y gastos") ya restaba del
+Balance lo que era trabajo del taller mismo marcado "Servicio" (ver la
+"trigésima primera ronda" más abajo) — pero no restaba el abonado de un
+pedido que TODAVÍA no termina de pagarse: esa plata sí está en caja
+(cuenta en "Entró"/Balance, es un `tx` normal como cualquier otro abono),
+pero no es utilidad real todavía porque de ahí hay que comprar los insumos
+que faltan para producir el pedido.
+
+Se agregó `calcAbonosPendientesPorPedido(desde, hasta)` (`core/calc.js`),
+con el MISMO criterio que ya usan los servicios: agrupa el abonado de cada
+pedido con saldo pendiente (`calcSaldoPedido(p) > 0`, sin contar pedidos
+cancelados ni reembolsos) y se resta de "Ganancia" junto con los
+servicios. Un pedido que se termina de pagar deja de restar — se mira el
+estado ACTUAL del pedido, no la fecha en que se abonó, para que uno ya
+cerrado no siga descontando Ganancia para siempre. En `modules/resumen.js`
+se agregó una fila de tiles chicos (`renderAbonosPendientesMini`, mismo
+componente `.kpi-mini` que los servicios) con un tile por pedido pendiente;
+a diferencia de un servicio no tiene historial propio que mostrar (ya es un
+solo pedido), así que cada tile reutiliza la navegación de "Por cobrar"
+(lleva a Pedidos filtrado por saldo).
+
+A diferencia de los cambios de PDF de las rondas anteriores, esto SÍ se
+pudo cubrir con pruebas automáticas (es cálculo + render normal, no
+contenido de PDF): `test/smoke.mjs` prueba que un pedido con saldo resta de
+Ganancia, que uno ya pagado por completo no, que uno cancelado tampoco, que
+un reembolso dentro de los abonos no se suma dos veces, y que fuera del
+rango de fechas no cuenta nada — verificado revirtiendo el fix a propósito
+y confirmando que esas pruebas nuevas fallan antes de dejarlo así.
+
 ## Registro de cambios — septiembre 2026 (trigésimo séptima ronda: la Cuenta de cobro lleva info de producción + historial de abonos)
 
 Dos pedidos del usuario:

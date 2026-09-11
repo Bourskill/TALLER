@@ -9,7 +9,7 @@ import {
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
   calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
-  calcServiciosPendientesPorCategoriaRango } from "../core/calc.js";
+  calcServiciosPendientesPorCategoriaRango, calcAbonosPendientesPorPedido } from "../core/calc.js";
 import { renderHelp, renderHistorialServicio } from "../core/components.js";
 import {
   configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
@@ -240,7 +240,13 @@ function renderGraficaResumen() {
   // también acá lo contaría dos veces. Ver calcServiciosPendientesPorCategoriaRango.
   var servicios = calcServiciosPendientesPorCategoriaRango(serie.desde, serie.hasta);
   var totalServicios = servicios.reduce(function (a, s) { return a + s.monto; }, 0);
-  var ganancia = t.balance - totalServicios;
+  // Mismo criterio que "servicios", pero para abonos de pedidos sin terminar
+  // de pagar: el cliente ya puso esa plata (cuenta en Balance) pero todavía
+  // no es utilidad — el usuario lo pidió explícito: "no es ganancia, de ahí
+  // tengo que empezar a comprar los insumos". Ver calcAbonosPendientesPorPedido.
+  var abonosPendientes = calcAbonosPendientesPorPedido(serie.desde, serie.hasta);
+  var totalAbonosPendientes = abonosPendientes.reduce(function (a, s) { return a + s.monto; }, 0);
+  var ganancia = t.balance - totalServicios - totalAbonosPendientes;
   var cifras = [
     { label: "Entró", valor: fmt(t.ingresos), clase: "pos" },
     { label: "Salió", valor: fmt(t.gastos), clase: "neg" },
@@ -250,6 +256,7 @@ function renderGraficaResumen() {
   return html + renderCifrasGrafica(cifras) +
     '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div>' +
     renderServiciosMini(servicios) +
+    renderAbonosPendientesMini(abonosPendientes) +
     "</div>";
 }
 
@@ -273,6 +280,23 @@ function renderServiciosMini(servicios) {
     '<div class="kpis-mini">' +
     servicios.map(function (s) {
       return '<button type="button" class="kpi-mini" data-action="abrir-historial-servicio" data-nombre="' + esc(s.nombre) + '"><div class="kpi-mini-label" title="' + esc(s.nombre) + '">' + esc(s.nombre) + '</div><div class="kpi-mini-value">' + fmt(s.monto) + "</div></button>";
+    }).join("") +
+    "</div>";
+}
+
+// Mismo formato que renderServiciosMini, un tile por PEDIDO sin terminar de
+// pagar. No tiene un historial propio que mostrar (ya es un solo pedido, no
+// una categoría acumulada de varias cotizaciones), así que cada tile
+// reutiliza la navegación de "Por cobrar" (kpi-nav a Pedidos filtrado por
+// saldo) en vez de abrir un popup nuevo — ver [[reutilizar-antes-de-crear]].
+function renderAbonosPendientesMini(abonos) {
+  if (!abonos.length) return "";
+  return '<div class="section-sub" style="margin:14px 0 6px;">De "Balance" a "Ganancia" también se restó esto (abonado de pedidos sin terminar de pagar)' +
+    renderHelp("Cada una de estas es la plata que un cliente ya abonó de un pedido que todavía tiene saldo pendiente: es plata real en caja (va dentro de \"Entró\") pero de ahí hay que comprar los insumos que faltan para ese pedido, así que todavía no es utilidad del negocio. En cuanto el pedido quede pagado por completo, deja de restarse acá y pasa a contar como Ganancia. Haz clic en cualquiera para ver los pedidos con saldo.") +
+    "</div>" +
+    '<div class="kpis-mini">' +
+    abonos.map(function (a) {
+      return '<button type="button" class="kpi-mini" data-action="kpi-nav" data-tab="pedidos" data-filtro-saldo="1" title="Ver pedidos con saldo"><div class="kpi-mini-label" title="' + esc(a.nombre) + '">' + esc(a.nombre) + '</div><div class="kpi-mini-value">' + fmt(a.monto) + "</div></button>";
     }).join("") +
     "</div>";
 }
