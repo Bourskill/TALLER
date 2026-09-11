@@ -11,6 +11,12 @@ plano, cargado directo por el navegador vía `<script type="module">` (soportado
 en todos los navegadores modernos). Simplemente se usa `import`/`export` de
 JavaScript para separar archivos en vez de tenerlo todo concatenado.
 
+**¿Vas a tocar algo que mueve dinero?** Revisa primero
+[CONTABILIDAD.md](CONTABILIDAD.md) — el mapa de todas las reglas
+financieras de la app (saldo, IVA, abonos, servicios, comisiones, por
+pagar) y los hallazgos de la auditoría de septiembre 2026, para comparar
+en vez de adivinar.
+
 ## Regla de UX: sin texto explicativo duplicado (no revertir esto)
 
 La app usa un ícono "?" (`renderHelp()` en `core/components.js`) para sacar
@@ -221,6 +227,34 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — septiembre 2026 (trigésimo novena ronda: auditoría financiera completa)
+
+El usuario preguntó si existe "una guía/librería" para el tema
+financiero, porque sentía que le tocaba adivinar procesos de flujo de
+dinero — pidió "una garantía... algo tangible, comparativo, para no
+estar a la deriva y a prueba y error". No existe una librería para esto
+(es contabilidad, no un paquete instalable), así que se hizo una
+auditoría real del código: 9 agentes revisaron TODA la lógica de dinero
+de la app (146 reglas extraídas de `core/calc.js` y los módulos de
+Pedidos/Cotizaciones/Finanzas/Pendientes) y las compararon contra
+principios estándar de contabilidad de caja desde tres ángulos
+(completitud, consistencia interna/doble conteo, casos borde de uso
+real).
+
+Resultado: **[CONTABILIDAD.md](CONTABILIDAD.md)**, un documento de
+referencia para comparar CUALQUIER cambio futuro que toque dinero contra
+lo que la app ya hace, en vez de improvisar. Incluye las reglas
+organizadas por área y 23 hallazgos de la auditoría: 9 verificados como
+correctos, 9 riesgos confirmados con escenario concreto (ej. registrar
+una deuda no genera su ingreso de caja correspondiente; el reporte de
+pedidos por rango calcula el saldo SIN IVA, reproduciendo un bug ya
+corregido en otro lugar), y 5 preguntas de negocio sin una respuesta de
+código correcta (ej. si el taller tiene derecho a descontar el IVA de
+sus propias compras — eso es para un contador, no para este documento).
+
+Ninguno de los 9 riesgos se corrigió todavía en esta ronda — quedan
+documentados para que el usuario decida, con calma, cuáles priorizar.
 
 ## Registro de cambios — septiembre 2026 (trigésimo octava ronda: el KPI "Ganancia" ya no cuenta el abonado de pedidos sin terminar de pagar)
 
