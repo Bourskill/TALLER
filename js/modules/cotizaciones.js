@@ -2194,7 +2194,18 @@ export var actions = {
         iva: cot.iva || p.iva,
         estado: agregado ? agregado.estado : p.estado,
         estadosDef: agregado ? agregado.estadosDef : null,
-        vendedor: cot.vendedor ? Object.assign({}, cot.vendedor) : p.vendedor,
+        // "cot.vendedor" siempre es un objeto no-nulo una vez se toca el
+        // panel Vendedor de la cotización (set-cot-vendedor lo rellena con
+        // valores por defecto: {nombre:"", ...}) — comparar solo contra
+        // "truthy" lo hacía SIEMPRE reemplazar al del pedido, incluso vacío.
+        // Como una cotización escalada nace con su propia COPIA del vendedor
+        // (ver escalar-a-cotizacion) sin sincronización automática después,
+        // asignar el vendedor directo en el PEDIDO (después de escalar) y
+        // luego pulsar "Aplicar a pedido" borraba ese vendedor real —
+        // incluida su comisión ya marcada "pagada" — con el objeto vacío de
+        // la cotización. Ahora solo reemplaza si la cotización de verdad
+        // tiene un nombre escrito.
+        vendedor: (cot.vendedor && cot.vendedor.nombre) ? Object.assign({}, cot.vendedor) : p.vendedor,
         // Solo pisa la fecha del pedido si la cotización define una — si se
         // dejó vacía al cotizar, se conserva la que el pedido rápido ya tenía
         // en vez de borrársela.

@@ -8,7 +8,7 @@
 // el futuro varias partes de la UI reaccionen al mismo cambio sin acoplarse.
 
 import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./constants.js";
-import { todayStr, uid } from "./utils.js";
+import { todayStr, uid, num } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
@@ -507,6 +507,43 @@ export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío
+// DESPUÉS de que su comisión ya se había pagado.
+//
+// Por qué existía el hueco: una cotización "escalada" desde un pedido
+// rápido nace con su PROPIA copia de vendedor (ver escalar-a-cotizacion en
+// modules/pedidos.js), separada de la del pedido — si el vendedor se
+// asigna directo en el PEDIDO (después de escalarlo) y nunca en la
+// cotización, "Aplicar a pedido" (aplicar-cotizacion-a-pedido en
+// modules/cotizaciones.js) sobrescribía TODO p.vendedor con el de la
+// cotización con solo comprobar que el objeto existiera (`cot.vendedor ?
+// ... : p.vendedor`) — un objeto vacío `{nombre:"",...}` es truthy, así
+// que el vendedor real (con su comisión ya "pagada") se borraba en
+// silencio. El fix está en el punto donde esto se CREA; esta función solo
+// repara pedidos que ya habían quedado así con datos viejos.
+//
+// El tx de la comisión pagada (marcado con origenComisionPedidoId, ver
+// MARCAS_ORIGEN_SISTEMA en core/calc.js) SÍ guarda quién la cobró
+// (`contraparte`) — es el único rastro confiable de quién era el vendedor
+// real, así que se usa para reconstruirlo. No hay forma de saber si la
+// comisión original era por porcentaje o monto fijo (ese dato SÍ se perdió
+// de verdad), así que se restaura como "fijo" por el monto que de verdad
+// se pagó: es el único número que no admite duda, y si el usuario corrige
+// el tipo/valor después, no cambia lo que ya se pagó.
+export function repararVendedorPerdido(pedidos, tx) {
+  var huboReparacion = false;
+  (pedidos || []).forEach(function (p) {
+    if (p.vendedor && p.vendedor.nombre) return; // no está roto
+    var txComision = (tx || []).filter(function (t) {
+      return t.tipo === "comision" && t.origenComisionPedidoId === p.id;
+    })[0];
+    if (!txComision || !txComision.contraparte) return;
+    p.vendedor = { nombre: txComision.contraparte, tipo: "fijo", valor: num(txComision.monto), estado: "pagado" };
+    huboReparacion = true;
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -744,6 +781,15 @@ export async function loadAll() {
     // vieja frente a otro dispositivo.
     if (!huboFalloDeRed && repararTxHuerfanosDeCotEscalada(state.tx, state.cotizaciones, state.pedidos)) {
       persist("tx");
+    }
+
+    // Auto-reparación: un pedido que perdió su vendedor DESPUÉS de que su
+    // comisión ya se había pagado (bug en aplicar-cotizacion-a-pedido, ya
+    // corregido ahí — ver repararVendedorPerdido más arriba para el
+    // mecanismo completo). Mismo criterio de "solo con red real" que la
+    // reparación de arriba.
+    if (!huboFalloDeRed && repararVendedorPerdido(state.pedidos, state.tx)) {
+      persist("pedidos");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"

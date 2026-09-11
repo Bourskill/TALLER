@@ -228,6 +228,46 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo cuarta ronda: el vendedor de un pedido se borraba después de pagarle su comisión)
+
+El usuario reportó, con un reporte financiero real: un pedido con una
+comisión de vendedor YA PAGADA ("Comisión — negra", $31.500 en Finanzas)
+aparecía como "(sin vendedor)" en "Pedidos del periodo" y "Ventas por
+vendedor" del PDF.
+
+**Causa:** una cotización "escalada" desde un pedido rápido nace con su
+PROPIA copia de `vendedor`, separada de la del pedido — sin sincronización
+automática después. Si el vendedor se asigna directo en el PEDIDO (después
+de escalarlo) y la cotización nunca tiene el suyo propio, "Aplicar a
+pedido" (`aplicar-cotizacion-a-pedido`, modules/cotizaciones.js)
+sobrescribía TODO `p.vendedor` con el de la cotización — pero comparaba
+`cot.vendedor` contra "truthy" en vez de contra su `.nombre`. En cuanto se
+toca el panel Vendedor de la cotización (aunque se deje sin nombre),
+`set-cot-vendedor` ya deja un objeto NO nulo (`{nombre:"", ...}`) — truthy
+pero vacío — así que "ganaba" sobre el vendedor real del pedido, borrándolo
+en silencio (comisión ya pagada incluida). El `tx` de la comisión no se
+tocó (guarda su propia copia congelada de `contraparte`), por eso el
+movimiento seguía apareciendo en Finanzas mientras el pedido ya no sabía
+quién lo vendió.
+
+**Fix de origen:** ahora compara `cot.vendedor && cot.vendedor.nombre`.
+
+**Reparación de datos ya rotos:** se agregó `repararVendedorPerdido`
+(`core/store.js`), que corre una vez en `loadAll()` (mismo patrón que
+`repararTxHuerfanosDeCotEscalada`): busca, para cada pedido sin
+`vendedor.nombre`, un `tx` de comisión ya pagada (`origenComisionPedidoId`)
+y reconstruye el nombre desde `contraparte` (el único dato que no admite
+duda). El tipo de comisión (% o fijo) no se puede recuperar, así que se
+restaura como "fijo" por el monto exacto que ya se pagó.
+
+Verificado en `test/smoke.mjs`: tanto el fix de origen (prueba end-to-end
+de "Aplicar a pedido") como la función de reparación, revirtiendo cada uno
+a propósito — la primera versión de la prueba del fix de origen usaba
+`vendedor: null` en la cotización, que resultó ser un caso "demasiado
+fácil" (null es falsy con o sin el bug, así que no lo detectaba); se
+corrigió a un objeto vacío pero truthy, que es lo que el bug real necesita.
+779/779 pasando.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo tercera ronda: últimos 2 riesgos de la auditoría — sobrepagos y "servicio" sin pedido real)
 
 **1. "Por pagar" no incluía los saldos a favor del cliente (sobrepagos).**

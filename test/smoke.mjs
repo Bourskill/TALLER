@@ -54,7 +54,7 @@ global.window.storage = {
 };
 
 const { render } = await import("../js/core/dom.js");
-const { loadAll, state, repararTxHuerfanosDeCotEscalada } = await import("../js/core/store.js");
+const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido } = await import("../js/core/store.js");
 const auth = await import("../js/core/auth.js");
 function loginComo(rol, nombre, email) {
   sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
@@ -1969,6 +1969,76 @@ assert(txYaLigado.pedidoId === "ya-tenia", "un tx que ya tenía pedidoId no se t
 assert(txSinCot.pedidoId === "", "uno sin cotizacionId (huérfano de verdad, sin pedido de origen) se deja para la papelera/filtro de \"Sueltos\", no se inventa un pedido");
 assert(txCotBorrada.pedidoId === "", "uno cuya cotización ya no existe tampoco se toca: no hay de dónde sacar el pedido");
 assert(txPedidoBorrado.pedidoId === "", "y si el pedido de destino también fue eliminado, no se resucita un pedidoId que apunta a la nada");
+
+// ---------------------------------------------------------------------------
+// El usuario reportó, con un reporte financiero real: un pedido con una
+// comisión de vendedor YA PAGADA ("Comisión — negra", $31.500 en Finanzas)
+// aparecía como "(sin vendedor)" en "Pedidos del periodo" y "Ventas por
+// vendedor". Causa: "aplicar-cotizacion-a-pedido" (modules/cotizaciones.js)
+// comparaba cot.vendedor contra "truthy" en vez de contra su .nombre — un
+// vendedor asignado directo en el pedido (después de escalarlo a
+// cotización, sin tocar el vendedor DE LA COTIZACIÓN) se borraba al
+// "Aplicar a pedido" si esa cotización nunca tuvo su propio vendedor. Fix
+// de origen en ese punto; repararVendedorPerdido (store.js) es la
+// auto-reparación en loadAll() para pedidos que ya habían quedado así con
+// datos viejos — mismo patrón que repararTxHuerfanosDeCotEscalada arriba.
+// ---------------------------------------------------------------------------
+const pedVendedorPerdido = { id: "ped-vendedor-perdido", numeroOp: "OP-0002", vendedor: null };
+const txComisionVendedorPerdido = { id: "tx-comision-negra", tipo: "comision", concepto: "Comisión — negra", contraparte: "negra", monto: 31500, origenComisionPedidoId: "ped-vendedor-perdido" };
+let reparoVendedor = repararVendedorPerdido([pedVendedorPerdido], [txComisionVendedorPerdido]);
+assert(reparoVendedor === true, "repararVendedorPerdido avisa que sí reparó algo");
+assert(pedVendedorPerdido.vendedor && pedVendedorPerdido.vendedor.nombre === "negra", "reconstruye el nombre del vendedor a partir del tx de la comisión ya pagada");
+assert(pedVendedorPerdido.vendedor.valor === 31500 && pedVendedorPerdido.vendedor.estado === "pagado", "...con el monto que de verdad se pagó y marcado como pagado (no se puede saber si era % o fijo, así que se restaura como fijo por lo ya pagado)");
+
+// No toca nada que no deba: un pedido que YA tiene vendedor, uno sin
+// ninguna comisión que lo respalde, y un tx de otro tipo (nunca debería
+// llevar origenComisionPedidoId, pero por si acaso no cuenta).
+const pedConVendedorOk = { id: "ped-vendedor-ok", numeroOp: "OP-0003", vendedor: { nombre: "Carlos", tipo: "porcentaje", valor: 5, estado: "pendiente" } };
+const pedSinComisionQueLoRespalde = { id: "ped-sin-comision", numeroOp: "OP-0004", vendedor: null };
+const txGastoConMarcaRara = { id: "tx-gasto-raro", tipo: "gasto", contraparte: "no debería contar", monto: 1000, origenComisionPedidoId: "ped-sin-comision" };
+reparoVendedor = repararVendedorPerdido([pedConVendedorOk, pedSinComisionQueLoRespalde], [txComisionVendedorPerdido, txGastoConMarcaRara]);
+assert(reparoVendedor === false, "y si no hay nada reparable, lo dice");
+assert(pedConVendedorOk.vendedor.nombre === "Carlos" && pedConVendedorOk.vendedor.tipo === "porcentaje", "un pedido que ya tiene vendedor no se toca, aunque exista una comisión pagada de otro pedido");
+assert(pedSinComisionQueLoRespalde.vendedor === null, "un pedido sin vendedor pero sin ninguna comisión real que lo respalde se deja tal cual (no se inventa un vendedor)");
+
+// El fix de ORIGEN (no solo la reparación de datos viejos): "Aplicar a
+// pedido" sobre una cotización escalada, cuando esa cotización nunca tuvo
+// su propio vendedor (el vendedor se asignó directo en el pedido), ya NO
+// borra el vendedor real del pedido — antes cualquier objeto no-nulo de
+// cot.vendedor (incluido uno vacío) ganaba sobre el del pedido.
+const pedidosPreviosVendedorFix = state.pedidos, cotizacionesPreviasVendedorFix = state.cotizaciones;
+state.pedidos = state.pedidos.concat([{
+  id: "ped-aplicar-vendedor-test", numeroOp: "OP-APLICAR-VEND", cliente: "Cliente Aplicar", descripcion: "Prueba aplicar",
+  cantidad: "1", total: 100000, costo: 40000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-aplicar-vendedor-test",
+  vendedor: { nombre: "Vendedor Real", tipo: "fijo", valor: 25000, estado: "pagado" },
+  abonos: [], lineas: [], stockConsumido: []
+}]);
+state.cotizaciones = state.cotizaciones.concat([{
+  id: "cot-aplicar-vendedor-test", cliente: "Cliente Aplicar", descripcion: "Prueba aplicar", fecha: "2026-01-01",
+  estado: "borrador", pedidoOrigenId: "ped-aplicar-vendedor-test", pedidoId: "",
+  // Truthy pero vacío — exactamente lo que deja set-cot-vendedor (core/calc.js)
+  // en cuanto se toca el panel Vendedor de la cotización sin escribir un
+  // nombre: null hubiera sido un caso demasiado fácil (falsy en los dos
+  // casos, con o sin el bug) y no habría detectado nada.
+  vendedor: { nombre: "", tipo: "porcentaje", valor: 0, estado: "pendiente" },
+  gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "capv1",
+  referencias: [{
+    id: "ref-apv-1", nombre: "Producto", imagenUrl: "", consumoAprox: 1, cantidadPedida: 1, precioVenta: 100000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [], detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}]);
+click('[data-action="tab"][data-tab="cotizaciones"]');
+click('[data-action="cot-vista"][data-val="historial"]');
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-aplicar-vendedor-test"]');
+click('[data-action="aplicar-cotizacion-a-pedido"][data-id="cot-aplicar-vendedor-test"]');
+const pedTrasAplicar = state.pedidos.find(p => p.id === "ped-aplicar-vendedor-test");
+assert(!!pedTrasAplicar && pedTrasAplicar.vendedor && pedTrasAplicar.vendedor.nombre === "Vendedor Real", "\"Aplicar a pedido\" con la cotización SIN su propio vendedor NO borra el vendedor real del pedido");
+assert(pedTrasAplicar.vendedor.estado === "pagado", "...y conserva que su comisión ya estaba pagada");
+assert(pedTrasAplicar.total === 100000, "...mientras que el resto de los datos SÍ se aplican normal (total tomado de la cotización)");
+state.pedidos = pedidosPreviosVendedorFix; state.cotizaciones = cotizacionesPreviasVendedorFix;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
 // ---------------------------------------------------------------------------
 // La serie de movimientos es una LÍNEA DE TIEMPO, no una lista de fechas con
