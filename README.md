@@ -228,6 +228,41 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo tercera ronda: últimos 2 riesgos de la auditoría — sobrepagos y "servicio" sin pedido real)
+
+**1. "Por pagar" no incluía los saldos a favor del cliente (sobrepagos).**
+Un abono mal digitado o mercancía devuelta deja el saldo de un pedido
+negativo — plata que el taller debe devolver — pero ningún KPI la sumaba.
+`calcSaldosAFavorClientes()`/`listaSaldosAFavorClientes()` (espejo de
+`calcPorCobrarPedidos`/`listaDeudores`, pero para saldos negativos) ahora
+entran en `calcPorPagar`, tienen su propia categoría en el desglose de
+Pendientes, y se tratan como urgentes en el indicador compacto.
+
+**2. "Servicio" disponible sin que hubiera un pedido real detrás.** Marcar
+una línea de "Compras del pedido" como "Servicio" en una cotización que
+nunca fue convertida ni escalada desde un pedido rápido la dejaba contar
+como plata disponible para pagar nómina, sin que el cliente hubiera
+aceptado ni pagado nada. `listaEntradasServicio` ahora exige que la
+cotización esté `convertida` o tenga `pedidoOrigenId` (escalada desde un
+pedido rápido ya real).
+
+**Vuelta importante en el camino:** la auditoría también señalaba que
+marcar una compra "Sí" y sincronizarla a Finanzas (`sincronizar-compras-
+finanzas`) no exigía cotización convertida. Se intentó bloquearlo igual
+que el "estimado completo" — y se revirtió al descubrir, con dos pruebas
+ya existentes que dependían de ello, que esto es intencional y correcto:
+"Sí" representa dinero que YA salió de la caja de verdad (a diferencia de
+"Servicio", que es una promesa de plata disponible condicionada a que la
+venta se concrete), y una cotización escalada desde un pedido rápido real
+necesita poder registrar compras reales antes de "Aplicar a pedido". Ver
+CONTABILIDAD.md para el detalle completo — quedó documentado ahí para no
+repetir el mismo intento de "arreglo" más adelante.
+
+Ambos verificados en `test/smoke.mjs` revirtiendo cada fix a propósito.
+770/770 pasando (más el test preexistente con timing real, ya documentado
+como intermitente y no relacionado). **Con esto, los 9 riesgos de la
+auditoría financiera de esta sesión quedan atendidos.**
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo segunda ronda: gasto fijo por periodo + "Deshacer último pago" de una deuda)
 
 **1. El bloqueo de borrado de un gasto fijo pagado no distinguía el

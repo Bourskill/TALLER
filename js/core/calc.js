@@ -582,12 +582,34 @@ export function listaDeudores() {
   });
   return lista.sort(function (a, b) { return b.monto - a.monto; });
 }
+// El espejo de listaDeudores: pedidos donde calcSaldoPedido(p) es NEGATIVO
+// (se cobró de más — un abono mal digitado, o mercancía devuelta). Esa
+// plata es una obligación real del taller (hay que devolverla), pero antes
+// no se sumaba en ningún KPI: calcPorCobrarPedidos/listaDeudores descartan
+// un saldo negativo sin más (`saldo > 0`), y "Por pagar" solo miraba seis
+// fuentes que no incluían esta. La propia app ya reconocía el caso en otros
+// lugares — pedidos.js marca la tarjeta con "se cobró de más: hay que
+// devolverlo", y la Cuenta de cobro imprime "SALDO A FAVOR DEL CLIENTE" —
+// pero el KPI "Por pagar" del Resumen nunca lo reflejaba.
+export function listaSaldosAFavorClientes() {
+  var lista = [];
+  state.pedidos.forEach(function (p) {
+    if (pedidoCancelado(p)) return;
+    var saldo = calcSaldoPedido(p);
+    if (saldo < 0) lista.push({ nombre: p.cliente, monto: -saldo, nota: p.descripcion, pedidoId: p.id });
+  });
+  return lista.sort(function (a, b) { return b.monto - a.monto; });
+}
+export function calcSaldosAFavorClientes() {
+  return listaSaldosAFavorClientes().reduce(function (a, s) { return a + s.monto; }, 0);
+}
 // "Por pagar": todo lo que el taller debe — gastos fijos sin pagar en su
 // periodo + nómina pendiente + comisiones de vendedor pendientes + deudas
-// registradas. Ya no incluye "gastos sueltos pendientes" de Finanzas, porque
-// ese estado ya no existe ahí (ver arriba).
+// registradas + saldos a favor de clientes (se les cobró de más). Ya no
+// incluye "gastos sueltos pendientes" de Finanzas, porque ese estado ya no
+// existe ahí (ver arriba).
 export function calcPorPagar() {
-  return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes() + calcComisionesConsignacionPendientes();
+  return calcGastosFijosPendientes() + calcNominaPendiente() + calcComisionesPendientes() + calcComisionesPendientesCot() + calcDeudasPendientes() + calcComisionesConsignacionPendientes() + calcSaldosAFavorClientes();
 }
 
 // Cuánto de la plata que entró en un periodo corresponde a trabajo hecho POR
@@ -622,6 +644,19 @@ function listaEntradasServicio() {
   var entradas = [];
   (state.cotizaciones || []).forEach(function (cot) {
     if (!(cot.compras || []).length) return;
+    // Una cotización que NUNCA fue un pedido de verdad (ni convertida, ni
+    // escalada desde un pedido rápido ya existente — ver pedidoOrigenId en
+    // modules/pedidos.js "escalar-a-cotizacion") no tiene ningún abono real
+    // detrás: marcar una línea "Servicio" ahí es solo una estimación para
+    // ver margen, no plata que de verdad haya entrado a la caja. Sin este
+    // filtro, ese "acumulado" ya contaba como disponible para pagar nómina
+    // de verdad vía validarServiciosAsignados, antes de que existiera
+    // ninguna venta. Ojo: una cotización ESCALADA sigue en estado
+    // "borrador" hasta pulsar "Aplicar a pedido", pero el pedido rápido
+    // detrás de ella (pedidoOrigenId) SÍ es real — mismo criterio que ya
+    // usa pedidoIdDeCotParaTx en modules/cotizaciones.js para no dejar sus
+    // movimientos como "sueltos".
+    if (cot.estado !== "convertida" && !cot.pedidoOrigenId) return;
     var lineas = calcListaCompras(cot);
     cot.compras.forEach(function (compra) {
       if (estadoCompra(compra) !== "servicio") return;
@@ -860,6 +895,17 @@ export function calcPorPagarDesglose() {
     });
   }
 
+  var saldosAFavor = listaSaldosAFavorClientes();
+  if (saldosAFavor.length) {
+    categorias.push({
+      categoria: "Saldos a favor de clientes",
+      monto: saldosAFavor.reduce(function (a, s) { return a + s.monto; }, 0),
+      items: saldosAFavor.map(function (s) {
+        return { concepto: s.nombre + (s.nota ? " (" + s.nota + ")" : ""), monto: s.monto, fecha: null };
+      })
+    });
+  }
+
   return categorias;
 }
 // Fecha de vencimiento MÁS PRÓXIMA de una obligación periódica (gasto fijo o
@@ -980,6 +1026,13 @@ export function calcResumenPorPagar() {
     (p.consignacion.ventas || []).forEach(function (v) {
       if (!v.comisionPagada) items.push({ monto: num(v.comisionMonto), vencida: true });
     });
+  });
+
+  // Saldos a favor de clientes: plata que ya se cobró de más y hay que
+  // devolver — no tiene una fecha de vencimiento propia (nadie la "vence"),
+  // así que se trata como urgente desde ya, igual que las comisiones.
+  listaSaldosAFavorClientes().forEach(function (s) {
+    items.push({ monto: s.monto, vencida: true });
   });
 
   if (!items.length) return { estado: "aldia" };

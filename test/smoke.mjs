@@ -484,7 +484,10 @@ const { todayStr: hoyStrServicios } = await import("../js/core/utils.js");
 var fechaCotServicios = hoyStrServicios(); // hoy: para que el tile del dashboard de 30 días la vea, sin depender de una fecha fija
 var cotServicios = {
   id: "cot-servicios-test", cliente: "Cliente Servicios", descripcion: "Prueba servicios", fecha: fechaCotServicios,
-  estado: "borrador", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "csrv1",
+  // "convertida" a propósito: una cotización SIN convertir no tiene pedido
+  // ni cobro real detrás, así que ya no cuenta como "servicio" acumulado
+  // (ver el fix de listaEntradasServicio más abajo, en su propia prueba).
+  estado: "convertida", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "csrv1",
   referencias: [{
     id: "ref-serv-1", nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 40000, origen: "taller", costoCompra: 0, proveedorId: "",
     insumos: [{ id: "ins-conf", nombre: "Confección", unidad: "servicio", costo: 5000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
@@ -600,6 +603,54 @@ var historialMedias = calcHistorialServicio("Medias");
 assert(historialMedias.length === 2 && historialMedias[0].tipo === "entrada" && historialMedias[0].monto === 2000000, "calcHistorialServicio: la entrada es la cotización que marcó \"Medias\" como servicio");
 assert(historialMedias[1].tipo === "salida" && historialMedias[1].monto === 1000000, "...y la salida es la nómina que se le asignó");
 assert(historialMedias[1].saldo === 1000000, "...con el saldo corriente ya descontado (2.000.000 − 1.000.000)");
+
+// ---------------------------------------------------------------------------
+// Una cotización que NUNCA tuvo un pedido real detrás (ni convertida, ni
+// escalada desde un pedido rápido) no debe poder acumular "servicio"
+// disponible para pagar nómina — es una CLAIM sobre plata ya cobrada, y acá
+// no se cobró nada todavía, solo se está cotizando. (Distinto de marcar una
+// compra "Sí" y sincronizarla como gasto real: ESO sí puede pasar antes de
+// convertir, porque representa dinero que de verdad salió de la caja al
+// comprar algo — cierre o no la venta, esa plata ya se gastó. Por eso
+// "sincronizar-compras-finanzas" sigue disponible desde el día uno, ver la
+// prueba de "movimientos sueltos" más abajo en este archivo.)
+// ---------------------------------------------------------------------------
+const { calcServiciosPorCategoriaRango: calcServCatBorrador } = await import("../js/core/calc.js");
+var cotBorrador = {
+  id: "cot-borrador-servicio-test", cliente: "Cliente Borrador", descripcion: "Sin convertir todavía", fecha: fechaCotServicios,
+  estado: "borrador", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "cbor1",
+  referencias: [{
+    id: "ref-bor-1", nombre: "Pantalón", imagenUrl: "", consumoAprox: 1, cantidadPedida: 5, precioVenta: 60000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [{ id: "ins-corte-bor", nombre: "Corte", unidad: "servicio", costo: 8000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+};
+state.cotizaciones = state.cotizaciones.concat([cotBorrador]);
+var claveCorteBorrador = calcListaComprasServ(cotBorrador).filter(function (l) { return l.nombre === "Corte"; })[0].clave;
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  return c.id === "cot-borrador-servicio-test" ? Object.assign({}, c, { compras: [{ clave: claveCorteBorrador, estado: "servicio", costoReal: 40000 }] }) : c;
+});
+render();
+assert(!calcServCatBorrador().some(function (s) { return s.nombre === "Corte"; }), "una cotización SIN convertir (borrador) marcada \"servicio\" NO cuenta como plata disponible — no hay pedido ni cobro real todavía");
+
+// convertirla sí la hace contar (mismo criterio de siempre, ahora con el
+// precondition explícito)
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  return c.id === "cot-borrador-servicio-test" ? Object.assign({}, c, { estado: "convertida" }) : c;
+});
+render();
+assert(calcServCatBorrador().some(function (s) { return s.nombre === "Corte" && s.monto === 40000; }), "...pero en cuanto se convierte en pedido, sí cuenta (40.000)");
+
+// una cotización ESCALADA (todavía "borrador", pero con un pedido rápido
+// real detrás vía pedidoOrigenId) también cuenta, sin necesidad de
+// "convertida".
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  return c.id === "cot-borrador-servicio-test" ? Object.assign({}, c, { estado: "borrador", pedidoOrigenId: "ped-esc" }) : c;
+});
+assert(calcServCatBorrador().some(function (s) { return s.nombre === "Corte" && s.monto === 40000; }), "y una cotización escalada desde un pedido rápido real (pedidoOrigenId) también cuenta, aunque siga en \"borrador\"");
+
+state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== "cot-borrador-servicio-test"; }); // limpieza
 
 click('[data-action="tab"][data-tab="resumen"]');
 var tileConfeccion = document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Confección"]');
@@ -742,6 +793,40 @@ const pedidoConSaldo = state.pedidos.find(p => (p.total - p.abono) > 0);
 assert(!!pedidoConSaldo, "hay al menos un pedido con saldo (para probar el KPI)");
 assert(calcPorCobrar() >= (pedidoConSaldo.total - pedidoConSaldo.abono), "Por cobrar incluye el saldo de pedidos");
 assert(calcPorPagar() >= (state.deudas[0].monto + state.config.gastosFijos[0].monto), "Por pagar incluye gastos fijos y deudas pendientes");
+
+// ---------------------------------------------------------------------------
+// "Por pagar" no incluía los saldos a favor del cliente (sobrepagos): un
+// abono mal digitado, o mercancía devuelta, dejaba calcSaldoPedido(p)
+// negativo — esa plata es una obligación real del taller (hay que
+// devolverla) pero calcPorCobrarPedidos/listaDeudores la descartan sin más
+// (saldo > 0), y el KPI "Por pagar" solo miraba seis fuentes que no la
+// incluían. Ahora calcSaldosAFavorClientes()/listaSaldosAFavorClientes() la
+// suman aparte y se incluyen en calcPorPagar, calcPorPagarDesglose y
+// calcResumenPorPagar (tratada como "vencida", igual que una comisión).
+// ---------------------------------------------------------------------------
+const { calcPorPagarDesglose, calcResumenPorPagar, listaSaldosAFavorClientes, calcSaldosAFavorClientes } = await import("../js/core/calc.js");
+const pedidosPreviosSobrepago = state.pedidos;
+const porPagarAntesSobrepago = calcPorPagar();
+state.pedidos = state.pedidos.concat([{
+  id: "ped-sobrepago", numeroOp: "OP-SOBREPAGO", cliente: "Cliente Sobrepago", descripcion: "Pagó de más por error",
+  cantidad: "1", total: 100000, costo: 40000, abono: 150000, estado: "entregado", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [{ id: "ab-sobrepago", monto: 150000, fecha: "2026-01-01", metodoPago: "Transferencia" }], lineas: [], stockConsumido: [], vendedor: null
+}]);
+const sobrepagos = listaSaldosAFavorClientes();
+assert(sobrepagos.length === 1 && sobrepagos[0].nombre === "Cliente Sobrepago" && sobrepagos[0].monto === 50000, "listaSaldosAFavorClientes detecta el pedido con saldo negativo (150.000 abonado - 100.000 de total = 50.000 de más)");
+assert(calcSaldosAFavorClientes() === 50000, "calcSaldosAFavorClientes suma esos 50.000");
+assert(Math.abs(calcPorPagar() - porPagarAntesSobrepago - 50000) < 1, "\"Por pagar\" ahora sube esos mismos 50.000");
+const desgloseConSobrepago = calcPorPagarDesglose();
+const categoriaSobrepago = desgloseConSobrepago.find(c => c.categoria === "Saldos a favor de clientes");
+assert(!!categoriaSobrepago && categoriaSobrepago.monto === 50000, "el desglose de \"Por pagar\" (Pendientes) trae una categoría propia para esto");
+const resumenConSobrepago = calcResumenPorPagar();
+assert(resumenConSobrepago.estado === "vencidas", "el saldo a favor se trata como urgente (\"vencida\"), no tiene una fecha propia que esperar");
+
+// un pedido CANCELADO con saldo negativo no cuenta (esa venta no se completó)
+state.pedidos = state.pedidos.map(p => p.id === "ped-sobrepago" ? Object.assign({}, p, { cancelado: true }) : p);
+assert(listaSaldosAFavorClientes().length === 0, "un pedido cancelado con saldo a favor no cuenta (esa venta no se va a completar)");
+state.pedidos = pedidosPreviosSobrepago;
 
 // --- pagar una deuda de pago único: debe salir de "pendientes" y moverse
 // entera (no como un simple cambio de estado) al historial de deudas ---

@@ -91,7 +91,7 @@ contabilidad de caja para negocio pequeño.
 | Qué | Regla | Dónde |
 |---|---|---|
 | Qué es un "servicio" | cualquier línea de "Compras del pedido" marcada `estado:"servicio"` — editable a mano en CUALQUIER línea, no atado a categorías del catálogo | `calc.js:590-621` `listaEntradasServicio` |
-| Acumulado bruto | agrupado por NOMBRE, filtrado por fecha de la COTIZACIÓN (un servicio nunca genera `tx`, no tiene fecha propia) | `calc.js:623` `calcServiciosPorCategoriaRango` |
+| Acumulado bruto | agrupado por NOMBRE, filtrado por fecha de la COTIZACIÓN (un servicio nunca genera `tx`, no tiene fecha propia). Solo cuenta si la cotización está `convertida` o tiene `pedidoOrigenId` (escalada desde un pedido rápido real) — una cotización que nunca fue ni una cosa ni la otra no tiene ningún cobro real detrás. | `calc.js:623` `calcServiciosPorCategoriaRango`/`listaEntradasServicio` |
 | Disponible | acumulado histórico MENOS lo ya asignado a un gasto/nómina (`tx.serviciosDescuento`) | `calc.js:675` `calcServiciosDisponibles` |
 | Lo que resta de Ganancia | topado a lo "disponible" ACTUAL, no al bruto — evita doble conteo cuando el servicio ya se pagó de verdad. Un servicio en $0 sigue en la lista (no desaparece). | `calc.js:700` `calcServiciosPendientesPorCategoriaRango` |
 | Validación al asignar un gasto/nómina a un servicio | (1) nunca deja un servicio negativo, (2) lo asignado no puede superar el monto del propio pago | `calc.js:751` `validarServiciosAsignados` |
@@ -185,7 +185,12 @@ casos borde de uso real). 23 hallazgos en total.
 8. Cancelar un pedido abonado en varias partes no descuadra nada.
 9. Las fechas de abonos/movimientos usan hora LOCAL, no UTC (ya corregido un bug histórico de "se pasa al día siguiente de noche").
 
-### ✅ Riesgos ya corregidos (7 de 9, septiembre 2026)
+### ✅ Riesgos atendidos (9 de 9, septiembre 2026)
+
+8 se corrigieron con código de punta a punta. El 9° ("Compras del pedido
+de una cotización sin convertir") tenía dos partes: una SÍ era un bug real
+y se corrigió; la otra, al investigarla, resultó ser un comportamiento
+intencional y correcto — se explica en su propia entrada más abajo.
 
 - **Registrar una deuda (préstamo) no generaba el ingreso de caja
   correspondiente.** Ahora el formulario de "Agregar deuda" tiene un
@@ -243,20 +248,38 @@ casos borde de uso real). 23 hallazgos en total.
   (campo `txId`, nuevo en cada línea de `historial`) — para esos casos
   el botón avisa en vez de adivinar cuál movimiento le corresponde.
   (`pendientes.js`)
-
-### 🔴 Riesgos pendientes (2)
-
-1. **"Por pagar" no incluye los saldos a favor del cliente.** Si tres
-   pedidos quedan con $50.000, $80.000 y $120.000 pagados de más (por
-   abono mal digitado o devolución de mercancía), esos $250.000 que el
-   taller debe devolver NO aparecen en el KPI "Por pagar" — solo se ven
-   si se revisa pedido por pedido. (`calc.js:546-572`)
-2. **Marcar "Sí"/"Servicio" en "Compras del pedido" de una cotización SIN
-   convertir puede generar un gasto real (o "disponible" para pagar
-   nómina) sin que exista pedido ni cobro.** El botón alternativo
-   ("registrar el estimado completo") sí está bloqueado hasta que la
-   cotización esté convertida — pero el camino principal
-   (`sincronizar-compras-finanzas`) no tiene ese mismo bloqueo.
+- **"Por pagar" no incluía los saldos a favor del cliente (sobrepagos).**
+  Un abono mal digitado o mercancía devuelta deja
+  `calcSaldoPedido(p)` negativo — esa plata es una obligación real del
+  taller (hay que devolverla) pero no se sumaba en ningún KPI. Ahora
+  `calcSaldosAFavorClientes()`/`listaSaldosAFavorClientes()` la suman
+  aparte: entra en `calcPorPagar`, tiene su propia categoría en el
+  desglose de Pendientes, y se trata como "vencida" (urgente) en el
+  indicador compacto, igual que una comisión sin fecha propia — no tiene
+  un vencimiento natural que esperar. (`calc.js`)
+- **"Servicio" disponible sin que hubiera pedido real detrás.** Marcar
+  una línea de "Compras del pedido" como "Servicio" en una cotización
+  que nunca fue ni convertida ni escalada desde un pedido rápido real
+  la dejaba contar como plata "disponible" para pagar nómina — sin que
+  el cliente hubiera aceptado ni pagado nada. Ahora `listaEntradasServicio`
+  exige que la cotización esté `convertida` O tenga `pedidoOrigenId` (una
+  escalada desde un pedido rápido YA real, aunque siga en "borrador"
+  hasta "Aplicar a pedido"). (`calc.js`)
+  **Importante — lo que NO se tocó, a propósito:** la auditoría original
+  también señaló que marcar una compra "Sí" y pulsar "Actualizar
+  movimientos financieros" (`sincronizar-compras-finanzas`) crea un gasto
+  real sin exigir que la cotización esté convertida. Al investigarlo se
+  confirmó que esto es INTENCIONAL y correcto, no un bug: a diferencia de
+  "Servicio" (una promesa de plata disponible que depende de que la venta
+  se concrete), "Sí" representa dinero que YA salió de la caja de verdad
+  (el texto de ayuda del propio campo lo dice: "se pagó de verdad y
+  aparte") — cerrar o no la venta no deshace esa compra real. Hay una
+  prueba existente (`test/smoke.mjs`, cotización "Prueba de servicio en
+  producción") que depende explícitamente de este comportamiento sin
+  restricción, y el flujo de "cotización escalada desde un pedido rápido"
+  (que sigue en "borrador" hasta aplicarse) también lo necesita así. Se
+  intentó primero bloquearlo igual que el estimado completo y se revirtió
+  al descubrir que rompía ambos casos reales.
 
 ### 🟡 Decisiones de negocio pendientes (5) — no son bugs, son preguntas para el dueño
 
@@ -294,8 +317,10 @@ casos borde de uso real). 23 hallazgos en total.
 
 ## Próximos pasos
 
-Esto es un mapa, no una lista de tareas ya aprobadas. 7 de 9 riesgos ya
-se corrigieron. Quedan 2 pendientes — revisarlos con calma y decidir si
-priorizarlos. Las 5 preguntas de negocio no tienen una respuesta
-"correcta" de código — son para conversarlas, posiblemente con un
-contador en el caso del IVA de compras.
+Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la
+auditoría original ya se atendieron. Lo que queda es distinto: las 5
+preguntas de negocio no tienen una respuesta "correcta" de código — son
+para conversarlas con calma, posiblemente con un contador en el caso del
+IVA de compras. Este documento sigue siendo el punto de partida para
+cualquier cambio futuro que toque dinero — sigue actualizándolo cada vez
+que se agregue o corrija algo de este tipo.
