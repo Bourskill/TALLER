@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas } from "../core/calc.js";
 import { renderTipoCostoOptions, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -161,9 +161,18 @@ function renderTabsCotizaciones(vista) {
     "</div>";
 }
 
+// Compartido entre el formulario de "nueva" y la cabecera de una cotización
+// ya creada (renderCotHead) — mismo <datalist> para las dos, así las
+// sugerencias aprendidas en una aparecen también en la otra.
+function renderDatalistMarcas() {
+  return '<datalist id="dl-marcas">' +
+    marcasConocidas().map(function (m) { return '<option value="' + esc(m) + '">'; }).join("") +
+    "</datalist>";
+}
+
 function renderFormNueva() {
   var f = state.formCotizacion;
-  return '<div class="card"><div class="section-title small">Nueva cotización' +
+  return renderDatalistMarcas() + '<div class="card"><div class="section-title small">Nueva cotización' +
     renderHelp("Arma cada referencia con sus insumos (o aplica una plantilla), define el precio de venta y el margen se calcula solo. Los gastos reales de producción se registran aparte para comparar contra lo cotizado.") +
     '</div><div class="form-grid">' +
     renderClienteSeleccionCampo({ clienteId: f.clienteId, accionAbrir: "abrir-cliente-picker-cotizacion", permitirNuevo: false }) +
@@ -172,6 +181,9 @@ function renderFormNueva() {
     '<div class="field"><label>Fecha de entrega (opcional)' +
     renderHelp("Se traslada al pedido cuando conviertas esta cotización — es lo que hace que aparezca en \"Próximas entregas\" del Resumen. Si aún no la sabes, puedes definirla después.") +
     '</label><input type="date" data-form="cotizacion" data-field="fechaEntrega" value="' + esc(f.fechaEntrega || "") + '" /></div>' +
+    '<div class="field"><label>Marca (opcional)' +
+    renderHelp("De qué línea de tu negocio es este pedido (ej. Uniformes, Urbana, Licras) — para saber de un vistazo a qué marca pertenece cada cotización, sin abrirla. Se sugieren las que ya hayas escrito antes.") +
+    '</label><input list="dl-marcas" data-form="cotizacion" data-field="marca" value="' + esc(f.marca || "") + '" placeholder="Ej. Urbana" /></div>' +
     '<button class="btn" ' + (f.clienteId ? "" : "disabled") + ' data-action="add-cotizacion">Crear cotización</button>' +
     "</div></div>";
 }
@@ -263,6 +275,7 @@ function renderCotResumen(c) {
     '<div class="cot-top"><div>' +
     '<span class="cot-cliente">' + esc(c.cliente) + "</span> " +
     '<span class="badge ' + c.estado + '">' + (c.estado === "convertida" ? "Convertida a pedido" : "Borrador") + "</span>" +
+    (c.marca ? ' <span class="badge" style="background:var(--surface-3);">' + esc(c.marca) + "</span>" : "") +
     '<div class="cot-meta">' + esc(c.descripcion) + " · " + esc(c.fecha) + " · " + fmt(totales.precioTotal) + " venta</div>" +
     "</div></div></div>";
 }
@@ -341,7 +354,7 @@ function renderCotHead(c, iva) {
   // muestra acá arriba, junto al estado, para no tener que ir a Pedidos solo
   // para confirmar con qué OP quedó esta cotización.
   var pedidoVinculado = c.pedidoId ? state.pedidos.filter(function (p) { return p.id === c.pedidoId; })[0] : null;
-  var html = '<div class="cot-head">' +
+  var html = renderDatalistMarcas() + '<div class="cot-head">' +
     '<div class="cot-head-info">' +
     '<div class="cot-head-top">' +
     renderClienteSeleccionCampo({
@@ -357,6 +370,7 @@ function renderCotHead(c, iva) {
     '<span class="cot-meta-item"><span class="cot-meta-label">Entrega' +
     renderHelp("Fecha comprometida de entrega. Al convertir esta cotización en pedido se traslada al pedido, que es lo que alimenta \"Próximas entregas\" en el Resumen y el recordatorio en Google Calendar.") +
     '</span><input type="date" class="mini-input" style="width:135px;" value="' + esc(c.fechaEntrega || "") + '" data-action-change="set-cot-fecha-entrega" data-id="' + c.id + '" /></span>' +
+    '<span class="cot-meta-item"><span class="cot-meta-label">Marca</span><input list="dl-marcas" class="mini-input" style="width:120px;" value="' + esc(c.marca || "") + '" placeholder="Opcional" data-action-change="set-cot-marca" data-id="' + c.id + '" /></span>' +
     (c.pedidoOrigenId && c.estado !== "convertida" ? '<span class="cot-meta-item" style="color:var(--accent-ink);">Escalada desde pedido rápido</span>' : "") +
     "</div>" +
     "</div>" +
@@ -1238,9 +1252,9 @@ export var actions = {
   "add-cotizacion": function () {
     var fc = state.formCotizacion;
     if (!exigirCampos([["Cliente", fc.cliente], ["Descripción", fc.descripcion]])) return;
-    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, fechaEntrega: fc.fechaEntrega || "", referencias: [nuevaReferencia()], costosGlobales: [], serviciosCobrados: [], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
+    var nueva = { id: uid(), clienteId: fc.clienteId || "", cliente: fc.cliente, descripcion: fc.descripcion, fecha: fc.fecha, fechaEntrega: fc.fechaEntrega || "", marca: fc.marca || "", referencias: [nuevaReferencia()], costosGlobales: [], serviciosCobrados: [], gastosReales: [], estado: "borrador", pedidoId: "", iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: codigoPublico() };
     state.cotizaciones.unshift(nueva);
-    state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" };
+    state.formCotizacion = { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "", marca: "" };
     // Se queda en esta misma pestaña, ahora mostrando el detalle completo de
     // la recién creada — el detalle SIEMPRE vive acá, nunca en Historial.
     state.cotizacionEditando = nueva.id;
@@ -1318,6 +1332,15 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var valor = el.value;
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { fechaEntrega: valor }) : c; });
+    marcarSucia(id);
+  },
+  // Solo informativo (de qué línea del negocio es el pedido) — no se
+  // traslada al pedido al convertir, a propósito: es un dato exclusivo de
+  // Cotizaciones (ver datosPedidoDesdeCot, que no lo incluye).
+  "set-cot-marca": function (el) {
+    var id = el.getAttribute("data-id");
+    var valor = el.value;
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { marca: valor }) : c; });
     marcarSucia(id);
   },
   // Eliminar SÍ guarda de una: no tendría sentido dejar "pendiente de

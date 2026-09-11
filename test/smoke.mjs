@@ -334,9 +334,56 @@ setInput('[data-form="cotizacion"][data-field="descripcion"]', "Uniformes de pru
 click('[data-action="add-cotizacion"]');
 assert(state.cotizaciones.length === 1, "crea cotización");
 assert(state.cotizaciones[0].referencias.length === 1, "la cotización nace con una referencia en blanco");
+assert(state.cotizaciones[0].marca === "", "\"marca\" nace vacía si no se llenó (es opcional)");
 
 const cotId = state.cotizaciones[0].id;
 const refId = state.cotizaciones[0].referencias[0].id;
+
+// ---------------------------------------------------------------------------
+// Campo opcional "Marca" en Cotizaciones: de qué línea del negocio es el
+// pedido (ej. Uniformes, Urbana, Licras) — pedido explícito por el usuario,
+// con sugerencias aprendidas de lo ya escrito antes (mismo patrón que el
+// datalist de "Persona" en Finanzas: <input list> + <datalist> nativo, sin
+// componente propio — el usuario pidió "texto libre con sugerencias", no
+// una lista fija que mantener aparte).
+// ---------------------------------------------------------------------------
+const { marcasConocidas: marcasConocidasTest } = await import("../js/core/calc.js");
+const inputMarcaCabecera = document.querySelector('[data-action-change="set-cot-marca"][data-id="' + cotId + '"]');
+assert(!!inputMarcaCabecera, "la cabecera de una cotización ya creada tiene su campo Marca");
+assert(inputMarcaCabecera.getAttribute("list") === "dl-marcas", "...con sugerencias desde el datalist compartido");
+inputMarcaCabecera.value = "Urbana";
+inputMarcaCabecera.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+assert(state.cotizaciones.find(c => c.id === cotId).marca === "Urbana", "escribir en el campo guarda la marca en la cotización");
+assert(marcasConocidasTest().indexOf("Urbana") !== -1, "marcasConocidas() la recuerda para sugerirla después");
+// como cualquier otra edición de cabecera, queda "sin guardar" hasta pulsar
+// Guardar — salir sin guardar (confirmarSalidaSiSucia) la revertiría.
+render();
+click('[data-action="guardar-cotizacion"][data-id="' + cotId + '"]');
+
+click('[data-action="cot-vista"][data-val="historial"]');
+const cardConMarca = document.querySelector('[data-cot-id="' + cotId + '"]');
+assert(!!cardConMarca && cardConMarca.textContent.includes("Urbana"), "la tarjeta del Historial muestra la marca, para saber de un vistazo a qué línea pertenece sin abrirla");
+click('[data-action="abrir-cotizacion-editor"][data-id="' + cotId + '"]');
+assert(document.querySelector('datalist#dl-marcas option[value="Urbana"]') !== null, "el datalist compartido ya ofrece \"Urbana\" como sugerencia (aprendida de esta misma cotización)");
+
+// una cotización SIN marca no muestra ningún badge de más en el Historial
+const cotSinMarcaId = "cot-sin-marca-test";
+state.cotizaciones = state.cotizaciones.concat([{
+  id: cotSinMarcaId, cliente: "Cliente Sin Marca", descripcion: "Sin marca", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", marca: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "csm1",
+  referencias: [], costosGlobales: [], serviciosCobrados: [], compras: []
+}]);
+click('[data-action="cot-vista"][data-val="historial"]');
+const cardSinMarca = document.querySelector('[data-cot-id="' + cotSinMarcaId + '"]');
+assert(!!cardSinMarca && !cardSinMarca.querySelector(".badge[style*=\"surface-3\"]"), "sin marca, no aparece ningún badge de más (campo opcional, no estorba a quien no lo usa)");
+state.cotizaciones = state.cotizaciones.filter(c => c.id !== cotSinMarcaId); // limpieza
+// "cotizacionEditando" se queda en cotId (cambiar de vista no lo limpia),
+// así que volver a "nueva" muestra otra vez su detalle completo, sin
+// necesidad de reabrir desde el Historial.
+click('[data-action="cot-vista"][data-val="nueva"]');
+
+// al convertir en pedido, "marca" NO se traslada — es un dato exclusivo de
+// Cotizaciones, a propósito (el usuario pidió agregarlo "a cotizaciones").
 
 // insumo personalizado con tipo "tela"
 click('[data-action="add-insumo-personalizado"][data-cot="' + cotId + '"][data-ref="' + refId + '"]');

@@ -288,7 +288,7 @@ export const state = {
     tipoRelacion: "cliente", comisionDefaultTipo: "porcentaje", comisionDefaultValor: "",
     categoriasInsumo: [], descripcion: "", puntuacion: ""
   },
-  formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "" },
+  formCotizacion: { clienteId: "", cliente: "", descripcion: "", fecha: todayStr(), fechaEntrega: "", marca: "" },
   formPend: { titulo: "", texto: "", categoria: "tarea", prioridad: "media", fecha: "", hora: "" },
   pendEditando: "", // id de la nota actualmente en modo edición (o "")
   formReporte: { desde: primerDiaMes(), hasta: todayStr() },

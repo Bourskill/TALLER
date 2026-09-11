@@ -1716,6 +1716,19 @@ export function unidadesConocidas() {
   return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, "es"); });
 }
 
+// Mismo criterio que unidadesConocidas: sin lista fija de base, solo lo que
+// el usuario ya haya escrito antes en el campo "Marca" de una cotización
+// (ej. "Uniformes", "Urbana", "Licras" — las líneas de producto de SU
+// negocio, no algo que la app pueda adivinar). Sirve para saber de un
+// vistazo a qué línea pertenece cada pedido sin tener que abrirlo.
+export function marcasConocidas() {
+  var set = {};
+  (state.cotizaciones || []).forEach(function (c) {
+    if (c.marca && String(c.marca).trim()) set[String(c.marca).trim()] = true;
+  });
+  return Object.keys(set).sort(function (a, b) { return a.localeCompare(b, "es"); });
+}
+
 // Un insumo agregado a una referencia desde el catálogo (ver "Insumos
 // predeterminados" en cotizaciones.js) guarda una COPIA de su costo en el
 // momento de agregarlo — es justamente lo que evita que una cotización vieja

@@ -228,6 +228,33 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo quinta ronda: campo opcional "Marca" en Cotizaciones)
+
+El usuario pidió poder saber de qué línea de su negocio es cada pedido
+(ej. "la marca de uniformes, la urbana, o la de licras") sin tener que
+abrirlo. Se preguntó cómo debía funcionar el campo — texto libre con
+sugerencias (como "Unidad" en Catálogo) vs. una lista fija editable — y
+eligió texto libre.
+
+**Implementación:** en vez de replicar el combo propio y navegación por
+teclado que tiene "Unidad" (justificado ahí porque es un campo repetido
+insumo por insumo dentro de tablas densas), se usó el mismo patrón ya
+existente en Finanzas para "Persona": un `<input list="dl-marcas">` +
+`<datalist>` nativo del navegador — cero JS nuevo para las sugerencias, el
+navegador ya las maneja. `marcasConocidas()` (`core/calc.js`) recorre
+`state.cotizaciones` en busca de lo ya escrito, sin ninguna lista de base
+(mismo criterio que `unidadesConocidas`: solo lo que el usuario mismo haya
+tecleado antes).
+
+El campo aparece en el formulario de "Nueva cotización", en la cabecera de
+una cotización ya creada (editable ahí también), y como un badge chico en
+la tarjeta del Historial — para verlo de un vistazo sin abrir nada, que
+era el pedido original. Es exclusivo de Cotizaciones a propósito: no se
+traslada al pedido al convertir (`datosPedidoDesdeCot` no lo incluye).
+
+Verificado en `test/smoke.mjs` revirtiendo el fix completo a propósito.
+787/787 pasando.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo cuarta ronda: el vendedor de un pedido se borraba después de pagarle su comisión)
 
 El usuario reportó, con un reporte financiero real: un pedido con una
