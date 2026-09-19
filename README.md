@@ -313,6 +313,21 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   interrumpir un login con una alerta por un respaldo en segundo plano),
   pero el botón "Respaldar ahora" (`modules/config.js`) ahora muestra un
   `window.alert` con el motivo real si falla, y confirma si funcionó.
+- **Mismo problema, encontrado en un lugar distinto**: subir cualquier
+  imagen (Icono del taller, pie de página de PDF, referencia de
+  Cotizaciones/Pedidos/Plantillas/Productos) empezó a fallar con
+  `Google Drive API 404: File not found: <id>` — la carpeta compartida de
+  Drive (`state.config.driveFolderId`, ver `core/drive.js`) guardada en la
+  copia restaurada de la Sheet apuntaba a una carpeta que ya no existe.
+  Como `obtenerCarpetaCompartida()` confiaba ciegamente en ese id
+  cacheado sin nunca validar que siguiera existiendo, esto dejaba **TODAS**
+  las subidas de imagen rotas para siempre, para cualquiera. Se corrigió
+  haciendo que `subirImagenReferencia()` (el único punto de entrada que
+  usan las cinco pantallas de arriba) detecte específicamente ese error
+  (un 404 con el id de la carpeta adentro del mensaje, no cualquier 404),
+  olvide el id muerto, cree una carpeta nueva (mismo camino que la primera
+  vez que alguien sube algo) y reintente UNA vez — en vez de quedar rota
+  hasta que alguien edite la Sheet a mano.
 
 ## Registro de cambios — septiembre 2026 (cuadragésimo quinta ronda: campo opcional "Marca" en Cotizaciones)
 

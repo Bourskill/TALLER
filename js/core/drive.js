@@ -107,9 +107,7 @@ async function hacerPublica(fileId) {
   });
 }
 
-// Sube un File (del input) y devuelve la URL lista para usar como imagenUrl.
-export async function subirImagenReferencia(file) {
-  var folderId = await obtenerCarpetaCompartida();
+async function subirArchivoAFolder(file, folderId) {
   var metadata = { name: file.name, parents: [folderId] };
   var boundary = "panel_taller_" + Date.now();
   var buffer = await file.arrayBuffer();
@@ -138,4 +136,36 @@ export async function subirImagenReferencia(file) {
   // sirve el archivo real y con CORS abierto (lo necesita pdf.js para
   // descargarlo con fetch al armar el PDF).
   return "https://lh3.googleusercontent.com/d/" + creado.id;
+}
+
+// Un 404 acá, con el ID de la carpeta adentro del mensaje ("File not found:
+// <id>"), significa que la carpeta guardada en config.driveFolderId ya no
+// existe en Drive — no un fallo de red ni de permisos. Puede pasar (le pasó
+// de verdad al taller en 2026-09, mismo incidente que SPREADSHEET_ID en
+// google-config.js): un ID cacheado que apuntaba a algo que se borró en
+// Drive por fuera de la app queda muerto para siempre si nadie lo nota.
+function esCarpetaInexistente(e, folderId) {
+  var msg = (e && e.message) || "";
+  return msg.indexOf("404") !== -1 && msg.indexOf(folderId) !== -1;
+}
+
+// Sube un File (del input) y devuelve la URL lista para usar como imagenUrl.
+export async function subirImagenReferencia(file) {
+  var folderId = await obtenerCarpetaCompartida();
+  try {
+    return await subirArchivoAFolder(file, folderId);
+  } catch (e) {
+    if (!esCarpetaInexistente(e, folderId)) throw e;
+    var session = getSession();
+    if (!session || session.rol !== "admin") {
+      throw new Error("La carpeta de imágenes de Drive ya no existe (se borró) y esta cuenta no puede recrearla. Pídele a un admin que suba una imagen para que se cree de nuevo.");
+    }
+    // Se olvida el ID muerto y se recrea desde cero (mismo camino que la
+    // primera vez que alguien sube una imagen) — un solo reintento, no un
+    // loop: si el segundo intento también falla, se deja ver el error real.
+    state.config.driveFolderId = "";
+    await persist("config");
+    var folderIdNuevo = await obtenerCarpetaCompartida();
+    return await subirArchivoAFolder(file, folderIdNuevo);
+  }
 }

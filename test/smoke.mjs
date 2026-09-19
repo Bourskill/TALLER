@@ -3945,6 +3945,85 @@ assert(alertMsgRespaldo.indexOf("403") !== -1, "...y el aviso trae el error real
 global.window.alert = global.alert = alertOriginalRespaldo;
 global.fetch = fetchOriginalRespaldo;
 
+// --- Mismo patrón, pero en la carpeta de RESPALDOS (backupFolderId): si
+// quedó apuntando a una carpeta ya borrada, el respaldo tiene que
+// auto-repararse igual que la carpeta de imágenes (ver el bloque de
+// abajo) — se olvida el id muerto, recrea la carpeta y reintenta, en vez
+// de fallar cada 24h para siempre sin que "Respaldar ahora" pueda arreglarlo.
+const folderIdViejoBackup = "carpeta-respaldos-vieja-test";
+state.config.backupFolderId = folderIdViejoBackup;
+state.config.ultimoBackupISO = "";
+let copiaIntentadaTest = false;
+const fetchOriginalBackupCarpeta = global.fetch;
+global.fetch = async function (url, options) {
+  var u = String(url);
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("/copy") !== -1) {
+    if (!copiaIntentadaTest) {
+      copiaIntentadaTest = true;
+      return { ok: false, status: 404, text: async function () { return "File not found: " + folderIdViejoBackup + "."; } };
+    }
+    return { ok: true, status: 200, json: async function () { return { id: "sheet-copia-test" }; } };
+  }
+  if (u.indexOf("fields=parents") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { parents: ["carpeta-padre-backup-test"] }; } };
+  }
+  if (u === "https://www.googleapis.com/drive/v3/files" && metodo === "POST") {
+    return { ok: true, status: 200, json: async function () { return { id: "carpeta-respaldo-nueva-test" }; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+await configModRespaldo.actions["respaldar-ahora"]();
+assert(state.config.backupFolderId === "carpeta-respaldo-nueva-test", "una carpeta de respaldos borrada también se auto-repara (mismo patrón que la carpeta de imágenes): se olvida el id muerto y se crea uno nuevo");
+assert(!!state.config.ultimoBackupISO, "...y el respaldo SÍ termina completándose en el reintento, no se queda a medias");
+global.fetch = fetchOriginalBackupCarpeta;
+
+// --- Drive (core/drive.js): un config.driveFolderId cacheado que apunta a
+// una carpeta ya borrada en Drive no debe dejar TODAS las subidas de
+// imagen rotas para siempre — pasó de verdad (ver incidente 2026-09 en el
+// README): un ID de carpeta viejo, guardado en una copia restaurada de la
+// Sheet, ya no existía en Drive, y cada intento de subir una imagen
+// fallaba con "File not found: <id>". subirImagenReferencia() ahora
+// detecta ESE error puntual (404 con el id de la carpeta adentro del
+// mensaje) y se auto-repara: olvida el id muerto, crea una carpeta nueva
+// (mismo camino que la primera vez que alguien sube algo) y reintenta UNA
+// vez, en vez de quedar rota para siempre.
+loginComo("admin", "", "admin-drive-test@taller.test");
+const driveMod = await import("../js/core/drive.js");
+const folderIdViejoTest = "carpeta-vieja-borrada-test";
+state.config.driveFolderId = folderIdViejoTest;
+let subidaIntentadaTest = false;
+const fetchOriginalDrive = global.fetch;
+global.fetch = async function (url, options) {
+  var u = String(url);
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("/values/roles") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { values: [] }; } };
+  }
+  if (u.indexOf("/upload/drive/v3/files") !== -1) {
+    if (!subidaIntentadaTest) {
+      subidaIntentadaTest = true;
+      return { ok: false, status: 404, text: async function () { return "File not found: " + folderIdViejoTest + "."; } };
+    }
+    return { ok: true, status: 200, json: async function () { return { id: "img-nueva-test" }; } };
+  }
+  if (u.indexOf("/permissions") !== -1) {
+    return { ok: true, status: 200, json: async function () { return {}; } };
+  }
+  if (u.indexOf("fields=parents") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { parents: ["carpeta-padre-test"] }; } };
+  }
+  if (u === "https://www.googleapis.com/drive/v3/files" && metodo === "POST") {
+    return { ok: true, status: 200, json: async function () { return { id: "carpeta-nueva-test" }; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+const archivoFalso = { name: "logo.png", type: "image/png", arrayBuffer: async function () { return new ArrayBuffer(4); } };
+const urlSubida = await driveMod.subirImagenReferencia(archivoFalso);
+assert(urlSubida.indexOf("img-nueva-test") !== -1, "una carpeta borrada NO deja la subida rota para siempre: se auto-repara y la imagen sí se sube (en el reintento)");
+assert(state.config.driveFolderId === "carpeta-nueva-test", "...y config.driveFolderId queda con la carpeta NUEVA, no con el id muerto (los próximos intentos no vuelven a fallar)");
+global.fetch = fetchOriginalDrive;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

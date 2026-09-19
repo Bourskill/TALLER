@@ -50,6 +50,24 @@ async function obtenerCarpetaRespaldos() {
   return creada.id;
 }
 
+function copiarSheetA(folderId, fecha) {
+  return driveFetch("files/" + SPREADSHEET_ID + "/copy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Panel del Taller — datos (respaldo " + fecha + ")", parents: [folderId] })
+  });
+}
+
+// Un 404 acá, con el id de la carpeta adentro del mensaje ("File not
+// found: <id>"), significa que backupFolderId quedó apuntando a una
+// carpeta que ya no existe en Drive (mismo patrón que config.driveFolderId
+// en core/drive.js — ver el incidente 2026-09 en el README, ese mismo
+// bug real apareció primero ahí).
+function esCarpetaInexistente(e, folderId) {
+  var msg = (e && e.message) || "";
+  return msg.indexOf("404") !== -1 && msg.indexOf(folderId) !== -1;
+}
+
 // forzar=true ignora el chequeo de 24h (lo usa el botón "Respaldar ahora" en
 // Configuración). Solo el admin lo dispara: es quien tiene acceso real de
 // Drive sobre la Sheet (un vendedor no puede copiarla).
@@ -75,11 +93,18 @@ export async function respaldarSiCorresponde(forzar) {
   // Fecha local (todayStr), no UTC: el nombre del respaldo tiene que decir
   // el día que el usuario vio en pantalla, no el del meridiano de Greenwich.
   var fecha = todayStr();
-  await driveFetch("files/" + SPREADSHEET_ID + "/copy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "Panel del Taller — datos (respaldo " + fecha + ")", parents: [folderId] })
-  });
+  try {
+    await copiarSheetA(folderId, fecha);
+  } catch (e) {
+    if (!esCarpetaInexistente(e, folderId)) throw e;
+    // La carpeta de respaldos se borró por fuera de la app: se olvida el id
+    // muerto, se recrea desde cero (mismo camino que la primera vez) y se
+    // reintenta UNA vez, en vez de quedar rota hasta que alguien lo note.
+    state.config.backupFolderId = "";
+    await persist("config");
+    var folderIdNuevo = await obtenerCarpetaRespaldos();
+    await copiarSheetA(folderIdNuevo, fecha);
+  }
   state.config.ultimoBackupISO = new Date().toISOString();
   await persist("config");
 }
