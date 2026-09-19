@@ -292,6 +292,22 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   con el mismo nombre del archivo en uso dando vueltas por el Drive (los
   respaldos automáticos de `core/backup.js` ya viven aparte, en su propia
   carpeta con fecha en el nombre, así que no deberían confundirse).
+- **Bug real encontrado de paso, al intentar confirmar si el respaldo
+  automático seguía funcionando**: no se encontró la carpeta de respaldos
+  en Drive, y resultó que `respaldarSiCorresponde()` (`core/backup.js`)
+  atrapaba CUALQUIER error del respaldo en silencio (solo `console.error`,
+  invisible para cualquiera que no tenga abierta la consola del navegador)
+  — tanto el chequeo automático al abrir la app COMO un clic real en el
+  botón "Respaldar ahora" de Configuración. Si el respaldo llevaba tiempo
+  fallando (permisos, cuota, lo que sea), no había ninguna forma de
+  notarlo: "Último respaldo" se quedaba en "Aún no se ha hecho ninguno"
+  para siempre, y ni siquiera apretar el botón a propósito lo delataba.
+  Se corrigió sacando el `try/catch` de `respaldarSiCorresponde()` (ahora
+  el error se propaga) y manejándolo distinto según quién llama: el
+  chequeo automático de `app.js` lo sigue silenciando (no tiene sentido
+  interrumpir un login con una alerta por un respaldo en segundo plano),
+  pero el botón "Respaldar ahora" (`modules/config.js`) ahora muestra un
+  `window.alert` con el motivo real si falla, y confirma si funcionó.
 
 ## Registro de cambios — septiembre 2026 (cuadragésimo quinta ronda: campo opcional "Marca" en Cotizaciones)
 

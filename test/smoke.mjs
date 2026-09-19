@@ -3915,6 +3915,36 @@ botonInsumoPersonalizado.focus();
 click('[data-action="add-insumo-personalizado"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
 assert((document.activeElement && document.activeElement.getAttribute("data-action")) !== "set-ref-origen", "clicar 'Insumo personalizado' NO deja el foco saltando al botón de 'origen' de arriba, solo porque los dos comparten data-cot+data-ref");
 
+// --- Respaldo (core/backup.js): si falla, "Respaldar ahora" tiene que
+// avisar con el motivo real, no tragárselo en silencio. Antes de esto,
+// respaldarSiCorresponde() atrapaba CUALQUIER error internamente (solo
+// console.error) sin importar si venía del chequeo automático al abrir la
+// app o de este clic manual — así que un respaldo roto podía llevar
+// meses fallando sin que nadie, ni siquiera alguien que apretara el botón
+// a propósito para confirmar que funcionaba, se enterara (ver incidente
+// 2026-09 en el README). Se mockea global.fetch (nunca se mockea en el
+// resto de esta suite — las demás pruebas con sesión simulada golpean la
+// red real y fallan solas con un 401, ver el comentario junto a
+// process.exit) para forzar un fallo determinístico de Drive.
+loginComo("admin", "", "admin-respaldo-test@taller.test");
+const configModRespaldo = await import("../js/modules/config.js");
+const fetchOriginalRespaldo = global.fetch;
+global.fetch = async function () {
+  return {
+    ok: false,
+    status: 403,
+    text: async function () { return '{"error":{"message":"insufficient permissions"}}'; }
+  };
+};
+const alertOriginalRespaldo = global.alert;
+let alertMsgRespaldo = null;
+global.window.alert = global.alert = function (msg) { alertMsgRespaldo = msg; };
+await configModRespaldo.actions["respaldar-ahora"]();
+assert(!!alertMsgRespaldo && alertMsgRespaldo.indexOf("No se pudo hacer el respaldo") !== -1, "si el respaldo falla, 'Respaldar ahora' avisa con el motivo (antes se tragaba el error en silencio, sin que nadie se enterara)");
+assert(alertMsgRespaldo.indexOf("403") !== -1, "...y el aviso trae el error real de la API, no un mensaje genérico");
+global.window.alert = global.alert = alertOriginalRespaldo;
+global.fetch = fetchOriginalRespaldo;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

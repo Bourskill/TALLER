@@ -149,8 +149,14 @@ export var actions = {
     persist("config"); notify();
   },
   "respaldar-ahora": async function () {
-    await respaldarSiCorresponde(true);
-    notify();
+    try {
+      await respaldarSiCorresponde(true);
+      notify();
+      window.alert("Respaldo hecho — busca \"Panel del Taller — respaldos\" en tu Google Drive.");
+    } catch (e) {
+      notify();
+      window.alert("No se pudo hacer el respaldo: " + (e && e.message ? e.message : e));
+    }
   },
   "agregar-miembro-equipo": async function () {
     var correoEl = document.getElementById("inp-equipo-correo");

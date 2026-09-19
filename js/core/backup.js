@@ -53,24 +53,33 @@ async function obtenerCarpetaRespaldos() {
 // forzar=true ignora el chequeo de 24h (lo usa el botón "Respaldar ahora" en
 // Configuración). Solo el admin lo dispara: es quien tiene acceso real de
 // Drive sobre la Sheet (un vendedor no puede copiarla).
+//
+// Antes esta función se tragaba cualquier error (solo console.error) sin
+// importar si venía del chequeo automático al abrir la app o de un clic real
+// en "Respaldar ahora" — así que si el respaldo llevaba tiempo fallando
+// (permisos, cuota, lo que sea), nadie se enteraba nunca: "Último respaldo"
+// se quedaba en "Aún no se ha hecho ninguno" para siempre y ni un clic manual
+// lo delataba (ver incidente 2026-09 en el README: se creyó que había un
+// respaldo automático protegiendo la Sheet y en realidad nunca se había
+// confirmado que corriera). Ahora el error se PROPAGA (no se atrapa acá): el
+// llamador automático de app.js lo sigue silenciando (no tiene sentido
+// interrumpir un login con una alerta por un respaldo en segundo plano), pero
+// el botón "Respaldar ahora" en config.js sí lo muestra — es la única forma
+// de que alguien note un respaldo roto ANTES de necesitarlo de verdad.
 export async function respaldarSiCorresponde(forzar) {
   var session = getSession();
   if (!session || session.rol !== "admin") return;
   var ultimo = state.config.ultimoBackupISO;
   if (!forzar && ultimo && (Date.now() - new Date(ultimo).getTime()) < VEINTICUATRO_HORAS_MS) return;
-  try {
-    var folderId = await obtenerCarpetaRespaldos();
-    // Fecha local (todayStr), no UTC: el nombre del respaldo tiene que decir
-    // el día que el usuario vio en pantalla, no el del meridiano de Greenwich.
-    var fecha = todayStr();
-    await driveFetch("files/" + SPREADSHEET_ID + "/copy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Panel del Taller — datos (respaldo " + fecha + ")", parents: [folderId] })
-    });
-    state.config.ultimoBackupISO = new Date().toISOString();
-    await persist("config");
-  } catch (e) {
-    console.error("No se pudo hacer el respaldo diario de la Sheet", e);
-  }
+  var folderId = await obtenerCarpetaRespaldos();
+  // Fecha local (todayStr), no UTC: el nombre del respaldo tiene que decir
+  // el día que el usuario vio en pantalla, no el del meridiano de Greenwich.
+  var fecha = todayStr();
+  await driveFetch("files/" + SPREADSHEET_ID + "/copy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Panel del Taller — datos (respaldo " + fecha + ")", parents: [folderId] })
+  });
+  state.config.ultimoBackupISO = new Date().toISOString();
+  await persist("config");
 }

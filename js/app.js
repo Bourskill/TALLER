@@ -51,9 +51,13 @@ async function entrarConSesion(session) {
   domMod.render();
   // Chequeo oportunista del respaldo diario (ver core/backup.js): no bloquea
   // el primer render, y no hace nada si ya se corrió en las últimas 24h o si
-  // quien entra no es admin.
+  // quien entra no es admin. Si falla, se registra en consola pero no se
+  // interrumpe el login con una alerta — para ver un fallo real hay que usar
+  // el botón "Respaldar ahora" en Configuración, que sí avisa (ver config.js).
   var backup = await import("./core/backup.js");
-  backup.respaldarSiCorresponde();
+  backup.respaldarSiCorresponde().catch(function (e) {
+    console.error("No se pudo hacer el respaldo diario de la Sheet", e);
+  });
 }
 
 async function intentarLogin() {
