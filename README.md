@@ -275,6 +275,11 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   parecidas), así que **`SPREADSHEET_ID` cambió** a la del archivo
   recuperado — se confirmó antes que tuviera las pestañas "roles" y "kv"
   con datos reales, no una copia vieja.
+- **`SPREADSHEET_ID` cambió una SEGUNDA vez ese mismo día**: el primer
+  restaurado de la Papelera no era el más actualizado — horas después el
+  admin encontró un respaldo más reciente y se cambió otra vez a ese. Con
+  varias copias parecidas dando vueltas, vale la pena, antes de dar una por
+  buena, comparar cuál tiene MÁS datos (no solo cuál abre sin error).
 - **Mensaje de error mejorado para la próxima vez**: `request()` en
   `js/core/googleRest.js` distinguía solo el 401 (sesión vencida) del resto
   de errores, que mostraba tal cual el JSON de la API — inútil para
