@@ -14,7 +14,18 @@ export const GOOGLE_CLIENT_ID = "934965200548-8ft5rk4lu06m45g5k5pgu31n9n408uq1.a
 // URL: https://docs.google.com/spreadsheets/d/ESTE_ES_EL_ID/edit). Debe
 // tener dos pestañas: "kv" (columnas key, value) y "roles" (columnas correo,
 // rol, vendedor_nombre).
-export const SPREADSHEET_ID = "1piZGAqi3F0YP5becUPT0mX_yMyAkXFnX4v8wfiXv9DY";
+//
+// ⚠️ INCIDENTE 2026-09-19: el archivo anterior se borró desde Google Drive
+// por accidente (entre varias copias con el mismo nombre "Panel del Taller"
+// acumuladas en el Drive del admin, se identificó mal cuál era la real y se
+// borró junto con las otras). Se recuperó desde la Papelera de Drive, pero
+// como el restaurado no fue el de ID original, este valor cambió. Ver
+// "🆘 Si el login da error de Google Sheets" al principio del README para
+// el procedimiento completo si esto vuelve a pasar — en resumen: Papelera de
+// Drive primero (restaurar ahí conserva el MISMO ID, no hay que tocar este
+// archivo), y si no aparece, la carpeta "Panel del Taller — respaldos"
+// (ver core/backup.js) para la copia automática más reciente.
+export const SPREADSHEET_ID = "1N8M0mdykGtdebCW_VK82bcQCtPaGFe2RCxPDImShgVc";
 
 // Scopes pedidos en un solo consentimiento. El scope de Drive es el amplio
 // ("drive", no "drive.file"): un vendedor necesita poder escribir dentro de

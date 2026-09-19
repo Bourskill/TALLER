@@ -18,6 +18,16 @@ async function request(accessToken, path, options) {
   if (!res.ok) {
     var body = await res.text().catch(function () { return ""; });
     if (res.status === 401) throw new Error("Tu sesión de Google venció. Recarga la página e inicia sesión de nuevo.");
+    // Un 404 acá (a diferencia de un rango/pestaña mal escrito, que da 400) es
+    // casi siempre la Sheet ENTERA inalcanzable: se borró/movió de Drive, o la
+    // cuenta con la que entraste no tiene acceso a ella (Google devuelve 404 en
+    // vez de 403 para no revelar si el archivo existe). Pasó de verdad en
+    // 2026-09 (ver el comentario junto a SPREADSHEET_ID en google-config.js) —
+    // el mensaje crudo de la API no decía nada de esto y dejaba a quien lo veía
+    // sin ninguna pista de por dónde arrancar.
+    if (res.status === 404) {
+      throw new Error("No se encontró la Google Sheet de datos (se borró, se movió, o esta cuenta de Google no tiene acceso a ella). Revisa primero la Papelera de Google Drive de la cuenta administradora: si el archivo sigue ahí, restáuralo — recupera el mismo ID y todo vuelve a funcionar sin tocar nada más. Si no aparece, busca en la carpeta \"Panel del Taller — respaldos\" la copia automática más reciente.");
+    }
     throw new Error("Google Sheets API " + res.status + ": " + body);
   }
   return res.json();

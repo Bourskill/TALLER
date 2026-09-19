@@ -17,6 +17,37 @@ financieras de la app (saldo, IVA, abonos, servicios, comisiones, por
 pagar) y los hallazgos de la auditoría de septiembre 2026, para comparar
 en vez de adivinar.
 
+## 🆘 Si el login da error de Google Sheets (404 / archivo no encontrado)
+
+Le pasó de verdad al taller el 2026-09-19: la Google Sheet que actúa como
+base de datos (`SPREADSHEET_ID` en `js/core/google-config.js`) se borró por
+accidente desde Google Drive — entre varias copias acumuladas con el mismo
+nombre "Panel del Taller", se identificó mal cuál era la real y se borró
+junto con las otras al hacer limpieza. Desde esa fecha, la app detecta este
+caso específico y muestra un mensaje claro con los pasos de abajo en vez del
+JSON crudo de la API (ver `request()` en `js/core/googleRest.js`) — pero
+igual queda el registro acá por si hace falta el detalle completo:
+
+1. **Papelera de Google Drive primero**, con la cuenta administradora:
+   `https://drive.google.com/drive/trash`. Si el archivo sigue ahí,
+   **Restaurar** — recupera el **mismo ID**, así que la app vuelve a
+   funcionar sola, sin tocar ni una línea de código.
+2. **Si no aparece en la papelera**, busca en la carpeta de Drive
+   **"Panel del Taller — respaldos"** (al lado de donde vivía la Sheet
+   original) la copia automática más reciente — ver `core/backup.js`: se
+   genera sola cada vez que un admin abre la app, máximo una vez cada 24h.
+   Ese respaldo tiene un ID **distinto** al original, así que hay que
+   actualizar `SPREADSHEET_ID` en `js/core/google-config.js` para que
+   apunte a esa copia (y confirmar antes que tenga las pestañas "roles" y
+   "kv" con datos recientes, no una copia vieja o vacía).
+3. **Para que no se repita**: evita tener varios archivos con el mismo
+   nombre "Panel del Taller" sueltos en el Drive del admin (los respaldos
+   automáticos ya se guardan aparte, en su propia carpeta, con la fecha en
+   el nombre — no deberían confundirse con el archivo en uso). Si en algún
+   momento se recrea el archivo a mano, dale un nombre que no se pueda
+   confundir con una copia vieja (ej. agregar la fecha), o bórrala/renómbrala
+   apenas quede claro que ya no hace falta.
+
 ## Regla de UX: sin texto explicativo duplicado (no revertir esto)
 
 La app usa un ícono "?" (`renderHelp()` en `core/components.js`) para sacar
@@ -227,6 +258,40 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — septiembre 2026 (cuadragésimo sexta ronda: se borró la Google Sheet de datos por accidente — recuperada + mensaje de error más claro)
+
+- **Incidente real, no un bug de código**: la Google Sheet configurada en
+  `SPREADSHEET_ID` (`js/core/google-config.js`) se borró desde Google Drive
+  por accidente — el admin vio varias copias con el mismo nombre "Panel del
+  Taller" acumuladas en su Drive, no supo cuál era la real, y las borró
+  todas de una. Nadie podía entrar a la app: el login llega hasta pedir el
+  rol contra la pestaña "roles" de esa Sheet (`resolverSesion()` en
+  `core/auth.js`) y eso fallaba con un 404 crudo de la API, mostrado tal
+  cual en la pantalla de login.
+- **Se recuperó desde la Papelera de Google Drive** (ver
+  [el punto 🆘 al principio de este README](#-si-el-login-da-error-de-google-sheets-404--archivo-no-encontrado)),
+  pero el archivo restaurado no era el de ID original (entre varias copias
+  parecidas), así que **`SPREADSHEET_ID` cambió** a la del archivo
+  recuperado — se confirmó antes que tuviera las pestañas "roles" y "kv"
+  con datos reales, no una copia vieja.
+- **Mensaje de error mejorado para la próxima vez**: `request()` en
+  `js/core/googleRest.js` distinguía solo el 401 (sesión vencida) del resto
+  de errores, que mostraba tal cual el JSON de la API — inútil para
+  cualquiera que no conozca la arquitectura. Ahora un 404 específicamente
+  (a diferencia de un rango/pestaña mal escrito, que da 400 — un 404 es
+  casi siempre la Sheet ENTERA inalcanzable) muestra un mensaje en español
+  con los pasos concretos de recuperación, en vez del error crudo.
+- **Para prevenir que se repita**: como la app no tiene backend propio, cada
+  persona del equipo entra con su PROPIA cuenta de Google y esa cuenta
+  necesita acceso de Editor directo sobre la Sheet (no solo a través de la
+  app) — cualquier Editor puede, sin querer, mandarla a la papelera desde
+  Drive/Sheets directamente. Eso no se puede evitar por código sin
+  reescribir la app con un backend propio (fuera de alcance). Lo que sí
+  ayuda, y quedó como recomendación para el admin: no dejar copias sueltas
+  con el mismo nombre del archivo en uso dando vueltas por el Drive (los
+  respaldos automáticos de `core/backup.js` ya viven aparte, en su propia
+  carpeta con fecha en el nombre, así que no deberían confundirse).
 
 ## Registro de cambios — septiembre 2026 (cuadragésimo quinta ronda: campo opcional "Marca" en Cotizaciones)
 
