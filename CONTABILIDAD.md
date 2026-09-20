@@ -521,6 +521,54 @@ pueden tener `es_compra_insumo`/`proveedor_id`/`insumo_nombre`/`cantidad`/
 la pestaña "Movimientos" de la Sheet real por ese periodo si algo se ve
 raro en el desglose de insumos o en qué servicio quedó "gastado".
 
+**Corrección sobre este mismo hallazgo:** el reporte original del usuario
+("no veo la gráfica ni los KPI de servicios") NO lo causaba esto —
+`fecha`/`tipo`/`monto` (de los que depende esa gráfica) están ANTES de la
+columna insertada, sin correrse. La causa real de esa parte era otra —
+ver Hallazgo #16 abajo.
+
+### 🔴 Hallazgo #16 — post-mortem 2026-09-20: fallo silencioso al leer "Movimientos"/"Clientes" de su propia pestaña. ✅ CORREGIDO
+
+Siguiendo el Hallazgo #15, el usuario confirmó que el fix no cambió nada
+("SIGUE IGUAL") y compartió una captura de Finanzas → Historial: solo 4
+movimientos, todos de agosto, con nombres de prueba ("q", "asdas",
+"dasdasd", "212312") y la insignia "ORIGEN ELIMINADO"/"PEDIDO ELIMINADO".
+La suma exacta de esos 4 (-$12.000 + $1.212 + $11.000 + $111) daba
+**$323 — exactamente lo que mostraba el KPI "Caja actual"**. El usuario
+confirmó después que la pestaña "Movimientos" de la Sheet real SÍ tiene
+muchas filas de datos reales — la app simplemente no las estaba leyendo.
+
+**Causa:** `core/store.js` (`loadAll`) lee "tx"/"clientes" en dos
+niveles: primero el blob VIEJO de la pestaña "kv" (`datos.tx`, de antes
+de que existiera la pestaña propia "Movimientos" — Fase 1 de la
+reorganización), y DESPUÉS intenta leer su pestaña tabular real
+(`TABLAS_SHEET.tx.leer()`), que si tiene éxito sobreescribe lo anterior.
+Si esa segunda lectura falla (red, permisos, lo que sea) y tampoco hay un
+"espejo" local (copia en este navegador de una lectura anterior exitosa
+de esa pestaña puntual), el código simplemente hacía `return;` en
+silencio — dejando a `state.tx` con el blob viejo de "kv", que en este
+caso databa de antes de que el taller tuviera movimientos reales
+registrados. Ningún aviso, ni siquiera el toast genérico de "sin
+conexión" (`huboFalloDeRed` solo se marcaba cuando el espejo SÍ tenía
+algo que usar).
+
+**Fix:** ahora CUALQUIER fallo al leer "tx"/"clientes" de su pestaña
+propia (con o sin espejo de respaldo) se guarda en
+`state.avisoTablaSheetFallo` con el error real, y `core/dom.js` lo
+muestra como una **barra fija** (no un toast de 3 segundos, a propósito
+— esto puede significar que Caja/Balance están mal) con un botón
+"Recargar ahora". La próxima vez que esto pase, se va a VER, con el
+motivo exacto, en vez de mostrar números incompletos con total
+confianza.
+
+**Nota:** los 4 movimientos de prueba (huérfanos, con su pedido ya
+eliminado) siguen contando en Caja mientras no se borren a mano con el
+🗑️ de Finanzas → Historial — es el comportamiento correcto (dinero que sí
+se registró no desaparece solo porque se borró el pedido, ver
+`MARCAS_ORIGEN_SISTEMA` en `core/calc.js`), pero como son datos de
+prueba, no reales, conviene borrarlos ahí apenas se confirme que la
+lectura real ya funciona.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

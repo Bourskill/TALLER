@@ -619,6 +619,7 @@ export function render() {
     mainInner += renderTopbar();
     mainInner += renderAvisoRecuperacion();
     mainInner += renderAvisoSinGuardar();
+    mainInner += renderAvisoTablaSheetFallo();
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
@@ -884,6 +885,29 @@ function renderAvisoSinGuardar() {
     '<div class="aviso-barra-sub">Lo que hiciste NO se perdió: quedó copiado en este navegador y se reintenta solo. ' +
     "Mientras tanto no cierres la pestaña. " + (g.ultimoError ? "(" + esc(g.ultimoError) + ")" : "") + "</div></div>" +
     '<button class="btn" data-action="reintentar-guardado">Reintentar ahora</button>' +
+    "</div>";
+}
+
+// Barra fija (no un toast que se calla solo) cuando "tx" y/o "clientes" no
+// se pudieron leer de su propia pestaña de Google Sheets al cargar (ver
+// state.avisoTablaSheetFallo en core/store.js) — lo que se ve pudo
+// resolverse con una copia vieja (espejo local de este dispositivo) o, en
+// el peor caso, con el blob de "kv" de antes de que "Movimientos"/
+// "Clientes" tuvieran su propia pestaña, meses desactualizado. Caja,
+// Balance y todo lo que dependa de movimientos puede estar mal mientras
+// esto siga en pantalla — por eso no es un aviso discreto que se ignora
+// solo. Auditoría financiera 2026-09-20 (el usuario reportó "Caja actual"
+// muy por debajo de lo real y la gráfica de Resumen vacía; la causa fue
+// justo esto, pasando en silencio hasta entonces).
+function renderAvisoTablaSheetFallo() {
+  var a = state.avisoTablaSheetFallo;
+  if (!a) return "";
+  var etiquetas = a.claves.map(function (c) { return ETIQUETA_CLAVE[c] || c; }).join(", ");
+  return '<div class="aviso-barra malo">' +
+    '<div><b>No se pudo leer ' + esc(etiquetas) + " desde Google Sheets en esta carga.</b>" +
+    '<div class="aviso-barra-sub">Lo que ves de esa área puede ser una copia vieja de este dispositivo, no lo más reciente de la hoja — revisa Caja/Balance con cuidado antes de confiar en ellos. ' +
+    (a.detalle ? "(" + esc(a.detalle) + ")" : "") + "</div></div>" +
+    '<button class="btn" data-action="recargar-pagina">Recargar ahora</button>' +
     "</div>";
 }
 

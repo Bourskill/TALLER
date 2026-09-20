@@ -173,6 +173,17 @@ export const state = {
   // cambios que nunca llegaron a la Sheet y el espejo local sí los tiene
   // (ver detectarRecuperacion). null el resto del tiempo.
   recuperacion: null,
+  // { claves: [...], detalle: "..." } si "tx" y/o "clientes" (ver
+  // TABLAS_SHEET) no se pudieron leer de su propia pestaña en ESTA carga —
+  // lo que se ve de esa área puede ser una copia vieja (espejo local) o,
+  // en el peor caso, el blob de "kv" de antes de que existiera su propia
+  // pestaña, meses desactualizado. Auditoría financiera 2026-09-20:
+  // antes esto fallaba en silencio (solo console.error) y Caja/Balance
+  // podían mostrar un número muy alejado del real sin ningún aviso. Se
+  // persiste hasta la próxima carga exitosa, a propósito: a diferencia de
+  // `toast`, esto no se debe poder ignorar por accidente. null el resto
+  // del tiempo — ver renderAvisoTablaSheetFallo en core/dom.js.
+  avisoTablaSheetFallo: null,
   // Panel de la campanita desplegado o no — estado de UI, nunca se persiste.
   notificacionesAbiertas: false,
   // Panel con la lista de atajos de teclado (tecla "?" o el botón del teclado
@@ -698,6 +709,14 @@ export async function loadAll() {
     //      dejó de actualizarse desde que esto se migró), pero mejor que
     //      nada.
     var tablaOk = {}; // key -> true si esta vez SÍ se pudo leer su pestaña propia de la red
+    // Claves de TABLAS_SHEET que fallaron esta carga -> mensaje real del
+    // error. Se usa después de este bloque para armar
+    // state.avisoTablaSheetFallo (ver su declaración arriba) — antes esto
+    // solo se veía en la consola, así que Caja/Balance/Resumen podían
+    // mostrarse calculados sobre una copia vieja (o el blob de "kv" de
+    // antes de la migración a pestaña propia) sin ningún aviso visible.
+    // Auditoría financiera 2026-09-20.
+    var tablaFallo = {};
     await Promise.allSettled(Object.keys(TABLAS_SHEET).map(function (key) {
       return TABLAS_SHEET[key].leer().then(function (items) {
         if (items.length === 0 && state[key] && state[key].length) {
@@ -712,6 +731,7 @@ export async function loadAll() {
         espejar(key, JSON.stringify(items));
         tablaOk[key] = true;
       }).catch(function (e) {
+        var detalle = e && e.message ? e.message : String(e);
         console.error("No se pudo leer la hoja estructurada de " + key + " — se intenta con la última copia local", e);
         // "Lo último guardado en kv" ya no es del todo cierto para tx/clientes
         // desde que viven en su propia pestaña (ver el comentario grande más
@@ -719,12 +739,26 @@ export async function loadAll() {
         // el ESPEJO —si hay uno, es de la última vez que ESTE dispositivo
         // leyó o guardó tx/clientes de verdad— por encima del blob viejo de
         // "kv" que `state[key]` ya trae como piso de seguridad.
+        //
+        // CUALQUIERA de las dos rutas (espejo o blob viejo de "kv") se
+        // marca como fallo visible: las dos pueden estar desactualizadas
+        // frente a la pestaña real, y antes solo se avisaba (huboFalloDeRed)
+        // cuando SÍ había espejo — si no había ninguno, `state[key]` se
+        // quedaba con el blob de "kv" en total silencio.
+        huboFalloDeRed = true;
+        tablaFallo[key] = detalle;
         var espejo = leerEspejo(key);
         if (espejo == null) return;
         var parsed = safeParse(espejo, undefined);
-        if (parsed !== undefined) { state[key] = parsed; huboFalloDeRed = true; }
+        if (parsed !== undefined) state[key] = parsed;
       });
     }));
+    if (Object.keys(tablaFallo).length) {
+      state.avisoTablaSheetFallo = {
+        claves: Object.keys(tablaFallo),
+        detalle: Object.keys(tablaFallo).map(function (k) { return tablaFallo[k]; })[0]
+      };
+    }
 
     // Base del chequeo de conflicto (ver verificarConflicto más arriba): para
     // cada clave que sí se pudo leer de la red esta vez (kv o tabla propia),

@@ -1944,6 +1944,31 @@ state.tab = "resumen";
 render();
 
 // ---------------------------------------------------------------------------
+// Auditoría financiera 2026-09-20 (post-mortem en vivo): si "tx" (o
+// "clientes") no se puede leer de su propia pestaña de Sheets al cargar,
+// antes esto solo quedaba en console.error — Caja/Balance/Resumen podían
+// mostrarse calculados sobre una copia vieja (o el blob de "kv" de antes de
+// que existiera esa pestaña propia) sin ningún aviso visible. Pasó de
+// verdad: el usuario reportó "Caja actual" muy por debajo de lo real y la
+// gráfica de Resumen vacía, y el Historial mostraba solo un puñado de
+// movimientos de prueba de meses atrás. Ahora state.avisoTablaSheetFallo
+// arma una barra fija (no un toast que se calla solo) con el motivo real.
+// ---------------------------------------------------------------------------
+// (No se afirma "sin avisoTablaSheetFallo no hay ninguna .aviso-barra": para
+// esta altura de la suite puede seguir viva la barra de "cambios sin
+// guardar" de una prueba anterior — es otro aviso-barra legítimo, no el de
+// acá. Se busca el texto propio de ESTE aviso, no la ausencia del selector.)
+state.avisoTablaSheetFallo = { claves: ["tx"], detalle: "Google Sheets API 500: fallo simulado" };
+render();
+var avisosTabla = Array.from(document.querySelectorAll(".aviso-barra.malo")).filter(function (el) { return el.textContent.indexOf("Google Sheets API 500: fallo simulado") !== -1; });
+assert(avisosTabla.length === 1, "con avisoTablaSheetFallo puesto, aparece la barra fija (no un toast temporal)");
+assert(avisosTabla[0].textContent.indexOf("movimientos de Finanzas") !== -1, "...nombra el área legible (ETIQUETA_CLAVE), no la clave interna \"tx\"");
+assert(!!avisosTabla[0].querySelector('[data-action="recargar-pagina"]'), "...con un botón para recargar, la forma de reintentar la carga completa");
+state.avisoTablaSheetFallo = null;
+render();
+assert(document.body.textContent.indexOf("Google Sheets API 500: fallo simulado") === -1, "quitar avisoTablaSheetFallo hace desaparecer la barra en el siguiente render");
+
+// ---------------------------------------------------------------------------
 // Servicios que se le cobran aparte al cliente (el diseño). Lo que se prueba
 // no es que cada cálculo funcione por separado, sino que los MISMOS números
 // sobrevivan cotización → pedido → líneas → reporte, con igualdad exacta.

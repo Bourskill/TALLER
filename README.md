@@ -259,6 +259,33 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo cuarta ronda: fallo silencioso al leer "Movimientos"/"Clientes" de su propia pestaña)
+
+Post-mortem en vivo del mismo día: tras la ronda anterior, el usuario
+reportó que "Caja actual" mostraba $323 cuando debía ser mucho más, y que
+la gráfica de "Ingresos y gastos"/los KPI de servicios seguían vacíos. Una
+captura de Finanzas → Historial mostró la causa: solo 4 movimientos de
+prueba de agosto (nombres tipo "q", "asdas"), cuya suma exacta daba $323.
+El usuario confirmó que la pestaña "Movimientos" de la Sheet real sí tiene
+muchas filas reales — la app no las estaba leyendo.
+
+- **Causa:** `core/store.js` (`loadAll`) lee "tx"/"clientes" del blob
+  viejo de "kv" primero, y los sobreescribe con su pestaña tabular propia
+  después — pero si esa segunda lectura fallaba y no había un "espejo"
+  local de esa pestaña puntual, el código hacía `return;` en silencio,
+  dejando el blob viejo de "kv" (de antes de que el taller tuviera
+  movimientos reales) como si fuera el dato vigente. Ni siquiera el toast
+  genérico de "sin conexión" se disparaba en ese caso.
+- **Fix:** nuevo `state.avisoTablaSheetFallo` — cualquier fallo al leer
+  "tx"/"clientes" de su pestaña propia (con o sin espejo de respaldo) se
+  guarda con el error real de la API y se muestra como una BARRA FIJA
+  (`renderAvisoTablaSheetFallo`, core/dom.js) con botón "Recargar ahora" —
+  no un toast que se calla solo a los 3 segundos, porque esto puede
+  significar que Caja/Balance están mal.
+- Ver CONTABILIDAD.md, "Hallazgo #16 — post-mortem 2026-09-20", y la nota
+  de corrección sobre el Hallazgo #15 (esa columna insertada en medio NO
+  era la causa de la gráfica/KPI vacíos, aunque seguía siendo un bug real).
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo tercera ronda: columna "empleadoId" insertada en medio del esquema de Movimientos corrompía los datos)
 
 El usuario reportó el mismo día que cerró la auditoría estricta (ver
