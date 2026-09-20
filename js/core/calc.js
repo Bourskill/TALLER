@@ -402,6 +402,13 @@ var MARCAS_ORIGEN_SISTEMA = [
       return state.deudas.some(function (d) { return d.id === t.origenDeudaIngresoId; }) ||
         state.deudasHistorial.some(function (d) { return d.id === t.origenDeudaIngresoId; });
     }
+  },
+  {
+    campo: "origenColchonId", que: "un aporte nuevo al Colchón",
+    donde: "Resumen → tile \"Colchón\" → historial → botón ✕ de ese relleno",
+    existe: function (t) {
+      return (state.config.colchonMovimientos || []).some(function (m) { return m.id === t.origenColchonId; });
+    }
   }
 ];
 
@@ -668,7 +675,34 @@ function listaEntradasServicio() {
       var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
       var monto = hayCostoReal ? num(compra.costoReal) : (linea ? linea.costoTotal : 0);
       if (monto <= 0) return;
-      entradas.push({ nombre: nombre, fecha: cot.fecha || "", cotizacionId: cot.id, cliente: cot.cliente || "", descripcion: cot.descripcion || "", monto: monto });
+      entradas.push({
+        nombre: nombre, fecha: cot.fecha || "", cotizacionId: cot.id, monto: monto,
+        concepto: "Cotización — " + (cot.cliente || "Sin cliente") + (cot.descripcion ? " (" + cot.descripcion + ")" : "")
+      });
+    });
+  });
+  // "Colchón": a diferencia de los demás servicios (cuya entrada nace sola,
+  // al marcar una línea de Compras como "Servicio"), este se rellena a mano
+  // desde Resumen — ver renderColchon en modules/resumen.js. El usuario lo
+  // pidió con un propósito puntual, distinto a "trabajo propio sin cobrar
+  // aparte": tener una reserva para cubrir el hueco cuando un cliente abona
+  // más de lo que en realidad es margen (ej. abona 50% pero el margen real
+  // es 30%: el 20% que falta para producir sale de acá en vez de tener que
+  // prestarlo). Puede rellenarse de dos formas (el usuario confirmó que
+  // usa las dos): apartando plata que YA estaba en caja (no genera
+  // movimiento en Finanzas, es pura reserva de algo ya contado) o con un
+  // aporte nuevo de su bolsillo (sí genera un ingreso real en Finanzas,
+  // marcado con origenColchonId — ver MARCAS_ORIGEN_SISTEMA). En los dos
+  // casos NO es Ganancia — igual que cualquier otro servicio, se resta de
+  // Balance en calcServiciosPendientesPorCategoriaRango — y se "gasta" con
+  // el mismo mecanismo ya existente (asignar a un gasto o pago de nómina),
+  // sin necesitar ningún cambio ahí: por eso entra a esta misma lista en
+  // vez de llevar su propio cálculo aparte.
+  (state.config.colchonMovimientos || []).forEach(function (m) {
+    entradas.push({
+      nombre: "Colchón", fecha: m.fecha || "", cotizacionId: "", monto: num(m.monto),
+      concepto: (m.origen === "aporte" ? "Aporte" : "Apartado de caja") + (m.nota ? " — " + m.nota : ""),
+      id: m.id
     });
   });
   return entradas;
@@ -695,10 +729,15 @@ export function calcHistorialServicio(nombre) {
   var movimientos = listaEntradasServicio()
     .filter(function (e) { return e.nombre === nombre; })
     .map(function (e) {
+      // e.id solo existe en los rellenos manuales de Colchón (ver
+      // listaEntradasServicio) — origenManual distingue esas filas para que
+      // el historial pueda ofrecer "quitar" solo ahí, nunca en una entrada
+      // real derivada de una cotización (esa no se puede "deshacer" desde
+      // acá, nace de marcar la compra como no-Servicio en su origen).
       return {
         tipo: "entrada", fecha: e.fecha, cotizacionId: e.cotizacionId,
-        concepto: "Cotización — " + (e.cliente || "Sin cliente") + (e.descripcion ? " (" + e.descripcion + ")" : ""),
-        monto: e.monto
+        concepto: e.concepto, monto: e.monto,
+        id: e.id || "", origenManual: !!e.id
       };
     });
   (state.tx || []).forEach(function (t) {

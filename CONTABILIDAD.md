@@ -95,6 +95,7 @@ contabilidad de caja para negocio pequeño.
 | Disponible | acumulado histórico MENOS lo ya asignado a un gasto/nómina (`tx.serviciosDescuento`) | `calc.js:675` `calcServiciosDisponibles` |
 | Lo que resta de Ganancia | topado a lo "disponible" ACTUAL, no al bruto — evita doble conteo cuando el servicio ya se pagó de verdad. Un servicio en $0 sigue en la lista (no desaparece). | `calc.js:700` `calcServiciosPendientesPorCategoriaRango` |
 | Validación al asignar un gasto/nómina a un servicio | (1) nunca deja un servicio negativo, (2) lo asignado no puede superar el monto del propio pago | `calc.js:751` `validarServiciosAsignados` |
+| "Colchón" (2026-09) | un servicio MÁS, con nombre fijo "Colchón" — mismo acumulado/disponible/asignación de arriba, sin ningún cambio en esas fórmulas. Su entrada no nace de una cotización: se rellena a mano desde Resumen, de dos formas (`state.config.colchonMovimientos[].origen`): `"separar"` (plata que ya estaba en caja, sin `tx` nuevo — pura reserva) o `"aporte"` (plata nueva, SÍ genera un `tx` de ingreso real, marcado `origenColchonId`). En los dos casos resta de Ganancia igual que cualquier servicio — es la plata "prestada" para cubrir el hueco cuando un abono supera el margen real. | `calc.js` `listaEntradasServicio` (bloque Colchón) / `modules/resumen.js` `renderColchon` |
 
 ### Consignación
 

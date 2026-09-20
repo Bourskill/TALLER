@@ -39,6 +39,10 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   // El ingreso en caja registrado al crear una deuda/préstamo marcado como
   // "trajo dinero en efectivo" (ver "add-deuda", modules/pendientes.js).
   { key: "origenDeudaIngresoId", header: "origen_deuda_ingreso_id" },
+  // El ingreso registrado al rellenar el Colchón con un aporte nuevo (no
+  // aplica al relleno "separar", que no genera tx) — ver "guardar-relleno-
+  // colchon", modules/resumen.js.
+  { key: "origenColchonId", header: "origen_colchon_id" },
   { key: "esInsumo", header: "es_compra_insumo" },
   { key: "proveedorId", header: "proveedor_id" },
   { key: "insumoNombre", header: "insumo_nombre" },

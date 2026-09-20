@@ -391,6 +391,13 @@ export const state = {
   // lo abre aparece en varios lados: los tiles de "Ganancia" en Resumen y
   // cada fila ya elegida de "Asignar a servicio(s)" en Finanzas/Pendientes.
   historialServicioAbierto: "",
+  // Panel de "Rellenar Colchón" en Resumen (ver renderColchon,
+  // modules/resumen.js) — abierto/cerrado + su borrador. No entra al
+  // sistema de borradores protegidos (FORM_STATE_KEY en core/dom.js): es un
+  // formulario de un solo paso, se llena y se guarda en segundos, sin el
+  // riesgo de trabajo real perdido que sí tienen pedidos/cotizaciones.
+  colchonRellenarAbierto: false,
+  formColchon: { monto: "", origen: "separar", fecha: todayStr(), nota: "" },
   // { [cotId + "|" + claveLinea]: true } — qué filas de la tabla de compras
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.

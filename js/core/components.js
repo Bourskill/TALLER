@@ -541,7 +541,12 @@ export function renderHistorialServicio(nombre) {
     movimientos.forEach(function (m) {
       html += '<div class="tx-row" style="grid-template-columns:' + cols + ';padding:8px 14px;">' +
         "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(m.fecha) + "</span>" +
-        '<span class="mobile-th">Concepto</span><span>' + esc(m.concepto) + "</span>" +
+        '<span class="mobile-th">Concepto</span><span>' + esc(m.concepto) +
+        // Solo los rellenos manuales de Colchón traen `id` (ver
+        // calcHistorialServicio en core/calc.js) — una entrada real de una
+        // cotización no se puede "deshacer" desde acá, nace de su origen.
+        (m.origenManual ? ' <button type="button" class="btn ghost small" data-action="quitar-relleno-colchon" data-id="' + esc(m.id) + '" title="Quitar este relleno" style="padding:0 6px;">✕</button>' : "") +
+        "</span>" +
         '<span class="mobile-th">Monto</span><span class="amount ' + (m.tipo === "entrada" ? "pos" : "neg") + '">' + (m.tipo === "entrada" ? "+" : "−") + fmt(m.monto) + "</span>" +
         '<span class="mobile-th">Saldo</span><span class="amount">' + fmt(m.saldo) + "</span>" +
         "</div>";

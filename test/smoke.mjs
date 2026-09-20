@@ -2311,13 +2311,106 @@ assert(textoResumenGan.includes("Ganancia"), "la tarjeta de Ingresos y gastos ah
 assert(textoResumenGan.includes("Corte"), "y debajo, un tile propio (con menos protagonismo que los KPI) por cada categoría de servicio restada");
 assert(!!document.querySelector(".kpis-mini") && !!document.querySelector(".kpi-mini"), "usando el componente de tiles chicos, no la dona rechazada");
 assert(!document.querySelector("#chart-composicion-caja"), "la dona \"De qué es la caja actual\" no existe más — se descartó por completo, no se dejó a medias");
-// Sin ningún servicio en el periodo, la fila de tiles ni aparece — ver
-// renderServiciosMini.
+// Sin ningún servicio en el periodo, SU fila de tiles ni aparece — ver
+// renderServiciosMini. El tile de "Colchón" (ver renderColchon) es
+// distinto a propósito: siempre se muestra, aunque esté en $0, porque es
+// una herramienta que se gestiona a mano, no un desglose de qué hubo en
+// el periodo — por eso ya no se puede afirmar que TODO ".kpis-mini"
+// desaparece, solo el tile de "Corte".
 state.cotizaciones = [];
 render();
-assert(!document.querySelector(".kpis-mini"), "sin servicios en el periodo, la fila de tiles no se dibuja (nada que desglosar)");
+assert(!document.body.textContent.includes("Corte"), "sin servicios en el periodo, su tile no se dibuja (nada que desglosar)");
+assert(!!document.querySelector('[data-action="abrir-historial-servicio"][data-nombre="Colchón"]'), "...pero el tile de \"Colchón\" sigue ahí (es una reserva que se gestiona a mano, no un desglose del periodo)");
 state.tx = txPreviosGan; state.cotizaciones = cotizacionesPreviasGan;
 render();
+
+// ---------------------------------------------------------------------------
+// "Colchón" (2026-09): reserva para cubrir el hueco cuando un cliente abona
+// más de lo que en realidad es margen — el usuario lo pidió con "mismo
+// funcionamiento que los otros servicios, se puede rellenar o gastar". A
+// diferencia de Confección/Corte (cuya entrada nace sola de una cotización),
+// Colchón se rellena a mano de DOS formas confirmadas por el usuario:
+// apartando plata que ya estaba en caja (sin tx nuevo) o con un aporte
+// nuevo de su bolsillo (sí genera un ingreso real en Finanzas). "Gastar"
+// reutiliza el mecanismo YA probado arriba (asignar a servicio en un
+// gasto/nómina) sin ningún cambio — por diseño.
+// ---------------------------------------------------------------------------
+const txAntesColchon = state.tx.length;
+state.tab = "resumen";
+render();
+click('[data-action="abrir-rellenar-colchon"]');
+assert(!!document.querySelector('[data-action-change="set-colchon-campo"][data-campo="monto"]'), "\"+ Rellenar\" abre el formulario del Colchón");
+setChange('[data-action-change="set-colchon-campo"][data-campo="monto"]', "100000");
+click('[data-action="guardar-relleno-colchon"]');
+assert(state.config.colchonMovimientos.length === 1, "guarda el primer relleno");
+const rellenoSepararId = state.config.colchonMovimientos[0].id;
+assert(state.config.colchonMovimientos[0].origen === "separar" && !state.config.colchonMovimientos[0].txId, "por defecto es \"separar\": no genera ningún movimiento en Finanzas");
+assert(state.tx.length === txAntesColchon, "...confirmado: el conteo de movimientos de Finanzas no cambió");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Colchón"; })[0].disponible === 100000, "\"Colchón\" ya tiene 100.000 disponibles, sin ningún tx nuevo");
+assert(document.body.textContent.includes("$100.000") , "el tile de Colchón en pantalla ya refleja el nuevo disponible");
+
+// --- Rellenar con "aporte" (plata nueva de bolsillo): SÍ genera un ingreso real ---
+click('[data-action="abrir-rellenar-colchon"]');
+setChange('[data-action-change="set-colchon-campo"][data-campo="monto"]', "50000");
+setChange('[data-action-change="set-colchon-campo"][data-campo="origen"]', "aporte");
+setChange('[data-action-change="set-colchon-campo"][data-campo="nota"]', "Prueba aporte");
+click('[data-action="guardar-relleno-colchon"]');
+assert(state.config.colchonMovimientos.length === 2, "guarda el segundo relleno");
+const rellenoAporte = state.config.colchonMovimientos[1];
+assert(rellenoAporte.origen === "aporte" && !!rellenoAporte.txId, "este sí quedó marcado \"aporte\", con su propio tx vinculado");
+assert(state.tx.length === txAntesColchon + 1, "...y ahora SÍ hay un movimiento nuevo en Finanzas");
+const txAporte = state.tx.filter(function (t) { return t.id === rellenoAporte.txId; })[0];
+assert(!!txAporte && txAporte.tipo === "ingreso" && txAporte.monto === 50000, "el tx del aporte es un ingreso real por el monto exacto");
+assert(txAporte.concepto.indexOf("Aporte a Colchón") !== -1 && txAporte.concepto.indexOf("Prueba aporte") !== -1, "...con la nota incluida en el concepto");
+assert(txAporte.origenColchonId === rellenoAporte.id, "...y queda marcado con origenColchonId (protegido contra borrado suelto, ver MARCAS_ORIGEN_SISTEMA)");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Colchón"; })[0].disponible === 150000, "\"Colchón\" acumula los dos rellenos: 150.000 disponibles");
+
+// --- Historial: entradas manuales muestran su concepto propio y un botón "quitar" ---
+click('[data-action="abrir-historial-servicio"][data-nombre="Colchón"]');
+var textoHistorialColchon = document.body.textContent;
+assert(textoHistorialColchon.indexOf("Apartado de caja") !== -1, "el relleno \"separar\" aparece en el historial con su concepto propio");
+assert(textoHistorialColchon.indexOf("Aporte — Prueba aporte") !== -1, "...y el de \"aporte\", con la nota en el concepto");
+assert(!!document.querySelector('[data-action="quitar-relleno-colchon"][data-id="' + rellenoSepararId + '"]'), "cada relleno manual trae su botón para quitarlo");
+click('[data-action="cerrar-historial-servicio"]');
+
+// --- Quitar un relleno: se puede, mientras no deje el Colchón en negativo ---
+click('[data-action="abrir-historial-servicio"][data-nombre="Colchón"]');
+click('[data-action="quitar-relleno-colchon"][data-id="' + rellenoSepararId + '"]');
+assert(state.config.colchonMovimientos.length === 1 && state.config.colchonMovimientos[0].id === rellenoAporte.id, "quitar el relleno \"separar\" lo saca de la lista (no tenía tx que borrar)");
+assert(calcServDisp().filter(function (s) { return s.nombre === "Colchón"; })[0].disponible === 50000, "\"Colchón\" vuelve a 50.000 (solo queda el aporte)");
+
+// --- Gastar del Colchón: mismo mecanismo YA probado con \"Confección\" arriba, sin ningún cambio ---
+state.tab = "finanzas";
+render();
+click('[data-action="finanzas-vista"][data-val="nuevo"]');
+click('[data-action="set-tx-tipo"][data-val="gasto"]');
+setInput('[data-form="tx"][data-field="concepto"]', "Insumo cubierto con el Colchón");
+setInput('[data-form="tx"][data-field="monto"]', "40000");
+click('[data-action="agregar-fila-servicio"][data-form-destino="formTx"]');
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formTx"][data-idx="0"]', "Colchón");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formTx"][data-idx="0"]', "40000");
+click('[data-action="add-tx"]');
+const gastoColchonId = state.tx[0].id;
+assert(calcServDisp().filter(function (s) { return s.nombre === "Colchón"; })[0].disponible === 10000, "gastar del Colchón funciona exactamente igual que con cualquier otro servicio: 50.000 − 40.000 = 10.000 disponibles");
+
+// --- Ahora sí, quitar el aporte (50.000) dejaría el Colchón en -40.000: se bloquea ---
+state.tab = "resumen";
+render();
+click('[data-action="abrir-historial-servicio"][data-nombre="Colchón"]');
+var alertaColchonOriginal = global.alert;
+var alertaColchonBloqueo = "";
+global.window.alert = global.alert = function (msg) { alertaColchonBloqueo = msg; };
+click('[data-action="quitar-relleno-colchon"][data-id="' + rellenoAporte.id + '"]');
+assert(alertaColchonBloqueo.indexOf("No se puede quitar") !== -1, "quitar un relleno que ya se gastó (en parte) se bloquea con un aviso, no lo deja descuadrado");
+assert(state.config.colchonMovimientos.length === 1, "...y de verdad no lo quita: sigue en la lista");
+assert(state.tx.some(function (t) { return t.id === rellenoAporte.txId; }), "...ni borra su tx en Finanzas");
+global.window.alert = global.alert = alertaColchonOriginal;
+click('[data-action="cerrar-historial-servicio"]');
+
+// --- limpieza: fuera del alcance de este bloque, no debe arrastrarse a las siguientes pruebas ---
+state.config.colchonMovimientos = [];
+state.tx = state.tx.filter(function (t) { return t.id !== rellenoAporte.txId && t.id !== gastoColchonId; });
+state.formTx = { tipo: "gasto", concepto: "", monto: "", contraparte: "", fecha: hoyStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] };
 
 // ---------------------------------------------------------------------------
 // "Ganancia" también debe excluir el abonado de pedidos SIN terminar de

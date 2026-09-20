@@ -259,6 +259,39 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo séptima ronda: nuevo "servicio" Colchón, reserva para cubrir huecos de flujo de caja)
+
+- **Pedido del usuario, con su propio ejemplo**: "si solo gano el 30% pero
+  abonan el 50%, significa que tengo que prestar temporalmente el 20% que
+  hace falta para sacar la producción" — quería una reserva propia para
+  ese hueco, en vez de tener que prestarlo de verdad. Pidió explícito:
+  "mismo funcionamiento que los otros servicios, se puede rellenar o
+  gastar... no es ganancia".
+- **Se implementó como un "servicio" más**, con nombre fijo "Colchón" —
+  reutiliza TODA la maquinaria ya existente (acumulado, disponible,
+  historial de entradas/salidas, resta de Ganancia, asignación a un
+  gasto/nómina) sin cambiar una sola de esas fórmulas. La única diferencia
+  real: su entrada no nace sola de una cotización, se rellena a mano desde
+  un tile nuevo en Resumen ("+ Rellenar"), justo debajo de los demás
+  tiles de servicio — a diferencia de esos, el de Colchón SIEMPRE se
+  muestra (aunque esté en $0): es una herramienta que se gestiona
+  activamente, no un desglose de qué hubo en el periodo.
+- **Dos formas de rellenar, las dos confirmadas por el usuario** (se
+  preguntó explícito antes de implementar, por las implicaciones
+  contables): "Ya estaba en caja" (aparta plata que ya estaba contada,
+  sin generar ningún movimiento nuevo en Finanzas) o "Aporte nuevo de mi
+  bolsillo" (sí genera un ingreso real en Finanzas, marcado con
+  `origenColchonId` — protegido de borrarse suelto, igual que cualquier
+  otro movimiento con origen del sistema). En los dos casos resta de
+  Ganancia igual que cualquier servicio: no es utilidad, es reserva.
+- **"Gastar" no necesitó ningún cambio**: es el mismo "Asignar a
+  servicio(s)" que ya existía en los formularios de gasto/nómina —
+  Colchón aparece ahí solo, apenas tiene algo disponible.
+- **Se agregó lo único que faltaba para poder corregir un relleno mal
+  escrito**: un botón "✕" en el historial de Colchón, con la misma regla
+  de "nunca negativo" que ya protege el resto del mecanismo — no se puede
+  quitar un relleno si eso dejaría lo ya gastado sin respaldo.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo sexta ronda: se borró la Google Sheet de datos por accidente — recuperada + mensaje de error más claro)
 
 - **Incidente real, no un bug de código**: la Google Sheet configurada en

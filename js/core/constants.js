@@ -93,6 +93,11 @@ export const DEFAULT_CONFIG = {
   // gasto define su propio periodo (ya no todo es mensual) y guarda en qué
   // periodo se marcó pagado por última vez (ver periodoKey en core/calc.js).
   gastosFijos: [], // { id, nombre, monto, periodo, pagadoHasta }
+  // Rellenos manuales del "servicio" Colchón — ver renderColchon en
+  // modules/resumen.js y listaEntradasServicio en core/calc.js. origen es
+  // "separar" (plata que ya estaba en caja, sin tx propio) o "aporte"
+  // (plata nueva, genera un ingreso en Finanzas — ahí txId apunta a ese tx).
+  colchonMovimientos: [], // { id, fecha, monto, origen, nota, txId }
   // Meta con periodo graduable (antes solo existía "Meta de fin de mes").
   meta: { label: "Meta de balance neto", monto: 0, periodo: "mensual" },
   // Datos de facturación/PDF (aparecen como "DE" en la cotización para el cliente).

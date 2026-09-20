@@ -2,14 +2,14 @@
 // viven acá (antes estaban en Configuración, que es donde vive la marca/
 // datos del negocio, no donde alguien busca sus números del día a día).
 
-import { state, notify } from "../core/store.js";
-import { esc, fmt, todayStr, num } from "../core/utils.js";
+import { state, notify, persist } from "../core/store.js";
+import { esc, fmt, todayStr, num, uid } from "../core/utils.js";
 import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
   calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
-  calcServiciosPendientesPorCategoriaRango, calcAbonosPendientesPorPedido } from "../core/calc.js";
+  calcServiciosPendientesPorCategoriaRango, calcAbonosPendientesPorPedido, calcServiciosDisponibles } from "../core/calc.js";
 import { renderHelp, renderHistorialServicio } from "../core/components.js";
 import {
   configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
@@ -227,7 +227,12 @@ function renderGraficaResumen() {
   // aviso quedo inalcanzable y en su lugar se dibujaban 30 barras en cero con
   // "Entro $0 - Salio $0 - Balance $0", que no le dice nada a nadie.
   if (!hayMovimientoEnSerie(serie)) {
-    return html + '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div></div>';
+    // Colchón (ver renderColchon abajo) igual se muestra acá: a diferencia
+    // del resto de esta tarjeta, es una herramienta que se gestiona a mano,
+    // no un desglose de "qué hubo en los últimos 30 días" — sin movimiento
+    // reciente que graficar sigue siendo un momento válido para rellenarlo
+    // o revisar cuánto queda disponible.
+    return html + '<div class="empty" style="padding:10px 0;">Sin movimientos en este rango para graficar.</div>' + renderColchon() + "</div>";
   }
   var t = totalesSerie(serie);
   // "Ganancia" = Balance menos lo que en el periodo fue trabajo del taller
@@ -257,7 +262,46 @@ function renderGraficaResumen() {
     '<div style="position:relative;height:220px;"><canvas id="chart-ingresos-gastos"></canvas></div>' +
     renderServiciosMini(servicios) +
     renderAbonosPendientesMini(abonosPendientes) +
+    renderColchon() +
     "</div>";
+}
+
+// "Colchón": una reserva de plata que el usuario pidió explícito para
+// cubrir el hueco cuando un cliente abona más de lo que en realidad es
+// margen (su ejemplo: "si solo gano el 30% pero abonan el 50%, tengo que
+// prestar temporalmente el 20% que hace falta para sacar la producción" —
+// esto es esa plata "prestada", propia, en vez de un préstamo de verdad).
+// Funciona EXACTAMENTE como cualquier otro servicio (ver
+// listaEntradasServicio en core/calc.js: entra a la misma lista, con el
+// nombre fijo "Colchón") — la única diferencia es que su entrada no nace
+// sola de una cotización, se rellena a mano acá. A propósito, a diferencia
+// de renderServiciosMini, este tile SIEMPRE se muestra (aunque esté en
+// $0): es una herramienta que el usuario gestiona activamente, no un
+// desglose que solo tiene sentido si hubo movimiento en el periodo.
+function renderColchon() {
+  var disp = calcServiciosDisponibles().filter(function (s) { return s.nombre === "Colchón"; })[0];
+  var disponible = disp ? disp.disponible : 0;
+  var f = state.formColchon || { monto: "", origen: "separar", fecha: todayStr(), nota: "" };
+  var html = '<div class="section-sub" style="margin:14px 0 6px;">Colchón (reserva para cubrir huecos de flujo de caja)' +
+    renderHelp('Plata aparte que NO cuenta como Ganancia, para cubrir el hueco cuando un cliente abona más de lo que en realidad es tu margen (ej. abona 50% pero tu ganancia real es 30%: el 20% que falta para producir sale de acá, en vez de tener que prestarlo). Se rellena apartando plata que ya estaba en caja (no genera un movimiento nuevo, solo la reserva) o agregando plata nueva de tu bolsillo (sí genera un ingreso en Finanzas). Se gasta igual que cualquier otro servicio: asignándolo a un gasto o pago de nómina — ver "Asignar a servicio(s)".') +
+    "</div>" +
+    '<div class="kpis-mini">' +
+    '<button type="button" class="kpi-mini" data-action="abrir-historial-servicio" data-nombre="Colchón"><div class="kpi-mini-label">Colchón</div><div class="kpi-mini-value">' + fmt(disponible) + "</div></button>" +
+    '<button type="button" class="btn ghost small" data-action="' + (state.colchonRellenarAbierto ? "cerrar-rellenar-colchon" : "abrir-rellenar-colchon") + '" style="align-self:center;">' + (state.colchonRellenarAbierto ? "Cancelar" : "+ Rellenar") + "</button>" +
+    "</div>";
+  if (state.colchonRellenarAbierto) {
+    html += '<div class="form-grid" style="margin-top:8px;">' +
+      '<div class="field"><label>Monto</label><input type="number" class="mini-input" value="' + esc(f.monto) + '" data-action-change="set-colchon-campo" data-campo="monto" placeholder="0" /></div>' +
+      '<div class="field"><label>¿De dónde sale?</label><select class="mini-input" data-action-change="set-colchon-campo" data-campo="origen">' +
+      '<option value="separar" ' + (f.origen === "separar" ? "selected" : "") + ">Ya estaba en caja (apartar)</option>" +
+      '<option value="aporte" ' + (f.origen === "aporte" ? "selected" : "") + ">Plata nueva de mi bolsillo (aporte)</option>" +
+      "</select></div>" +
+      '<div class="field"><label>Fecha</label><input type="date" class="mini-input" value="' + esc(f.fecha || todayStr()) + '" data-action-change="set-colchon-campo" data-campo="fecha" /></div>' +
+      '<div class="field wide"><label>Nota (opcional)</label><input class="mini-input" value="' + esc(f.nota) + '" data-action-change="set-colchon-campo" data-campo="nota" placeholder="Ej. Sobrante del pedido de Juana" /></div>' +
+      "</div>" +
+      '<div class="row-actions" style="margin-top:6px;"><button class="btn small" data-action="guardar-relleno-colchon">Guardar relleno</button></div>';
+  }
+  return html;
 }
 
 // Tiles chicos y discretos, uno por categoría de "servicio" (mano de obra
@@ -772,6 +816,72 @@ function renderDesgloseProductos(fr) {
 }
 
 export var actions = {
+  "abrir-rellenar-colchon": function () {
+    state.formColchon = { monto: "", origen: "separar", fecha: todayStr(), nota: "" };
+    state.colchonRellenarAbierto = true;
+    notify();
+  },
+  "cerrar-rellenar-colchon": function () {
+    state.colchonRellenarAbierto = false;
+    notify();
+  },
+  "set-colchon-campo": function (el) {
+    state.formColchon[el.getAttribute("data-campo")] = el.value;
+  },
+  // Ver el comentario grande de listaEntradasServicio (core/calc.js) para
+  // el propósito completo. "aporte" además crea un ingreso real en
+  // Finanzas (marcado con origenColchonId, para que quede protegido en la
+  // lista de movimientos hasta que se quite el relleno desde acá); "separar"
+  // no toca Finanzas para nada, es pura reserva de plata ya contada.
+  "guardar-relleno-colchon": function () {
+    var f = state.formColchon;
+    var monto = num(f.monto);
+    if (monto <= 0) { window.alert("Escribe un monto mayor a cero."); return; }
+    var fecha = f.fecha || todayStr();
+    var nota = (f.nota || "").trim();
+    var id = uid();
+    var mov = { id: id, fecha: fecha, monto: monto, origen: f.origen, nota: nota, txId: "" };
+    if (f.origen === "aporte") {
+      var txId = uid();
+      mov.txId = txId;
+      state.tx.unshift({
+        id: txId, fecha: fecha, tipo: "ingreso",
+        concepto: "Aporte a Colchón" + (nota ? " — " + nota : ""),
+        monto: monto, contraparte: "", pedidoId: "", cotizacionId: "",
+        esInsumo: "", insumoNombre: "", proveedorId: "", cantidad: "", unidad: "",
+        serviciosDescuento: [], origenColchonId: id
+      });
+      persist("tx");
+    }
+    state.config.colchonMovimientos = (state.config.colchonMovimientos || []).concat([mov]);
+    persist("config");
+    state.formColchon = { monto: "", origen: "separar", fecha: todayStr(), nota: "" };
+    state.colchonRellenarAbierto = false;
+    notify();
+  },
+  // Ningún relleno se puede quitar si eso dejaría el Colchón negativo (lo
+  // ya gastado, vía "asignar a servicio(s)", no puede quedar sin respaldo)
+  // — mismo espíritu que validarServiciosAsignados en core/calc.js.
+  "quitar-relleno-colchon": function (el) {
+    var id = el.getAttribute("data-id");
+    var mov = (state.config.colchonMovimientos || []).filter(function (m) { return m.id === id; })[0];
+    if (!mov) return;
+    var disp = calcServiciosDisponibles().filter(function (s) { return s.nombre === "Colchón"; })[0];
+    var acumulado = disp ? disp.acumulado : 0;
+    var usado = disp ? (disp.acumulado - disp.disponible) : 0;
+    if (acumulado - num(mov.monto) < usado - 0.5) {
+      window.alert("No se puede quitar: ya se gastó más de lo que quedaría en el Colchón sin este relleno.");
+      return;
+    }
+    if (!window.confirm('¿Quitar este relleno de ' + fmt(num(mov.monto)) + " del Colchón" + (mov.txId ? " y su movimiento en Finanzas?" : "?"))) return;
+    state.config.colchonMovimientos = (state.config.colchonMovimientos || []).filter(function (m) { return m.id !== id; });
+    persist("config");
+    if (mov.txId) {
+      state.tx = (state.tx || []).filter(function (t) { return t.id !== mov.txId; });
+      persist("tx");
+    }
+    notify();
+  },
   // Mismo patrón de "ir al registro de origen" que ya usan Finanzas
   // ("↗ Origen") y Pendientes ("↗ Ver"): navega a Pedidos → Historial, hace
   // scroll a la tarjeta y la hace destellar para identificarla entre varias.
