@@ -259,6 +259,34 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo quinta ronda: la pestaña "Movimientos" se quedó corta de columnas — causa raíz real de "Caja actual" mal)
+
+La barra de aviso de la ronda anterior reveló el error real apenas se
+usó: `Google Sheets API 400: Range (Movimientos!AA1:AB1) exceeds grid
+limits. Max rows: 1000, max columns: 26`. Esta era la causa de fondo de
+todo el episodio del "Caja actual" en $323: la pestaña "Movimientos" se
+creó con el tamaño de fábrica de Google (26 columnas), el esquema creció
+a 28 con el tiempo, y completar el encabezado en la columna 27/28 (algo
+que pasa en CADA carga mientras falten encabezados) tiraba un 400 —
+`leer()` fallaba entera, sin siquiera llegar a pedir los datos reales.
+
+- **Por qué no se veía en las lecturas normales de otras columnas:**
+  `values.get` es tolerante con un rango que se sale de la grilla — solo
+  `values.update`/`values.clear` (escritura) lo rechazan, y completar
+  encabezados es una escritura.
+- **Fix:** `asegurarPestana` (core/sheetsTabular.js) ahora agranda la
+  grilla de columnas de la pestaña (nunca las filas) ANTES de escribir
+  cualquier encabezado que se salga de su tamaño actual — nuevo
+  `sheetsAgrandarColumnas`/`sheetsGetSheetsInfo` en core/googleRest.js
+  (`sheetsGetSheetNames`, que ya no se usa en ningún otro lado, se quitó).
+  Una pestaña nueva también nace ya con el tamaño exacto que su esquema
+  necesita.
+- Test que reproduce el límite REAL de Google (un mock de fetch que
+  rechaza cualquier escritura más allá del `columnCount` actual con el
+  mismo 400 exacto que dio la API) y confirma que la grilla se agranda
+  antes de escribir el encabezado.
+- Ver CONTABILIDAD.md, "Hallazgo #17 — la causa raíz real de #16".
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo cuarta ronda: fallo silencioso al leer "Movimientos"/"Clientes" de su propia pestaña)
 
 Post-mortem en vivo del mismo día: tras la ronda anterior, el usuario

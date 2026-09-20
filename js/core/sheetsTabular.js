@@ -22,25 +22,53 @@
 // dónde queda visible la información.
 
 import { getAccessToken } from "./auth.js";
-import { sheetsValuesGet, sheetsValuesUpdate, sheetsValuesClear, sheetsGetSheetNames, sheetsAddSheet } from "./googleRest.js";
+import { sheetsValuesGet, sheetsValuesUpdate, sheetsValuesClear, sheetsGetSheetsInfo, sheetsAddSheet, sheetsAgrandarColumnas } from "./googleRest.js";
 import { SPREADSHEET_ID } from "./google-config.js";
 
-var sheetsExistentesCache = null; // Set de nombres de pestaña ya confirmados — evita
-// consultar "¿existe la pestaña?" en cada guardado, solo la primera vez.
+var sheetsInfoCache = null; // nombre de pestaña -> { sheetId, columnCount } ya confirmados —
+// evita consultar "¿existe la pestaña? ¿de qué tamaño?" en cada guardado, solo la primera vez.
 var headersVerificados = {}; // nombre de pestaña -> true, una vez confirmado/completado su encabezado esta sesión.
 
+// INCIDENTE 2026-09-20: un esquema que crece con el tiempo (ver
+// COLUMNAS_MOVIMIENTOS en sheetsEsquemas.js) puede terminar necesitando
+// más columnas de las 26 (A-Z) con las que Google crea una pestaña nueva
+// por defecto. Escribir más allá de esa grilla (la fila de encabezados o
+// los datos mismos) da un 400 "exceeds grid limits" — un error que no dice
+// nada de permisos ni de rango mal escrito, y que antes de la ronda
+// anterior (ver "avisar cuando tx/clientes no se pueden leer") pasaba en
+// silencio: la lectura fallaba, no había espejo local útil, y la app
+// mostraba un blob viejísimo como si fuera el dato vigente. Esta función
+// ahora agranda la grilla (solo columnas — nunca filas, ver
+// sheetsAgrandarColumnas) ANTES de intentar escribir cualquier encabezado
+// que se salga de su tamaño actual.
 async function asegurarPestana(token, nombre, columnas) {
-  if (!sheetsExistentesCache) {
-    var nombres = await sheetsGetSheetNames(token, SPREADSHEET_ID);
-    sheetsExistentesCache = {};
-    nombres.forEach(function (n) { sheetsExistentesCache[n] = true; });
+  if (!sheetsInfoCache) {
+    var infos = await sheetsGetSheetsInfo(token, SPREADSHEET_ID);
+    sheetsInfoCache = {};
+    infos.forEach(function (info) { sheetsInfoCache[info.title] = { sheetId: info.sheetId, columnCount: info.columnCount }; });
   }
-  if (!sheetsExistentesCache[nombre]) {
-    await sheetsAddSheet(token, SPREADSHEET_ID, nombre);
+  if (!sheetsInfoCache[nombre]) {
+    // Se crea directo con el tamaño que el esquema necesita HOY: evita que
+    // una pestaña recién creada ya nazca corta si el esquema ya tiene más
+    // de 26 columnas.
+    var creada = await sheetsAddSheet(token, SPREADSHEET_ID, nombre, columnas.length);
+    var propsCreada = creada && creada.replies && creada.replies[0] && creada.replies[0].addSheet && creada.replies[0].addSheet.properties;
+    sheetsInfoCache[nombre] = { sheetId: propsCreada ? propsCreada.sheetId : null, columnCount: columnas.length };
     await sheetsValuesUpdate(token, SPREADSHEET_ID, nombre + "!A1:" + letraColumna(columnas.length) + "1", [columnas.map(function (c) { return c.header; })]);
-    sheetsExistentesCache[nombre] = true;
     headersVerificados[nombre] = true;
     return;
+  }
+  // La pestaña ya existía con una grilla más angosta de lo que el esquema
+  // necesita ahora (ver el aviso del incidente arriba) — agrandarla es
+  // idempotente y barato (una sola llamada, cacheada el resto de la
+  // sesión), así que se revisa siempre, no solo la primera vez que se
+  // detecta el hueco.
+  var infoPestana = sheetsInfoCache[nombre];
+  if (infoPestana.columnCount < columnas.length) {
+    if (infoPestana.sheetId != null) {
+      await sheetsAgrandarColumnas(token, SPREADSHEET_ID, infoPestana.sheetId, columnas.length);
+    }
+    infoPestana.columnCount = columnas.length;
   }
   // La pestaña ya existía de antes de que el esquema ganara columnas nuevas
   // (ej. origenGastoId/esInsumo en tablaMovimientos): la fila de encabezados

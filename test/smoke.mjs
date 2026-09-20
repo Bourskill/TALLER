@@ -4499,6 +4499,77 @@ assert(urlSubida.indexOf("img-nueva-test") !== -1, "una carpeta borrada NO deja 
 assert(state.config.driveFolderId === "carpeta-nueva-test", "...y config.driveFolderId queda con la carpeta NUEVA, no con el id muerto (los próximos intentos no vuelven a fallar)");
 global.fetch = fetchOriginalDrive;
 
+// --- El bug REAL detrás del post-mortem del 2026-09-20: la pestaña
+// "Movimientos" nació con el tamaño de fábrica de Google (26 columnas,
+// A-Z) y el esquema creció a 28 (ver COLUMNAS_MOVIMIENTOS abajo) —
+// escribir el encabezado más allá de la columna Z daba un 400 "exceeds
+// grid limits", que hacía fallar leer() ENTERO (ni siquiera llegaba a
+// pedir los datos) y sin ningún aviso visible, la app se quedaba
+// mostrando un blob viejísimo de "kv" como si fuera vigente. Este mock
+// reproduce el límite real de Google: cualquier escritura (PUT) a una
+// columna más allá de `gridColumnCount` responde el mismo 400 real, hasta
+// que llega un updateSheetProperties (ver sheetsAgrandarColumnas) que
+// agranda la grilla — igual que la API real.
+loginComo("admin", "", "admin-grid-test@taller.test");
+const { crearTablaSheet: crearTablaSheetGridTest } = await import("../js/core/sheetsTabular.js");
+function colLetraANumeroTest(letra) {
+  var n = 0;
+  for (var i = 0; i < letra.length; i++) n = n * 26 + (letra.charCodeAt(i) - 64);
+  return n;
+}
+function colFinDeRangoTest(range) {
+  var partes = range.split("!")[1].split(":");
+  var m = partes[partes.length - 1].match(/^[A-Z]+/);
+  return colLetraANumeroTest(m[0]);
+}
+var gridColumnCountTest = 26; // tamaño de fábrica de Google — igual que el incidente real
+var sheetIdGridTest = 4242;
+var agrandoLlamadoConTest = null;
+const fetchOriginalGrid = global.fetch;
+global.fetch = async function (url, options) {
+  var u = decodeURIComponent(String(url));
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("?fields=sheets.properties(sheetId,title,gridProperties.columnCount)") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { sheets: [{ properties: { sheetId: sheetIdGridTest, title: "MovimientosGridTest", gridProperties: { columnCount: gridColumnCountTest } } }] }; } };
+  }
+  if (u.indexOf(":batchUpdate") !== -1 && metodo === "POST") {
+    var body = JSON.parse(options.body);
+    var req = body.requests[0];
+    if (req.updateSheetProperties) {
+      agrandoLlamadoConTest = { sheetId: req.updateSheetProperties.properties.sheetId, columnCount: req.updateSheetProperties.properties.gridProperties.columnCount };
+      gridColumnCountTest = req.updateSheetProperties.properties.gridProperties.columnCount; // la API real SÍ agranda de verdad
+      return { ok: true, status: 200, json: async function () { return {}; } };
+    }
+    return { ok: true, status: 200, json: async function () { return { replies: [{ addSheet: { properties: { sheetId: sheetIdGridTest } } }] }; } };
+  }
+  if (u.indexOf("/values/") !== -1) {
+    var range = u.slice(u.indexOf("/values/") + "/values/".length).split("?")[0].split(":clear")[0];
+    if (metodo === "GET") {
+      // Encabezado ya existente con el tamaño VIEJO (26 columnas) — es lo
+      // que fuerza a asegurarPestana a ver que hace falta completar más.
+      return { ok: true, status: 200, json: async function () { return { values: [Array.from({ length: 26 }, function (_, i) { return "col" + i; })] }; } };
+    }
+    // PUT (valores) o POST (:clear): la API real rechaza cualquier rango
+    // que se salga de la grilla ACTUAL, exactamente el 400 que se vio en
+    // producción.
+    if (colFinDeRangoTest(range) > gridColumnCountTest) {
+      return { ok: false, status: 400, text: async function () { return '{"error":{"code":400,"message":"Range (' + range + ') exceeds grid limits. Max rows: 1000, max columns: ' + gridColumnCountTest + '","status":"INVALID_ARGUMENT"}}'; } };
+    }
+    return { ok: true, status: 200, json: async function () { return {}; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+// 28 columnas (una más de las 26 de fábrica) — mismo tamaño real que
+// tablaMovimientos alcanzó este mismo día.
+var columnasGridTest = Array.from({ length: 28 }, function (_, i) { return { key: "c" + i, header: "col" + i }; });
+const tablaGridTest = crearTablaSheetGridTest("MovimientosGridTest", columnasGridTest);
+const itemsGridTest = await tablaGridTest.leer();
+assert(Array.isArray(itemsGridTest), "leer() una pestaña con MENOS columnas en su grilla que el esquema actual ya NO lanza \"exceeds grid limits\" (se agranda la grilla antes de escribir el encabezado)");
+assert(!!agrandoLlamadoConTest, "...porque se llamó a updateSheetProperties para agrandar la grilla");
+assert(agrandoLlamadoConTest.sheetId === sheetIdGridTest, "...con el sheetId NUMÉRICO correcto (no el nombre/título de la pestaña)");
+assert(agrandoLlamadoConTest.columnCount === 28, "...agrandada exactamente a las columnas que el esquema necesita, ni de más ni de menos");
+global.fetch = fetchOriginalGrid;
+
 // Incidente 2026-09-20: sheetsTabular.js lee cada fila de "Movimientos" por
 // POSICIÓN (columnas[i] <-> fila[i]), nunca por el nombre del encabezado —
 // insertar una columna nueva EN MEDIO del arreglo (pasó con "empleadoId",

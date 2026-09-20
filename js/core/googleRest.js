@@ -65,18 +65,52 @@ export async function sheetsValuesClear(accessToken, spreadsheetId, range) {
   return request(accessToken, spreadsheetId + "/values/" + encodeURIComponent(range) + ":clear", { method: "POST" });
 }
 
-// Nombres de todas las pestañas que ya existen en la Sheet — para saber si
-// hay que crear una nueva antes de escribir en ella (ver sheetsAddSheet).
-export async function sheetsGetSheetNames(accessToken, spreadsheetId) {
-  var data = await request(accessToken, spreadsheetId + "?fields=sheets.properties.title", { method: "GET" });
-  return (data.sheets || []).map(function (s) { return s.properties.title; });
+// Nombre, id NUMÉRICO (el que pide updateSheetProperties, distinto del
+// nombre/título) y tamaño ACTUAL de grilla de cada pestaña — ver
+// sheetsAgrandarColumnas abajo y el incidente 2026-09-20 junto a
+// asegurarPestana en sheetsTabular.js: escribir en una columna que la
+// grilla de la pestaña todavía no tiene (ej. columna 27 cuando Google la
+// creó con el tamaño de fábrica de 26) da un 400 "exceeds grid limits",
+// no un error de permisos ni de rango mal escrito — hay que agrandar la
+// grilla primero, no solo escribir el encabezado.
+export async function sheetsGetSheetsInfo(accessToken, spreadsheetId) {
+  var data = await request(accessToken, spreadsheetId + "?fields=sheets.properties(sheetId,title,gridProperties.columnCount)", { method: "GET" });
+  return (data.sheets || []).map(function (s) {
+    return { title: s.properties.title, sheetId: s.properties.sheetId, columnCount: (s.properties.gridProperties || {}).columnCount || 0 };
+  });
 }
 
-// Crea una pestaña nueva (vacía) con el nombre dado.
-export async function sheetsAddSheet(accessToken, spreadsheetId, title) {
+// Crea una pestaña nueva (vacía) con el nombre dado. `columnCount` opcional
+// evita que una pestaña recién creada para un esquema con más de 26
+// columnas (el tamaño de fábrica de Google) tenga que agrandarse aparte en
+// la siguiente escritura — ver sheetsAgrandarColumnas.
+export async function sheetsAddSheet(accessToken, spreadsheetId, title, columnCount) {
+  var properties = { title: title };
+  if (columnCount) properties.gridProperties = { columnCount: columnCount };
   return request(accessToken, spreadsheetId + ":batchUpdate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: title } } }] })
+    body: JSON.stringify({ requests: [{ addSheet: { properties: properties } }] })
+  });
+}
+
+// Agranda (NUNCA achica — quien llama debe pasar ya el máximo entre lo
+// actual y lo necesario) la cantidad de columnas de la grilla de una
+// pestaña existente. Solo toca columnCount a propósito: la cantidad de
+// filas no se ha visto nunca como el límite real (ver el comentario en
+// sheetsGetSheetsInfo), y agrandarla sin necesidad acerca la Sheet al
+// límite total de 10 millones de celdas de Google sin ningún beneficio.
+export async function sheetsAgrandarColumnas(accessToken, spreadsheetId, sheetId, columnCount) {
+  return request(accessToken, spreadsheetId + ":batchUpdate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requests: [{
+        updateSheetProperties: {
+          properties: { sheetId: sheetId, gridProperties: { columnCount: columnCount } },
+          fields: "gridProperties.columnCount"
+        }
+      }]
+    })
   });
 }

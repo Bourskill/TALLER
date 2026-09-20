@@ -569,6 +569,41 @@ se registró no desaparece solo porque se borró el pedido, ver
 prueba, no reales, conviene borrarlos ahí apenas se confirme que la
 lectura real ya funciona.
 
+### 🔴 Hallazgo #17 — post-mortem 2026-09-20: la pestaña "Movimientos" se quedó corta de columnas ("exceeds grid limits"). ✅ CORREGIDO — la causa raíz real de #16
+
+La barra fija del Hallazgo #16 reveló el error real la primera vez que se
+usó: `Google Sheets API 400: Range (Movimientos!AA1:AB1) exceeds grid
+limits. Max rows: 1000, max columns: 26`. Esta es la causa raíz
+verdadera detrás de todo lo reportado ese día (Caja en $323, gráfica y
+KPI de servicios vacíos): la pestaña "Movimientos" se creó con el tamaño
+de fábrica de Google (26 columnas, A-Z), y el esquema (ver
+`COLUMNAS_MOVIMIENTOS`) creció con el tiempo hasta 28. Escribir el
+encabezado en la columna 27/28 (AA/AB) — algo que `asegurarPestana` hace
+en CADA `leer()`/`escribir()` mientras falten encabezados por completar —
+se salía de la grilla real de esa pestaña y tiraba un 400. Como esto
+pasaba ANTES de siquiera pedir los datos, `leer()` fallaba entera: ni
+_llegaba_ a intentar traer las filas reales, entraba directo al fallback
+silencioso del Hallazgo #16 (blob viejo de "kv").
+
+**Por qué no se vio antes:** `values.get` (lectura) es tolerante con un
+rango que se sale de la grilla — devuelve lo que hay, sin error. Solo
+`values.update`/`values.clear` (escritura) lo rechazan. Por eso las
+LECTURAS de otras columnas parecían andar bien y el problema quedaba
+escondido específicamente en el paso de "completar encabezados
+faltantes", una escritura.
+
+**Fix:** `asegurarPestana` ahora agranda la grilla de columnas (nunca las
+filas — no hay evidencia de que ese límite se haya tocado, y agrandarlo
+sin necesidad acerca la Sheet al límite de 10 millones de celdas de
+Google sin ningún beneficio) ANTES de escribir cualquier encabezado que
+se salga de su tamaño actual, vía `updateSheetProperties` (nuevo
+`sheetsAgrandarColumnas` en `core/googleRest.js`). Una pestaña nueva
+también nace directo con el tamaño que el esquema necesita ese día, para
+no volver a repetir esto. Test que reproduce el límite REAL de Google
+(un mock de fetch que rechaza cualquier escritura más allá de
+`gridColumnCount` con el mismo 400 exacto) y confirma que la grilla se
+agranda antes de escribir.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la
