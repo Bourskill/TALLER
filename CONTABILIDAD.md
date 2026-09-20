@@ -483,6 +483,44 @@ corregidos en 5 rondas — ver "Registro de cambios" del README.)*
   el periodo de pago de alguien: aproximación ya documentada como
   intencional en el código, el usuario puede ajustar el número sugerido.
 
+### 🔴 Hallazgo #15 — post-mortem 2026-09-20: columna insertada en medio del esquema de Movimientos. ✅ CORREGIDO
+
+El usuario reportó, el mismo día que se cerró esta auditoría, que la
+gráfica de "Ingresos y gastos" y los tiles de servicios habían
+desaparecido de Resumen. Al revisar el propio arreglo `tablaMovimientos`
+que el hallazgo de nómina de esta auditoría (bloque "Pendientes" arriba)
+había tocado, se encontró que `empleadoId` se había agregado **en medio**
+del arreglo de columnas (entre `origenColchonId` y `esInsumo`), no al
+final.
+
+**Por qué esto es grave:** `core/sheetsTabular.js` lee cada fila de la
+Sheet real por POSICIÓN (`columnas[i]` ↔ `fila[i]`), nunca por el nombre
+del encabezado — es la única forma de que agregar encabezados nuevos a una
+pestaña vieja no obligue a reescribir toda la fila 1 a mano (ver
+`asegurarPestana`). Insertar una columna en medio corre TODO lo que sigue
+un puesto a la izquierda: cada movimiento YA GUARDADO en la Sheet quedaba
+leyendo el dato de su columna vecina — `esInsumo` tomaba el viejo
+`proveedorId`, `proveedorId` el viejo `insumoNombre`, `insumoNombre` el
+viejo `cantidad`, `cantidad` el viejo `unidad` (`Number("metros")` → `0`),
+`unidad` el JSON de `serviciosDescuento` como texto plano, y
+`serviciosDescuento` quedaba **vacío** (columna fuera de rango) — todo
+movimiento existente perdía en silencio su "asignado a servicio(s)".
+
+**Fix:** `empleadoId` se movió al final del arreglo (única posición segura
+para una columna nueva). Se agregó un test que fija el ORDEN exacto de
+`COLUMNAS_MOVIMIENTOS` (`test/smoke.mjs`) — no puede detectar el bug en sí
+(no hay red real en las pruebas), pero congela el contrato que lo evita: si
+alguien vuelve a insertar una columna en medio, el test falla antes de
+llegar a producción.
+
+**Duda abierta para el usuario:** si esto llegó a persistir de verdad en la
+Sheet (cualquier guardado — un gasto nuevo, un pago de nómina, etc. —
+mientras el bug estuvo activo), los movimientos guardados en ese lapso
+pueden tener `es_compra_insumo`/`proveedor_id`/`insumo_nombre`/`cantidad`/
+`unidad`/`servicios_descuento` con el valor de su columna vecina. Revisar
+la pestaña "Movimientos" de la Sheet real por ese periodo si algo se ve
+raro en el desglose de insumos o en qué servicio quedó "gastado".
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

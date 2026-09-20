@@ -4474,6 +4474,30 @@ assert(urlSubida.indexOf("img-nueva-test") !== -1, "una carpeta borrada NO deja 
 assert(state.config.driveFolderId === "carpeta-nueva-test", "...y config.driveFolderId queda con la carpeta NUEVA, no con el id muerto (los próximos intentos no vuelven a fallar)");
 global.fetch = fetchOriginalDrive;
 
+// Incidente 2026-09-20: sheetsTabular.js lee cada fila de "Movimientos" por
+// POSICIÓN (columnas[i] <-> fila[i]), nunca por el nombre del encabezado —
+// insertar una columna nueva EN MEDIO del arreglo (pasó con "empleadoId",
+// metida entre origenColchonId y esInsumo) corre TODO lo que sigue un
+// puesto: cada fila YA GUARDADA en la Sheet real queda leyendo el dato de
+// su vecina. El daño real de ese día: esInsumo <- (vieja) proveedorId,
+// proveedorId <- insumoNombre, insumoNombre <- cantidad, cantidad <- unidad
+// (Number("metros") = 0), unidad <- el JSON de serviciosDescuento como
+// texto plano, y serviciosDescuento <- nada (columna fuera de rango) => TODO
+// movimiento existente perdía en silencio su "asignado a servicio(s)". Este
+// test fija el ORDEN exacto de columnas: si alguien vuelve a insertar una
+// columna en medio (en vez de agregarla al final), esta lista deja de
+// coincidir y el test avisa ANTES de que llegue a producción — no puede
+// detectar el bug en sí (no hay red real acá), pero sí congela el contrato
+// que lo previene.
+const { COLUMNAS_MOVIMIENTOS } = await import("../js/core/sheetsEsquemas.js");
+assert(JSON.stringify(COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; })) === JSON.stringify([
+  "id", "fecha", "tipo", "concepto", "monto", "contraparte", "pedidoId", "cotizacionId",
+  "gastoFijoId", "deudaId", "origenAbonoId", "origenReembolsoId", "origenVentaConsignacionId",
+  "origenComisionConsignacionId", "origenCompraClave", "origenGastoFijoPeriodo", "origenComisionCotId",
+  "origenComisionPedidoId", "origenGastoId", "origenDeudaIngresoId", "origenColchonId",
+  "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId"
+]), "el orden de columnas de tablaMovimientos no cambió: una columna nueva se agregó al final, nunca insertada en medio (ver el incidente del 2026-09-20 arriba)");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

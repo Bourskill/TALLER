@@ -259,6 +259,39 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo tercera ronda: columna "empleadoId" insertada en medio del esquema de Movimientos corrompía los datos)
+
+El usuario reportó el mismo día que cerró la auditoría estricta (ver
+CONTABILIDAD.md) que la gráfica de "Ingresos y gastos" y los tiles de
+servicios habían desaparecido de Resumen. Causa: la ronda anterior
+("Pendientes") agregó la columna `empleadoId` a `tablaMovimientos`
+(core/sheetsEsquemas.js) **en medio** del arreglo, entre `origenColchonId`
+y `esInsumo`, en vez de al final.
+
+`core/sheetsTabular.js` lee cada fila de la Sheet real por POSICIÓN
+(`columnas[i]` ↔ `fila[i]`), nunca por el nombre del encabezado. Insertar
+una columna en medio corre TODO lo que sigue un puesto: cada movimiento ya
+guardado quedaba leyendo el dato de su columna vecina —`esInsumo` tomaba
+el viejo `proveedorId`, `proveedorId` el viejo `insumoNombre`,
+`insumoNombre` el viejo `cantidad`, `cantidad` el viejo `unidad`
+(`Number("metros")` → `0`), `unidad` el JSON de `serviciosDescuento` como
+texto plano, y `serviciosDescuento` quedaba vacío (columna fuera de rango)
+— todo movimiento existente perdía en silencio su "asignado a
+servicio(s)".
+
+- **Fix:** `empleadoId` se movió al final del arreglo de columnas — la
+  única posición segura para una columna nueva en este esquema.
+- Se extrajo el arreglo a `export var COLUMNAS_MOVIMIENTOS` (antes solo
+  vivía envuelto dentro de `tablaMovimientos`, sin forma de probarlo sin
+  red).
+- Nuevo test que fija el ORDEN exacto de `COLUMNAS_MOVIMIENTOS`: no puede
+  detectar el bug en sí (no hay red real en las pruebas), pero congela el
+  contrato que lo evita — insertar una columna en medio en el futuro hace
+  fallar el test antes de llegar a producción.
+- Ver CONTABILIDAD.md, "Hallazgo #15 — post-mortem 2026-09-20", para la
+  duda abierta sobre si algún movimiento llegó a guardarse de verdad
+  mientras el bug estuvo activo.
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo segunda ronda: 3 riesgos de "Ganancia" — IVA no restado, doble conteo, sobrepago no restado)
 
 Quinta y última tanda de la auditoría financiera estricta (ver

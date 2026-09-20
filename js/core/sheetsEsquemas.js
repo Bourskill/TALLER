@@ -7,7 +7,22 @@
 
 import { crearTablaSheet } from "./sheetsTabular.js";
 
-export var tablaMovimientos = crearTablaSheet("Movimientos", [
+// OJO — INCIDENTE 2026-09-20: sheetsTabular.js lee cada fila por POSICIÓN
+// (columnas[i] <-> fila[i]), nunca por el nombre del encabezado. Este
+// arreglo define esa posición: agregar una columna nueva EN MEDIO (como se
+// hizo por accidente con "empleadoId", entre origenColchonId y esInsumo)
+// corre TODO lo que viene después un puesto — cada fila YA GUARDADA en la
+// Sheet real queda leyendo el dato de la columna vecina. Acá el daño fue:
+// esInsumo <- (vieja) proveedorId, proveedorId <- insumoNombre, insumoNombre
+// <- cantidad, cantidad <- unidad (Number("metros") = 0), unidad <- el JSON
+// de serviciosDescuento (como texto plano), y serviciosDescuento <- nada
+// (columna fuera de rango) => TODO movimiento existente perdía su
+// "asignado a servicio(s)" sin avisar. Una columna nueva SIEMPRE va al
+// FINAL de este arreglo, nunca insertada — ver el test que fija este orden
+// en test/smoke.mjs ("el orden de columnas de tablaMovimientos...").
+// Exportado aparte (no solo el tablaMovimientos ya envuelto) justo para que
+// ese test pueda leer el orden sin necesitar red ni mocks de Sheets.
+export var COLUMNAS_MOVIMIENTOS = [
   { key: "id", header: "id" },
   { key: "fecha", header: "fecha" },
   { key: "tipo", header: "tipo" },
@@ -43,10 +58,6 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   // aplica al relleno "separar", que no genera tx) — ver "guardar-relleno-
   // colchon", modules/resumen.js.
   { key: "origenColchonId", header: "origen_colchon_id" },
-  // Id estable del empleado (no su nombre) que respalda un pago de
-  // nómina — ver "pagar-nomina" en modules/pendientes.js y
-  // calcNominaPagadaEmpleado en core/calc.js. Auditoría 2026-09-20.
-  { key: "empleadoId", header: "empleado_id" },
   { key: "esInsumo", header: "es_compra_insumo" },
   { key: "proveedorId", header: "proveedor_id" },
   { key: "insumoNombre", header: "insumo_nombre" },
@@ -57,8 +68,14 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   // [{nombre, monto}] — a qué servicio(s) se le descontó este gasto/pago de
   // nómina (ver calcServiciosDisponibles en core/calc.js). Solo aplica a
   // tipo "gasto"/"nomina"; el resto de tx no lo usa y queda como "[]".
-  { key: "serviciosDescuento", header: "servicios_descuento", json: true }
-]);
+  { key: "serviciosDescuento", header: "servicios_descuento", json: true },
+  // Id estable del empleado (no su nombre) que respalda un pago de
+  // nómina — ver "pagar-nomina" en modules/pendientes.js y
+  // calcNominaPagadaEmpleado en core/calc.js. Auditoría 2026-09-20. AL
+  // FINAL a propósito, ver el aviso arriba del todo de este arreglo.
+  { key: "empleadoId", header: "empleado_id" }
+];
+export var tablaMovimientos = crearTablaSheet("Movimientos", COLUMNAS_MOVIMIENTOS);
 
 export var tablaClientes = crearTablaSheet("Clientes", [
   { key: "id", header: "id" },
