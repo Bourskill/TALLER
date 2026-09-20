@@ -1205,7 +1205,20 @@ export function periodoKey(fechaStr, periodo) {
   if (periodo === "semanal") {
     // Semana aproximada (no es la semana ISO-8601 exacta, pero alcanza para
     // agrupar "esta semana" de forma consistente).
-    var date = new Date(fechaStr);
+    //
+    // OJO: `new Date(fechaStr)` parsea un string "YYYY-MM-DD" como
+    // MEDIANOCHE UTC, no medianoche local — en Colombia (UTC-5) eso cae a
+    // las 7pm del día ANTERIOR, así que getFullYear()/getDay() de abajo
+    // (que sí leen en hora LOCAL) terminaban calculando la semana de
+    // "ayer" en vez de la de "hoy" justo el día que cruza el límite de
+    // semana — un domingo específico del año, según el cálculo de abajo.
+    // Construir la fecha con año/mes/día explícitos (en vez de parsear el
+    // string) usa SIEMPRE hora local, sin ese desfase — mismo motivo por
+    // el que toggle-gasto-fijo-pagado (pendientes.js) SÍ daba la semana
+    // correcta: construía su fecha con `new Date()` (real, local),
+    // no parseando un string. Auditoría financiera 2026-09-20, verificado
+    // en vivo un domingo (2026-09-20): las dos daban semanas distintas.
+    var date = new Date(Number(y), Number(m) - 1, d);
     var inicioAno = new Date(date.getFullYear(), 0, 1);
     var dias = Math.floor((date - inicioAno) / 86400000);
     var semana = Math.ceil((dias + inicioAno.getDay() + 1) / 7);
@@ -1252,7 +1265,7 @@ export function diasPagoDeEmpleado(e) {
 export function calcNominaPendienteEmpleado(e) {
   var periodo = periodoDeEmpleado(e);
   var aPagar = calcSalarioPorPeriodo(e, periodo);
-  var pagado = calcNominaPagadaEmpleado(e.nombre, periodo);
+  var pagado = calcNominaPagadaEmpleado(e, periodo);
   return Math.max(0, aPagar - pagado);
 }
 export function calcNominaPendiente() {
@@ -1308,10 +1321,22 @@ export function rangoPeriodoActual(periodo) {
 // "nomina" con esa contraparte) dentro del periodo actual — a diferencia de
 // calcNominaPendiente (que es el pool agregado de TODOS), esto es para
 // mostrar el estado "pagado/pendiente" por fila en Pendientes → Nómina.
-export function calcNominaPagadaEmpleado(nombre, periodo) {
+// `e` es el empleado completo (no solo el nombre): empleadoId es la fuente
+// correcta para saber "¿ya le pagué a ESTA persona este periodo?" — un tx
+// viejo (de antes de este campo) no lo tiene, así que para esos se cae al
+// nombre, igual que siempre. Antes se comparaba SOLO por nombre
+// (tx.contraparte === nombre), así que renombrar a alguien (o tener dos
+// personas con el mismo nombre) desconectaba sus pagos históricos: la
+// pastilla volvía a "pendiente" con el salario completo, y un segundo
+// "Pagar" creaba un pago duplicado sin ningún aviso. Auditoría financiera
+// 2026-09-20.
+export function calcNominaPagadaEmpleado(e, periodo) {
   var miPeriodo = periodoKey(todayStr(), periodo);
   return state.tx
-    .filter(function (t) { return t.tipo === "nomina" && t.contraparte === nombre && periodoKey(t.fecha, periodo) === miPeriodo; })
+    .filter(function (t) {
+      if (t.tipo !== "nomina" || periodoKey(t.fecha, periodo) !== miPeriodo) return false;
+      return t.empleadoId ? t.empleadoId === e.id : t.contraparte === e.nombre;
+    })
     .reduce(function (a, t) { return a + num(t.monto); }, 0);
 }
 // Cada gasto fijo tiene su propio periodo (mensual/quincenal/semanal) y guarda

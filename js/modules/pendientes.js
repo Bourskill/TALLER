@@ -12,7 +12,7 @@ import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
   calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor,
   calcSalarioPorPeriodo, salarioBaseDe, rangoPeriodoActual, periodoDeEmpleado, diasPagoDeEmpleado,
-  calcServiciosDisponibles, validarServiciosAsignados
+  calcServiciosDisponibles, validarServiciosAsignados, periodoKey
 } from "../core/calc.js";
 import { PERIODOS_PAGO, DIAS_SEMANA } from "../core/constants.js";
 import { renderHelp, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
@@ -329,7 +329,7 @@ function renderFilaEmp(e) {
   var periodoE = periodoDeEmpleado(e);
   var diasE = diasPagoDeEmpleado(e);
   var rangoE = rangoPeriodoActual(periodoE);
-  var pagado = calcNominaPagadaEmpleado(e.nombre, periodoE);
+  var pagado = calcNominaPagadaEmpleado(e, periodoE);
   var aPagar = calcSalarioPorPeriodo(e, periodoE);
   var estaPagado = aPagar > 0 && pagado >= aPagar - 0.5;
   var html = '<div class="emp-row" style="grid-template-columns:' + COLS_EMP + ';">' +
@@ -661,7 +661,10 @@ export var actions = {
     if (!validacion.ok) { window.alert(validacion.error); return; }
     var rango = rangoPeriodoActual(periodoPago);
     var concepto = "Nómina " + rangoTexto(rango) + " — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
-    state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, fecha: fp.fecha || todayStr(), pedidoId: "", serviciosDescuento: validacion.limpias });
+    // empleadoId (no solo el nombre en contraparte) es lo que permite a
+    // calcNominaPagadaEmpleado reconocer los pagos de ESTA persona aunque
+    // se le corrija el nombre después, o exista otra con el mismo nombre.
+    state.tx.unshift({ id: uid(), tipo: "nomina", concepto: concepto, monto: monto, contraparte: e.nombre, empleadoId: e.id, fecha: fp.fecha || todayStr(), pedidoId: "", serviciosDescuento: validacion.limpias });
     state.nominaPagoId = "";
     state.formNominaPago = { bono: "", descuento: "", fecha: todayStr(), servicios: [] };
     persist("tx"); notify();
@@ -811,18 +814,13 @@ export var actions = {
       if (!window.confirm("¿Deshacer el pago de \"" + gastoFijo.nombre + "\" de este periodo (" + fmt(num(gastoFijo.monto)) + ")?\n\n" +
         "Se retira de Finanzas el gasto que se había creado y vuelve a quedar pendiente.")) return;
     }
-    // Misma lógica de "clave de periodo" que periodoKey() en core/calc.js.
+    // Antes esto reimplementaba su propia "clave de periodo" a mano, en vez
+    // de llamar a periodoKey() — las dos versiones podían divergir (y
+    // divergían de verdad, los domingos, hasta que se corrigió el bug de
+    // huso horario de periodoKey — ver el comentario grande ahí). Una sola
+    // fuente, siempre. Auditoría financiera 2026-09-20.
     var periodo = gastoFijo.periodo || "mensual";
-    var hoy = new Date();
-    var y = hoy.getFullYear(), m = String(hoy.getMonth() + 1).padStart(2, "0"), d = hoy.getDate();
-    var clave = y + "-" + m;
-    if (periodo === "quincenal") clave = y + "-" + m + "-" + (d <= 15 ? "Q1" : "Q2");
-    if (periodo === "semanal") {
-      var inicioAno = new Date(hoy.getFullYear(), 0, 1);
-      var dias = Math.floor((hoy - inicioAno) / 86400000);
-      var semana = Math.ceil((dias + inicioAno.getDay() + 1) / 7);
-      clave = y + "-W" + semana;
-    }
+    var clave = periodoKey(todayStr(), periodo);
     var origenPeriodo = id + "|" + clave;
     state.config.gastosFijos = (state.config.gastosFijos || []).map(function (g) {
       if (g.id !== id) return g;
@@ -937,9 +935,26 @@ export var actions = {
       txIngreso.contraparte = g("edit-contraparte");
       persist("tx");
     }
-    persist("deudas"); notify();
+    persist("deudas");
     var actualizada = state.deudas.filter(function (d) { return d.id === id; })[0];
-    if (actualizada) sincronizarEventoDeuda(actualizada);
+    // Si bajar el número de "Cuotas" deja la deuda saldada (ej. se la
+    // condonaron), se mueve al historial igual que si se hubiera pagado
+    // por la vía normal ("pagar-deuda") — si no, quedaba "activa" con
+    // saldo $0 para siempre: "Por pagar" seguía sumando el valor de una
+    // cuota fantasma (monto/cuotas no depende de cuotasPagadas), y el
+    // botón "Pagar" no podía corregirlo (con saldo 0 no hace nada, en
+    // silencio). Auditoría financiera 2026-09-20.
+    if (actualizada && num(actualizada.cuotasPagadas) >= num(actualizada.cuotas)) {
+      state.deudasHistorial = state.deudasHistorial.concat([Object.assign({}, actualizada, {
+        fechaCompletada: actualizada.fechaCompletada || todayStr(), calendarEventId: ""
+      })]);
+      state.deudas = state.deudas.filter(function (d) { return d.id !== id; });
+      persist("deudasHistorial"); persist("deudas");
+      if (actualizada.calendarEventId) eliminarEvento(actualizada.calendarEventId).catch(function (e) { console.error("No se pudo borrar el evento de Calendar de la deuda", e); });
+    } else if (actualizada) {
+      sincronizarEventoDeuda(actualizada);
+    }
+    notify();
   },
   "remove-deuda": function (el) {
     var id = el.getAttribute("data-id");

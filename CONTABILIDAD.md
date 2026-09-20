@@ -401,15 +401,19 @@ verse entre sí).
    retira su movimiento (si tenía) y la limpia de la cotización —
    convierte el botón en una reconciliación de verdad, no solo un "agregar".
 
-**Pendientes:**
+**Pendientes. ✅ CORREGIDOS los 3:**
 10. **Bajar el número de "Cuotas" de una deuda por debajo de las ya
     pagadas** la deja saldada (saldo $0) pero nunca se mueve a
     Historial — queda fantasma en "Por pagar" y el botón "Pagar" deja
-    de hacer nada, en silencio.
+    de hacer nada, en silencio. **Fix:** `guardar-deuda-edit` ahora
+    revisa si la edición la deja saldada y la mueve al historial, igual
+    que `pagar-deuda`.
 11. **Los pagos de nómina se identifican por el NOMBRE del empleado, no
     por un id** — renombrar a alguien (o tener dos personas con el
     mismo nombre) desconecta sus pagos históricos: la app puede volver
-    a pedir un pago ya hecho.
+    a pedir un pago ya hecho. **Fix:** el tx de nómina ahora guarda
+    `empleadoId`; `calcNominaPagadaEmpleado` lo usa como fuente
+    principal (con el nombre como respaldo, para tx viejos).
 12. **Bug de huso horario en `periodoKey()` para periodo "semanal"** —
     `calcGastoFijoPendiente`/`calcNominaPendienteEmpleado` calculan la
     semana actual con un método, y `toggle-gasto-fijo-pagado` la
@@ -418,6 +422,10 @@ verse entre sí).
     (`2026-W38` vs. `2026-W39`). Un gasto fijo semanal marcado "pagado"
     un domingo puede volver a mostrarse "pendiente" ese mismo día, y si
     alguien lo vuelve a marcar, se duplica el gasto en Finanzas.
+    **Fix:** `periodoKey` construye la fecha con año/mes/día explícitos
+    (hora local) en vez de parsear el string (que caía en UTC); y
+    `toggle-gasto-fijo-pagado` dejó de reimplementar la lógica a mano —
+    ahora llama a `periodoKey()`, una sola fuente para las dos.
 
 **Ganancia (Resumen) — 3 hallazgos, el patrón "falta restar una
 categoría más" que ya se repitió con servicios, abonos pendientes y

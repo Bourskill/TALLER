@@ -754,6 +754,68 @@ assert(1200000 - totalCubierto === 180000, "y los 180.000 restantes, al no venir
 assert(calcServDisp().filter(function (s) { return s.nombre === "Confección"; })[0].disponible === 0, "\"Confección\" queda en 0 (no negativo)");
 assert(calcServDisp().filter(function (s) { return s.nombre === "Medias"; })[0].disponible === 1000000, "\"Medias\" queda con 1.000.000 disponibles (2.000.000 − 1.000.000)");
 
+// --- Auditoría 2026-09-20: los pagos de nómina se identifican por el id del
+// empleado, no solo por su nombre — renombrarlo (o tener dos personas con
+// el mismo nombre) no debe desconectar sus pagos ya hechos.
+assert(pagoNomina.empleadoId === costurera.id, "el tx del pago de nómina queda marcado con el id del empleado");
+const { calcNominaPagadaEmpleado: calcNominaPagadaTest } = await import("../js/core/calc.js");
+const costureraRenombrada = { id: costurera.id, nombre: costurera.nombre + " (corregido)" };
+assert(calcNominaPagadaTest(costureraRenombrada, "mensual") >= 1200000, "renombrar al empleado NO desconecta el pago que ya se le hizo (se busca por empleadoId, no por el nombre viejo que quedó guardado en el tx)");
+assert(calcNominaPagadaTest({ id: "otro-id-cualquiera", nombre: costurera.nombre }, "mensual") === 0, "...y otra persona con el MISMO nombre (pero id distinto) no hereda ese pago por error");
+
+// --- Auditoría 2026-09-20: bug de huso horario en periodoKey() para
+// periodo "semanal" — new Date(fechaStr) parsea un string como medianoche
+// UTC, no local, y en Colombia (UTC-5) eso desfasaba el cálculo justo los
+// domingos (el sábado y el domingo caían en la MISMA semana calculada,
+// cuando el domingo ya era la siguiente). Se verificó en vivo, ejecutando
+// el código real un domingo (2026-09-20): daba "2026-W38" para el sábado
+// 19 Y el domingo 20 — deberían ser semanas distintas.
+const { periodoKey: periodoKeyTest } = await import("../js/core/calc.js");
+assert(periodoKeyTest("2026-09-19", "semanal") === "2026-W38", "periodoKey: sábado 2026-09-19 cae en la semana 38");
+assert(periodoKeyTest("2026-09-20", "semanal") === "2026-W39", "periodoKey: domingo 2026-09-20 YA es la semana 39 (antes del fix, daba 38 — la misma que el sábado anterior)");
+assert(periodoKeyTest("2026-09-21", "semanal") === "2026-W39", "...y el lunes 2026-09-21 sigue en la semana 39, junto con el domingo");
+
+// Consecuencia real del bug: toggle-gasto-fijo-pagado (pendientes.js)
+// reimplementaba esta misma lógica A MANO, con `new Date()` real (sin el
+// bug) — así que las dos versiones podían DIVERGIR: marcar pagado un
+// domingo con una, y consultar "¿está pendiente?" con la otra, daba
+// respuestas distintas. Ahora las dos llaman a periodoKey(): confirma que
+// un gasto fijo semanal marcado pagado HOY (cualquier día que sea) se ve
+// de inmediato como ya pagado, sin importar qué día de la semana es.
+const pedidosPreviosPeriodoKey = state.pedidos, cotizacionesPreviasPeriodoKey = state.cotizaciones;
+state.config.gastosFijos = (state.config.gastosFijos || []).concat([{ id: "gf-semanal-test", nombre: "Prueba semanal", monto: 20000, periodo: "semanal", diasPago: [], pagadoHasta: "" }]);
+state.tab = "pendientes"; render();
+click('[data-action="toggle-gasto-fijo-pagado"][data-id="gf-semanal-test"]');
+const gfSemanalTrasPagar = state.config.gastosFijos.find(function (g) { return g.id === "gf-semanal-test"; });
+assert(!!gfSemanalTrasPagar && !!gfSemanalTrasPagar.pagadoHasta, "sanity: marcar pagado guarda la clave del periodo actual");
+const { calcGastoFijoPendiente: calcGastoFijoPendienteTest } = await import("../js/core/calc.js");
+assert(calcGastoFijoPendienteTest(gfSemanalTrasPagar) === 0, "y calcGastoFijoPendiente (la fuente que decide si sigue \"pendiente\") está de acuerdo de inmediato — antes, un desfase de un día podía volver a mostrarlo pendiente el mismo día que se pagó");
+state.config.gastosFijos = state.config.gastosFijos.filter(function (g) { return g.id !== "gf-semanal-test"; });
+state.pedidos = pedidosPreviosPeriodoKey; state.cotizaciones = cotizacionesPreviasPeriodoKey;
+
+// --- Auditoría 2026-09-20: editar una deuda para bajar "Cuotas" a un valor
+// ya cubierto por cuotasPagadas debe moverla al historial (saldada) — antes
+// se quedaba "activa" con saldo $0 para siempre, sumando una cuota
+// fantasma en "Por pagar" que el botón "Pagar" no podía corregir.
+const deudasPreviasCuotasTest = state.deudas, deudasHistorialPreviasCuotasTest = state.deudasHistorial;
+state.deudas = [{
+  id: "deuda-cuotas-editar-test", concepto: "Préstamo máquina plana", contraparte: "", monto: 600000,
+  cuotas: 6, cuotasPagadas: 4, periodo: "mensual", diasPago: [], fechaVencimiento: "", calendarEventId: "",
+  historial: [
+    { fecha: "2026-01-01", monto: 100000, txId: "tx-cuota-1" }, { fecha: "2026-02-01", monto: 100000, txId: "tx-cuota-2" },
+    { fecha: "2026-03-01", monto: 100000, txId: "tx-cuota-3" }, { fecha: "2026-04-01", monto: 100000, txId: "tx-cuota-4" }
+  ]
+}];
+state.deudasHistorial = [];
+state.tab = "pendientes"; state.deudasVista = "activas"; render();
+click('[data-action="editar-deuda"][data-id="deuda-cuotas-editar-test"]');
+document.querySelector('[data-deuda-edit-row="deuda-cuotas-editar-test"] [data-role="edit-cuotas"]').value = "4";
+click('[data-action="guardar-deuda-edit"][data-id="deuda-cuotas-editar-test"]');
+assert(!state.deudas.some(function (d) { return d.id === "deuda-cuotas-editar-test"; }), "bajar \"Cuotas\" a las ya pagadas mueve la deuda al historial (saldada), no la deja \"activa\" con saldo fantasma");
+const deudaSaldadaPorEdicion = state.deudasHistorial.find(function (d) { return d.id === "deuda-cuotas-editar-test"; });
+assert(!!deudaSaldadaPorEdicion && deudaSaldadaPorEdicion.cuotas === 4 && deudaSaldadaPorEdicion.cuotasPagadas === 4, "...y aparece en el historial con las cuotas corregidas");
+state.deudas = deudasPreviasCuotasTest; state.deudasHistorial = deudasHistorialPreviasCuotasTest;
+
 // --- El usuario reportó: "en resumen no se está viendo reflejado estos
 // cambios en sus KPIs de servicios" — el KPI "Ganancia" restaba el
 // acumulado BRUTO de cada servicio sin importar si ya se había pagado,

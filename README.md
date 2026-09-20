@@ -259,6 +259,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo primera ronda: 3 riesgos de Pendientes — deuda con cuotas bajadas, nómina por nombre, huso horario semanal)
+
+Cuarta tanda de la auditoría financiera estricta (ver CONTABILIDAD.md).
+
+- **Editar una deuda para bajar "Cuotas"** por debajo de las ya pagadas
+  (ej. te la condonaron) ahora mueve la deuda al historial si queda
+  saldada — antes se quedaba "activa" con saldo $0 para siempre, sumando
+  una cuota fantasma en "Por pagar" que el botón "Pagar" no podía
+  corregir (con saldo 0 no hacía nada, en silencio).
+- **Los pagos de nómina ahora se identifican por el id del empleado**, no
+  solo por su nombre — el tx guarda `empleadoId`; renombrar a alguien (o
+  tener dos personas con el mismo nombre) ya no desconecta sus pagos
+  históricos ni permite pagarle dos veces por error.
+- **Bug de huso horario real en `periodoKey()` para periodo "semanal"**,
+  verificado ejecutando el código el mismo domingo que se encontró
+  (2026-09-20): `new Date(fechaStr)` parsea un string de fecha como
+  medianoche UTC, no local, así que en Colombia (UTC-5) el cálculo de
+  "esta semana" se desfasaba un día — justo los domingos, el sábado y el
+  domingo caían en la MISMA semana calculada. De paso, `toggle-gasto-
+  fijo-pagado` reimplementaba esta lógica A MANO (sin el bug, porque
+  usaba `new Date()` real) — las dos versiones podían DIVERGIR: marcar
+  pagado un domingo con una, consultar "¿pendiente?" con la otra, daba
+  respuestas distintas. Se corrigió la fecha (construida con año/mes/día
+  explícitos, hora local) y se eliminó la duplicación: ahora solo hay
+  una función, `periodoKey()`.
+
 ## Registro de cambios — septiembre 2026 (quincuagésima ronda: compras huérfanas al borrar un insumo/costo global ya pagado)
 
 Tercera tanda de la auditoría financiera estricta (ver CONTABILIDAD.md).

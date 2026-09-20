@@ -43,6 +43,10 @@ export var tablaMovimientos = crearTablaSheet("Movimientos", [
   // aplica al relleno "separar", que no genera tx) — ver "guardar-relleno-
   // colchon", modules/resumen.js.
   { key: "origenColchonId", header: "origen_colchon_id" },
+  // Id estable del empleado (no su nombre) que respalda un pago de
+  // nómina — ver "pagar-nomina" en modules/pendientes.js y
+  // calcNominaPagadaEmpleado en core/calc.js. Auditoría 2026-09-20.
+  { key: "empleadoId", header: "empleado_id" },
   { key: "esInsumo", header: "es_compra_insumo" },
   { key: "proveedorId", header: "proveedor_id" },
   { key: "insumoNombre", header: "insumo_nombre" },
