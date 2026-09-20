@@ -2605,6 +2605,83 @@ state.tx = txPreviosGan; state.cotizaciones = cotizacionesPreviasGan;
 render();
 
 // ---------------------------------------------------------------------------
+// Auditoría financiera 2026-09-20: 3 hallazgos más en la fórmula de
+// "Ganancia" — el mismo patrón de "falta restar una categoría más" que ya
+// se había repetido antes (servicios → abonos pendientes → Colchón). Cada
+// escenario reemplaza TODO el estado relevante (pedidos/cotizaciones/tx)
+// por uno mínimo y controlado, para que el número de Ganancia leído del
+// DOM sea 100% predecible sin depender de ningún otro fixture del archivo.
+// ---------------------------------------------------------------------------
+function leerCifraGrafica(label) {
+  var celdas = Array.prototype.slice.call(document.querySelectorAll(".grafica-cifra"));
+  var celda = celdas.filter(function (c) { return c.querySelector(".grafica-cifra-label").textContent === label; })[0];
+  return celda ? celda.querySelector(".amount").textContent : null;
+}
+const { fmt: fmtGananciaTest } = await import("../js/core/utils.js");
+const estadoPrevioGananciaTest = { pedidos: state.pedidos, cotizaciones: state.cotizaciones, tx: state.tx, config: Object.assign({}, state.config) };
+const hoyGananciaTest = hoyStr();
+
+// --- 13) El IVA cobrado nunca se restaba de "Ganancia" ---
+state.pedidos = [{
+  id: "ped-gan-iva-test", numeroOp: "OP-GAN-IVA", cliente: "Cliente Ganancia IVA", descripcion: "Prueba",
+  cantidad: "1", total: 1000000, costo: 400000, abono: 1190000, estado: "nuevo", estadosDef: null,
+  fechaCreacion: hoyGananciaTest, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [{ id: "ab-gan-iva", monto: 1190000, fecha: hoyGananciaTest, metodoPago: "efectivo", comprobanteUrl: "" }],
+  lineas: [], stockConsumido: [], vendedor: null, iva: { activo: true, porcentaje: 19 }
+}];
+state.cotizaciones = [];
+state.tx = [{ id: "tx-gan-iva", tipo: "ingreso", concepto: "Pago factura con IVA", monto: 1190000, contraparte: "Cliente Ganancia IVA", fecha: hoyGananciaTest, pedidoId: "ped-gan-iva-test", origenAbonoId: "ab-gan-iva" }];
+state.config.colchonMovimientos = [];
+state.tab = "resumen"; render();
+assert(calcMod.calcIvaCobradoTotal() === 190000, "sanity: este pedido tiene $190.000 de IVA ya cobrado (19% de $1.000.000, pagado completo)");
+assert(leerCifraGrafica("Ganancia") === fmtGananciaTest(1000000), "Ganancia ya resta el IVA cobrado: $1.190.000 de caja − $190.000 de IVA = $1.000.000 (antes mostraba $1.190.000, como si el IVA fuera utilidad)");
+
+// --- 14) Un pedido con servicio pendiente Y abono sin terminar de pagar
+// restaba la misma plata dos veces ---
+const cotGanDobleId = "cot-gan-doble-test";
+const cotGanDoble = {
+  id: cotGanDobleId, clienteId: "", cliente: "Cliente Doble", descripcion: "Prueba doble conteo", fecha: hoyGananciaTest,
+  estado: "convertida", pedidoId: "ped-gan-doble-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cgdt1",
+  referencias: [{
+    id: "r-cgdt1", nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 5, precioVenta: 200000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [{ id: "i-cgdt1", nombre: "Confección Doble", unidad: "servicio", costo: 40000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+};
+const claveConfeccionDoble = calcListaComprasServ(cotGanDoble).filter(function (l) { return l.nombre === "Confección Doble"; })[0].clave;
+cotGanDoble.compras = [{ clave: claveConfeccionDoble, estado: "servicio", costoReal: 200000 }];
+state.pedidos = [{
+  id: "ped-gan-doble-test", numeroOp: "OP-GAN-DOBLE", cliente: "Cliente Doble", descripcion: "Prueba",
+  cantidad: "5", total: 1000000, costo: 400000, abono: 500000, estado: "nuevo", estadosDef: null,
+  fechaCreacion: hoyGananciaTest, fechaEntrega: "", tipoCliente: "propio", cotizacionId: cotGanDobleId,
+  abonos: [{ id: "ab-gan-doble", monto: 500000, fecha: hoyGananciaTest, metodoPago: "efectivo", comprobanteUrl: "" }],
+  lineas: [], stockConsumido: [], vendedor: null, iva: { activo: false, porcentaje: 19 }
+}];
+state.cotizaciones = [cotGanDoble];
+state.tx = [{ id: "tx-gan-doble", tipo: "ingreso", concepto: "Abono con servicio pendiente", monto: 500000, contraparte: "Cliente Doble", fecha: hoyGananciaTest, pedidoId: "ped-gan-doble-test", origenAbonoId: "ab-gan-doble" }];
+render();
+assert(leerCifraGrafica("Ganancia") === fmtGananciaTest(0), "un pedido con servicio Y abono pendiente a la vez ya NO resta la misma plata dos veces: Ganancia queda en $0 (500.000 de balance − 500.000 de abono pendiente, el servicio no se resta aparte porque ya está incluido en ese abono) — antes daba −$200.000, una \"pérdida\" ficticia");
+
+// --- 15) El excedente de un sobrepago no se restaba de "Ganancia" ---
+state.pedidos = [{
+  id: "ped-gan-sobrepago-test", numeroOp: "OP-GAN-SOBRE", cliente: "Cliente Sobrepago", descripcion: "Prueba sobrepago",
+  cantidad: "1", total: 500000, costo: 200000, abono: 600000, estado: "nuevo", estadosDef: null,
+  fechaCreacion: hoyGananciaTest, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [{ id: "ab-gan-sobre", monto: 600000, fecha: hoyGananciaTest, metodoPago: "efectivo", comprobanteUrl: "" }],
+  lineas: [], stockConsumido: [], vendedor: null, iva: { activo: false, porcentaje: 19 }
+}];
+state.cotizaciones = [];
+state.tx = [{ id: "tx-gan-sobre", tipo: "ingreso", concepto: "Abono de más", monto: 600000, contraparte: "Cliente Sobrepago", fecha: hoyGananciaTest, pedidoId: "ped-gan-sobrepago-test", origenAbonoId: "ab-gan-sobre" }];
+render();
+assert(calcMod.calcSaldosAFavorClientes() === 100000, "sanity: este pedido dejó $100.000 de saldo a favor del cliente (abonó 600.000 sobre un pedido de 500.000)");
+assert(leerCifraGrafica("Ganancia") === fmtGananciaTest(500000), "Ganancia ya resta el excedente del sobrepago: $600.000 de caja − $100.000 que hay que devolver = $500.000 (antes mostraba $600.000, contando esa plata como utilidad Y como deuda con el cliente al mismo tiempo)");
+
+state.pedidos = estadoPrevioGananciaTest.pedidos; state.cotizaciones = estadoPrevioGananciaTest.cotizaciones; state.tx = estadoPrevioGananciaTest.tx; state.config = estadoPrevioGananciaTest.config;
+render();
+
+// ---------------------------------------------------------------------------
 // "Colchón" (2026-09): reserva para cubrir el hueco cuando un cliente abona
 // más de lo que en realidad es margen — el usuario lo pidió con "mismo
 // funcionamiento que los otros servicios, se puede rellenar o gastar". A

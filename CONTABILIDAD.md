@@ -113,7 +113,7 @@ contabilidad de caja para negocio pequeño.
 | Por cobrar | suma de `calcSaldoPedido(p)` (con IVA) SOLO cuando es positivo, de pedidos no cancelados | `calc.js:546` `calcPorCobrarPedidos` |
 | Por pagar | `gastos fijos + nómina + comisiones (pedido y cotización) + deudas (valor de la cuota) + comisiones de consignación` pendientes | `calc.js:570` `calcPorPagar` |
 | Balance (30 días) | ingresos − gastos del rango, vía `calcSerieMovimientos` (misma función que CUALQUIER otro reporte) | `modules/resumen.js:321` |
-| Ganancia (30 días) | `Balance − serviciosPendientes(rango) − abonosPendientes(rango)` | `modules/resumen.js:232` `renderGraficaResumen` |
+| Ganancia (30 días) | `Balance − serviciosPendientes(rango) − abonosPendientes(rango) − ivaCobrado − saldosAFavorClientes` (las dos últimas NO están filtradas por rango: son una deuda/obligación VIGENTE, igual que en "Por pagar" — actualizado en la auditoría estricta 2026-09-20, antes faltaban) | `modules/resumen.js` `renderGraficaResumen` |
 | Abonado que "todavía no es Ganancia" | abonos de pedidos NO cancelados con saldo `> 0` (aún no pagados por completo); mira el estado ACTUAL del pedido, no la fecha del abono | `calc.js:732` `calcAbonosPendientesPorPedido` |
 | IVA cobrado (KPI) | proporcional a lo pagado, sobre todos los pedidos incluidos cancelados; solo se muestra si el taller factura IVA | `calc.js:515-530`, `modules/resumen.js:145` |
 
@@ -429,22 +429,30 @@ verse entre sí).
 
 **Ganancia (Resumen) — 3 hallazgos, el patrón "falta restar una
 categoría más" que ya se repitió con servicios, abonos pendientes y
-Colchón:**
+Colchón. ✅ CORREGIDOS los 3:**
 13. **El IVA cobrado nunca se resta de "Ganancia"** — la misma pantalla
     de Resumen tiene un tile que dice "esos $X no son tuyos" (IVA
     cobrado) y, dos tarjetas más abajo, "Ganancia" los cuenta como
-    utilidad.
+    utilidad. **Fix:** se resta `calcIvaCobradoTotal()`.
 14. **Un pedido con servicio pendiente Y abono sin terminar de pagar
     resta la misma plata DOS VECES** de Ganancia (una vez como
     "servicio pendiente", otra como "abono pendiente" — ninguna de las
-    dos funciones se excluye contra la otra).
+    dos funciones se excluye contra la otra). **Fix:** nueva
+    `calcServiciosPorCategoriaRangoSinPedidosPendientes` — el servicio
+    de un pedido que TODAVÍA no termina de pagarse ya no se resta
+    aparte (su abono, que ya lo incluye, se resta una sola vez).
 15. **El excedente de un sobrepago (saldo a favor del cliente) cuenta
     como Ganancia Y como obligación de "Por pagar" al mismo tiempo** —
     `calcAbonosPendientesPorPedido` descarta los pedidos sobrepagados en
-    vez de restar el excedente.
+    vez de restar el excedente. **Fix:** se resta
+    `calcSaldosAFavorClientes()`.
+
+Con esto, la fórmula completa de Ganancia queda:
+`Balance − servicios pendientes − abonos pendientes − IVA cobrado − saldos a favor de clientes`.
 
 *(Sí, son 15 puntos con 14 numerados arriba por agrupación temática — el
-conteo real de hallazgos "riesgo_real" distintos es 14.)*
+conteo real de hallazgos "riesgo_real" distintos es 14. Los 14 quedaron
+corregidos en 5 rondas — ver "Registro de cambios" del README.)*
 
 ### 🟡 Dudas a confirmar y deuda técnica (no son bugs de dinero, o de bajo impacto)
 

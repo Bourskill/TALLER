@@ -9,7 +9,7 @@ import {
   calcCaja, calcPorCobrar, calcPedidosActivos, calcResumenPorPagar,
   calcResumenMovimientos, calcComprasInsumoRango, calcProductosVendidosRango, calcResumenProductosVendidos,
   calcPedidosRango, calcResumenPedidos, calcVentasPorVendedorRango, pedidoCancelado, pedidoTerminado, calcSaldoPedido, calcIvaCobradoTotal, calcPrendasTerminadasPorDia,
-  calcServiciosPendientesPorCategoriaRango, calcAbonosPendientesPorPedido, calcServiciosDisponibles } from "../core/calc.js";
+  calcServiciosPendientesPorCategoriaRango, calcAbonosPendientesPorPedido, calcServiciosDisponibles, calcSaldosAFavorClientes } from "../core/calc.js";
 import { renderHelp, renderHistorialServicio } from "../core/components.js";
 import {
   configurarDefaults, crearBarrasIngresosGastos, crearLinea, destruirGrafica
@@ -251,7 +251,22 @@ function renderGraficaResumen() {
   // tengo que empezar a comprar los insumos". Ver calcAbonosPendientesPorPedido.
   var abonosPendientes = calcAbonosPendientesPorPedido(serie.desde, serie.hasta);
   var totalAbonosPendientes = abonosPendientes.reduce(function (a, s) { return a + s.monto; }, 0);
-  var ganancia = t.balance - totalServicios - totalAbonosPendientes;
+  // Dos categorías más de "plata en caja que no es ganancia todavía",
+  // mismo patrón que servicios/abonos pendientes de arriba — auditoría
+  // financiera 2026-09-20, mismo hallazgo que ya se había repetido antes
+  // (primero solo restaba servicios, después abonos pendientes, ahora
+  // esto): el IVA cobrado es del Estado, nunca del taller (ver el bloque
+  // grande "---------- IVA ----------" más arriba en este archivo — el
+  // tile "IVA cobrado" ya lo dice, pero Ganancia no lo estaba restando) y
+  // el excedente de un sobrepago (cliente que abonó de más) es una deuda
+  // real con el cliente, no utilidad (ya se resta de "Por pagar" vía
+  // calcSaldosAFavorClientes — Ganancia no lo cruzaba). Las dos son montos
+  // "de siempre" (no filtrados por fecha), igual que calcIvaCobradoTotal/
+  // calcSaldosAFavorClientes en el resto de la app: son una deuda/
+  // obligación VIGENTE, no un flujo de los últimos 30 días.
+  var totalIvaCobrado = calcIvaCobradoTotal();
+  var totalSaldosAFavor = calcSaldosAFavorClientes();
+  var ganancia = t.balance - totalServicios - totalAbonosPendientes - totalIvaCobrado - totalSaldosAFavor;
   var cifras = [
     { label: "Entró", valor: fmt(t.ingresos), clase: "pos" },
     { label: "Salió", valor: fmt(t.gastos), clase: "neg" },

@@ -843,8 +843,35 @@ export function serviciosQueQuedanNegativosSiSeBorra(cot) {
 // lo que sigue pendiente. (Con nada pagado todavía, disponible >= acumulado
 // del periodo y el resultado es idéntico a antes — no cambia nada para
 // quien no use la asignación a servicios.)
+// Igual que calcServiciosPorCategoriaRango, pero excluye las entradas de un
+// pedido que TODAVÍA no ha terminado de pagar — solo para el cálculo de
+// "Ganancia" (calcServiciosPendientesPorCategoriaRango, abajo). Si un
+// pedido sigue con saldo pendiente, su abono COMPLETO (que ya incluye
+// cualquier "servicio" suyo) se resta aparte vía
+// calcAbonosPendientesPorPedido — restar TAMBIÉN el servicio de ese mismo
+// pedido acá contaría la misma plata dos veces. El acumulado REAL de un
+// servicio (calcServiciosPorCategoriaRango, del que depende "disponible"
+// para poder gastarlo) no cambia: sigue siendo plata cotizada de verdad,
+// gastable, sin importar si el pedido ya terminó de pagarse — solo se
+// ajusta cuánto de eso ya se restó de Ganancia. Auditoría financiera
+// 2026-09-20.
+function calcServiciosPorCategoriaRangoSinPedidosPendientes(desde, hasta) {
+  var porNombre = {};
+  listaEntradasServicio().forEach(function (e) {
+    if ((desde && e.fecha < desde) || (hasta && e.fecha > hasta)) return;
+    if (e.cotizacionId) {
+      var cot = state.cotizaciones.filter(function (c) { return c.id === e.cotizacionId; })[0];
+      var pedidoId = cot ? (cot.pedidoId || cot.pedidoOrigenId) : "";
+      var pedido = pedidoId ? state.pedidos.filter(function (p) { return p.id === pedidoId; })[0] : null;
+      if (pedido && calcSaldoPedido(pedido) > 0) return;
+    }
+    porNombre[e.nombre] = (porNombre[e.nombre] || 0) + e.monto;
+  });
+  return Object.keys(porNombre).map(function (nombre) { return { nombre: nombre, monto: porNombre[nombre] }; });
+}
+
 export function calcServiciosPendientesPorCategoriaRango(desde, hasta) {
-  var acumuladosPeriodo = calcServiciosPorCategoriaRango(desde, hasta);
+  var acumuladosPeriodo = calcServiciosPorCategoriaRangoSinPedidosPendientes(desde, hasta);
   var disponibles = calcServiciosDisponibles();
   // Un servicio ya pagado por completo queda en $0 pero SIGUE en la lista
   // (no se filtra): el usuario pidió explícito que su tile no desaparezca

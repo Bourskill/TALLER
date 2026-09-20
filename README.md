@@ -259,6 +259,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo segunda ronda: 3 riesgos de "Ganancia" — IVA no restado, doble conteo, sobrepago no restado)
+
+Quinta y última tanda de la auditoría financiera estricta (ver
+CONTABILIDAD.md) — cierra los 14 riesgos reales encontrados. Los tres son
+el mismo patrón que ya se había repetido antes en "Ganancia" (primero
+faltaba restar servicios, después abonos pendientes, después Colchón):
+faltaban categorías de "plata en caja que no es utilidad todavía".
+
+- **El IVA cobrado nunca se restaba de "Ganancia"** — la misma pantalla de
+  Resumen tiene un tile que dice "esos $X no son tuyos" (IVA cobrado) y,
+  más abajo, "Ganancia" los contaba como utilidad. Ahora se resta
+  `calcIvaCobradoTotal()`.
+- **Un pedido con una línea "Servicio" pendiente Y un abono sin terminar
+  de pagar restaba la misma plata DOS VECES** — el servicio por su lado,
+  el abono completo (que YA incluye ese servicio) por el suyo. Nueva
+  función `calcServiciosPorCategoriaRangoSinPedidosPendientes`: el
+  servicio de un pedido que todavía no termina de pagarse deja de
+  restarse aparte de Ganancia (su acumulado real para poder GASTARLO
+  sigue intacto, solo cambia cuánto se resta de Ganancia).
+- **El excedente de un sobrepago (cliente que abonó de más) contaba como
+  Ganancia Y como deuda en "Por pagar" al mismo tiempo** — ahora también
+  se resta, con `calcSaldosAFavorClientes()`.
+
+La fórmula completa de Ganancia queda: `Balance − servicios pendientes −
+abonos pendientes − IVA cobrado − saldos a favor de clientes`.
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo primera ronda: 3 riesgos de Pendientes — deuda con cuotas bajadas, nómina por nombre, huso horario semanal)
 
 Cuarta tanda de la auditoría financiera estricta (ver CONTABILIDAD.md).
