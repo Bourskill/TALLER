@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra } from "../core/calc.js";
 import { renderTipoCostoOptions, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -1377,6 +1377,17 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cot) return;
+    // "Nunca negativo" en un servicio se protege en todo el resto del
+    // sistema (validarServiciosAsignados) — esta era la única puerta por
+    // donde se podía romper: borrar la cotización que aportó un servicio
+    // YA gastado (asignado a un gasto/nómina real) dejaba su "disponible"
+    // en negativo, sin ningún aviso. Se bloquea acá, no solo se avisa —
+    // misma severidad que el resto de esa regla. Auditoría 2026-09-20.
+    var serviciosRotos = serviciosQueQuedanNegativosSiSeBorra(cot);
+    if (serviciosRotos.length) {
+      window.alert('No se puede eliminar: ya se gastó plata del servicio "' + serviciosRotos[0].nombre + '" que esta cotización aportó (quedaría en ' + fmt(serviciosRotos[0].quedaria) + '). Deshaz esa asignación primero desde Finanzas/Pendientes, o esperar a que se pague por otra vía.');
+      return;
+    }
     var movimientos = movimientosGeneradosPorCotizacion(cot);
     var neto = movimientos.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
     var aviso = movimientos.length

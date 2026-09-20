@@ -259,6 +259,29 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo novena ronda: 4 riesgos más de servicios — filas repetidas, pedido eliminado, cotización con servicio gastado, editar tx asignado)
+
+Segunda tanda de la auditoría financiera estricta (ver CONTABILIDAD.md),
+esta vez el bloque de "servicios" (Confección, Corte, Colchón).
+
+- **`validarServiciosAsignados`** ahora acumula lo comprometido POR NOMBRE
+  fila a fila (antes cada fila se comparaba contra un `disponible`
+  congelado sin sumar entre sí) — repetir el mismo servicio en dos filas
+  del mismo gasto/nómina ya no puede dejarlo en negativo.
+- **`listaEntradasServicio`** ya no acepta un `pedidoOrigenId` con solo que
+  el string no esté vacío: confirma que ese pedido rápido siga existiendo
+  de verdad. Si se eliminó después de escalar (antes de aplicar la
+  cotización), su servicio deja de contar como plata disponible.
+- **Eliminar una cotización que aportó un servicio ya gastado** (asignado
+  a un gasto/nómina real) ahora se BLOQUEA, no solo se avisa — misma
+  severidad que "ningún servicio puede quedar negativo" en el resto del
+  sistema. Nueva función `serviciosQueQuedanNegativosSiSeBorra`.
+- **Editar el Monto o el Tipo de un gasto/nómina que ya tenía "Asignar a
+  servicio(s)"** queda bloqueado, igual que ya lo estaba para un
+  movimiento vinculado a un pedido/cotización/gasto fijo/deuda —
+  `origenDeTx` ahora también reconoce `serviciosDescuento` como un origen
+  real que no se puede desincronizar a mano.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo octava ronda: comisión de vendedor pagable dos veces — cotización vs. pedido)
 
 Primera tanda de correcciones de la auditoría financiera estricta

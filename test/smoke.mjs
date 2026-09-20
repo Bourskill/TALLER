@@ -591,6 +591,80 @@ assert(alertaCapturada.indexOf("Confección") >= 0, "...y avisa cuál servicio n
 global.window.alert = global.alert = alertaOriginal;
 state.formTx.servicios = []; // limpia el intento fallido para no arrastrarlo a la próxima prueba
 
+// --- Auditoría financiera 2026-09-20: dos filas del MISMO servicio no
+// pueden sumar más de lo disponible, aunque cada una por separado sí
+// alcance — antes validarServiciosAsignados comparaba cada fila contra un
+// `disponible` congelado, sin acumular entre filas del mismo formulario.
+// "Confección" tiene 20.000 disponibles en este punto (línea de arriba).
+// La UI real solo ofrece "+ Agregar servicio" mientras queden nombres
+// distintos por elegir (filas.length < disponibles.length) — con un solo
+// servicio ("Confección") en este punto, no se puede llegar a 2 filas por
+// esa vía. Se arma el borrador directo (mismo resultado que si hubiera 2+
+// servicios disponibles y el usuario eligiera el mismo nombre dos veces,
+// que el <select> nunca lo impide): lo que se está probando es
+// validarServiciosAsignados, no el botón "+".
+click('[data-action="finanzas-vista"][data-val="nuevo"]');
+click('[data-action="set-tx-tipo"][data-val="gasto"]');
+setInput('[data-form="tx"][data-field="concepto"]', "Dos filas mismo servicio");
+setInput('[data-form="tx"][data-field="monto"]', "30000");
+state.formTx.servicios = [{ nombre: "Confección", monto: "15000" }, { nombre: "Confección", monto: "15000" }];
+render();
+var txAntesFilasRepetidas = state.tx.length;
+var alertaFilasRepetidasOriginal = global.alert;
+var alertaFilasRepetidas = "";
+global.window.alert = global.alert = function (msg) { alertaFilasRepetidas = msg; };
+click('[data-action="add-tx"]');
+assert(state.tx.length === txAntesFilasRepetidas, "dos filas del MISMO servicio que suman más de lo disponible (15.000+15.000=30.000 > 20.000) NO se guardan, aunque cada una por separado sí alcanzara");
+assert(alertaFilasRepetidas.indexOf("Confección") >= 0, "...y avisa cuál servicio no alcanza");
+global.window.alert = global.alert = alertaFilasRepetidasOriginal;
+state.formTx.servicios = [];
+
+// --- Auditoría 2026-09-20: un gasto ya asignado a un servicio no queda con
+// Monto/Tipo libremente editables (antes sí, y bajarle el monto a mano
+// dejaba serviciosDescuento "congelado" con el valor viejo, inflando
+// Ganancia sin que nada lo delate).
+click('[data-action="finanzas-vista"][data-val="historial"]');
+click('[data-action="editar-tx"][data-id="' + gastoConServicio.id + '"]');
+assert(!document.querySelector('[data-tx-edit-row="' + gastoConServicio.id + '"] [data-role="edit-monto"]'), "un gasto ya asignado a un servicio no deja el Monto editable a mano");
+assert(!document.querySelector('[data-tx-edit-row="' + gastoConServicio.id + '"] [data-role="edit-tipo"]'), "...ni el Tipo, por el mismo motivo (desincronizaría serviciosDescuento del monto/tipo real)");
+click('[data-action="cancelar-edicion-tx"]');
+
+// --- Auditoría 2026-09-20: eliminar la cotización que aportó un servicio
+// YA gastado (asignado a un gasto/nómina real) se bloquea, no solo se
+// avisa — misma severidad que "nunca negativo" en el resto del sistema.
+const pedidosPreviosRemoveCotServ = state.pedidos, cotizacionesPreviasRemoveCotServ = state.cotizaciones, txPreviosRemoveCotServ = state.tx;
+const cotServicioParaBorrar = {
+  id: "cot-borrar-servicio-test", clienteId: "", cliente: "Cliente Borrar", descripcion: "Prueba borrar", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-borrar-servicio-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cbst1",
+  referencias: [{
+    id: "r-cbst1", nombre: "Camisa", imagenUrl: "", consumoAprox: 1, cantidadPedida: 5, precioVenta: 40000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [{ id: "i-cbst1", nombre: "Confección Borrar", unidad: "servicio", costo: 10000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+};
+const claveServicioBorrar = calcListaComprasServ(cotServicioParaBorrar).filter(function (l) { return l.nombre === "Confección Borrar"; })[0].clave;
+cotServicioParaBorrar.compras = [{ clave: claveServicioBorrar, estado: "servicio", costoReal: 50000 }];
+state.pedidos = [{
+  id: "ped-borrar-servicio-test", numeroOp: "OP-BORRAR-SERV", cliente: "Cliente Borrar", descripcion: "Prueba",
+  cantidad: "1", total: 200000, costo: 100000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-borrar-servicio-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotServicioParaBorrar];
+state.tx = [{ id: "tx-gasto-servicio-borrar", tipo: "gasto", concepto: "Pago a la operaria", monto: 50000, contraparte: "Operaria", fecha: "2026-01-02", pedidoId: "", serviciosDescuento: [{ nombre: "Confección Borrar", monto: 50000 }] }];
+assert(calcServDisp().filter(function (s) { return s.nombre === "Confección Borrar"; })[0].disponible === 0, "sanity: \"Confección Borrar\" está totalmente gastado (50.000 acumulado, 50.000 usado)");
+var alertaBorrarServOriginal = global.alert;
+var alertaBorrarServ = "";
+global.window.alert = global.alert = function (msg) { alertaBorrarServ = msg; };
+const { actions: cotAccionesRemoveTest } = await import("../js/modules/cotizaciones.js");
+cotAccionesRemoveTest["remove-cotizacion"]({ getAttribute: function () { return "cot-borrar-servicio-test"; } });
+assert(state.cotizaciones.some(function (c) { return c.id === "cot-borrar-servicio-test"; }), "no se pudo eliminar la cotización: dejaría \"Confección Borrar\" en negativo (ya se le pagó a la operaria)");
+assert(alertaBorrarServ.indexOf("Confección Borrar") >= 0, "...y el aviso dice cuál servicio se rompería");
+global.window.alert = global.alert = alertaBorrarServOriginal;
+state.pedidos = pedidosPreviosRemoveCotServ; state.cotizaciones = cotizacionesPreviasRemoveCotServ; state.tx = txPreviosRemoveCotServ;
+
 // --- Nómina: servicio por defecto de un empleado + "si no alcanza, varios" ---
 click('[data-action="tab"][data-tab="pendientes"]');
 var costurera = state.config.nomina[0];
@@ -691,11 +765,26 @@ assert(calcServCatBorrador().some(function (s) { return s.nombre === "Corte" && 
 
 // una cotización ESCALADA (todavía "borrador", pero con un pedido rápido
 // real detrás vía pedidoOrigenId) también cuenta, sin necesidad de
-// "convertida".
+// "convertida" — mientras ese pedido rápido siga existiendo de verdad
+// (ver el caso contrario justo abajo).
+const pedidosPreviosEscServTest = state.pedidos;
+state.pedidos = state.pedidos.concat([{
+  id: "ped-esc-servicio-real-test", numeroOp: "OP-ESC-SERV", cliente: "Cliente Esc Servicio", descripcion: "Prueba",
+  cantidad: "1", total: 100000, costo: 40000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}]);
 state.cotizaciones = state.cotizaciones.map(function (c) {
-  return c.id === "cot-borrador-servicio-test" ? Object.assign({}, c, { estado: "borrador", pedidoOrigenId: "ped-esc" }) : c;
+  return c.id === "cot-borrador-servicio-test" ? Object.assign({}, c, { estado: "borrador", pedidoOrigenId: "ped-esc-servicio-real-test" }) : c;
 });
 assert(calcServCatBorrador().some(function (s) { return s.nombre === "Corte" && s.monto === 40000; }), "y una cotización escalada desde un pedido rápido real (pedidoOrigenId) también cuenta, aunque siga en \"borrador\"");
+
+// Auditoría financiera 2026-09-20: si ese pedido rápido se eliminó DESPUÉS
+// de escalar (antes de aplicar la cotización), pedidoOrigenId queda
+// "truthy pero obsoleto" — ya no debe contar, mismo patrón que el bug
+// hermano de movimientos sueltos (desincronizacion_movimientos_pedido_escalado).
+state.pedidos = pedidosPreviosEscServTest; // el pedido "se elimina": ya no existe en state.pedidos
+assert(!calcServCatBorrador().some(function (s) { return s.nombre === "Corte"; }), "...pero si ese pedido rápido se elimina antes de aplicar la cotización, deja de contar: pedidoOrigenId truthy ya no basta, tiene que seguir existiendo de verdad");
 
 state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== "cot-borrador-servicio-test"; }); // limpieza
 

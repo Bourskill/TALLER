@@ -280,7 +280,10 @@ function renderFila(t) {
     '<span class="mobile-th">Tipo</span><span><span class="tag ' + t.tipo + '">' + t.tipo + "</span></span>" +
     '<span class="mobile-th">Monto</span><span class="amount ' + (t.tipo === "ingreso" ? "pos" : "neg") + '">' + (t.tipo === "ingreso" ? "+" : "-") + fmt(t.monto) + "</span>" +
     '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-    (origen ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
+    // El origen "servicio" (ver origenDeTx) no tiene ningún lugar propio al
+    // que navegar — ya se ve con el tag 📋 de arriba — así que no ofrece el
+    // botón "↗ Origen", solo bloquea la edición de tipo/monto.
+    (origen && origen.tipo !== "servicio" ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
     '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
     '<button class="btn ' + (sistema ? "ghost" : "danger") + ' small" data-action="remove-tx" data-id="' + t.id + '" title="' + esc(tituloBorrar) + '">' + (sistema ? "🔒" : "🗑") + "</button>" +
     "</span>" +

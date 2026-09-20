@@ -285,6 +285,16 @@ export function origenDeTx(t) {
       state.deudasHistorial.filter(function (x) { return x.id === t.deudaId; })[0];
     if (d) return { tipo: "deuda", id: d.id, label: "Deuda — " + d.concepto };
   }
+  // Un gasto/nómina con parte de su monto "Asignado a servicio(s)" (ver
+  // validarServiciosAsignados) es igual de real que los cuatro de arriba:
+  // cambiar su Monto a mano desincroniza lo que de verdad salió de caja de
+  // lo que calcServiciosDisponibles cree que se gastó de ese servicio —
+  // faltaba acá, así que quedaba totalmente editable (típico en un pago de
+  // nómina, que nace sin pedidoId/cotizacionId/gastoFijoId/deudaId).
+  // Auditoría financiera 2026-09-20.
+  if ((t.serviciosDescuento || []).length) {
+    return { tipo: "servicio", id: null, label: "un servicio asignado (\"Asignar a servicio(s)\")" };
+  }
   return null;
 }
 
@@ -662,8 +672,16 @@ function listaEntradasServicio() {
     // "borrador" hasta pulsar "Aplicar a pedido", pero el pedido rápido
     // detrás de ella (pedidoOrigenId) SÍ es real — mismo criterio que ya
     // usa pedidoIdDeCotParaTx en modules/cotizaciones.js para no dejar sus
-    // movimientos como "sueltos".
-    if (cot.estado !== "convertida" && !cot.pedidoOrigenId) return;
+    // movimientos como "sueltos". Y no basta con que pedidoOrigenId sea
+    // truthy: si ese pedido rápido se eliminó DESPUÉS de escalar (antes de
+    // aplicar la cotización), el string sigue ahí pero ya no hay ningún
+    // pedido real detrás — mismo patrón "truthy pero obsoleto" que el bug
+    // hermano ya documentado (desincronizacion_movimientos_pedido_escalado).
+    // Auditoría financiera 2026-09-20.
+    if (cot.estado !== "convertida") {
+      if (!cot.pedidoOrigenId) return;
+      if (!state.pedidos.some(function (p) { return p.id === cot.pedidoOrigenId; })) return;
+    }
     var lineas = calcListaCompras(cot);
     cot.compras.forEach(function (compra) {
       if (estadoCompra(compra) !== "servicio") return;
@@ -779,6 +797,41 @@ export function calcServiciosDisponibles() {
   });
 }
 
+// Antes de eliminar una cotización, hay que saber si borrarla dejaría
+// algún "servicio" en negativo: el acumulado de ese servicio baja (esta
+// cotización deja de aportarle), pero lo YA gastado de él
+// (tx.serviciosDescuento) no depende de que la cotización siga
+// existiendo — "nunca negativo" es una invariante que se protege en todo
+// el resto del sistema (validarServiciosAsignados) y no debía quedar
+// abierta justo por este camino. Devuelve [] si se puede borrar sin
+// problema, o [{nombre, disponibleActual, quedaria}] por cada servicio
+// que rompería la regla. Auditoría financiera 2026-09-20.
+export function serviciosQueQuedanNegativosSiSeBorra(cot) {
+  if (!cot || !(cot.compras || []).length) return [];
+  var aportes = {};
+  var lineas = calcListaCompras(cot);
+  cot.compras.forEach(function (compra) {
+    if (estadoCompra(compra) !== "servicio") return;
+    var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
+    var nombre = linea ? linea.nombre : compra.clave;
+    var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
+    var monto = hayCostoReal ? num(compra.costoReal) : (linea ? linea.costoTotal : 0);
+    if (monto <= 0) return;
+    aportes[nombre] = (aportes[nombre] || 0) + monto;
+  });
+  if (!Object.keys(aportes).length) return [];
+  var disponibles = calcServiciosDisponibles();
+  var problemas = [];
+  Object.keys(aportes).forEach(function (nombre) {
+    var d = disponibles.filter(function (s) { return s.nombre === nombre; })[0];
+    var acumuladoActual = d ? d.acumulado : 0;
+    var usado = d ? (d.acumulado - d.disponible) : 0;
+    var quedaria = acumuladoActual - aportes[nombre] - usado;
+    if (quedaria < -0.5) problemas.push({ nombre: nombre, disponibleActual: d ? d.disponible : 0, quedaria: quedaria });
+  });
+  return problemas;
+}
+
 // Lo que TODAVÍA resta de "Ganancia" por cada servicio del periodo — ya no
 // puede ser el acumulado bruto de calcServiciosPorCategoriaRango sin más:
 // ahora que un servicio se puede pagar de verdad (ver
@@ -858,12 +911,21 @@ export function validarServiciosAsignados(filas, montoTotal) {
     .map(function (f) { return { nombre: f.nombre, monto: num(f.monto) }; }); // normaliza a número antes de guardar
   if (!limpias.length) return { ok: true, error: null, limpias: [] };
   var disponibles = calcServiciosDisponibles();
+  // Comprometido POR NOMBRE, acumulado fila a fila — no alcanza con
+  // comparar cada fila por separado contra `disponible` (ese número es
+  // fijo, calculado UNA vez arriba): si el mismo servicio aparece en dos
+  // filas del mismo formulario, cada una pasaba individualmente aunque la
+  // SUMA de las dos superara lo disponible real, dejando el servicio en
+  // negativo. Auditoría financiera 2026-09-20.
+  var comprometidoPorNombre = {};
   for (var i = 0; i < limpias.length; i++) {
     var d = disponibles.filter(function (s) { return s.nombre === limpias[i].nombre; })[0];
     var disponible = d ? d.disponible : 0;
-    if (num(limpias[i].monto) > disponible + 0.5) {
-      return { ok: false, error: '"' + limpias[i].nombre + '" solo tiene ' + fmt(disponible) + " disponible.", limpias: null };
+    var yaComprometido = comprometidoPorNombre[limpias[i].nombre] || 0;
+    if (yaComprometido + num(limpias[i].monto) > disponible + 0.5) {
+      return { ok: false, error: '"' + limpias[i].nombre + '" solo tiene ' + fmt(disponible - yaComprometido) + " disponible.", limpias: null };
     }
+    comprometidoPorNombre[limpias[i].nombre] = yaComprometido + num(limpias[i].monto);
   }
   var asignado = limpias.reduce(function (a, f) { return a + num(f.monto); }, 0);
   if (asignado > num(montoTotal) + 0.5) {

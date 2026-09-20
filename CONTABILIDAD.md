@@ -365,22 +365,30 @@ verse entre sí).
    `confirm()` (de menor severidad — es un botón explícito, no una
    pastilla ambigua). **Fix:** mismo `window.confirm()`.
 
-**Servicios (Confección, Corte, Colchón — 4 hallazgos):**
+**Servicios (Confección, Corte, Colchón — 4 hallazgos). ✅ CORREGIDOS los 4:**
 5. **Se puede dejar un servicio en negativo repitiendo el mismo nombre
    en dos filas** de "Asignar a servicio(s)" — `validarServiciosAsignados`
    valida cada fila contra un `disponible` congelado, sin sumar entre
-   filas del mismo formulario.
+   filas del mismo formulario. **Fix:** ahora acumula lo comprometido
+   por nombre fila a fila, dentro de la misma llamada.
 6. **Un servicio de una cotización "escalada" sigue contando como plata
    disponible aunque el pedido rápido que la originó ya se haya
    eliminado** — mismo patrón "truthy pero obsoleto" que el bug hermano
    ya documentado (`desincronizacion_movimientos_pedido_escalado`).
+   **Fix:** `listaEntradasServicio` ahora confirma que ese pedido siga
+   existiendo de verdad, no solo que el id no esté vacío.
 7. **Eliminar la cotización de origen de un servicio ya gastado** deja
    `disponible` negativo en silencio (el aviso de borrado no lo
-   menciona).
+   menciona). **Fix:** se bloquea (no solo se avisa) si borrarla dejaría
+   algún servicio en negativo — misma severidad que el resto de esa regla
+   (`serviciosQueQuedanNegativosSiSeBorra`, nueva función en calc.js).
 8. **Editar el Monto de un gasto/nómina que ya tenía "Asignar a
    servicio(s)" no revalida ni ajusta esa asignación** — plata que en
    la práctica dejó de salir de caja se queda contada como "gastada" de
-   un servicio para siempre. Encontrado por 3 de los 6 agentes.
+   un servicio para siempre. Encontrado por 3 de los 6 agentes. **Fix:**
+   `origenDeTx` ahora también bloquea Monto/Tipo cuando el movimiento
+   tiene `serviciosDescuento` (mismo candado que ya protegía a
+   pedido/cotización/gasto fijo/deuda).
 
 **Compras/insumos de una cotización:**
 9. **Borrar un insumo/referencia/costo global ya marcado "Sí" (comprado)
