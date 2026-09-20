@@ -1771,11 +1771,25 @@ export var actions = {
         "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
     }
     var lineas = calcListaCompras(cot);
-    var creados = 0, actualizados = 0, borrados = 0;
+    var creados = 0, actualizados = 0, borrados = 0, huerfanas = 0;
 
     var compras = (cot.compras || []).map(function (compra) {
       var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
-      var nombre = linea ? linea.nombre : compra.clave;
+      // Sin `linea`, el insumo/referencia/costo global/servicio cobrado que
+      // originó esta compra ya no existe en la cotización (se borró
+      // después de marcarla) — sin este chequeo, la entrada seguía viva
+      // para siempre: si estaba en "Sí" volvía a crear/actualizar su
+      // movimiento cada vez que se pulsaba este botón, invisible en la
+      // tabla de compras (que solo muestra lo que existe HOY). Se retira
+      // junto con su movimiento, si tenía uno. Auditoría 2026-09-20.
+      if (!linea) {
+        if (compra.txId) {
+          state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
+        }
+        huerfanas++;
+        return null;
+      }
+      var nombre = linea.nombre;
       var monto = num(compra.costoReal);
 
       // Solo "Sí" (pagado de verdad, aparte) genera un movimiento en
@@ -1829,7 +1843,7 @@ export var actions = {
       state.tx.unshift(Object.assign({ id: txId }, datos));
       creados++;
       return Object.assign({}, compra, { txId: txId });
-    });
+    }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
 
     state.cotizaciones = state.cotizaciones.map(function (c) {
       return c.id === id ? Object.assign({}, c, { compras: compras }) : c;
@@ -1839,6 +1853,7 @@ export var actions = {
     if (creados) partes.push(creados + " movimiento(s) creado(s)");
     if (actualizados) partes.push(actualizados + " actualizado(s)");
     if (borrados) partes.push(borrados + " retirado(s)");
+    if (huerfanas) partes.push(huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
     mostrarToast(partes.length ? "✓ Finanzas al día: " + partes.join(", ") + "." : "Nada que sincronizar — marca alguna compra primero.");
   },
   // ---------- Costos globales del pedido ----------

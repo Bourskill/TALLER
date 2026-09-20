@@ -390,12 +390,16 @@ verse entre sí).
    tiene `serviciosDescuento` (mismo candado que ya protegía a
    pedido/cotización/gasto fijo/deuda).
 
-**Compras/insumos de una cotización:**
+**Compras/insumos de una cotización. ✅ CORREGIDO:**
 9. **Borrar un insumo/referencia/costo global ya marcado "Sí" (comprado)
    deja una "compra fantasma"**: sigue generando/actualizando su
    movimiento en Finanzas cada vez que se pulsa "Actualizar movimientos
    financieros", y sigue inflando el costo real de la cotización — sin
-   ningún botón visible para encontrarla ni borrarla.
+   ningún botón visible para encontrarla ni borrarla. **Fix:**
+   `calcCotGastosReales` ya no cuenta una compra huérfana como
+   sobrecosto, y "Actualizar movimientos financieros" ahora la detecta,
+   retira su movimiento (si tenía) y la limpia de la cotización —
+   convierte el botón en una reconciliación de verdad, no solo un "agregar".
 
 **Pendientes:**
 10. **Bajar el número de "Cuotas" de una deuda por debajo de las ya

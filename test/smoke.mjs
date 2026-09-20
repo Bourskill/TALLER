@@ -665,6 +665,53 @@ assert(alertaBorrarServ.indexOf("Confección Borrar") >= 0, "...y el aviso dice 
 global.window.alert = global.alert = alertaBorrarServOriginal;
 state.pedidos = pedidosPreviosRemoveCotServ; state.cotizaciones = cotizacionesPreviasRemoveCotServ; state.tx = txPreviosRemoveCotServ;
 
+// --- Auditoría 2026-09-20: borrar el insumo/costo global que originó una
+// compra "Sí" ya registrada deja una "compra fantasma" — sigue inflando
+// el costo real Y sigue generando/actualizando su movimiento cada vez que
+// se pulsa "Actualizar movimientos financieros". Se prueba con un costo
+// global (clave más simple: "global|id") pero el mecanismo es el mismo
+// para un insumo o una referencia entera.
+const pedidosPreviosHuerfanaTest = state.pedidos, cotizacionesPreviasHuerfanaTest = state.cotizaciones, txPreviosHuerfanaTest = state.tx;
+const cotHuerfanaTest = {
+  id: "cot-huerfana-test", clienteId: "", cliente: "Cliente Huérfana", descripcion: "Prueba huérfana", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-huerfana-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "chft1",
+  referencias: [],
+  // Dos costos globales: "Empaque" se queda (así la tabla de "Compras del
+  // pedido" — y su botón de sincronizar — sigue teniendo algo que mostrar),
+  // "Domicilio" es el que se borra para simular la compra huérfana.
+  costosGlobales: [
+    { id: "cg-huerfana", nombre: "Domicilio", costo: 50000, proveedorId: "", esServicio: false },
+    { id: "cg-se-queda", nombre: "Empaque", costo: 5000, proveedorId: "", esServicio: false }
+  ],
+  serviciosCobrados: [], compras: [{ clave: "global|cg-huerfana", estado: "si", costoReal: 75000, txId: "tx-huerfana-test" }]
+};
+state.pedidos = [{
+  id: "ped-huerfana-test", numeroOp: "OP-HUERFANA", cliente: "Cliente Huérfana", descripcion: "Prueba",
+  cantidad: "1", total: 100000, costo: 50000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-huerfana-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotHuerfanaTest];
+state.tx = [{ id: "tx-huerfana-test", tipo: "gasto", concepto: "Compra — Domicilio — Prueba huérfana", monto: 75000, contraparte: "", fecha: "2026-01-02", pedidoId: "ped-huerfana-test", cotizacionId: "cot-huerfana-test", origenCompraClave: "global|cg-huerfana" }];
+const { calcCotGastosReales: calcCotGastosRealesTest } = await import("../js/core/calc.js");
+assert(calcCotGastosRealesTest(cotHuerfanaTest) === 25000, "sanity: con el costo global todavía ahí, la variación es 75.000 (real) − 50.000 (estimado) = 25.000");
+// Se borra SOLO "Domicilio" (como haría "remove-costo-global") SIN limpiar
+// cot.compras — así queda exactamente huérfana, como en el reporte real.
+// "Empaque" se queda, para que la tabla de "Compras del pedido" (y su
+// botón de sincronizar) sigan teniendo algo que mostrar.
+cotHuerfanaTest.costosGlobales = cotHuerfanaTest.costosGlobales.filter(function (g) { return g.id !== "cg-huerfana"; });
+assert(calcCotGastosRealesTest(cotHuerfanaTest) === 0, "y al quedar huérfana (su costo global ya no existe), YA NO se cuenta como sobrecosto — antes sumaba los 75.000 completos, inflando el costo real para siempre");
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-huerfana-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-huerfana-test"][data-val="produccion"]');
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-huerfana-test"]');
+const cotHuerfanaTrasSync = state.cotizaciones.find(function (c) { return c.id === "cot-huerfana-test"; });
+assert(!!cotHuerfanaTrasSync && cotHuerfanaTrasSync.compras.length === 0, "\"Actualizar movimientos financieros\" limpia la compra huérfana de la cotización");
+assert(!state.tx.some(function (t) { return t.id === "tx-huerfana-test"; }), "...y retira su movimiento de Finanzas (ya no hay insumo real detrás)");
+state.pedidos = pedidosPreviosHuerfanaTest; state.cotizaciones = cotizacionesPreviasHuerfanaTest; state.tx = txPreviosHuerfanaTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
 // --- Nómina: servicio por defecto de un empleado + "si no alcanza, varios" ---
 click('[data-action="tab"][data-tab="pendientes"]');
 var costurera = state.config.nomina[0];

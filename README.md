@@ -259,6 +259,23 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésima ronda: compras huérfanas al borrar un insumo/costo global ya pagado)
+
+Tercera tanda de la auditoría financiera estricta (ver CONTABILIDAD.md).
+
+- **Borrar un insumo, referencia o costo global de una cotización que ya
+  tenía una compra "Sí" registrada** dejaba una "compra fantasma" en
+  `cot.compras`, invisible en la tabla (que solo muestra lo que existe
+  HOY), pero que "Actualizar movimientos financieros" seguía
+  creando/actualizando en Finanzas cada vez que se pulsaba el botón, y
+  que `calcCotGastosReales` seguía sumando completa como sobrecosto.
+- **Fix**: `calcCotGastosReales` ya no cuenta una compra sin su línea de
+  origen. Y "Actualizar movimientos financieros" ahora también reconcilia
+  hacia atrás: detecta cualquier compra huérfana, retira su movimiento de
+  Finanzas (si tenía uno) y la limpia de la cotización — el toast ahora
+  puede decir "N compra(s) vieja(s) limpiada(s)" además de
+  creados/actualizados/retirados.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo novena ronda: 4 riesgos más de servicios — filas repetidas, pedido eliminado, cotización con servicio gastado, editar tx asignado)
 
 Segunda tanda de la auditoría financiera estricta (ver CONTABILIDAD.md),

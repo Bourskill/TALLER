@@ -2057,7 +2057,14 @@ export function calcCotGastosReales(cot) {
     // finanzas en modules/cotizaciones.js), no si cuenta como costo.
     if (estadoCompra(c) === "no" || !num(c.costoReal)) return a;
     var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
-    return a + (num(c.costoReal) - (linea ? linea.costoTotal : 0));
+    // Sin `linea` (el insumo/referencia/costo global que la originó ya se
+    // borró de la cotización), esta compra quedó huérfana — no es un
+    // sobrecosto real de nada que exista hoy, es una entrada vieja
+    // esperando que "Actualizar movimientos financieros" la limpie (ver
+    // sincronizar-compras-finanzas). Contarla acá inflaba "costo real" para
+    // siempre por algo que ya no está en la cotización. Auditoría 2026-09-20.
+    if (!linea) return a;
+    return a + (num(c.costoReal) - linea.costoTotal);
   }, 0);
   var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
   return deCompras + deGastos;
