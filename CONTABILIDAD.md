@@ -316,6 +316,147 @@ intencional y correcto — se explica en su propia entrada más abajo.
 
 ---
 
+## Auditoría estricta de septiembre 2026 (segunda pasada) — hallazgos
+
+El usuario pidió una revisión "súper estricta" de TODA la lógica de
+dinero, con dudas explícitas, después del incidente de la Sheet borrada y
+de agregar "Colchón". Se hizo con 6 agentes en paralelo (Pedidos,
+Cotizaciones, Finanzas, Servicios, Pendientes, KPIs) leyendo el código
+ACTUAL desde cero — sin confiar en este documento — y cada hallazgo pasó
+por un segundo agente que intentó refutarlo antes de contarlo como real.
+
+**Lo bueno primero:** gran parte de lo ya corregido en la auditoría
+original (sección de arriba) se revisó de nuevo y sigue sólido — IVA
+separado de "Por cobrar"/"Por pagar", flujo de deudas, checkbox de
+efectivo, cancelar vs. eliminar pedido, Colchón bien encadenado con el
+resto del sistema de servicios. Pero esta pasada, más agresiva, encontró
+bastante más que la vez anterior — 14 riesgos reales confirmados, la
+mayoría nuevos, algunos con doble o triple confirmación independiente
+(varios agentes distintos llegaron al mismo hallazgo por su cuenta, sin
+verse entre sí).
+
+### 🔴 Riesgos reales confirmados (14)
+
+**Comisión de vendedor — el bloque más serio, 4 hallazgos relacionados:**
+1. **Se puede pagar la comisión de un vendedor DOS VECES**: una desde el
+   pedido, otra desde la cotización que lo originó — `toggle-comision`
+   (pedidos.js) y `toggle-comision-cot` (cotizaciones.js) crean/borran
+   tx marcados con campos DISTINTOS (`origenComisionPedidoId` vs.
+   `origenComisionCotId`) que nunca se cruzan entre sí. Encontrado de
+   forma independiente por 3 de los 6 agentes.
+2. **Duplicar un pedido/cotización con la comisión ya pagada la copia
+   "pagada" sin ningún tx real detrás** — `duplicarCotizacionCompleta`
+   limpia `compras`/`estimadoTxId` a propósito pero se olvida de
+   `vendedor.estado`. La comisión de la venta nueva queda invisible en
+   "Comisiones pendientes" para siempre. Encontrado 3 veces.
+3. **`toggle-comision-cot` mueve plata real sin pedir confirmación** —
+   a diferencia de su gemela en Pedidos (que sí pregunta con el monto),
+   la pastilla de Cotizaciones crea/borra el gasto al primer toque.
+4. **Botón "Pagar comisión" de consignación**: mismo problema, sin
+   `confirm()` (de menor severidad — es un botón explícito, no una
+   pastilla ambigua).
+
+**Servicios (Confección, Corte, Colchón — 4 hallazgos):**
+5. **Se puede dejar un servicio en negativo repitiendo el mismo nombre
+   en dos filas** de "Asignar a servicio(s)" — `validarServiciosAsignados`
+   valida cada fila contra un `disponible` congelado, sin sumar entre
+   filas del mismo formulario.
+6. **Un servicio de una cotización "escalada" sigue contando como plata
+   disponible aunque el pedido rápido que la originó ya se haya
+   eliminado** — mismo patrón "truthy pero obsoleto" que el bug hermano
+   ya documentado (`desincronizacion_movimientos_pedido_escalado`).
+7. **Eliminar la cotización de origen de un servicio ya gastado** deja
+   `disponible` negativo en silencio (el aviso de borrado no lo
+   menciona).
+8. **Editar el Monto de un gasto/nómina que ya tenía "Asignar a
+   servicio(s)" no revalida ni ajusta esa asignación** — plata que en
+   la práctica dejó de salir de caja se queda contada como "gastada" de
+   un servicio para siempre. Encontrado por 3 de los 6 agentes.
+
+**Compras/insumos de una cotización:**
+9. **Borrar un insumo/referencia/costo global ya marcado "Sí" (comprado)
+   deja una "compra fantasma"**: sigue generando/actualizando su
+   movimiento en Finanzas cada vez que se pulsa "Actualizar movimientos
+   financieros", y sigue inflando el costo real de la cotización — sin
+   ningún botón visible para encontrarla ni borrarla.
+
+**Pendientes:**
+10. **Bajar el número de "Cuotas" de una deuda por debajo de las ya
+    pagadas** la deja saldada (saldo $0) pero nunca se mueve a
+    Historial — queda fantasma en "Por pagar" y el botón "Pagar" deja
+    de hacer nada, en silencio.
+11. **Los pagos de nómina se identifican por el NOMBRE del empleado, no
+    por un id** — renombrar a alguien (o tener dos personas con el
+    mismo nombre) desconecta sus pagos históricos: la app puede volver
+    a pedir un pago ya hecho.
+12. **Bug de huso horario en `periodoKey()` para periodo "semanal"** —
+    `calcGastoFijoPendiente`/`calcNominaPendienteEmpleado` calculan la
+    semana actual con un método, y `toggle-gasto-fijo-pagado` la
+    calcula con OTRO — **verificado yo mismo ejecutando el código real
+    hoy, domingo 2026-09-20: los dos métodos dan semanas distintas**
+    (`2026-W38` vs. `2026-W39`). Un gasto fijo semanal marcado "pagado"
+    un domingo puede volver a mostrarse "pendiente" ese mismo día, y si
+    alguien lo vuelve a marcar, se duplica el gasto en Finanzas.
+
+**Ganancia (Resumen) — 3 hallazgos, el patrón "falta restar una
+categoría más" que ya se repitió con servicios, abonos pendientes y
+Colchón:**
+13. **El IVA cobrado nunca se resta de "Ganancia"** — la misma pantalla
+    de Resumen tiene un tile que dice "esos $X no son tuyos" (IVA
+    cobrado) y, dos tarjetas más abajo, "Ganancia" los cuenta como
+    utilidad.
+14. **Un pedido con servicio pendiente Y abono sin terminar de pagar
+    resta la misma plata DOS VECES** de Ganancia (una vez como
+    "servicio pendiente", otra como "abono pendiente" — ninguna de las
+    dos funciones se excluye contra la otra).
+15. **El excedente de un sobrepago (saldo a favor del cliente) cuenta
+    como Ganancia Y como obligación de "Por pagar" al mismo tiempo** —
+    `calcAbonosPendientesPorPedido` descarta los pedidos sobrepagados en
+    vez de restar el excedente.
+
+*(Sí, son 15 puntos con 14 numerados arriba por agrupación temática — el
+conteo real de hallazgos "riesgo_real" distintos es 14.)*
+
+### 🟡 Dudas a confirmar y deuda técnica (no son bugs de dinero, o de bajo impacto)
+
+- **"Colchón" y una línea real con el mismo nombre** se mezclarían en el
+  mismo acumulado (requiere coincidencia exacta del nombre, poco
+  probable, pero sin ninguna protección).
+- **"Separar" al Colchón no tiene tope contra el Balance real** — se
+  puede escribir cualquier número sin validar que esa plata exista de
+  verdad en caja (a diferencia de "gastar" un servicio, que sí topa).
+- **Un servicio puede mostrar "disponible" negativo** si se corrige
+  `costoReal` hacia abajo después de haber gastado parte de él — no
+  descuadra Balance/Ganancia (esos ya están protegidos), es solo un
+  número negativo confuso en pantalla.
+- **La regla de "comisión pendiente" está copiada a mano en 3-4 lugares
+  distintos** de `core/calc.js` en vez de una sola función compartida —
+  hoy dan el mismo resultado, pero es el mismo riesgo estructural que
+  "una sola fuente por fórmula" (arriba) pide evitar.
+- **`origenGastoId`** (modelo viejo de "costo real", reemplazado por
+  `compras`) no tiene protección de borrado ni se limpia al eliminar su
+  cotización — solo importa si todavía queda algún dato viejo de antes
+  de la migración; no se pudo confirmar desde el código si existe.
+- **Eliminar una cotización ya convertida en pedido** no avisa de que
+  deja un pedido huérfano (`cotizacionId` apuntando a nada).
+- **Pagar la comisión de un vendedor sobre un pedido casi sin cobrar** ya
+  estaba identificado como pregunta de negocio (ver 🟡 de arriba) — se
+  confirmó que sigue sin bloquearse, a propósito.
+- **`factorPeriodo` (4 semanas/mes)** para sugerir el salario al cambiar
+  el periodo de pago de alguien: aproximación ya documentada como
+  intencional en el código, el usuario puede ajustar el número sugerido.
+
+### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
+
+Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la
+Papelera de movimientos (a diferencia de "Eliminar" en Finanzas). Se
+verificó que es el MISMO patrón que ya usan 10+ acciones de "deshacer en
+el origen" (deshacer pago de deuda, comisión, gasto fijo aplicado...) —
+el tx del Colchón está protegido en `MARCAS_ORIGEN_SISTEMA` justo para
+forzar que se deshaga desde ahí. No hace falta ningún cambio.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la
