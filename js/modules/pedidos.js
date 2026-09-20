@@ -1870,12 +1870,16 @@ export var actions = {
       window.alert("No se pudo enviar el correo: " + (e && e.message ? e.message : e));
     }
   },
+  // Confirmación agregada en la auditoría financiera 2026-09-20: es un
+  // botón explícito (no una pastilla ambigua), pero mueve plata real igual
+  // que toggle-comision/toggle-comision-cot, que sí preguntan.
   "pagar-comision-consignacion": function (el) {
     var id = el.getAttribute("data-id"), ventaId = el.getAttribute("data-venta");
     var ped = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!ped || !ped.consignacion) return;
     var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
     if (!venta || venta.comisionPagada) return;
+    if (!window.confirm("¿Pagar la comisión de esta venta de consignación?\n\nMonto: " + fmt(venta.comisionMonto) + "\n\nSe registra un gasto en Finanzas (esa plata sale de la caja).")) return;
     state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Comisión consignación — " + ped.cliente, monto: venta.comisionMonto, contraparte: ped.cliente, fecha: todayStr(), pedidoId: ped.id, origenComisionConsignacionId: ventaId });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
@@ -1921,7 +1925,15 @@ export var actions = {
           };
         })
         : [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "", estado: p.estado, estadosDef: p.estadosDef || null }],
-      gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: p.vendedor ? Object.assign({}, p.vendedor) : null,
+      gastosReales: [], iva: { activo: false, porcentaje: 19 },
+      // Mismo motivo que en duplicarCotizacionCompleta (cotizaciones.js): si
+      // la comisión del pedido ya estaba "pagada", esa bandera no debe
+      // quedarle a la cotización escalada — el tx real sigue siendo del
+      // pedido original. Mientras la cotización esté "escalada" (sin
+      // aplicar todavía), su propio toggle de comisión queda activo, así
+      // que heredar "pagada" sin un tx propio detrás abriría la misma
+      // puerta de doble pago. Auditoría financiera 2026-09-20.
+      vendedor: p.vendedor ? Object.assign({}, p.vendedor, { estado: "pendiente", fechaPago: "" }) : null,
       codigoPublico: codigoPublico()
     };
     state.cotizaciones.unshift(nuevaCot);

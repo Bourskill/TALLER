@@ -259,6 +259,35 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (cuadragésimo octava ronda: comisión de vendedor pagable dos veces — cotización vs. pedido)
+
+Primera tanda de correcciones de la auditoría financiera estricta
+(ver CONTABILIDAD.md). El bloque más grave: la comisión de un vendedor se
+podía pagar dos veces, una desde el pedido y otra desde la cotización que
+lo originó, porque cada lado usaba un campo de origen distinto
+(`origenComisionPedidoId` vs. `origenComisionCotId`) que nunca se
+cruzaban. Confirmado de forma independiente por 3 de los 6 agentes de la
+auditoría.
+
+- **`convertir-cotizacion`/`aplicar-cotizacion-a-pedido`**: si la comisión
+  ya estaba pagada ANTES de convertir, el tx real ahora se re-etiqueta
+  como del pedido nuevo (antes seguía marcado `origenComisionCotId`,
+  invisible para "Deshacer el pago" del lado del pedido — que igual
+  marcaba el pedido como "pendiente" sin retirar el gasto real, y un
+  segundo pago creaba un segundo tx).
+- **Una vez la cotización tiene un pedido real (`c.pedidoId`), deja de
+  poder tocar esa comisión por su cuenta** — `renderCotVendedorCompact`
+  reemplaza el botón por una insignia de solo lectura ("ver Pedidos"), y
+  `toggle-comision-cot` tiene el mismo guardia como red de seguridad.
+- **`duplicarCotizacionCompleta`/`escalar-a-cotizacion`**: si el vendedor
+  copiado ya tenía la comisión "pagada", la copia ahora resetea
+  `estado`/`fechaPago` — mismo patrón que ya se aplicaba a
+  `compras`/`estimadoTxId` (ids que apuntan hacia afuera nunca se copian
+  tal cual), extendido al vendedor.
+- **`toggle-comision-cot` y "Pagar comisión" de consignación** ahora
+  piden confirmación con el monto exacto antes de mover plata real —
+  mismo patrón que `toggle-comision` (pedidos.js) ya tenía.
+
 ## Registro de cambios — septiembre 2026 (cuadragésimo séptima ronda: nuevo "servicio" Colchón, reserva para cubrir huecos de flujo de caja)
 
 - **Pedido del usuario, con su propio ejemplo**: "si solo gano el 30% pero

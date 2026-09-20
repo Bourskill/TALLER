@@ -337,24 +337,33 @@ verse entre sí).
 
 ### 🔴 Riesgos reales confirmados (14)
 
-**Comisión de vendedor — el bloque más serio, 4 hallazgos relacionados:**
+**Comisión de vendedor — el bloque más serio, 4 hallazgos relacionados.
+✅ CORREGIDOS los 4 (ver "Registro de cambios" del README):**
 1. **Se puede pagar la comisión de un vendedor DOS VECES**: una desde el
    pedido, otra desde la cotización que lo originó — `toggle-comision`
    (pedidos.js) y `toggle-comision-cot` (cotizaciones.js) crean/borran
    tx marcados con campos DISTINTOS (`origenComisionPedidoId` vs.
    `origenComisionCotId`) que nunca se cruzan entre sí. Encontrado de
-   forma independiente por 3 de los 6 agentes.
+   forma independiente por 3 de los 6 agentes. **Fix:** al convertir o
+   aplicar una cotización con la comisión ya pagada, el tx real se
+   re-etiqueta como del pedido; y una vez `cot.pedidoId` existe, la
+   cotización deja de poder tocar esa comisión por su cuenta (botón
+   reemplazado por una insignia de solo lectura + guardia en la acción).
 2. **Duplicar un pedido/cotización con la comisión ya pagada la copia
    "pagada" sin ningún tx real detrás** — `duplicarCotizacionCompleta`
    limpia `compras`/`estimadoTxId` a propósito pero se olvida de
    `vendedor.estado`. La comisión de la venta nueva queda invisible en
-   "Comisiones pendientes" para siempre. Encontrado 3 veces.
+   "Comisiones pendientes" para siempre. Encontrado 3 veces. **Fix:**
+   la copia resetea `vendedor.estado`/`fechaPago` — mismo arreglo en
+   `escalar-a-cotizacion` (mismo patrón, mismo riesgo).
 3. **`toggle-comision-cot` mueve plata real sin pedir confirmación** —
    a diferencia de su gemela en Pedidos (que sí pregunta con el monto),
    la pastilla de Cotizaciones crea/borra el gasto al primer toque.
+   **Fix:** mismo `window.confirm()` con el monto exacto que ya tenía
+   `toggle-comision`.
 4. **Botón "Pagar comisión" de consignación**: mismo problema, sin
    `confirm()` (de menor severidad — es un botón explícito, no una
-   pastilla ambigua).
+   pastilla ambigua). **Fix:** mismo `window.confirm()`.
 
 **Servicios (Confección, Corte, Colchón — 4 hallazgos):**
 5. **Se puede dejar un servicio en negativo repitiendo el mismo nombre

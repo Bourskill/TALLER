@@ -2088,6 +2088,88 @@ state.pedidos = pedidosPreviosVendedorFix; state.cotizaciones = cotizacionesPrev
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
 // ---------------------------------------------------------------------------
+// Auditoría financiera 2026-09-20: la comisión de un vendedor se podía pagar
+// DOS VECES — una desde el pedido, otra desde la cotización que lo originó —
+// porque cada lado usa un campo de origen distinto (origenComisionPedidoId
+// vs. origenComisionCotId) que nunca se cruzan. Se corrigió con dos piezas:
+// (1) al convertir/aplicar, si la comisión ya estaba pagada, el tx real se
+// RE-ETIQUETA como del pedido; (2) una vez la cotización tiene un pedido real
+// (c.pedidoId), su propio toggle queda bloqueado — la única fuente pasa a
+// ser el pedido.
+// ---------------------------------------------------------------------------
+const { duplicarCotizacionCompleta: duplicarCotTest, actions: cotAccionesTest } = await import("../js/modules/cotizaciones.js");
+
+// --- 1) Duplicar una cotización con la comisión ya pagada la resetea ---
+const cotComisionPagadaParaDuplicar = {
+  id: "cot-dup-comision-test", cliente: "Cliente Original", descripcion: "Prueba", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-dup-comision-test", pedidoOrigenId: "",
+  vendedor: { nombre: "Vendedor Duplicado", tipo: "fijo", valor: 90000, estado: "pagado", fechaPago: "2026-01-05" },
+  gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cdct1",
+  referencias: [], costosGlobales: [], serviciosCobrados: [], compras: []
+};
+const copiaConComisionReseteada = duplicarCotTest(cotComisionPagadaParaDuplicar);
+assert(copiaConComisionReseteada.vendedor.nombre === "Vendedor Duplicado", "duplicar una cotización conserva el NOMBRE del vendedor");
+assert(copiaConComisionReseteada.vendedor.estado === "pendiente" && copiaConComisionReseteada.vendedor.fechaPago === "", "...pero resetea el estado 'pagado' — la copia no tiene ningún pago real detrás (auditoría 2026-09-20)");
+
+// --- 2) Escalar un pedido con comisión ya pagada a cotización también la resetea ---
+const pedidosPreviosEscComision = state.pedidos, cotizacionesPreviasEscComision = state.cotizaciones;
+state.pedidos = state.pedidos.concat([{
+  id: "ped-esc-comision-test", numeroOp: "OP-ESC-COM", cliente: "Cliente Esc", descripcion: "Prueba escalar",
+  cantidad: "1", total: 100000, costo: 40000, abono: 0, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  vendedor: { nombre: "Vendedor Escalado Pagado", tipo: "fijo", valor: 15000, estado: "pagado" },
+  abonos: [], lineas: [], stockConsumido: []
+}]);
+state.tab = "pedidos"; state.pedidosVista = "historial"; render();
+click('[data-action="escalar-a-cotizacion"][data-id="ped-esc-comision-test"]');
+const cotDeEscComision = state.cotizaciones.find(c => c.pedidoOrigenId === "ped-esc-comision-test");
+assert(!!cotDeEscComision && cotDeEscComision.vendedor.nombre === "Vendedor Escalado Pagado", "escalar un pedido conserva el nombre del vendedor");
+assert(cotDeEscComision.vendedor.estado === "pendiente", "...pero resetea 'pagado' a 'pendiente': el tx real sigue siendo del pedido, no de esta cotización nueva (auditoría 2026-09-20)");
+state.pedidos = pedidosPreviosEscComision; state.cotizaciones = cotizacionesPreviasEscComision;
+
+// --- 3) Convertir una cotización con comisión YA pagada: el tx se re-etiqueta ---
+const pedidosPreviosConvComision = state.pedidos, cotizacionesPreviasConvComision = state.cotizaciones, txPreviosConvComision = state.tx;
+state.pedidos = [];
+state.cotizaciones = [{
+  id: "cot-conv-comision-test", clienteId: "", cliente: "Cliente Convertir", descripcion: "Prueba convertir", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: { nombre: "Vendedor Convertido", tipo: "fijo", valor: 50000, estado: "pagado", fechaPago: "2026-01-02" },
+  gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "ccct1",
+  referencias: [{ id: "r-ccct1", nombre: "Producto", imagenUrl: "", consumoAprox: 1, cantidadPedida: 1, precioVenta: 100000, origen: "taller", costoCompra: 0, proveedorId: "", insumos: [], detalle: [], estado: "nuevo", estadosDef: null }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.tx = [{ id: "tx-comision-preconversion", tipo: "comision", concepto: "Comisión — Vendedor Convertido", monto: 50000, contraparte: "Vendedor Convertido", fecha: "2026-01-02", pedidoId: "", cotizacionId: "cot-conv-comision-test", origenComisionCotId: "cot-conv-comision-test" }];
+state.tab = "cotizaciones"; state.cotVendedorEditando = ""; state.cotizacionEditando = ""; state.cotizacionesVista = "historial";
+render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-conv-comision-test"]');
+click('[data-action="convertir-cotizacion"][data-id="cot-conv-comision-test"]');
+const pedidoRecienConvertido = state.pedidos.find(p => p.cotizacionId === "cot-conv-comision-test");
+assert(!!pedidoRecienConvertido && pedidoRecienConvertido.vendedor.estado === "pagado", "el pedido nuevo hereda la comisión ya pagada");
+const txsDeEstaComision = state.tx.filter(t => t.contraparte === "Vendedor Convertido");
+assert(txsDeEstaComision.length === 1, "sigue existiendo UN SOLO movimiento de esa comisión (no se duplicó al convertir)");
+assert(txsDeEstaComision[0].origenComisionPedidoId === pedidoRecienConvertido.id && !txsDeEstaComision[0].origenComisionCotId, "...y quedó re-etiquetado como del PEDIDO (antes seguía marcado origenComisionCotId, invisible para 'Deshacer el pago' del lado del pedido)");
+// "Deshacer el pago" desde el PEDIDO ahora sí encuentra y borra ESE tx (antes no lo encontraba, y el pedido igual quedaba "pendiente" con el gasto real todavía ahí).
+state.tab = "pedidos"; state.pedidosVista = "historial"; render();
+click('[data-action="toggle-pedido-panel"][data-id="' + pedidoRecienConvertido.id + '"]');
+click('[data-action="toggle-comision"][data-id="' + pedidoRecienConvertido.id + '"]');
+assert(state.tx.filter(t => t.contraparte === "Vendedor Convertido").length === 0, "\"Deshacer el pago\" desde el pedido SÍ retira el tx real (antes no lo encontraba por el campo de origen distinto)");
+assert(state.pedidos.find(p => p.id === pedidoRecienConvertido.id).vendedor.estado === "pendiente", "...y el pedido vuelve a quedar pendiente de verdad");
+// Volver a marcarla pagada crea UN solo tx nuevo, no un segundo fantasma.
+click('[data-action="toggle-comision"][data-id="' + pedidoRecienConvertido.id + '"]');
+assert(state.tx.filter(t => t.contraparte === "Vendedor Convertido").length === 1, "volver a pagarla crea un único movimiento nuevo, no arrastra ningún duplicado");
+// Y la cotización ya convertida ya NO puede tocar esa comisión por su cuenta.
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-conv-comision-test"]');
+state.cotVendedorEditando = "cot-conv-comision-test";
+render();
+assert(!document.querySelector('[data-action="toggle-comision-cot"][data-id="cot-conv-comision-test"]'), "una cotización ya convertida ya no muestra el botón para tocar la comisión por su cuenta — la única fuente es el pedido");
+const txsAntesDeIntentoBloqueado = state.tx.length;
+cotAccionesTest["toggle-comision-cot"]({ getAttribute: function () { return "cot-conv-comision-test"; } });
+assert(state.tx.length === txsAntesDeIntentoBloqueado, "...y si de todos modos se dispara la acción (red de seguridad), el guardia la bloquea sin tocar Finanzas");
+state.pedidos = pedidosPreviosConvComision; state.cotizaciones = cotizacionesPreviasConvComision; state.tx = txPreviosConvComision;
+state.cotVendedorEditando = ""; state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// ---------------------------------------------------------------------------
 // La serie de movimientos es una LÍNEA DE TIEMPO, no una lista de fechas con
 // datos. Antes solo existían los periodos con movimientos, así que dos días
 // separados por una semana se dibujaban pegados y la forma de la curva mentía.

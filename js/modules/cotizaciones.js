@@ -49,6 +49,15 @@ export function duplicarCotizacionCompleta(cot) {
   // igual a cotizaciones YA duplicadas antes de este fix.
   copia.compras = [];
   copia.estimadoTxId = "";
+  // Mismo motivo que compras/estimadoTxId, un nivel más abajo: si el
+  // vendedor de la cotización original ya tenía su comisión "pagada", esa
+  // bandera venía copiada tal cual (con JSON.parse/stringify) pero sin
+  // ningún movimiento real detrás en Finanzas para ESTA copia — el tx real
+  // sigue ligado al id de la cotización original. La copia terminaba
+  // mostrando "ya se le pagó" a un vendedor sin que nadie le hubiera pagado
+  // nada por esta venta nueva, e invisible para "Comisiones pendientes".
+  // Auditoría financiera 2026-09-20, hallazgo confirmado 3 veces.
+  if (copia.vendedor) copia.vendedor = Object.assign({}, copia.vendedor, { estado: "pendiente", fechaPago: "" });
   return copia;
 }
 
@@ -418,6 +427,12 @@ function renderCotVendedorCompact(c) {
   var expandido = state.cotVendedorEditando === c.id;
   var valor = calcComisionValorCot(c);
   var pagado = v.estado === "pagado";
+  // Una vez la cotización tiene un pedido REAL detrás (convertida, o
+  // escalada y ya aplicada), la comisión pasa a gestionarse SOLO desde ahí
+  // (toggle-comision en pedidos.js) — mostrar acá un segundo botón activo
+  // permitía pagarla (o deshacerla) dos veces sobre la misma venta, cada
+  // lado con su propio tx sin cruzarse. Auditoría financiera 2026-09-20.
+  var tieneDetrasUnPedido = !!c.pedidoId;
 
   if (!expandido) {
     var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : " · pendiente")) : "Sin vendedor asignado";
@@ -432,8 +447,10 @@ function renderCotVendedorCompact(c) {
     "</select>" +
     '<input type="number" class="mini-input" style="width:100px" placeholder="Valor" value="' + esc(v.valor) + '" data-action-change="set-cot-vendedor" data-campo="valor" data-id="' + c.id + '" />' +
     (v.nombre ? ('<b style="color:var(--ink);">' + fmt(valor) + "</b>" +
-      '<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision-cot" data-id="' + c.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
-      (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-cot-vendedor-fecha" data-id="' + c.id + '" /></label>') : "")) : "") +
+      (tieneDetrasUnPedido
+        ? '<span class="badge" title="Esta cotización ya tiene un pedido real — la comisión se paga/deshace desde ahí.">' + (pagado ? "pagada" : "pendiente") + " · ver Pedidos</span>"
+        : ('<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision-cot" data-id="' + c.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
+          (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-cot-vendedor-fecha" data-id="' + c.id + '" /></label>') : "")))) : "") +
     '<button class="btn ghost small" data-action="toggle-cot-vendedor" data-id="' + c.id + '">Listo</button>' +
     "</div>";
 }
@@ -1940,6 +1957,23 @@ export var actions = {
       }, heredado);
       state.pedidos.unshift(nuevoP);
       state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: nuevoP.id }) : c; });
+      // Si la comisión ya se había pagado ANTES de convertir (desde el
+      // propio toggle de la cotización), el tx real que la respalda se
+      // re-etiqueta como del PEDIDO nuevo — de acá en adelante la única
+      // fuente para pagar/deshacer esa comisión es el pedido
+      // (renderCotVendedorCompact deja de mostrar el toggle una vez
+      // c.pedidoId existe). Sin este re-etiquetado, "Deshacer el pago"
+      // desde el pedido no encontraba el tx (seguía marcado
+      // origenComisionCotId, no origenComisionPedidoId) y un segundo pago
+      // creaba un SEGUNDO gasto real por la misma comisión — hallazgo
+      // confirmado 3 veces en la auditoría financiera 2026-09-20.
+      if (nuevoP.vendedor && nuevoP.vendedor.estado === "pagado") {
+        state.tx = state.tx.map(function (t) {
+          if (t.origenComisionCotId !== id) return t;
+          return Object.assign({}, t, { origenComisionCotId: "", origenComisionPedidoId: nuevoP.id, pedidoId: nuevoP.id });
+        });
+        persist("tx");
+      }
       nuevoP.stockConsumido = descontarStockPorTallas(cot, "pedido:" + nuevoP.id);
       // Convertir consolida TODO lo que estuviera pendiente de guardar: el
       // pedido se arma con esos valores, así que no puede quedar una versión
@@ -2006,16 +2040,30 @@ export var actions = {
   },
   // Igual que toggle-comision en pedidos.js: desmarcar "pagada" revierte de
   // verdad el movimiento (no solo la etiqueta), para que volver a marcarla
-  // pagada después no duplique el pago en Finanzas.
+  // pagada después no duplique el pago en Finanzas. Y, desde la auditoría
+  // financiera 2026-09-20, mismo par de arreglos que ya tenía su gemela:
+  // (1) si la cotización ya tiene un pedido real detrás, esta acción queda
+  // bloqueada — la comisión se gestiona SOLO desde ahí (ver
+  // renderCotVendedorCompact, que además deja de mostrar el botón en ese
+  // caso: este guardia es la red de seguridad si de todos modos llega a
+  // dispararse); (2) pide confirmación con el monto antes de mover plata
+  // real — antes esto era una pastilla clicable sin preguntar nada, el
+  // mismo patrón ya rechazado hace tiempo en pedidos.js.
   "toggle-comision-cot": function (el) {
     var id = el.getAttribute("data-id");
     var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
     if (!cot || !cot.vendedor || !cot.vendedor.nombre) return;
+    if (cot.pedidoId) { window.alert("Esta cotización ya tiene un pedido real — paga o deshaz la comisión desde ahí (Pedidos)."); return; }
     var pagando = cot.vendedor.estado !== "pagado";
+    var valor = calcComisionValorCot(cot);
     if (pagando) {
-      var valor = calcComisionValorCot(cot);
+      if (!window.confirm("¿Marcar como pagada la comisión de " + cot.vendedor.nombre + "?\n\n" +
+        "Monto: " + fmt(valor) + "\n\n" +
+        "Se registra un gasto de " + fmt(valor) + " en Finanzas (esa plata sale de la caja). Puedes deshacerlo desde esta misma cotización.")) return;
       state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + cot.vendedor.nombre, monto: valor, contraparte: cot.vendedor.nombre, fecha: todayStr(), pedidoId: pedidoIdDeCotParaTx(cot), cotizacionId: cot.id, origenComisionCotId: id });
     } else {
+      if (!window.confirm("¿Deshacer el pago de la comisión de " + cot.vendedor.nombre + " (" + fmt(valor) + ")?\n\n" +
+        "Se retira de Finanzas el gasto que se había creado y la comisión vuelve a quedar pendiente de pago.")) return;
       state.tx = state.tx.filter(function (t) { return t.origenComisionCotId !== id; });
     }
     persist("tx");
@@ -2237,6 +2285,16 @@ export var actions = {
       });
     });
     state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "convertida", pedidoId: cot.pedidoOrigenId }) : c; });
+    // Mismo re-etiquetado que en "convertir-cotizacion": si la comisión de
+    // esta cotización escalada ya estaba pagada, su tx pasa a ser del
+    // pedido — ver ese comentario para el porqué completo.
+    if (cot.vendedor && cot.vendedor.nombre && cot.vendedor.estado === "pagado") {
+      state.tx = state.tx.map(function (t) {
+        if (t.origenComisionCotId !== id) return t;
+        return Object.assign({}, t, { origenComisionCotId: "", origenComisionPedidoId: cot.pedidoOrigenId, pedidoId: cot.pedidoOrigenId });
+      });
+      persist("tx");
+    }
     // Terminado — vuelve al índice; ahí se ve, ya resumida, como "Convertida a pedido".
     state.cotizacionEditando = "";
     state.cotizacionesVista = "historial";
