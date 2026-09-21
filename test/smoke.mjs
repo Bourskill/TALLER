@@ -2363,6 +2363,43 @@ assert(txNominaConColchonFalso.origenColchonId === "", "un pago de nómina con o
 assert(txComisionRealIntacta.origenComisionPedidoId === "ped-vendedor-perdido", "...pero una comisión real (tipo \"comision\") con esa misma marca NO se toca");
 assert(repararMarcasOrigenInconsistentes([txComisionRealIntacta]) === false, "y sobre datos ya limpios, no reporta ninguna reparación");
 
+// ---------------------------------------------------------------------------
+// Reporte en producción, mismo día: el usuario notó que "Origen eliminado"
+// solo le salía en SALIDAS de dinero (gastos), nunca en ingresos — pista
+// correcta: es una compra que perdió su seguimiento en cot.compras (el bug
+// de clave inestable de un insumo renombrado, ya evitado hacia adelante en
+// sincronizar-compras-finanzas) mientras la línea que la originó sigue
+// viva. Sin reparar esto, el usuario no puede corregirlo solo desde la UI:
+// volver a marcar "Sí" crea un movimiento NUEVO en vez de reconectar el
+// que ya existe, contando el mismo gasto dos veces.
+// ---------------------------------------------------------------------------
+const { repararComprasSinSeguimiento } = await import("../js/core/calc.js");
+const cotSeguimientoTest = {
+  id: "cot-seguimiento-test", cliente: "Cliente Seguimiento", descripcion: "Prueba seguimiento", fecha: "2026-08-30",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "", vendedor: null,
+  referencias: [],
+  costosGlobales: [
+    { id: "cg-sigue-vivo", nombre: "Sublimación", costo: 38000, proveedorId: "", esServicio: false },
+    { id: "cg-ya-no-existe-de-verdad", nombre: "Ya no existe", costo: 1000, proveedorId: "", esServicio: false }
+  ],
+  serviciosCobrados: [],
+  // cot.compras vacío a propósito: así queda exactamente como el reporte
+  // real (la línea sigue en costosGlobales, pero su seguimiento se perdió).
+  compras: []
+};
+const txSublimacionSinSeguimiento = { id: "tx-sublimacion-sin-seguimiento", tipo: "gasto", concepto: "Compra — Sublimación — Prueba seguimiento", monto: 38000, contraparte: "", fecha: "2026-08-30", cotizacionId: "cot-seguimiento-test", origenCompraClave: "global|cg-sigue-vivo" };
+// Este segundo caso simula un costo global que SÍ se borró de verdad —
+// nunca debe reconectarse, tiene que seguir huérfano.
+cotSeguimientoTest.costosGlobales = cotSeguimientoTest.costosGlobales.filter(function (g) { return g.id !== "cg-ya-no-existe-de-verdad"; });
+const txGenuinoHuerfanoSeguimiento = { id: "tx-genuino-huerfano-seguimiento", tipo: "gasto", concepto: "Compra — Ya no existe — Prueba seguimiento", monto: 1000, contraparte: "", fecha: "2026-08-30", cotizacionId: "cot-seguimiento-test", origenCompraClave: "global|cg-ya-no-existe-de-verdad" };
+let reparoSeguimiento = repararComprasSinSeguimiento([txSublimacionSinSeguimiento, txGenuinoHuerfanoSeguimiento], [cotSeguimientoTest]);
+assert(reparoSeguimiento === true, "repararComprasSinSeguimiento avisa que sí reparó algo");
+assert(cotSeguimientoTest.compras.length === 1, "reconecta SOLO la compra cuya línea sigue viva de verdad (Sublimación), no la que de verdad ya no existe");
+const comprasReconectada = cotSeguimientoTest.compras[0];
+assert(comprasReconectada.clave === "global|cg-sigue-vivo" && comprasReconectada.txId === "tx-sublimacion-sin-seguimiento" && comprasReconectada.costoReal === 38000, "...reconectada al MISMO tx existente (mismo id, mismo monto) — ningún movimiento nuevo, la función solo toca cot.compras");
+assert(!cotSeguimientoTest.compras.some(function (co) { return co.clave === "global|cg-ya-no-existe-de-verdad"; }), "la compra genuinamente eliminada NO se reconecta — sigue huérfana, que es lo correcto");
+assert(repararComprasSinSeguimiento([txSublimacionSinSeguimiento], [cotSeguimientoTest]) === false, "y una vez reconectada, correr la reparación de nuevo no hace nada (ya está al día)");
+
 // El fix de ORIGEN (no solo la reparación de datos viejos): "Aplicar a
 // pedido" sobre una cotización escalada, cuando esa cotización nunca tuvo
 // su propio vendedor (el vendedor se asignó directo en el pedido), ya NO

@@ -259,6 +259,27 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo octava ronda: reconectar, no solo evitar, las compras que ya se habían desconectado)
+
+El usuario dio la pista clave tras la ronda anterior: "solo pasa con las
+salidas de dinero, con los ingresos no sale ese avisito" — apuntaba de
+vuelta al Hallazgo #18 (insumo renombrado desconecta su compra), no a un
+bug nuevo. El fix de #18 evita que vuelva a pasar, pero no reparaba las
+compras que YA se habían desconectado antes de ese fix — el usuario no
+podía arreglarlo solo: volver a marcar "Sí" crea un movimiento NUEVO en
+vez de reconectar el existente, contando el mismo gasto dos veces.
+
+- **Fix:** nueva `repararComprasSinSeguimiento` (core/calc.js, junto a
+  `calcListaCompras`) — para cada tx con `origenCompraClave` sin
+  seguimiento en `cot.compras`, si `calcListaCompras(cot)` confirma que
+  la línea sigue viva, reconstruye la entrada apuntando al MISMO tx
+  existente (ningún movimiento nuevo). Si la línea genuinamente ya no
+  existe, no toca nada — se queda huérfana correctamente.
+- store.js ahora importa de calc.js (antes solo al revés) — es un ciclo
+  seguro porque loadAll() invoca esta función en tiempo de ejecución,
+  mucho después de que ambos módulos ya terminaron de evaluarse.
+- Ver CONTABILIDAD.md, "Hallazgo #20".
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo séptima ronda: "Origen eliminado" falso en comisiones/nómina — dos corrimientos de columna más, nunca detectados, en 2026-09-10 y 2026-09-19)
 
 El usuario siguió reportando la insignia en pedidos reales — una

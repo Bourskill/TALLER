@@ -703,6 +703,33 @@ el dato está mal. Si después de esta ronda sigue apareciendo "Origen
 eliminado" en una COMISIÓN real (no en una compra/gasto/nómina), es ese
 caso — avisar para investigar aparte, con el pedido/id específico.
 
+### 🔴 Hallazgo #20 — el pedazo que faltaba del Hallazgo #18: reconectar (no solo evitar) una compra que perdió su seguimiento. ✅ CORREGIDO
+
+El usuario, tras la ronda de #19, dio una pista clave: **"solo pasa con
+las salidas de dinero, con los ingresos no sale ese avisito"**. Correcto
+— y apuntaba de vuelta al Hallazgo #18, no a un bug nuevo. El fix de #18
+evita que sincronizar-compras-finanzas vuelva a desconectar una compra
+por corregir el nombre de un insumo, pero **no repara las que ya se
+habían desconectado antes de ese fix** — el daño de #18 ya estaba hecho
+en varios pedidos reales (varias líneas por pedido: "Rib Sublimable",
+"Elastico", "Domicilio", "Sublimación", "Alabama"...).
+
+**Por qué el usuario no podía arreglarlo solo:** volver a marcar "Sí" en
+la cotización no reconecta el movimiento existente — crea uno NUEVO
+(`compra.txId` nace vacío), contando el mismo gasto dos veces mientras el
+viejo sigue ahí "eliminado".
+
+**Fix:** nueva reparación automática al cargar,
+`repararComprasSinSeguimiento` (`core/calc.js`, junto a
+`calcListaCompras` — usa esa misma función, por eso vive ahí y no en
+`core/store.js` con las demás auto-reparaciones): para cada tx con
+`origenCompraClave` cuyo `cot.compras` ya no tiene esa clave, revisa si
+`calcListaCompras(cot)` confirma que la línea SIGUE viva de verdad. Si
+sí, reconstruye la entrada de `cot.compras` apuntando al MISMO tx (mismo
+id, mismo monto) — ningún movimiento nuevo. Si la línea genuinamente ya
+no existe, no toca nada: se deja huérfana, que es el comportamiento
+correcto.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

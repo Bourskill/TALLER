@@ -2236,6 +2236,45 @@ export function calcListaCompras(cot) {
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.costoTotal - a.costoTotal; });
 }
 
+// Repara, mutando en el sitio, una compra que perdió su seguimiento en
+// `cot.compras` mientras la línea que la originó SIGUE existiendo de
+// verdad en calcListaCompras — el caso típico: un insumo se marcó "Sí",
+// se sincronizó a Finanzas, y DESPUÉS alguien le corrigió el nombre (una
+// edición normal). Antes de que sincronizar-compras-finanzas dejara de
+// tratar eso como un borrado (ver "insumo/producto: clave inestable ante
+// una edición, no se toca" en modules/cotizaciones.js), la entrada de
+// `cot.compras` YA se había perdido para las compras afectadas por esta
+// misma edición — ese daño quedó hecho y el fix de origen no lo repara
+// solo, porque solo evita que vuelva a pasar de aquí en adelante.
+//
+// Sin `cot.compras`, MARCAS_ORIGEN_SISTEMA (origenCompraClave) no
+// encuentra con qué respaldar el movimiento y lo muestra "Origen
+// eliminado" aunque nada se haya borrado — y el usuario NO puede
+// corregirlo solo reabriendo la cotización: volver a marcar "Sí" ahí crea
+// un movimiento NUEVO en vez de reconectar el que ya existe, contando el
+// mismo gasto dos veces. Esta reparación reconecta el tx EXISTENTE (mismo
+// id, ningún movimiento nuevo) con una entrada de `cot.compras`
+// reconstruida — SOLO cuando calcListaCompras(cot) confirma que la línea
+// sigue viva de verdad; si genuinamente ya no existe, se deja huérfano
+// (comportamiento correcto: dinero real, solo se perdió el papeleo).
+// Reportado en producción 2026-09-20 ("solo pasa con las salidas de
+// dinero" — el patrón exacto de esto, ya que las compras son gastos).
+export function repararComprasSinSeguimiento(tx, cotizaciones) {
+  var huboReparacion = false;
+  (tx || []).forEach(function (t) {
+    if (!t.origenCompraClave || !t.cotizacionId) return;
+    var cot = (cotizaciones || []).filter(function (c) { return c.id === t.cotizacionId; })[0];
+    if (!cot) return;
+    var yaTiene = (cot.compras || []).some(function (co) { return co.clave === t.origenCompraClave; });
+    if (yaTiene) return;
+    var lineaViva = calcListaCompras(cot).filter(function (l) { return l.clave === t.origenCompraClave; })[0];
+    if (!lineaViva) return;
+    cot.compras = (cot.compras || []).concat([{ clave: t.origenCompraClave, estado: "si", costoReal: num(t.monto), txId: t.id }]);
+    huboReparacion = true;
+  });
+  return huboReparacion;
+}
+
 // ---------- costeo de productos del catálogo ----------
 // Un producto del catálogo se costea con la MISMA fórmula que una referencia
 // de cotización, tratándolo como "una referencia de cantidad 1": así un

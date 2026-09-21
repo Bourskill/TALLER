@@ -12,6 +12,12 @@ import { todayStr, uid, num } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
+// calc.js importa `state` DE ESTE archivo — importar de vuelta acá cierra
+// un ciclo, pero es seguro: loadAll() (más abajo) solo invoca esta función
+// en tiempo de ejecución, mucho después de que los dos módulos ya
+// terminaron de evaluarse. La alternativa (duplicar calcListaCompras acá)
+// rompería "una sola fuente por fórmula".
+import { repararComprasSinSeguimiento } from "./calc.js";
 import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
@@ -899,6 +905,15 @@ export async function loadAll() {
     // Mismo criterio de "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararMarcasOrigenInconsistentes(state.tx)) {
       persist("tx");
+    }
+
+    // Auto-reparación: una compra que perdió su seguimiento en
+    // cot.compras (el fix de origen ya evita que vuelva a pasar, ver
+    // repararComprasSinSeguimiento en core/calc.js) mientras la línea que
+    // la originó sigue existiendo de verdad. Mismo criterio de "solo con
+    // red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararComprasSinSeguimiento(state.tx, state.cotizaciones)) {
+      persist("cotizaciones");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"
