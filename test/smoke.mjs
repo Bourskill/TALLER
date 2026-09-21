@@ -1726,6 +1726,50 @@ assert(filaIva.saldo === 0, "pagado por completo CON IVA, el saldo del reporte d
 assert(filaIva.total === 1000000, "\"total\" del reporte se queda en la base SIN IVA a propósito (misma cifra que usa \"ganancia\", el IVA nunca es utilidad)");
 state.pedidos = pedidosPreviosIva;
 
+// ---------------------------------------------------------------------------
+// calcPedidosRango usaba el costo ESTIMADO congelado en p.costo al
+// convertir, para siempre — aunque después se registraran compras reales en
+// Producción, el reporte seguía mostrando "lo cotizado". El usuario lo
+// pidió explícito: "el reporte lo quiero con datos de verdad". Ahora, si el
+// pedido viene de una cotización, usa el costo REAL (calcCotResultadoReal)
+// en su lugar — un pedido rápido (sin cotización) no tiene "real" que
+// comparar, se queda con su único costo tal cual.
+// ---------------------------------------------------------------------------
+const pedidosPreviosRealTest = state.pedidos, cotizacionesPreviasRealTest = state.cotizaciones;
+const cotRealReporteTest = {
+  id: "cot-realreporte-test", clienteId: "", cliente: "Cliente Real Reporte", descripcion: "Prueba reporte real", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-realreporte-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "crealrep1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-realreporte-test", nombre: "Tela", costo: 20000, cantidad: 1, proveedorId: "", esServicio: false }],
+  // Costó menos de lo estimado: real $12.000 contra $20.000 estimado.
+  compras: [{ clave: "global|cg-realreporte-test", estado: "si", costoReal: 12000, txId: "" }]
+};
+const fechaRealReporteTest = "2026-02-01";
+state.pedidos = [{
+  id: "ped-realreporte-test", numeroOp: "OP-REALREP", cliente: "Cliente Real Reporte", descripcion: "Prueba",
+  cantidad: "1", total: 50000, costo: 20000, abono: 50000, estado: "entregado", estadosDef: null,
+  fechaCreacion: fechaRealReporteTest, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-realreporte-test",
+  abonos: [{ id: "ab-realrep", monto: 50000, fecha: fechaRealReporteTest, metodoPago: "Transferencia" }],
+  lineas: [], stockConsumido: [], vendedor: null
+}, {
+  // Pedido rápido, sin cotización: no hay "estimado vs. real" que comparar.
+  id: "ped-rapido-realtest", numeroOp: "OP-RAPIDOREAL", cliente: "Cliente Rápido", descripcion: "Pedido a mano",
+  cantidad: "1", total: 30000, costo: 18000, abono: 30000, estado: "entregado", estadosDef: null,
+  fechaCreacion: fechaRealReporteTest, fechaEntrega: "", tipoCliente: "propio", cotizacionId: "",
+  abonos: [{ id: "ab-rapreal", monto: 30000, fecha: fechaRealReporteTest, metodoPago: "Transferencia" }],
+  lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotRealReporteTest];
+const filasRealReporteTest = rangoPed(fechaRealReporteTest, fechaRealReporteTest);
+const filaRealReporteTest = filasRealReporteTest.find(f => f.id === "ped-realreporte-test");
+assert(!!filaRealReporteTest, "el pedido con cotización aparece en el reporte");
+assert(filaRealReporteTest.costo === 12000, "el reporte usa el costo REAL (lo que de verdad se compró, $12.000) en vez del estimado congelado en el pedido ($20.000)");
+assert(filaRealReporteTest.ganancia === 50000 - 12000, "...y la ganancia del reporte se calcula sobre ese costo real, no sobre el estimado");
+const filaRapidaRealTest = filasRealReporteTest.find(f => f.id === "ped-rapido-realtest");
+assert(filaRapidaRealTest.costo === 18000, "un pedido rápido (sin cotización) sigue usando su único costo (p.costo) tal cual");
+state.pedidos = pedidosPreviosRealTest; state.cotizaciones = cotizacionesPreviasRealTest;
+
 // reactivar lo devuelve a la circulación
 click('[data-action="reactivar-pedido"][data-id="' + pedCancel.id + '"]');
 pc = state.pedidos.find(p => p.id === pedCancel.id);

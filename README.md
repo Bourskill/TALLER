@@ -259,6 +259,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo tercera ronda: el reporte de Pedidos usa costo/ganancia REALES, no el estimado congelado al convertir)
+
+El usuario preguntó si casos como el Hallazgo #23 afectaban los KPI de
+ganancia "y demás" — al rastrearlo, resultó que el reporte de Pedidos
+(Resumen → Reportes, y su PDF) SIEMPRE mostró el costo **estimado**
+(`pedido.costo`, congelado al convertir la cotización), nunca el costo
+real de lo que en verdad se compró — aunque el panel "Estimado vs. Real"
+de la cotización sí lo supiera. Pedido explícito: "el reporte lo quiero
+con datos de verdad".
+
+- **Fix:** `calcPedidosRango` (core/calc.js) usa
+  `calcCotResultadoReal(cot).costoTotal` en vez de `pedido.costo` cuando
+  el pedido viene de una cotización — mismo criterio que ya tenía ese
+  campo (sin comisión, sin IVA), así que es un reemplazo directo. Un
+  pedido rápido (sin cotización) no tiene "real" que comparar, se queda
+  con su único costo.
+- Efecto en cascada correcto y sin tocar nada más: los totales del reporte
+  (`calcResumenPedidos`) y la ganancia por vendedor
+  (`calcVentasPorVendedorRango`) ya suman por estas mismas filas.
+- El "Ganancia" del KPI de Resumen (Balance real menos servicios/abonos
+  pendientes) NO se vio afectado por esto — nunca dependió de
+  `pedido.costo`, siempre vino de los movimientos reales de Finanzas.
+- Ver CONTABILIDAD.md, "Hallazgo #24".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo segunda ronda: un costo real de $0 escrito a propósito no contaba como ahorro — 0 es falsy)
 
 Reportado por el usuario viendo una cotización real: marcó "Domicilio" y

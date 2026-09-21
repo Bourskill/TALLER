@@ -842,6 +842,33 @@ real para decidir precios o comisiones estaba viendo un número
 sistemáticamente más bajo de lo real cada vez que algo terminaba costando
 $0 de lo presupuestado.
 
+### 🟡 Hallazgo #24 — el reporte de Pedidos mostraba costo/ganancia ESTIMADOS para siempre, nunca reales. ✅ CORREGIDO (decisión de diseño, no un bug de cálculo)
+
+Al investigar el Hallazgo #23, se le preguntó al usuario si le preocupaba
+que casos así afectaran "los montos finales de los KPI de ganancia y
+demás" — la respuesta reveló algo más grande. `calcCotResultadoReal`
+(el panel "Estimado vs. Real") solo se usa DENTRO de una cotización — el
+reporte de Pedidos (Resumen → Reportes → tabla de pedidos, y el PDF que la
+reutiliza) leía `pedido.costo`, un número que se congela al convertir la
+cotización en pedido (`datosPedidoDesdeCot`) y **nunca se vuelve a tocar**,
+así que el reporte mostraba para siempre el costo ESTIMADO original, sin
+importar cuántas compras reales se registraran después en Producción.
+Esto NO es un error de cálculo (el número que mostraba era correcto para
+lo que representaba) sino un desfase de alcance: "el reporte" y "el panel
+de la cotización" respondían preguntas distintas sin que nadie lo hubiera
+decidido así a propósito.
+
+**Fix:** `calcPedidosRango` (core/calc.js) ahora usa
+`calcCotResultadoReal(cot).costoTotal` en vez de `pedido.costo` cuando el
+pedido viene de una cotización — mismo criterio (sin comisión, sin IVA)
+que ya tenía `pedido.costo`, así que es un reemplazo directo, no un nuevo
+concepto. Un pedido rápido (sin cotización, sin insumos que comprar por
+separado) no tiene "estimado vs. real" que comparar — se queda con su
+único costo tal cual. Efecto en cascada correcto: `calcResumenPedidos`
+(totales del reporte) y `calcVentasPorVendedorRango` (ganancia por
+vendedor) ya suman por el campo `costo`/`ganancia` de estas mismas filas,
+así que heredan el cambio sin tocarlos.
+
 ---
 
 ## Próximos pasos

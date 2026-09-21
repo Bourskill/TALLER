@@ -2517,6 +2517,22 @@ export function calcProductosVendidosRango(desde, hasta) {
   return filas.sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
 }
 
+// El costo que debe contar en el reporte de un pedido: si viene de una
+// cotización, el costo REAL (estimado + lo que las compras registradas en
+// Producción de verdad costaron, ver calcCotResultadoReal) en vez del
+// estimado congelado en `p.costo` al convertir — ese número nunca se movía
+// después, así que el reporte seguía mostrando "lo cotizado" para siempre,
+// aunque ya se hubiera comprado todo y se supiera el costo real. El
+// usuario lo pidió explícitamente: "el reporte lo quiero con datos de
+// verdad". Sin cotización (pedido rápido, escrito a mano línea por línea)
+// no hay estimado/real que comparar — `p.costo` YA es el único costo que
+// existe, se deja tal cual.
+function costoRealDePedido(p) {
+  if (!p || !p.cotizacionId) return num(p && p.costo);
+  var cot = (state.cotizaciones || []).filter(function (c) { return c.id === p.cotizacionId; })[0];
+  return cot ? calcCotResultadoReal(cot).costoTotal : num(p.costo);
+}
+
 // Pedidos cuya venta cae en el rango, con lo que hace falta para leerlos de
 // un vistazo: qué se vendió, por cuánto, cuánto se cobró y qué falta cobrar.
 // Usa la MISMA fecha que el reporte de productos (fechaPedido), para que un
@@ -2529,6 +2545,7 @@ export function calcPedidosRango(desde, hasta) {
     })
     .map(function (p) {
       var total = num(p.total), abonado = num(p.abono);
+      var costo = costoRealDePedido(p);
       return {
         id: p.id, fecha: fechaPedido(p), numeroOp: p.numeroOp || "—",
         cliente: p.cliente || "—", descripcion: p.descripcion || "—",
@@ -2542,7 +2559,7 @@ export function calcPedidosRango(desde, hasta) {
         // por completo con IVA activo daba un saldo negativo de
         // exactamente el IVA, y esta tabla (y el PDF que la reutiliza) lo
         // pintaba en verde como si fuera a favor del cliente.
-        total: total, costo: num(p.costo), ganancia: total - num(p.costo),
+        total: total, costo: costo, ganancia: total - costo,
         abonado: abonado, saldo: calcSaldoPedido(p),
         // El cancelado SIGUE apareciendo en la lista —es el registro de que
         // existió— pero va marcado, y calcResumenPedidos lo deja fuera de los
