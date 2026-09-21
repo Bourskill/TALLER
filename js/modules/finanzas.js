@@ -271,7 +271,7 @@ function renderFila(t) {
   return '<div class="tx-row">' +
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) +
-    (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde.">origen eliminado</span>' : "") +
+    (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde. (' + esc(huerfano.campo) + ": " + esc(huerfano.valor) + ')">origen eliminado</span>' : "") +
     ((t.serviciosDescuento || []).length
       ? ' <span class="tag" title="Descontado de: ' + (t.serviciosDescuento || []).map(function (d) { return esc(d.nombre) + " " + fmt(d.monto); }).join(", ") + '">📋 ' + (t.serviciosDescuento.length === 1 ? esc(t.serviciosDescuento[0].nombre) : t.serviciosDescuento.length + " servicios") + "</span>"
       : "") +

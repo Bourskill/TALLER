@@ -449,7 +449,12 @@ export function origenSistemaDeTx(t) {
 export function origenSistemaHuerfano(t) {
   var marca = marcaDeTx(t);
   if (!marca || marca.existe(t)) return null;
-  return { que: marca.que };
+  // `campo`/`valor` — el identificador interno exacto que no encontró con
+  // qué respaldarse, no solo la explicación humana (`que`). Auditoría
+  // financiera 2026-09-20, post-mortem: sin esto, diagnosticar un caso real
+  // exigía adivinar a ciegas cuál de los ~10 campos de marca era y con qué
+  // valor — con esto el usuario lo puede leer directo del tooltip.
+  return { que: marca.que, campo: marca.campo, valor: t[marca.campo] };
 }
 
 // Los movimientos que generó una COTIZACIÓN: la comisión de su vendedor, las

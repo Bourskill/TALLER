@@ -1767,11 +1767,20 @@ state.tx.unshift({ id: "tx-huerfano", tipo: "ingreso", concepto: "Abono de un pe
   monto: 90000, fecha: fechaDePrueba, pedidoId: "pedido-que-no-existe", origenAbonoId: "abono-fantasma" });
 const txHuerfano = state.tx.find(t => t.id === "tx-huerfano");
 assert(origenSistemaDeTx(txHuerfano) === null, "un movimiento cuyo origen ya no existe deja de estar protegido");
-assert(!!origenSistemaHuerfano(txHuerfano), "y se reconoce como huérfano, para poder avisarlo en pantalla");
+const huerfanoInfo = origenSistemaHuerfano(txHuerfano);
+assert(!!huerfanoInfo, "y se reconoce como huérfano, para poder avisarlo en pantalla");
+// Post-mortem 2026-09-20: diagnosticar un caso real en producción exigía
+// adivinar a ciegas cuál de los ~10 campos de marca era y con qué valor —
+// origenSistemaHuerfano ahora también devuelve el campo/valor EXACTOS
+// (no solo la explicación humana `que`), y el tooltip de la insignia los
+// muestra, para que el reporte del usuario ya traiga el dato preciso.
+assert(huerfanoInfo.campo === "origenAbonoId" && huerfanoInfo.valor === "abono-fantasma", "...con el campo y el valor EXACTOS que no encontraron respaldo, no solo la explicación humana");
 
 click('[data-action="tab"][data-tab="finanzas"]');
 click('[data-action="finanzas-vista"][data-val="historial"]');
 assert(!!document.querySelector('[data-action="filtro-tx"][data-val="huerfanos"]'), "aparece el filtro para encontrar los movimientos sueltos");
+const insigniaHuerfano = document.querySelector('.tag[title*="origenAbonoId"]');
+assert(!!insigniaHuerfano && insigniaHuerfano.title.indexOf("abono-fantasma") !== -1, "la insignia \"origen eliminado\" en pantalla trae el campo y el valor exactos en su tooltip, no solo el texto genérico");
 click('[data-action="remove-tx"][data-id="tx-huerfano"]');
 assert(!state.tx.some(t => t.id === "tx-huerfano"), "un movimiento huérfano SÍ se puede borrar desde Finanzas");
 assert(state.txPapelera.some(t => t.id === "tx-huerfano"), "y va a la papelera como cualquier otro");
