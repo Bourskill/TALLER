@@ -543,7 +543,15 @@ export var actions = {
         // porque el insumo de la plantilla no guarda categoriaId — sin esto,
         // un insumo marcado servicio por su CATEGORÍA (no por su Unidad)
         // llegaba a la plantilla sin ninguna forma de saberlo.
-        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }; });
+        //
+        // `origenCatalogoId` se guarda por el mismo motivo que en
+        // nuevoInsumo: es lo que permite avisar más adelante si el catálogo
+        // cambió de precio (ver insumoCambioDeCatalogo en core/calc.js).
+        // Antes NO se guardaba acá — un insumo agregado a una plantilla
+        // desde el catálogo (y de ahí a cualquier cotización vía "Aplicar
+        // plantilla") nunca quedaba vinculado, así que el aviso jamás podía
+        // aparecer para ninguno de ellos. Reportado en producción 2026-09-21.
+        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item), origenCatalogoId: item.id }; });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }

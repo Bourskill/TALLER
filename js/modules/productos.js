@@ -573,7 +573,11 @@ export var actions = {
         // esServicio se resuelve UNA vez, acá (igual que en plantillas.js):
         // el insumo del producto no guarda categoriaId, así que sin esto un
         // insumo marcado servicio por su CATEGORÍA se perdía al copiarlo.
-        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item) }; });
+        // `origenCatalogoId` es lo mismo que ya hace nuevoInsumo (ver
+        // modules/cotizaciones.js) — sin esto, el aviso de "el catálogo
+        // cambió de precio" nunca podía aparecer para un insumo agregado a
+        // un producto del catálogo. Reportado en producción 2026-09-21.
+        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item), origenCatalogoId: item.id }; });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }

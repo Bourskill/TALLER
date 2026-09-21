@@ -1718,7 +1718,13 @@ export var actions = {
         // esServicio ya viene resuelto desde la plantilla (ver add-pla-insumo-
         // catalogo en modules/plantillas.js) — se hereda tal cual, no se
         // vuelve a calcular acá (la referencia tampoco guarda categoriaId).
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio };
+        // `origenCatalogoId` se hereda igual, si la plantilla lo trae — es
+        // lo que permite avisar acá si el catálogo cambió de precio (ver
+        // insumoCambioDeCatalogo en core/calc.js). Reportado en producción
+        // 2026-09-21: sin esto, TODO insumo agregado vía "Aplicar
+        // plantilla" perdía el vínculo, sin importar que la plantilla sí lo
+        // tuviera.
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "" };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1764,7 +1770,9 @@ export var actions = {
         patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
           // esServicio ya viene resuelto desde el producto (ver
           // confirmar-insumo-picker-producto en modules/productos.js).
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio };
+          // `origenCatalogoId` se hereda igual — ver el mismo comentario en
+          // "aplicar-plantilla" más arriba.
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "" };
         }));
         if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
       }

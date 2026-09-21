@@ -949,6 +949,54 @@ esta vez con un insumo que puede vivir en 3 listas distintas de una
 cotización (insumo de referencia, costo global, servicio cobrado) pero
 solo UNA de ellas tenía la comparación contra el catálogo.
 
+### 🔴 Hallazgo #27 — la causa REAL: "Aplicar plantilla"/"Aplicar producto" nunca copiaban `origenCatalogoId`. ✅ CORREGIDO
+
+El Hallazgo #26 (arriba) fue una conclusión apresurada: se presentó como
+si fuera EL caso del usuario sin que él lo hubiera confirmado — asumido
+solo porque "Domicilio" (un costo global) apareció en un screenshot
+anterior de esta misma conversación. El usuario corrigió esto de
+inmediato ("de donde sacaste que me molestaba solo 'Domicilio'?") y no
+era esa la causa.
+
+**El hallazgo real, encontrado al buscar sistemáticamente TODOS los
+sitios del código que copian un insumo desde el catálogo** (no solo el
+que ya se había corregido): "Aplicar plantilla" y "Aplicar producto" —
+el camino MÁS COMÚN para armar una referencia rápido, mucho más que
+agregar insumos uno por uno — nunca guardaban `origenCatalogoId`. Ni
+siquiera al agregar un insumo DIRECTO desde el catálogo a una plantilla o
+a un producto (`confirmar-insumo-picker-plantilla`/
+`confirmar-insumo-picker-producto`): el vínculo se perdía desde ahí, dos
+pasos antes de llegar a la cotización.
+
+**Fix, en los 4 sitios:**
+- `confirmar-insumo-picker-plantilla` (modules/plantillas.js) y
+  `confirmar-insumo-picker-producto` (modules/productos.js): ahora
+  guardan `origenCatalogoId: item.id` al agregar un insumo del catálogo.
+- `aplicar-plantilla`/`aplicar-producto` (modules/cotizaciones.js): ahora
+  propagan `origenCatalogoId: ins.origenCatalogoId || ""` al copiar el
+  insumo a la referencia.
+
+**Reparación retroactiva:** `repararOrigenCatalogoInsumos` (core/store.js,
+corre en `loadAll()`) reconstruye el vínculo perdido en TODO lo ya
+guardado (plantillas, productos, y referencias de cotizaciones) — por
+NOMBRE, y solo cuando ese nombre coincide con EXACTAMENTE un insumo del
+catálogo. Un nombre ambiguo (dos insumos del catálogo con el mismo
+nombre) se deja sin reparar a propósito: mejor no avisar que vincular al
+insumo equivocado. Sin esto, el fix de código de arriba solo habría
+servido para insumos agregados DE AQUÍ EN ADELANTE — todas las
+plantillas/productos/cotizaciones ya creadas habrían seguido rotas para
+siempre.
+
+**Lección de proceso (la más importante de esta ronda):** al investigar
+"por qué algo no pasa", no basta con encontrar UN sitio con el bug y
+darlo por resuelto — hay que buscar sistemáticamente TODOS los caminos
+que llegan al mismo resultado final antes de anunciar una causa. Presentar
+una hipótesis razonable (pero no confirmada por el usuario) como si fuera
+el diagnóstico final generó una ronda completa de trabajo real (#26)
+sobre un caso que nunca se confirmó, mientras la causa de mayor impacto
+—la que afecta el camino MÁS usado para construir una cotización—
+seguía sin tocarse.
+
 ---
 
 ## Próximos pasos

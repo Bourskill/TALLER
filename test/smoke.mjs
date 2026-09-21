@@ -296,6 +296,7 @@ assert(
   state.plantillasPrendas.find(p => p.id === nuevaPlaId).insumos.length === 1,
   "agrega insumo del catálogo a la plantilla"
 );
+assert(state.plantillasPrendas.find(p => p.id === nuevaPlaId).insumos[0].origenCatalogoId === catItemId, "...y ese insumo queda vinculado al insumo del catálogo del que salió (origenCatalogoId) — antes esto no se guardaba, y el aviso de \"el catálogo cambió de precio\" nunca podía aparecer para ningún insumo agregado a una plantilla (reportado en producción 2026-09-21)");
 
 // --- flujos de producción: se crean y editan directamente en Plantillas ---
 const flujosPrevios = state.plantillasEstados.length;
@@ -5077,6 +5078,83 @@ assert(cotTrasMantenerServicio.serviciosCobrados[0].costo === 3000, "\"Mantener\
 assert(!document.querySelector('[data-action="actualizar-insumo-catalogo"][data-ins="sc-catglobal-test"]'), "...y su aviso desaparece — ya se decidió, a conciencia, mantener el número de la cotización");
 
 state.pedidos = pedidosPreviosCatGlobalTest; state.cotizaciones = cotizacionesPreviasCatGlobalTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// --- El mismo vínculo con el catálogo (origenCatalogoId) se perdía al
+// copiar un insumo a una plantilla o a un producto, y de ahí a la
+// referencia de una cotización vía "Aplicar plantilla"/"Aplicar
+// producto" — el camino MÁS COMÚN para armar una referencia rápido, más
+// común incluso que agregar insumos uno por uno. El usuario lo confirmó
+// tras corregir mi primera teoría (que asumí sin que él lo dijera): no
+// era un costo global, era justo este otro hueco. Se prueba el camino
+// completo (plantilla -> cotización -> aviso) y la reparación retroactiva
+// para lo que ya se guardó sin el vínculo (por nombre, con cuidado de NO
+// adivinar si el nombre es ambiguo en el catálogo).
+const pedidosPreviosPlaProdTest = state.pedidos, cotizacionesPreviasPlaProdTest = state.cotizaciones,
+  plantillasPreviasPlaProdTest = state.plantillasPrendas, productosPreviosPlaProdTest = state.productos,
+  catalogoPrevioPlaProdTest = state.catalogoInsumos;
+
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "ins-plaprod-1", nombre: "Tela Plaprod", unidad: "m", costo: 4000, tipo: "tela", categoriaId: "", proveedorId: "" },
+  // Dos insumos con el MISMO nombre normalizado: a propósito, para probar
+  // que la reparación retroactiva se abstiene de adivinar en vez de
+  // vincular al azar con cualquiera de los dos.
+  { id: "ins-ambiguo-a-test", nombre: "Broche", unidad: "UND", costo: 500, tipo: "por_prenda", categoriaId: "", proveedorId: "" },
+  { id: "ins-ambiguo-b-test", nombre: "broche ", unidad: "UND", costo: 800, tipo: "por_prenda", categoriaId: "", proveedorId: "" }
+]);
+state.plantillasPrendas = [{
+  id: "pla-plaprod-test", nombre: "Camiseta Plaprod", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [{ id: "pla-ins-plaprod-test", nombre: "Tela Plaprod", unidad: "m", costo: 4000, tipo: "tela", cantidad: 1, esServicio: false, origenCatalogoId: "ins-plaprod-1" }]
+}];
+state.productos = [];
+state.clientes.push({ id: "cli-plaprod-test", nombre: "Cliente Plaprod", tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] });
+state.cotizaciones = [{
+  id: "cot-plaprod-test", clienteId: "cli-plaprod-test", cliente: "Cliente Plaprod", descripcion: "Prueba plantilla/producto", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cplaprod1",
+  referencias: [{
+    id: "ref-plaprod-test", nombre: "", imagenUrl: "", consumoAprox: 1, cantidadPedida: 5, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [], detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-plaprod-test"]');
+setChange('[data-action-change="aplicar-plantilla"][data-cot="cot-plaprod-test"][data-ref="ref-plaprod-test"]', "pla-plaprod-test");
+
+var cotTrasAplicarPlaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-plaprod-test"; })[0];
+var insumoCopiadoPlaTest = cotTrasAplicarPlaTest.referencias[0].insumos[0];
+assert(insumoCopiadoPlaTest.origenCatalogoId === "ins-plaprod-1", "\"Aplicar plantilla\" propaga el vínculo con el catálogo al insumo copiado — antes se perdía siempre, sin importar que la plantilla sí lo tuviera");
+
+click('[data-action="guardar-cotizacion"][data-id="cot-plaprod-test"]');
+state.tab = "catalogo"; render();
+setChange('[data-action-change="set-cat-campo"][data-id="ins-plaprod-1"][data-campo="costo"]', "7000");
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-plaprod-test"]');
+assert(!!document.querySelector(".ins-aviso-cambio"), "y con eso, el aviso de \"el catálogo cambió\" SÍ aparece para un insumo que llegó a la cotización vía \"Aplicar plantilla\"");
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- Reparación retroactiva: dato viejo, guardado ANTES de este fix (sin
+// origenCatalogoId en la plantilla ni en la cotización) --
+state.plantillasPrendas.find(function (p) { return p.id === "pla-plaprod-test"; }).insumos[0].origenCatalogoId = "";
+state.cotizaciones.find(function (c) { return c.id === "cot-plaprod-test"; }).referencias[0].insumos[0].origenCatalogoId = "";
+state.productos = [{
+  id: "pro-plaprod-test", nombre: "Producto Plaprod", origen: "taller", precioVenta: 60000, costoCompra: 0, proveedorId: "", imagenUrl: "", consumoSugerido: 1, flujoEstadosId: "",
+  insumos: [{ id: "pro-ins-plaprod-test", nombre: "Broche", unidad: "UND", costo: 500, tipo: "por_prenda", cantidad: 1, esServicio: false, origenCatalogoId: "" }],
+  tallas: []
+}];
+const { repararOrigenCatalogoInsumos: repararCatTest } = await import("../js/core/store.js");
+const huboReparacionTest = repararCatTest(state.catalogoInsumos, state.plantillasPrendas, state.productos, state.cotizaciones);
+assert(huboReparacionTest === true, "la reparación retroactiva detecta y arregla los vínculos perdidos");
+assert(state.plantillasPrendas.find(function (p) { return p.id === "pla-plaprod-test"; }).insumos[0].origenCatalogoId === "ins-plaprod-1", "...reconstruye el vínculo de la PLANTILLA por nombre, contra el insumo correcto del catálogo");
+assert(state.cotizaciones.find(function (c) { return c.id === "cot-plaprod-test"; }).referencias[0].insumos[0].origenCatalogoId === "ins-plaprod-1", "...y también el de la COTIZACIÓN ya guardada, sin que el usuario tenga que volver a aplicar nada a mano");
+assert(state.productos.find(function (p) { return p.id === "pro-plaprod-test"; }).insumos[0].origenCatalogoId === "", "...pero NO adivina cuando el nombre es AMBIGUO en el catálogo (\"Broche\" existe dos veces) — mejor no reparar que vincular al insumo equivocado");
+
+state.pedidos = pedidosPreviosPlaProdTest; state.cotizaciones = cotizacionesPreviasPlaProdTest;
+state.plantillasPrendas = plantillasPreviasPlaProdTest; state.productos = productosPreviosPlaProdTest;
+state.catalogoInsumos = catalogoPrevioPlaProdTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
 console.log("\n✅ Todos los checks de humo pasaron.");

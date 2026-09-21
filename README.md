@@ -259,6 +259,27 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo sexta ronda: la causa REAL — "Aplicar plantilla"/"Aplicar producto" nunca copiaban el vínculo con el catálogo)
+
+La ronda anterior (#26) se presentó como si fuera el caso del usuario sin
+que él lo hubiera confirmado — el usuario corrigió esto de inmediato. La
+causa real, encontrada buscando sistemáticamente TODOS los sitios que
+copian un insumo desde el catálogo: "Aplicar plantilla" y "Aplicar
+producto" — el camino MÁS usado para armar una referencia — nunca
+guardaban `origenCatalogoId`, ni siquiera al agregar el insumo al
+catálogo de la plantilla/producto en primer lugar.
+
+- **Fix en los 4 sitios de origen:** `confirmar-insumo-picker-plantilla`
+  (modules/plantillas.js), `confirmar-insumo-picker-producto`
+  (modules/productos.js), y `aplicar-plantilla`/`aplicar-producto`
+  (modules/cotizaciones.js) ahora guardan/propagan `origenCatalogoId`.
+- **Reparación retroactiva:** `repararOrigenCatalogoInsumos`
+  (core/store.js, en `loadAll()`) reconstruye el vínculo perdido en todo
+  lo ya guardado (plantillas, productos, cotizaciones) por NOMBRE —
+  solo cuando coincide con exactamente un insumo del catálogo; un nombre
+  ambiguo se deja sin tocar a propósito.
+- Ver CONTABILIDAD.md, "Hallazgo #27".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo quinta ronda: el aviso de "el catálogo cambió" no revisaba costos globales ni servicios cobrados)
 
 El usuario reportó: "actualicé el valor de un insumo y no se vio

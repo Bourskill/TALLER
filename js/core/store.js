@@ -8,7 +8,7 @@
 // el futuro varias partes de la UI reaccionen al mismo cambio sin acoplarse.
 
 import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./constants.js";
-import { todayStr, uid, num } from "./utils.js";
+import { todayStr, uid, num, norm } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
 import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
@@ -648,6 +648,57 @@ export function repararMarcasOrigenInconsistentes(tx) {
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`)
+// que un insumo pudo perder al copiarse a una plantilla, a un producto del
+// catálogo nuevo, o de cualquiera de esos dos a la referencia de una
+// cotización. El bug de origen (en los 4 sitios que copian un insumo desde
+// el catálogo o desde una plantilla/producto, ya corregidos) nunca guardaba
+// ese campo — así que el aviso de "el catálogo cambió de precio" (ver
+// insumoCambioDeCatalogo en core/calc.js) nunca podía aparecer para NINGÚN
+// insumo agregado por esos caminos, solo para el que se agrega directo a
+// una referencia desde "Insumos predeterminados". Reportado en producción
+// 2026-09-21: "actualicé el valor de un insumo y no se vio reflejado en
+// cotización... guardado o no, no se actualiza el insumo".
+//
+// El vínculo perdido no se puede recuperar con certeza (no quedó guardado
+// en ningún lado a qué insumo del catálogo pertenecía cada copia) — se
+// reconstruye por NOMBRE, y solo cuando ese nombre coincide con
+// EXACTAMENTE un insumo del catálogo (un nombre que existe dos veces en el
+// catálogo se deja como está: mejor no avisar que adivinar mal). Es mejor
+// esfuerzo, igual que el resto de reparaciones de esta lista: un falso
+// positivo ocasional (un insumo escrito a mano que por casualidad se llama
+// igual que uno del catálogo) como mucho ofrece un aviso de más, que se
+// descarta con "Mantener" sin ningún daño real — el costo de NO reparar es
+// peor, el aviso se queda roto para siempre en todo lo ya creado.
+export function repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, productos, cotizaciones) {
+  var idPorNombre = {};
+  var nombresAmbiguos = {};
+  (catalogoInsumos || []).forEach(function (i) {
+    var clave = norm(String(i.nombre || "").trim());
+    if (!clave) return;
+    if (idPorNombre[clave] && idPorNombre[clave] !== i.id) { nombresAmbiguos[clave] = true; return; }
+    idPorNombre[clave] = i.id;
+  });
+  function repararLista(insumos) {
+    var hubo = false;
+    (insumos || []).forEach(function (ins) {
+      if (ins.origenCatalogoId) return;
+      var clave = norm(String(ins.nombre || "").trim());
+      if (!clave || nombresAmbiguos[clave] || !idPorNombre[clave]) return;
+      ins.origenCatalogoId = idPorNombre[clave];
+      hubo = true;
+    });
+    return hubo;
+  }
+  var huboReparacion = false;
+  (plantillas || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (productos || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (cotizaciones || []).forEach(function (c) {
+    (c.referencias || []).forEach(function (r) { if (repararLista(r.insumos)) huboReparacion = true; });
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -935,6 +986,15 @@ export async function loadAll() {
     // red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararComprasSinSeguimiento(state.tx, state.cotizaciones)) {
       persist("cotizaciones");
+    }
+
+    // Auto-reparación: origenCatalogoId perdido al copiar un insumo a una
+    // plantilla, a un producto, o de ahí a una cotización (ver
+    // repararOrigenCatalogoInsumos más arriba — los 4 sitios de origen ya
+    // están corregidos, esto solo reconstruye lo ya guardado). Mismo
+    // criterio de "solo con red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararOrigenCatalogoInsumos(state.catalogoInsumos, state.plantillasPrendas, state.productos, state.cotizaciones)) {
+      persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"
