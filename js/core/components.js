@@ -4,7 +4,7 @@
 
 import { esc, norm, fmt, num } from "./utils.js";
 import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias } from "./calc.js";
-import { TIPOS_COSTO } from "./constants.js";
+import { TIPOS_COSTO, TIPOS_ENLAZABLES } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
 // Compartido entre Cotizaciones, Catálogo y Plantillas para que el texto de
@@ -84,6 +84,36 @@ export function renderTipoCostoOptions(current, enCotizacion) {
   }).map(function (k) {
     return '<option value="' + k + '" ' + (k === current ? "selected" : "") + '>' + esc(TIPOS_COSTO[k].label) + "</option>";
   }).join("");
+}
+
+// <option> del enlace de cantidad (ver TIPOS_ENLAZABLES en core/constants.js
+// y cantidadEfectivaInsumo en core/calc.js) — compartido entre Catálogo,
+// Plantillas, Productos y Cotizaciones para que el texto salga idéntico en
+// los cuatro lugares donde se puede definir o ver un enlace.
+export function renderEnlaceOptions(current) {
+  return '<option value="">Sin enlace</option>' +
+    TIPOS_ENLAZABLES.map(function (k) {
+      return '<option value="' + k + '" ' + (k === current ? "selected" : "") + '>' + esc(TIPOS_COSTO[k].label) + "</option>";
+    }).join("");
+}
+
+// Celda "Cant." de un insumo dentro de una referencia/plantilla/producto —
+// compartida entre los tres para que un insumo enlazado se vea y se
+// explique igual en cualquiera de los tres lugares. Un insumo SIN enlace
+// se edita a mano como siempre (deshabilitado solo para "fijo_pedido", que
+// no tiene cantidad propia — ver TIPOS_COSTO). Uno CON enlace muestra la
+// suma ya calculada, de solo lectura (nunca se guarda, ver
+// cantidadEfectivaInsumo), con el desglose de dónde sale en el tooltip —
+// para que enlazar no se sienta como una caja negra.
+export function renderCeldaCantidadInsumo(insumo, contenedor, attrs) {
+  if (insumo.enlaceTipo) {
+    var fuentes = ((contenedor && contenedor.insumos) || []).filter(function (i) { return i.id !== insumo.id && i.tipo === insumo.enlaceTipo; });
+    var total = fuentes.reduce(function (a, i) { return a + num(i.cantidad); }, 0);
+    var tipoLabel = (TIPOS_COSTO[insumo.enlaceTipo] || {}).label || insumo.enlaceTipo;
+    var desglose = fuentes.length ? fuentes.map(function (i) { return num(i.cantidad); }).join(" + ") + " = " + total : "ninguno todavía";
+    return '<span class="amount" title="Enlazado a ' + fuentes.length + ' insumo(s) tipo \'' + esc(tipoLabel) + "': " + esc(desglose) + '">🔗 ' + total + "</span>";
+  }
+  return '<input type="number" class="mini-input" style="width:100%" value="' + esc(insumo.cantidad) + '"' + attrs + ' data-campo="cantidad" ' + (insumo.tipo === "fijo_pedido" ? "disabled" : "") + " />";
 }
 
 // ---------------------------------------------------------------------------

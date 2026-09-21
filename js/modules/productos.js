@@ -15,14 +15,14 @@
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
-import { renderTipoCostoOptions, renderHelp, renderTarjetaMini, renderToggleSeccion, renderExploradorInsumos } from "../core/components.js";
+import { renderTipoCostoOptions, renderEnlaceOptions, renderCeldaCantidadInsumo, renderHelp, renderTarjetaMini, renderToggleSeccion, renderExploradorInsumos } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
-import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio } from "../core/calc.js";
+import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio, cantidadEfectivaInsumo } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
 import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
 
-var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 70px 30px";
+var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 110px 70px 30px";
 var TALLA_COLS = "minmax(90px,1fr) 90px 30px";
 var MOV_COLS = "90px 90px 70px 70px minmax(120px,1fr)";
 
@@ -351,14 +351,16 @@ function renderCosteoProduccion(p) {
     "</select></div>" +
     "</div>";
 
-  html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant./mult.</span><span></span></div>';
+  html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant./mult.</span><span></span></div>';
   insumos.forEach(function (i) {
+    var attrsIns = ' data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '"';
     html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';">' +
-      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
-      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="costo" />' +
-      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
-      '<span class="mobile-th">Cant./mult.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' + (i.tipo === "fijo_pedido" ? "disabled" : "") + " />" +
+      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '"' + attrsIns + ' data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '"' + attrsIns + ' data-campo="unidad" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
+      '<span class="mobile-th">Enlace</span><select class="mini-input" style="width:100%"' + attrsIns + ' data-campo="enlaceTipo" title="Suma sola la cantidad de todos los insumos del tipo elegido, en vez de escribirla a mano.">' + renderEnlaceOptions(i.enlaceTipo) + "</select>" +
+      '<span class="mobile-th">Cant./mult.</span>' + renderCeldaCantidadInsumo(i, p, attrsIns) +
       '<button class="btn danger small" data-action="remove-pro-insumo" data-pro="' + p.id + '" data-ins="' + i.id + '">✕</button>' +
       "</div>";
   });
@@ -582,7 +584,7 @@ export var actions = {
         // producto — mismo criterio que en plantillas.js/nuevoInsumo.
         var nuevos = items.map(function (item) {
           var esTela = item.tipo === "tela";
-          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id };
+          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id, enlaceTipo: item.enlaceTipo || "" };
         });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
@@ -602,6 +604,9 @@ export var actions = {
       var insumos = (p.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
         var patch = {}; patch[campo] = numerico ? num(el.value) : el.value;
+        // Al desenlazar, congela la última cantidad calculada (ver mismo
+        // criterio en set-ins-campo, modules/cotizaciones.js).
+        if (campo === "enlaceTipo" && !el.value && i.enlaceTipo) patch.cantidad = cantidadEfectivaInsumo(i, p);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, p, { insumos: insumos });

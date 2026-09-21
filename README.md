@@ -259,6 +259,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo segunda ronda: enlazar la cantidad de un insumo a la suma de otros — ej. "Sublimación" enlazada a "Tela")
+
+Efecto secundario de la ronda anterior (consumo de tela independiente
+por insumo): el usuario notó que eso volvió MANUAL algo que antes se
+actualizaba solo — "Sublimación" o "Corte" necesitan sumar la cantidad
+de todas las telas de la referencia, y antes lo hacían gratis porque
+todas leían el mismo "Consumo tela (MT)". Pidió una funcionalidad
+nueva: poder enlazar la cantidad de un insumo a la de otros.
+
+- Nueva columna **"Enlace"** en Insumos (catálogo), Plantillas,
+  Productos y Cotizaciones — se elige un tipo (ej. "Tela") y la
+  cantidad de ese insumo pasa a SUMAR sola la de todos los insumos de
+  ese tipo en el mismo contenedor, en vez de escribirse a mano.
+- `cantidadEfectivaInsumo` (core/calc.js): nunca guarda el resultado,
+  siempre lo recalcula a partir de los insumos actuales — corregir una
+  tela actualiza solo el costo de todo lo que esté enlazado a ella, sin
+  tocar ninguna otra fila.
+- Se puede **predefinir** en el Catálogo (ej. "Sublimación" siempre
+  enlazada a "Tela") — se hereda al agregar el insumo a cualquier
+  plantilla, producto o cotización, sin configurarlo cada vez.
+- Desenlazar congela la última cantidad calculada, en vez de saltar al
+  valor manual viejo que tenía guardado desde antes de enlazarse.
+- Ver CONTABILIDAD.md, "Hallazgo #32".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo primera ronda: se elimina el interruptor "se fabrica en el taller / se compra a proveedor" — una prenda comprada hecha es, desde ahora, un insumo más)
 
 El usuario fue un paso más allá de la ronda anterior: "creo que es mejor

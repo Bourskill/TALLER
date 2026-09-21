@@ -1286,6 +1286,77 @@ Finanzas después de migrar) antes de avisarle al usuario.
 
 ---
 
+### 🟡 Hallazgo #32 — nueva funcionalidad: enlazar la cantidad de un insumo a la suma de otros (ej. "Sublimación" enlazada a "Tela"). ✅ IMPLEMENTADO
+
+Efecto secundario real del Hallazgo #28 (consumo de tela independiente
+por insumo): antes, UN solo "Consumo tela (MT)" a nivel de referencia
+alimentaba sin querer todo lo que dependía de él — al independizar cada
+tela, cualquier insumo relacionado (sublimación, corte) que antes se
+actualizaba solo pasó a tener que corregirse a mano cada vez. El usuario
+lo señaló directo: "como ya no todo depende de 1 único consumo de tela,
+entonces ahora todos los valores pasan a ponerse de manera manual,
+contradictorio con lo que se intenta lograr" — y pidió la funcionalidad
+opuesta: poder enlazar la cantidad de un insumo a la de otros, con un
+ejemplo exacto ("si tengo 1 metro de una tela y otros 2 metros de otra,
+a la final voy a sublimar 3 metros").
+
+**Mecanismo elegido — enlazar por TIPO, no insumo por insumo:** en vez
+de elegir a mano cuáles insumos sumar (se rompe solo en cuanto se agrega
+un tercero y se olvida marcarlo), la regla es "suma la cantidad de TODOS
+los insumos de un tipo elegido, en esta misma referencia/plantilla/
+producto". Así un insumo nuevo del mismo tipo se suma solo, sin volver a
+configurar nada. Confirmado con el usuario antes de construir.
+
+**`insumo.enlaceTipo`** (nuevo campo, "" = sin enlazar): guarda el tipo
+elegido (`tela`, `por_prenda` o `producto_comprado` — ver
+`TIPOS_ENLAZABLES`, `core/constants.js`; `fijo_pedido` queda afuera
+porque su costo no depende de ninguna cantidad propia, y `global`/
+`servicio_cobrado` ni viven en los insumos de una referencia).
+
+**`cantidadEfectivaInsumo(insumo, contenedor)`** (core/calc.js): la
+ÚNICA fuente de "cuánto vale de verdad la cantidad de este insumo" de
+aquí en adelante — la manual, o la suma de sus insumos de origen si está
+enlazado. NUNCA se guarda el resultado: se recalcula siempre a partir de
+los insumos actuales del contenedor (`.insumos`, sirve igual para una
+referencia, una plantilla o un producto), así que nunca puede quedar
+desincronizado — mismo criterio de "una sola fuente por fórmula" de
+siempre (ver [[rigor_matematico_dinero]]). `calcCostoPrenda` y la
+`cantidadFisica` de `agregarInsumosDeReferencias` (lista de compras) se
+migraron a usarla en vez de leer `insumo.cantidad` directo. A propósito
+NO resuelve el enlace de los insumos de origen de forma recursiva (suma
+su cantidad cruda) — evita cualquier riesgo de ciclo sin necesitar
+detección de ciclos; el alcance de v1 es un solo nivel, que cubre los
+casos reales pedidos.
+
+**Predefinición (Catálogo → Insumos) + aplicación (Cotizaciones,
+Plantillas, Productos):** el usuario pidió expresamente que "Sublimación
+pudiera detectar la categoría 'tela' del insumo y automáticamente hacer
+el enlace" y que la columna "Enlace" existiera en los cuatro lugares
+donde vive un insumo (confirmado explícitamente que también en
+Plantillas y Productos, no solo Insumos/Cotización). Un insumo del
+catálogo con `enlaceTipo` predefinido lo trae puesto al copiarse a
+cualquiera de los tres (mismo patrón que `esServicio`/
+`origenCatalogoId`) — no hay que configurarlo cada vez que se usa.
+
+**UX del campo "Cant.":** un insumo enlazado deja de ser editable — se
+ve como un valor calculado (🔗 + el total), con un tooltip que explica
+de dónde sale la suma, para que enlazar no se sienta como una caja
+negra. Al DESenlazar, se congela la última cantidad calculada en el
+campo manual (en vez de saltar al valor viejo que tenía guardado desde
+antes de enlazarse, que nunca se actualizó mientras estuvo enlazado) —
+así la corrección no cambia el costo de golpe sin que nadie lo pida.
+
+Verificado end-to-end (el cálculo puro suma correctamente y excluye al
+insumo de sí mismo; el flujo completo en una cotización, incluyendo que
+corregir una tela actualiza SOLA el costo del insumo enlazado sin tocar
+su fila, que la lista de compras usa la cantidad enlazada y que
+desenlazar congela el valor en vez de saltar a uno viejo; la
+predefinición desde el Catálogo se hereda al agregar el insumo; y que
+Plantillas y Productos también soportan enlazar y su costeo lo refleja)
+antes de avisarle al usuario.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

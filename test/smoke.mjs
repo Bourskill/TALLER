@@ -5576,6 +5576,164 @@ assert(huboSegundaMigracionProvTest === false, "correr la migración de nuevo so
 
 state.cotizaciones = cotizacionesPreviasMigProvTest;
 
+// ---------------------------------------------------------------------------
+// Enlace de cantidad entre insumos (ver TIPOS_ENLAZABLES en
+// core/constants.js). El usuario notó, el mismo día que se independizó el
+// consumo de cada tela (Hallazgo #28), que eso volvió MANUAL algo que antes
+// se actualizaba solo: un insumo como "Sublimación" (o "Corte") necesita
+// sumar la cantidad de todas las telas de la referencia, y si se corrige
+// una tela, la suma debe actualizarse sola. Ejemplo real que dio: "si
+// tengo 1 metro de una tela y otros 2 metros de otra, a la final voy a
+// sublimar 3 metros". Se prueba el cálculo puro, el flujo completo en una
+// cotización (incluyendo que el número se actualiza solo al editar una
+// tela, y que desenlazar congela el último valor en vez de saltar a uno
+// viejo), la predefinición desde el Catálogo, y que Plantillas/Productos
+// también lo soportan (el usuario pidió expresamente que fuera editable
+// ahí también, no solo en Insumos/Cotización).
+// ---------------------------------------------------------------------------
+
+// -- cantidadEfectivaInsumo: el cálculo puro --
+const { cantidadEfectivaInsumo: cantEfectivaTest } = await import("../js/core/calc.js");
+const contEnlaceTest = {
+  insumos: [
+    { id: "tA-enl", tipo: "tela", cantidad: 1 },
+    { id: "tB-enl", tipo: "tela", cantidad: 2 },
+    { id: "sub-enl", tipo: "por_prenda", cantidad: 99, enlaceTipo: "tela" }
+  ]
+};
+assert(cantEfectivaTest(contEnlaceTest.insumos[2], contEnlaceTest) === 3, "un insumo enlazado a \"tela\" suma la cantidad de TODOS los insumos tipo tela del contenedor (1 + 2 = 3) — el ejemplo exacto que dio el usuario — ignorando su propia cantidad manual guardada (99)");
+assert(cantEfectivaTest(contEnlaceTest.insumos[0], contEnlaceTest) === 1, "un insumo SIN enlace sigue devolviendo su cantidad escrita a mano, sin cambios");
+const contSelfEnlaceTest = { insumos: [{ id: "x-enl", tipo: "tela", cantidad: 5, enlaceTipo: "tela" }] };
+assert(cantEfectivaTest(contSelfEnlaceTest.insumos[0], contSelfEnlaceTest) === 0, "un insumo enlazado a su PROPIO tipo no se suma a sí mismo — sin insumos hermanos, la suma es 0, no su propia cantidad");
+assert(cantEfectivaTest(null, contEnlaceTest) === 0, "sin insumo, no truena: devuelve 0");
+
+// -- flujo completo en una cotización: 2 telas + "Sublimación" enlazada --
+const pedidosPreviosEnlaceTest = state.pedidos, cotizacionesPreviasEnlaceTest = state.cotizaciones;
+state.cotizaciones = [{
+  id: "cot-enlace-test", clienteId: "", cliente: "Cliente Enlace", descripcion: "Prueba enlace", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cenlace1",
+  referencias: [{
+    id: "ref-enlace-test", nombre: "Camiseta sublimada", imagenUrl: "", cantidadPedida: 10, precioVenta: 50000,
+    insumos: [
+      { id: "ins-telaA-test", nombre: "Tela A", unidad: "m", costo: 20000, tipo: "tela", cantidad: 1, consumoPropio: true, esServicio: false, enlaceTipo: "" },
+      { id: "ins-telaB-test", nombre: "Tela B", unidad: "m", costo: 15000, tipo: "tela", cantidad: 2, consumoPropio: true, esServicio: false, enlaceTipo: "" },
+      { id: "ins-sub-test", nombre: "Sublimación", unidad: "m", costo: 5000, tipo: "por_prenda", cantidad: 1, esServicio: false, enlaceTipo: "" }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-enlace-test"]');
+assert(!!document.querySelector('select[data-ins="ins-sub-test"][data-campo="enlaceTipo"]'), "cada insumo de una referencia tiene su propio selector \"Enlace\"");
+assert(!!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "sin enlazar todavía, \"Cant.\" de Sublimación sigue siendo un campo editable normal");
+
+setChange('[data-ins="ins-sub-test"][data-campo="enlaceTipo"]', "tela");
+var refTrasEnlazarTest = state.cotizaciones[0].referencias[0];
+assert(refTrasEnlazarTest.insumos.filter(function (i) { return i.id === "ins-sub-test"; })[0].enlaceTipo === "tela", "elegir \"Tela\" en Enlace guarda ese tipo en el insumo");
+assert(!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "una vez enlazada, \"Cant.\" de Sublimación DEJA de ser un campo editable...");
+var celdaCantSubTest = document.querySelector('[data-ins-row][data-ins="ins-sub-test"]').textContent;
+assert(celdaCantSubTest.indexOf("🔗 3") !== -1, "...y muestra la suma ya calculada (1 + 2 = 3), con el ícono de enlace");
+const { calcCostoPrenda: calcCostoPrendaEnlaceTest, calcListaCompras: calcListaComprasEnlaceTest } = await import("../js/core/calc.js");
+assert(calcCostoPrendaEnlaceTest(refTrasEnlazarTest.insumos[2], refTrasEnlazarTest) === 15000, "el costo x prenda de Sublimación ya usa la cantidad enlazada (5.000 × 3 = 15.000)");
+
+// -- corregir una tela ACTUALIZA sola la cantidad enlazada, sin tocar la fila de Sublimación --
+setChange('[data-ins="ins-telaA-test"][data-campo="cantidad"]', "1.5");
+var refTrasCorregirTest = state.cotizaciones[0].referencias[0];
+var subTrasCorregirTest = refTrasCorregirTest.insumos.filter(function (i) { return i.id === "ins-sub-test"; })[0];
+assert(calcCostoPrendaEnlaceTest(subTrasCorregirTest, refTrasCorregirTest) === 17500, "al corregir la Tela A de 1 a 1.5, el costo de Sublimación sube SOLO (5.000 × (1.5 + 2) = 17.500) — para eso se pidió el enlace, que \"en caso de que haya una modificación esta actualice las otras cantidades\"");
+var listaEnlaceTest = calcListaComprasEnlaceTest(refTrasCorregirTest ? state.cotizaciones[0] : null);
+var lineaSubListaTest = listaEnlaceTest.filter(function (l) { return l.nombre === "Sublimación"; })[0];
+assert(!!lineaSubListaTest && lineaSubListaTest.cantidadFisica === 35 && lineaSubListaTest.costoTotal === 175000, "la lista de compras también usa la cantidad enlazada, no un número manual desactualizado (3.5m × 10 prendas = 35, 5.000 × 3.5 × 10 = 175.000)");
+
+// -- desenlazar CONGELA el último valor calculado, no salta al viejo (1) --
+setChange('[data-ins="ins-sub-test"][data-campo="enlaceTipo"]', "");
+var subTrasDesenlazarTest = state.cotizaciones[0].referencias[0].insumos.filter(function (i) { return i.id === "ins-sub-test"; })[0];
+assert(subTrasDesenlazarTest.enlaceTipo === "", "desenlazar limpia el tipo elegido");
+assert(subTrasDesenlazarTest.cantidad === 3.5, "...y CONGELA la cantidad en el último valor calculado (3.5) en vez de saltar al valor manual viejo (1) que tenía guardado desde antes de enlazarse");
+assert(!!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "y \"Cant.\" vuelve a ser un campo editable normal");
+
+state.pedidos = pedidosPreviosEnlaceTest; state.cotizaciones = cotizacionesPreviasEnlaceTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- predefinir el enlace en el Catálogo: se hereda solo al agregar el insumo --
+const pedidosPreviosEnlaceCatTest = state.pedidos, cotizacionesPreviasEnlaceCatTest = state.cotizaciones,
+  catalogoPrevioEnlaceCatTest = state.catalogoInsumos;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-sub-enlace-test", nombre: "Sublimación predefinida", unidad: "m", costo: 4000, tipo: "por_prenda", categoriaId: "", proveedorId: "", enlaceTipo: "tela" }
+]);
+state.cotizaciones = [{
+  id: "cot-enlacecat-test", clienteId: "", cliente: "Cliente Enlace Cat", descripcion: "Prueba enlace desde catálogo", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cenlacecat1",
+  referencias: [{
+    id: "ref-enlacecat-test", nombre: "Ref enlace catálogo", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-telaX-enlacecat", nombre: "Tela X", unidad: "m", costo: 10000, tipo: "tela", cantidad: 2, consumoPropio: true, esServicio: false, enlaceTipo: "" }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-enlacecat-test"]');
+click('[data-action="abrir-insumo-picker"][data-cot="cot-enlacecat-test"][data-ref="ref-enlacecat-test"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="cat-sub-enlace-test"]');
+click('[data-action="confirmar-insumo-picker"]');
+var refTrasPickerEnlaceTest = state.cotizaciones[0].referencias[0];
+var subDelCatalogoTest = refTrasPickerEnlaceTest.insumos.filter(function (i) { return i.origenCatalogoId === "cat-sub-enlace-test"; })[0];
+assert(!!subDelCatalogoTest && subDelCatalogoTest.enlaceTipo === "tela", "un insumo del catálogo con enlace PREDEFINIDO lo trae ya puesto al agregarlo — no hay que configurarlo cada vez");
+const { calcCostoPrenda: calcCostoPrendaEnlaceCatTest } = await import("../js/core/calc.js");
+assert(calcCostoPrendaEnlaceCatTest(subDelCatalogoTest, refTrasPickerEnlaceTest) === 8000, "...y su costo ya refleja la suma (4.000 × 2m de Tela X = 8.000), sin que el usuario haya tocado nada más");
+
+state.pedidos = pedidosPreviosEnlaceCatTest; state.cotizaciones = cotizacionesPreviasEnlaceCatTest;
+state.catalogoInsumos = catalogoPrevioEnlaceCatTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- también editable en Plantillas (el usuario lo pidió explícito) --
+const plantillasPreviasEnlaceTest = state.plantillasPrendas;
+state.plantillasPrendas = [{
+  id: "pla-enlace-test", nombre: "Plantilla enlace", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [
+    { id: "plains-telaA-enlace", nombre: "Tela plantilla A", unidad: "m", costo: 8000, tipo: "tela", cantidad: 1, enlaceTipo: "" },
+    { id: "plains-telaB-enlace", nombre: "Tela plantilla B", unidad: "m", costo: 6000, tipo: "tela", cantidad: 1, enlaceTipo: "" },
+    { id: "plains-corte-enlace", nombre: "Corte", unidad: "m", costo: 2000, tipo: "por_prenda", cantidad: 1, enlaceTipo: "" }
+  ]
+}];
+state.tab = "plantillas"; state.plantillasVista = "plantillas"; state.plantillaEditando = "pla-enlace-test"; render();
+assert(!!document.querySelector('select[data-pla="pla-enlace-test"][data-ins="plains-corte-enlace"][data-campo="enlaceTipo"]'), "Plantillas también tiene el selector \"Enlace\" por insumo");
+setChange('[data-pla="pla-enlace-test"][data-ins="plains-corte-enlace"][data-campo="enlaceTipo"]', "tela");
+var plaTrasEnlaceTest = state.plantillasPrendas[0];
+assert(!document.querySelector('input[data-pla="pla-enlace-test"][data-ins="plains-corte-enlace"][data-campo="cantidad"]'), "enlazado, \"Cant./mult.\" de Corte deja de ser editable en Plantillas también");
+const { calcCostoUnitarioRef: calcCostoUnitRefEnlacePlaTest } = await import("../js/core/calc.js");
+assert(calcCostoUnitRefEnlacePlaTest({ insumos: plaTrasEnlaceTest.insumos, cantidadPedida: 1 }) === 8000 + 6000 + 2000 * 2, "el costo por prenda de la plantilla YA refleja el enlace: Corte cuesta 2.000 × (1 + 1) = 4.000, sumado a las dos telas (8.000 + 6.000 + 4.000 = 18.000)");
+state.plantillasPrendas = plantillasPreviasEnlaceTest;
+state.plantillaEditando = ""; state.plantillasVista = "plantillas";
+
+// -- también editable en Productos (mismo pedido explícito del usuario) --
+const productosPreviosEnlaceTest = state.productos;
+state.productos = [{
+  id: "pro-enlace-test", nombre: "Producto enlace", origen: "taller", precioVenta: 0, costoCompra: 0, proveedorId: "", imagenUrl: "", consumoSugerido: 1, flujoEstadosId: "",
+  insumos: [
+    { id: "proins-telaA-enlace", nombre: "Tela producto A", unidad: "m", costo: 5000, tipo: "tela", cantidad: 1, enlaceTipo: "" },
+    { id: "proins-telaB-enlace", nombre: "Tela producto B", unidad: "m", costo: 3000, tipo: "tela", cantidad: 1, enlaceTipo: "" },
+    { id: "proins-corte-enlace", nombre: "Corte producto", unidad: "m", costo: 1000, tipo: "por_prenda", cantidad: 1, enlaceTipo: "" }
+  ],
+  tallas: []
+}];
+state.tab = "productos"; state.productosVista = "nueva"; state.productoEditando = "pro-enlace-test"; render();
+assert(!!document.querySelector('select[data-pro="pro-enlace-test"][data-ins="proins-corte-enlace"][data-campo="enlaceTipo"]'), "Productos también tiene el selector \"Enlace\" por insumo");
+setChange('[data-pro="pro-enlace-test"][data-ins="proins-corte-enlace"][data-campo="enlaceTipo"]', "tela");
+var proTrasEnlaceTest = state.productos[0];
+assert(!document.querySelector('input[data-pro="pro-enlace-test"][data-ins="proins-corte-enlace"][data-campo="cantidad"]'), "enlazado, \"Cant./mult.\" de Corte deja de ser editable en Productos también");
+const { calcTotalesProducto: calcTotalesEnlaceProTest } = await import("../js/core/calc.js");
+assert(calcTotalesEnlaceProTest(proTrasEnlaceTest).costoUnit === 5000 + 3000 + 1000 * 2, "el costo del producto YA refleja el enlace: Corte cuesta 1.000 × (1 + 1) = 2.000, sumado a las dos telas (5.000 + 3.000 + 2.000 = 10.000)");
+state.productos = productosPreviosEnlaceTest;
+state.productoEditando = ""; state.productosVista = "nueva";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

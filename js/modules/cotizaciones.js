@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra } from "../core/calc.js";
-import { renderTipoCostoOptions, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, cantidadEfectivaInsumo } from "../core/calc.js";
+import { renderTipoCostoOptions, renderEnlaceOptions, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
@@ -106,7 +106,12 @@ function nuevoInsumo(fuente, ref) {
     // insumoCambioDeCatalogo en core/calc.js). Un insumo escrito a mano
     // directo en la cotización (sin pasar por el catálogo) no trae vínculo:
     // no hay con qué compararlo, y no debe avisar de nada.
-    origenCatalogoId: fuente ? fuente.id : ""
+    origenCatalogoId: fuente ? fuente.id : "",
+    // El enlace (ver TIPOS_ENLAZABLES en core/constants.js) se hereda igual
+    // que esServicio/origenCatalogoId si el catálogo ya lo tenía predefinido
+    // (ej. "Sublimación" enlazado a "Tela") — editable después en esta
+    // misma fila si hace falta ajustarlo.
+    enlaceTipo: (fuente && fuente.enlaceTipo) || ""
   };
 }
 
@@ -824,7 +829,7 @@ function renderReferenciasTabs(c) {
   return html;
 }
 
-var INS_COLS_REF = "minmax(130px,1fr) 90px 90px 165px 70px 90px 30px";
+var INS_COLS_REF = "minmax(130px,1fr) 90px 90px 165px 115px 70px 90px 30px";
 
 // Aviso de que un insumo cambió en el catálogo desde que se copió a esta
 // referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
@@ -883,6 +888,10 @@ function renderFilasGlobales(cotId, ref) {
       renderComboUnidad({ id: "cotglobal-unidad-" + g.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global", true) + "</select>" +
+      // El enlace no aplica a un costo global (se paga una vez, no por
+      // prenda) — celda vacía solo para no desalinear las columnas con la
+      // tabla de insumos de arriba, que comparte el mismo grid.
+      '<span class="mobile-th">Enlace</span><span></span>' +
       // La cantidad no aplica: se paga una vez, no por prenda.
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="1" disabled />' +
       '<span class="mobile-th">Costo x prenda</span><span class="amount" title="' + fmt(g.costo) + " entre " + unidades + ' prenda(s) del pedido">' + fmt(calcCostoPrendaGlobal(cot, g)) + "</span>" +
@@ -919,7 +928,7 @@ function renderFilasServicios(cotId) {
     // por prenda), así que reusar el encabezado de la tabla de insumos las
     // haría leer al revés.
     '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';">' +
-    "<span>Servicio</span><span>Unidad</span><span>Te cuesta</span><span>Tipo de costo</span><span>Le cobras</span><span>Ganancia</span><span></span></div>";
+    "<span>Servicio</span><span>Unidad</span><span>Te cuesta</span><span>Tipo de costo</span><span></span><span>Le cobras</span><span>Ganancia</span><span></span></div>";
   servicios.forEach(function (s) {
     var attrs = ' data-action-change="set-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '"';
     var ganancia = num(s.precio) - num(s.costo);
@@ -934,6 +943,7 @@ function renderFilasServicios(cotId) {
       renderComboUnidad({ id: "cotserv-unidad-" + s.id }) + "</span>" +
       '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0.") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
+      "<span></span>" +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
       '<span class="mobile-th">Ganancia</span><span class="amount' + (ganancia < 0 ? " neg" : "") + '" title="Lo que le cobras menos lo que te cuesta">' + fmt(ganancia) + "</span>" +
       '<button class="btn danger small" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '">✕</button>' +
@@ -961,7 +971,7 @@ function renderFilasServicios(cotId) {
 // los dos puede incluir una "prenda comprada" como parte de su receta).
 function renderTablaInsumosRef(cotId, ref) {
   var html = '<div class="ins-table">' +
-    '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
+    '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 115px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
     // El insumo se copió del catálogo al agregarlo (costo incluido) para que
     // esta cotización no cambie de precio sola si el catálogo se repone más
@@ -971,6 +981,7 @@ function renderTablaInsumosRef(cotId, ref) {
     // cotización sigue funcionando igual con el número que tenía, hasta que
     // alguien decida actualizarla.
     var cambio = insumoCambioDeCatalogo(i);
+    var attrsIns = ' data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '"';
     // Reordenar por arrastre con SortableJS (ver bindEvents en core/dom.js y
     // reordenarInsumos más abajo) — no con el API nativo de drag-and-drop:
     // esta librería trae soporte real por touch de fábrica, que el nativo no
@@ -978,22 +989,22 @@ function renderTablaInsumosRef(cotId, ref) {
     // css/cotizaciones.css) para no participar del grid ni de las parejas
     // etiqueta/valor del colapso responsivo (ver responsive.css) — no hizo
     // falta tocar esa lógica para nada.
-    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
+    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 115px 70px 90px 30px;" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
       '<span class="ins-drag-handle" title="Arrastra para reordenar">⠿</span>' +
-      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="nombre" />' +
-      '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="unidad" />' +
+      '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '"' + attrsIns + ' data-campo="nombre" />' +
+      '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '"' + attrsIns + ' data-campo="unidad" />' +
       renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
-      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
-      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
+      '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
+      '<span class="mobile-th">Enlace</span><select class="mini-input" style="width:100%"' + attrsIns + ' data-campo="enlaceTipo" title="Suma sola la cantidad de todos los insumos del tipo elegido, en vez de escribirla a mano — ej. \'Sublimación\' enlazado a \'Tela\' suma los metros de todas las telas de esta referencia.">' + renderEnlaceOptions(i.enlaceTipo) + "</select>" +
       // Para "tela", la cantidad ES el consumo (metros) de ESTA tela — ya
       // no la comparte con la referencia (ver calcCostoPrenda en
       // core/calc.js): dos sublimados distintos en la misma referencia
       // pueden consumir cantidades distintas. "Fijo por pedido" sigue
       // deshabilitado — no tiene cantidad propia, la determina
-      // cantidadPedida de la referencia.
-      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' +
-      (i.tipo === "fijo_pedido" ? "disabled" : "") +
-      (i.tipo === "tela" ? ' title="Metros de ESTA tela que consume una prenda. Si hay más de una tela en la referencia (ej. dos sublimados distintos), cada una lleva su propio consumo."' : "") + " />" +
+      // cantidadPedida de la referencia. Un insumo ENLAZADO (ver arriba)
+      // no se edita a mano: se calcula solo, ver renderCeldaCantidadInsumo.
+      '<span class="mobile-th">Cant.</span>' + renderCeldaCantidadInsumo(i, ref, attrsIns) +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";
@@ -1694,6 +1705,13 @@ export var actions = {
       var insumos = (r.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
         var patch = {}; patch[campo] = valor;
+        // Al DESenlazar (enlaceTipo pasa a ""), se congela la última
+        // cantidad calculada en el campo manual — si no, "Cant." saltaría
+        // de golpe al valor viejo que tenía guardado desde antes de
+        // enlazarse (nunca se actualizó mientras estuvo enlazado, ver
+        // cantidadEfectivaInsumo en core/calc.js), como si se hubiera
+        // corregido algo sin que nadie lo tocara.
+        if (campo === "enlaceTipo" && !valor && i.enlaceTipo) patch.cantidad = cantidadEfectivaInsumo(i, r);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, r, { insumos: insumos });
@@ -1719,7 +1737,7 @@ export var actions = {
         // referencia — sin esto, la reparación retroactiva
         // (repararConsumoTelaPorInsumo en core/store.js) lo pisaría con
         // consumoAprox de la referencia en el próximo loadAll().
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela" };
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", enlaceTipo: ins.enlaceTipo || "" };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1759,7 +1777,7 @@ export var actions = {
         patch.insumos = (r.insumos || []).concat([{
           id: uid(), nombre: prod.nombre || "Producto de proveedor", unidad: "UND",
           costo: num(prod.costoCompra), tipo: "producto_comprado", cantidad: 1,
-          esServicio: false, proveedorId: prod.proveedorId || "", origenCatalogoId: ""
+          esServicio: false, proveedorId: prod.proveedorId || "", origenCatalogoId: "", enlaceTipo: ""
         }]);
       } else {
         patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
@@ -1767,7 +1785,7 @@ export var actions = {
           // confirmar-insumo-picker-producto en modules/productos.js).
           // `origenCatalogoId`/`consumoPropio` se heredan igual — ver el
           // mismo comentario en "aplicar-plantilla" más arriba.
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela" };
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", enlaceTipo: ins.enlaceTipo || "" };
         }));
       }
       if (prod.flujoEstadosId) {

@@ -181,6 +181,31 @@ export const TIPOS_COSTO = {
   }
 };
 
+// Tipos de insumo cuya CANTIDAD se puede enlazar a la de otro insumo (ver
+// "enlace" más abajo) — "fijo_pedido" queda afuera porque su costo no
+// depende de ninguna cantidad propia (se reparte el costo total entre las
+// prendas, ver TIPOS_COSTO.fijo_pedido), y "global"/"servicio_cobrado" ni
+// siquiera viven en los insumos de una referencia.
+export const TIPOS_ENLAZABLES = ["tela", "por_prenda", "producto_comprado"];
+
+// Enlace: la cantidad de un insumo puede, en vez de escribirse a mano, ser
+// la SUMA de la cantidad de todos los demás insumos de un tipo elegido en
+// la misma referencia/plantilla/producto (ej. "Sublimación" enlazado a
+// "Tela" suma automáticamente los metros de TODAS las telas). Nunca se
+// guarda el resultado: se recalcula siempre a partir de los insumos
+// actuales (ver cantidadEfectivaInsumo en core/calc.js), así que nunca
+// queda desincronizado si se edita cualquiera de los insumos de origen.
+// Pedido explícito del usuario 2026-09-21, tras notar que independizar el
+// consumo de cada tela (ver TIPOS_COSTO arriba) volvió manual algo que
+// antes se actualizaba solo: "para que en caso de que haya una
+// modificación esta actualice las otras cantidades".
+//
+// `insumo.enlaceTipo` guarda el tipo elegido ("" o ausente = sin enlace,
+// cantidad manual como siempre). Se puede predefinir en el Catálogo de
+// insumos (viaja luego a Plantillas/Productos/Cotizaciones al copiarse,
+// igual que `esServicio`/`origenCatalogoId`) o definirse directo en
+// cualquiera de esos cuatro lugares.
+
 // Unidad reservada para lo que se paga pero no se compra en ningún lado:
 // diseño, confección, sublimado. Un insumo con esta unidad no aparece con
 // "N unidades" en la lista de compras — no es algo tangible que se pida.

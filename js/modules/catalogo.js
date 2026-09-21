@@ -1,7 +1,7 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
 import { esc, num, uid, exigirCampos } from "../core/utils.js";
 import { TIPOS_COSTO } from "../core/constants.js";
-import { renderTipoCostoOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
+import { renderTipoCostoOptions, renderEnlaceOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categoriasMadre, subcategoriasDe, idsConSubcategorias } from "../core/calc.js";
 
@@ -14,7 +14,7 @@ import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categori
 // el nombre (la columna que MÁS necesita espacio real) es la primera en
 // quedarse sin nada si el contenedor aprieta — ver el porqué grande junto a
 // ".tx-row" en css/tables.css.
-var COLS = "minmax(150px,1.6fr) 120px 88px 155px 150px 140px 32px";
+var COLS = "minmax(150px,1.6fr) 120px 88px 155px 130px 150px 140px 32px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
 
 function renderPropuestasPendientes(session) {
@@ -371,7 +371,7 @@ function categoriaDelFiltroActivo(categorias) {
 // en vez de seis campos idénticos.
 function renderTablaInsumos(items, categorias) {
   var html = '<div class="tx-row head insumo" style="grid-template-columns:' + COLS + ';">' +
-    "<span>Insumo</span><span>Costo</span><span>Unidad</span><span>Tipo de costo</span><span>Proveedor</span><span>Categoría</span><span></span></div>";
+    "<span>Insumo</span><span>Costo</span><span>Unidad</span><span>Tipo de costo</span><span>Enlace</span><span>Proveedor</span><span>Categoría</span><span></span></div>";
   items.forEach(function (c) { html += renderFilaInsumo(c, categorias); });
   return html;
 }
@@ -414,6 +414,8 @@ function renderFilaInsumo(c, categorias) {
     "</span>" +
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
+
+    '<span class="mobile-th">Enlace' + renderHelp("Predefine que la cantidad de este insumo se calcule sola, sumando la de todos los insumos de un tipo elegido (ej. \"Sublimación\" enlazado a \"Tela\" suma los metros de todas las telas). Se hereda al agregar este insumo a una plantilla, producto o cotización — se puede ajustar ahí si hace falta.") + '</span><select class="mini-input" style="width:100%"' + attrs + ' data-campo="enlaceTipo">' + renderEnlaceOptions(c.enlaceTipo) + "</select>" +
 
     '<span class="mobile-th">Proveedor</span>' + renderSelectorProveedorInsumo(c) +
 

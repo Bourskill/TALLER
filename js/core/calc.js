@@ -1799,9 +1799,31 @@ export function clientesFiltrados() {
 // (un multiplicador extra que nadie tocaba, siempre en 1 por defecto): el
 // usuario notó que "Costo x prenda" ya reflejaba el consumo pero "Cant."
 // seguía en 1 sin relación visible — se simplificó a un solo factor real.
+// Cantidad EFECTIVA de un insumo: la que escribió el usuario a mano, o —si
+// tiene un enlace (`insumo.enlaceTipo`, ver TIPOS_ENLAZABLES en
+// core/constants.js)— la SUMA de la cantidad de todos los DEMÁS insumos de
+// ESE tipo en el mismo contenedor (una referencia, una plantilla o un
+// producto — cualquier objeto con `.insumos`). Nunca se guarda el
+// resultado: se recalcula siempre a partir de los insumos actuales, así
+// que nunca queda desincronizado si se edita cualquiera de los insumos de
+// origen. Pedido del usuario 2026-09-21 — ejemplo real: "Sublimación"
+// enlazado a "Tela" suma sola los metros de TODAS las telas de la
+// referencia, sin tener que corregirlo a mano cada vez que cambia una.
+//
+// A propósito NO resuelve el enlace de los insumos de origen de forma
+// recursiva (suma su `cantidad` cruda, no su cantidadEfectiva) — evita
+// cualquier riesgo de ciclo (A enlazado a B enlazado a A) sin necesitar
+// detección de ciclos: el alcance de v1 es un solo nivel de enlace, que
+// cubre los casos reales pedidos (sublimación/corte enlazados a tela).
+export function cantidadEfectivaInsumo(insumo, contenedor) {
+  if (!insumo) return 0;
+  if (!insumo.enlaceTipo) return num(insumo.cantidad);
+  return ((contenedor && contenedor.insumos) || [])
+    .filter(function (i) { return i.id !== insumo.id && i.tipo === insumo.enlaceTipo; })
+    .reduce(function (a, i) { return a + num(i.cantidad); }, 0);
+}
 export function calcCostoPrenda(insumo, ref) {
   var costo = num(insumo.costo);
-  var cantidad = num(insumo.cantidad) || 1;
   if (insumo.tipo === "tela") {
     // El consumo (metros) es del INSUMO, no de la referencia — así dos
     // telas distintas en la misma referencia (ej. dos sublimados, cada
@@ -1814,13 +1836,13 @@ export function calcCostoPrenda(insumo, ref) {
     // cotización está hecha para 1 tela". Ver nuevoInsumo en
     // modules/cotizaciones.js y repararConsumoTelaPorInsumo en
     // core/store.js (migración de lo ya guardado).
-    return costo * (num(insumo.cantidad) || 0);
+    return costo * (cantidadEfectivaInsumo(insumo, ref) || 0);
   }
   if (insumo.tipo === "fijo_pedido") {
     var cantidadPedida = num(ref.cantidadPedida) || 1;
     return cantidadPedida ? costo / cantidadPedida : 0;
   }
-  return costo * cantidad; // por_prenda
+  return costo * (cantidadEfectivaInsumo(insumo, ref) || 1); // por_prenda, producto_comprado
 }
 // Una referencia COMPRADA A PROVEEDOR no se arma con insumos: llega hecha, y
 // su costo por unidad ES lo que se paga por ella. Resolverlo acá (y no en
@@ -2306,9 +2328,12 @@ function agregarInsumosDeReferencias(referencias) {
       var cantFisica = 0;
       // Consumo PROPIO del insumo, no el de la referencia — ver
       // calcCostoPrenda, mismo criterio. Una prenda comprada se cuenta por
-      // unidad, igual que un insumo "por_prenda".
-      if (ins.tipo === "tela") cantFisica = (num(ins.cantidad) || 0) * cantidadPedida;
-      else if (ins.tipo === "por_prenda" || esProductoComprado) cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
+      // unidad, igual que un insumo "por_prenda". cantidadEfectivaInsumo
+      // resuelve un insumo enlazado (ver TIPOS_ENLAZABLES en
+      // core/constants.js) a la suma de sus insumos de origen — así la
+      // lista de compras nunca muestra un número manual desactualizado.
+      if (ins.tipo === "tela") cantFisica = (cantidadEfectivaInsumo(ins, ref) || 0) * cantidadPedida;
+      else if (ins.tipo === "por_prenda" || esProductoComprado) cantFisica = (cantidadEfectivaInsumo(ins, ref) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;
       if (esInsumoServicio(ins)) mapa[key].esServicio = true;
