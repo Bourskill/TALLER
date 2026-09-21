@@ -259,6 +259,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo segunda ronda: cambiar de etapa de producción varias veces seguido ya no se siente pesado)
+
+Reporte: "cambiar los estados de produccion parece ser una funcion muy
+pesada, porque cuando los cambio la app se actualiza y se pone
+ligeramente lenta por unos parpadeos incluso cuando hago varios
+cambios a la vez me salen errores, y el boton de guardado me dice que
+no se han podido guardar los cambios, aunque la notificacion es
+temporal porque despues se pueden guardar".
+
+- Causa: cada flecha ◀▶ de avanzar/retroceder etapa llamaba a
+  `persist()` en cada clic sin esperar al anterior, y el guardado no
+  coordinaba llamadas concurrentes de la misma clave — varios clics
+  seguidos lanzaban varias rondas de escritura a la Sheet EN PARALELO
+  contra la misma fila (avanzar una referencia guarda DOS claves por
+  clic: hasta 6 peticiones de red de un solo clic), y cada ronda
+  disparaba su propio refresco de pantalla al terminar, ya sin relación
+  con el clic que lo originó — de ahí los parpadeos. Un tropiezo
+  pasajero en medio de esa ráfaga de peticiones era el aviso temporal
+  de "no se pudo guardar" (se cura solo porque ya existe reintento
+  automático).
+- Corrección general en el guardado (no en cada botón): llamadas
+  concurrentes para la MISMA clave ahora se agrupan en, como mucho, una
+  ronda de red adicional — la última, con el estado más reciente.
+  Ningún clic se pierde pese a agruparse. Ver CONTABILIDAD.md, Hallazgo
+  #40.
+
 ## Registro de cambios — septiembre 2026 (octogésimo primera ronda: la columna Insumo quedó más angosta — el texto no llegaba ni a la mitad del campo)
 
 Ajuste el mismo día de la ronda anterior: la columna Insumo crece con

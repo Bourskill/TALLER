@@ -66,6 +66,22 @@ var escritor = null;   // async (clave) => void — lo inyecta store.js
 var notificar = function () {};
 var temporizador = null;
 
+// Escritura de red ya en curso por clave (la promesa de esa ronda), y ronda
+// YA AGENDADA para justo después de que termine (compartida por quien la pidió
+// primero y cualquiera que llegue mientras tanto). Sin esto, cada clic rápido
+// seguido (ej. avanzar de etapa varias veces, o "avanzar referencia" que
+// guarda "cotizaciones" Y "pedidos" en el mismo clic) lanzaba SU PROPIA
+// escritura en paralelo contra la MISMA fila de la Sheet: ráfagas de
+// peticiones que a veces fallaban por un rato (se ve como "no se pudo
+// guardar", y se cura solo cuando el reintento automático encuentra la red
+// tranquila) y, peor para lo que se siente al usar la app, cada una disparaba
+// su propio notificar() → render completo al terminar, MUCHO después del
+// clic que lo originó — de ahí los parpadeos encadenados. Como cada escritura
+// manda el estado COMPLETO de la clave (no un delta, ver la nota grande de
+// arriba), no hace falta una ronda por clic: alcanza con la última.
+var enVueloClave = {};   // { [clave]: Promise de esa ronda }
+var proximaRonda = {};   // { [clave]: Promise de la ronda agendada tras la actual }
+
 // "Guardando…" solo se anuncia si el guardado se está DEMORANDO. Casi todo lo
 // que se hace en la app dispara un guardado, y esos guardados tardan
 // milisegundos: mostrar el aviso en cada uno hacía que algo apareciera y
@@ -287,12 +303,9 @@ function mensajeDeConflicto(e) {
   return (e && e.message) ? e.message : "Alguien más guardó un cambio distinto mientras tanto.";
 }
 
-// Intenta escribir una clave, dejándola encolada si falla. `json` es solo para
-// el espejo: el reintento posterior vuelve a leer el estado actual.
-export async function guardarClave(clave, json) {
-  espejar(clave, json);
-  enCola[clave] = true;
-  anotarEnDisco();
+// Una ronda de escritura de verdad para `clave` (relee el estado ACTUAL vía
+// `escritor`, no algo capturado antes — igual que ya hacía el reintento).
+async function escribirRonda(clave) {
   enVuelo++;
   marcarPosibleLentitud();
   // Sin notificar() acá: un guardado que va bien no debe producir NINGÚN
@@ -324,7 +337,40 @@ export async function guardarClave(clave, json) {
     enVuelo--;
     limpiarLentitudSiTerminó();
     notificar();
+    delete enVueloClave[clave];
   }
+}
+
+// Intenta escribir una clave, dejándola encolada si falla. `json` es solo para
+// el espejo: el reintento posterior vuelve a leer el estado actual.
+//
+// El espejo local y el aviso de "hay algo sin guardar" (enCola) se anotan
+// SIEMPRE, de inmediato, en cada llamada — eso no se retrasa ni se agrupa,
+// es la red de seguridad contra un cierre/caída a mitad de camino. Lo único
+// que se agrupa es la escritura DE RED: si ya hay una en curso para esta
+// misma clave, esta llamada no lanza otra en paralelo — se une a la ronda
+// que ya está agendada justo después (o agenda una si no la había), que va a
+// escribir con el estado de ESE momento. Un burst de N clics seguidos sobre
+// la misma clave termina en, como mucho, 2 rondas de red (la que ya iba en
+// vuelo + una más con el resultado final), no N.
+export function guardarClave(clave, json) {
+  espejar(clave, json);
+  enCola[clave] = true;
+  anotarEnDisco();
+  if (enVueloClave[clave]) {
+    if (!proximaRonda[clave]) {
+      proximaRonda[clave] = enVueloClave[clave].then(function () {
+        delete proximaRonda[clave];
+        var p = escribirRonda(clave);
+        enVueloClave[clave] = p;
+        return p;
+      });
+    }
+    return proximaRonda[clave];
+  }
+  var p = escribirRonda(clave);
+  enVueloClave[clave] = p;
+  return p;
 }
 
 // Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver

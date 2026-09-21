@@ -1785,6 +1785,68 @@ del grid: así se sigue evitando el hueco al final de la fila (la
 columna sigue siendo flexible) mientras el campo visible queda de un
 tamaño cómodo. Cambio puramente visual, sin prueba dedicada.
 
+### 🟢 Hallazgo #40 — cambiar de etapa de producción varias veces seguido se sentía pesado (parpadeos) y a veces mostraba "no se pudo guardar" de forma temporal. ✅ IMPLEMENTADO
+
+El usuario reportó: "cambiar los estados de produccion parece ser una
+función muy pesada, porque cuando los cambio la app se actualiza y se
+pone ligeramente lenta por unos parpadeos incluso cuando hago varios
+cambios a la vez me salen errores, y el botón de guardado me dice que
+no se han podido guardar los cambios, aunque la notificación es
+temporal porque después se pueden guardar" (2026-09-21).
+
+**Causa raíz:** `moveEstado`/`moveEstadoRef` (modules/pedidos.js, los
+manejadores de las flechas ◀ ▶ de la barra de progreso — ver
+`renderProgresoEtapas` en core/components.js) llaman a `persist()` en
+CADA clic sin esperar a que termine el anterior, y `guardarClave()`
+(core/guardado.js) no tenía ninguna coordinación entre llamadas
+concurrentes para la MISMA clave: cada clic lanzaba su propia ronda de
+peticiones a la Sheet (releer revisión + escribir + sellar revisión
+nueva) EN PARALELO contra la misma fila — `moveEstadoRef`, al mover
+una referencia dentro de una cotización, persiste DOS claves por clic
+("cotizaciones" y "pedidos"), así que un solo clic ya dispara hasta 6
+peticiones de red. Encima, cada ronda dispara su propio `notificar()`
+→ render completo de la app AL TERMINAR, de forma asíncrona, mucho
+después del clic que la originó — con varios clics seguidos, esos
+renders se apilaban y seguían llegando incluso después de que el
+usuario dejara de tocar nada, lo que se sentía como parpadeos.
+
+La causa del aviso "no se pudo guardar" temporal: con varias rondas de
+red concurrentes contra la misma fila, cualquier tropiezo pasajero
+(límite de tasa, una petición lenta en medio de la ráfaga) caía en el
+manejo de error genérico de `guardarClave` y mostraba el aviso — que
+`guardado.js` ya reintenta solo a los 15s (ver `programarReintento`),
+por eso se curaba sin que el usuario hiciera nada. No era un error de
+verdad: era la ráfaga de peticiones concurrentes tropezando consigo
+misma.
+
+**Corrección — agrupar (coalesce) rondas concurrentes de la misma
+clave, en vez de tocar cada sitio que llama a `persist()`:**
+`guardarClave()` ahora distingue dos cosas que antes iban juntas: el
+espejo local (localStorage) y el aviso de "hay algo sin guardar" se
+siguen anotando de inmediato en CADA llamada, sin ningún retraso — es
+la red de seguridad contra un cierre a mitad de camino y no se debía
+tocar. Lo que se agrupa es solo la escritura DE RED: si ya hay una
+ronda en curso para esa clave, una llamada nueva no lanza la suya en
+paralelo — se une a la ronda que ya está agendada justo después (o
+agenda una si no la había). Como cada escritura manda el estado
+COMPLETO de la clave, no un delta (ver la nota de diseño al principio
+de core/guardado.js), un burst de N clics termina en, como mucho, 2
+rondas de red (la que ya iba en vuelo + una más con el resultado
+final), nunca N — y esa ronda final siempre lleva el estado MÁS
+RECIENTE, así que ningún clic se pierde pese a agruparse.
+
+Arreglo general en `core/guardado.js` (una sola clave a coordinar,
+`guardarClave`), no en cada manejador de acción — cualquier otro sitio
+de la app con el mismo patrón (varias mutaciones rápidas + `persist()`
+sin esperar) queda protegido igual, sin tener que tocarlo.
+
+Probado con una escritura de red simulada deliberadamente lenta para
+forzar el solape: 3 llamadas a `persist("pedidos")` seguidas mientras
+la primera seguía en curso terminan en solo 2 escrituras reales, la
+última con el valor más reciente, y las 3 promesas devueltas por
+`persist()` sí resuelven (nadie que haga `await persist(...)` se queda
+esperando para siempre) — ver test/smoke.mjs.
+
 ---
 
 ## Próximos pasos

@@ -4138,6 +4138,56 @@ assert(guardadoMod.estadoGuardado().clavesConflicto.indexOf("deudas") === -1, "y
 state.recuperacion = null;
 
 // ---------------------------------------------------------------------------
+// Optimización de guardado (2026-09-21): cambiar de etapa de producción varias
+// veces seguido (avanzar/retroceder) se sentía pesado — parpadeos, y a veces
+// un aviso temporal de "no se pudo guardar" que se curaba solo. Causa:
+// moveEstado/moveEstadoRef (modules/pedidos.js) llaman a persist() en cada
+// clic sin esperar a que termine el anterior, y guardarClave() no coordinaba
+// para nada llamadas concurrentes de la MISMA clave — cada clic lanzaba su
+// propia ronda de peticiones a la Sheet EN PARALELO contra la misma fila
+// (moveEstadoRef, encima, persiste DOS claves por clic), y cada ronda
+// disparaba su propio notificar() -> render al terminar, mucho después del
+// clic que la originó. Fix: guardarClave() ahora agrupa llamadas
+// concurrentes para la misma clave en, como mucho, una ronda de red más
+// (ver core/guardado.js).
+// ---------------------------------------------------------------------------
+await loadAll(); // base limpia para revConocida["pedidos"]
+state.pedidos = [{ id: "ped-coalesce-1", numeroOp: "OP-COAL", val: 1 }];
+const setCallsCoalesce = [];
+let abrirCompuertaCoalesce;
+const compuertaCoalesce = new Promise(function (r) { abrirCompuertaCoalesce = r; });
+const origSetCoalesce = window.storage.set;
+window.storage.set = async function (key, value, arg2) {
+  if (key === constantsMod.KEYS.pedidos) {
+    setCallsCoalesce.push(JSON.parse(value)[0].val);
+    await compuertaCoalesce; // simula una escritura de red lenta, para poder disparar más clics MIENTRAS sigue en curso
+  }
+  return origSetCoalesce(key, value, arg2);
+};
+
+const pCoalesce1 = storeMod2.persist("pedidos"); // "clic" 1 — arranca su ronda de verdad
+for (let i = 0; i < 30 && setCallsCoalesce.length === 0; i++) await Promise.resolve(); // deja que la ronda 1 llegue de verdad hasta topar con la escritura (verificarConflicto de por medio)
+assert(setCallsCoalesce.length === 1, "la ronda 1 alcanzó a lanzar su escritura de red");
+
+// Mientras la ronda 1 sigue "en vuelo" (esperando la compuerta), llegan más
+// cambios rápidos — el mismo patrón que un usuario dándole varias veces
+// seguidas a la flecha de avanzar etapa.
+state.pedidos = [{ id: "ped-coalesce-1", numeroOp: "OP-COAL", val: 2 }];
+const pCoalesce2 = storeMod2.persist("pedidos"); // "clic" 2
+state.pedidos = [{ id: "ped-coalesce-1", numeroOp: "OP-COAL", val: 3 }];
+const pCoalesce3 = storeMod2.persist("pedidos"); // "clic" 3
+await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+assert(setCallsCoalesce.length === 1, "los clics 2 y 3, mientras el 1 seguía en vuelo, NO lanzaron su propia escritura en paralelo — se agruparon");
+
+abrirCompuertaCoalesce();
+await Promise.all([pCoalesce1, pCoalesce2, pCoalesce3]);
+window.storage.set = origSetCoalesce;
+assert(setCallsCoalesce.length === 2, "al terminar la ronda 1, se disparó UNA sola ronda más agrupada (no dos) — 3 clics terminaron en 2 escrituras de red, no en 3");
+assert(setCallsCoalesce[1] === 3, "...y esa ronda agrupada escribió el estado MÁS RECIENTE (val 3); el valor intermedio (2) nunca hizo falta escribirlo aparte, porque cada escritura manda el estado completo");
+const filaPedidosTrasCoalesce = await window.storage.get(constantsMod.KEYS.pedidos);
+assert(JSON.parse(filaPedidosTrasCoalesce.value)[0].val === 3, "y lo que de verdad quedó en la Sheet es el estado final — ningún clic se perdió pese a agruparse");
+
+// ---------------------------------------------------------------------------
 // Ronda de 6 pedidos del usuario (2026-09-04): duplicar pedidos, reordenar
 // insumos por arrastre, notas como bloc de notas, distintivo en contactos e
 // importar desde los Contactos de Google. ("Comisiones pendientes en Cuentas
