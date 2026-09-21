@@ -985,55 +985,23 @@ function renderFilasServicios(cotId) {
 // El ORIGEN de la referencia no es un campo más: es lo que decide qué
 // formulario se muestra. Una referencia fabricada en el taller se costea con
 // insumos y consumo de tela; una comprada a proveedor llega hecha, así que no
-// tiene ni insumos ni consumo — su costo es el precio de compra, y lo que
-// hace falta saber es a quién se le compra y cuándo llega. Por eso va como
-// control segmentado arriba de todo, y no como un <select> perdido entre los
-// demás campos: cambiarlo reescribe la referencia entera.
-function renderRefCard(cotId, ref) {
-  var cotRef = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
-  // Costo CARGADO: el directo de la referencia más la parte que le toca de
-  // los costos globales del pedido. Es el mismo número que usan el total de
-  // la cotización y el reporte de productos vendidos — antes la referencia
-  // mostraba solo el directo y parecía que las cuentas no cuadraban.
-  var calc = calcRefTotalesConGlobales(cotRef, ref);
-  var esProveedor = ref.origen === "proveedor";
-  var attrs = ' data-cot="' + cotId + '" data-ref="' + ref.id + '"';
-  var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
-    '<div class="ref-top">' +
-    renderThumb(cotId, ref) +
-    '<div class="ref-top-info">' +
-    '<span class="ref-nombre"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="nombre" /></span>' +
-    '<div class="segmented" style="margin:8px 0 4px;">' +
-    '<button class="segmented-opcion ' + (esProveedor ? "" : "active") + '" data-action="set-ref-origen"' + attrs + ' data-val="taller">🧵 Se fabrica en el taller</button>' +
-    '<button class="segmented-opcion ' + (esProveedor ? "active" : "") + '" data-action="set-ref-origen"' + attrs + ' data-val="proveedor">📦 Se compra a proveedor</button>' +
-    "</div>" +
-    '<div class="ref-fields">' +
-    (esProveedor ? "" : '<span><label>Consumo tela (MT)' +
-      renderHelp("Valor de arranque para cualquier tela nueva que agregues a esta referencia — cada tela lleva su PROPIO consumo (editable en su fila de insumos), así que si hay más de una (ej. dos sublimados distintos), cada una puede llevar una cantidad distinta.") +
-      '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="consumoAprox" /></span>') +
-    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
-    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
-    (esProveedor
-      ? ('<span><label>Costo de compra x1' + renderHelp("Lo que te cobra el proveedor por cada unidad. Reemplaza a los insumos: de acá sale el costo y la ganancia de la referencia.") + '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.costoCompra || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="costoCompra" /></span>' +
-        renderSelectorProveedorRef(cotId, ref) +
-        '<span><label>Entrega esperada</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="fechaEntregaProveedor" /></span>')
-      : "") +
-    '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia"' + attrs + ">Eliminar referencia</button>" +
-    "</div>" +
-    "</div>" +
-    "</div>";
+// tiene consumo de tela que definir — pero SÍ puede llevar insumos/mano de
+// obra ADICIONALES sobre la compra (ver renderTablaInsumosRef más abajo,
+// 2026-09-21). Por eso el origen va como control segmentado arriba de todo,
+// y no como un <select> perdido entre los demás campos: cambiarlo reescribe
+// la referencia entera.
 
-  // Insumos, plantillas y "aplicar producto" solo tienen sentido si la prenda
-  // se fabrica. Para una referencia de proveedor esa tabla entera sale del
-  // contexto: no hay nada que cortar, coser ni comprar por separado.
-  if (esProveedor) {
-    html += renderRefProveedorResumen(ref, calc);
-    html += renderDetalleReferencia(cotId, ref);
-    html += "</div>"; // .ref-card
-    return html;
-  }
-
-  html += '<div class="ins-table">' +
+// Tabla de insumos de una referencia (fila por insumo + costos globales +
+// servicios cobrados + botones para agregar) — compartida entre "se fabrica
+// en el taller" y "se compra a proveedor". Una prenda comprada hecha puede
+// de todas formas necesitar un insumo extra (ej. estampar un DTF) o mano de
+// obra propia (ej. una planchada) por encima del precio de compra — el
+// usuario lo pidió explícito 2026-09-21 con ese mismo ejemplo. `permitirRecetas`
+// solo se pasa `true` para "taller": "Aplicar plantilla"/"Aplicar producto"
+// reemplazan la receta COMPLETA de insumos de una prenda que se fabrica
+// desde cero, algo que no tiene sentido sobre una prenda que ya llega hecha.
+function renderTablaInsumosRef(cotId, ref, permitirRecetas) {
+  var html = '<div class="ins-table">' +
     '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
     // El insumo se copió del catálogo al agregarlo (costo incluido) para que
@@ -1080,19 +1048,75 @@ function renderRefCard(cotId, ref) {
   html += '<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">' +
     '<button class="btn ghost small" data-action="abrir-insumo-picker" data-cot="' + cotId + '" data-ref="' + ref.id + '">📂 Insumos predeterminados…</button>' +
     '<button class="btn ghost small" data-action="add-insumo-personalizado" data-cot="' + cotId + '" data-ref="' + ref.id + '">+ Insumo personalizado</button>' +
-    ((state.plantillasPrendas || []).length ? (
+    (permitirRecetas && (state.plantillasPrendas || []).length ? (
       '<select class="mini-input applyPlantilla" style="max-width:220px" data-action-change="aplicar-plantilla" data-cot="' + cotId + '" data-ref="' + ref.id + '">' +
       '<option value="">Aplicar plantilla…</option>' +
       state.plantillasPrendas.map(function (p) { return '<option value="' + p.id + '">' + esc(p.nombre) + "</option>"; }).join("") +
       "</select>"
     ) : "") +
-    ((state.productos || []).length ? (
+    (permitirRecetas && (state.productos || []).length ? (
       '<select class="mini-input" style="max-width:220px" data-action-change="aplicar-producto" data-cot="' + cotId + '" data-ref="' + ref.id + '" title="Trae los insumos, el precio y el flujo de un producto del catálogo (prenda ya hecha con stock)">' +
       '<option value="">Aplicar producto del catálogo…</option>' +
       state.productos.map(function (p) { return '<option value="' + p.id + '" ' + (ref.productoId === p.id ? "selected" : "") + '>' + esc(p.nombre) + "</option>"; }).join("") +
       "</select>"
     ) : "") +
     "</div>";
+  return html;
+}
+function renderRefCard(cotId, ref) {
+  var cotRef = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  // Costo CARGADO: el directo de la referencia más la parte que le toca de
+  // los costos globales del pedido. Es el mismo número que usan el total de
+  // la cotización y el reporte de productos vendidos — antes la referencia
+  // mostraba solo el directo y parecía que las cuentas no cuadraban.
+  var calc = calcRefTotalesConGlobales(cotRef, ref);
+  var esProveedor = ref.origen === "proveedor";
+  var attrs = ' data-cot="' + cotId + '" data-ref="' + ref.id + '"';
+  var html = '<div class="ref-card" data-ref-id="' + ref.id + '">' +
+    '<div class="ref-top">' +
+    renderThumb(cotId, ref) +
+    '<div class="ref-top-info">' +
+    '<span class="ref-nombre"><input class="mini-input" style="width:100%;font-weight:700;font-size:14px;" placeholder="Nombre de la referencia (ej. Camiseta jugador)" value="' + esc(ref.nombre) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="nombre" /></span>' +
+    '<div class="segmented" style="margin:8px 0 4px;">' +
+    '<button class="segmented-opcion ' + (esProveedor ? "" : "active") + '" data-action="set-ref-origen"' + attrs + ' data-val="taller">🧵 Se fabrica en el taller</button>' +
+    '<button class="segmented-opcion ' + (esProveedor ? "active" : "") + '" data-action="set-ref-origen"' + attrs + ' data-val="proveedor">📦 Se compra a proveedor</button>' +
+    "</div>" +
+    '<div class="ref-fields">' +
+    (esProveedor ? "" : '<span><label>Consumo tela (MT)' +
+      renderHelp("Valor de arranque para cualquier tela nueva que agregues a esta referencia — cada tela lleva su PROPIO consumo (editable en su fila de insumos), así que si hay más de una (ej. dos sublimados distintos), cada una puede llevar una cantidad distinta.") +
+      '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="consumoAprox" /></span>') +
+    '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
+    '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
+    (esProveedor
+      ? ('<span><label>Costo de compra x1' + renderHelp("Lo que te cobra el proveedor por cada unidad. Reemplaza a los insumos: de acá sale el costo y la ganancia de la referencia.") + '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.costoCompra || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="costoCompra" /></span>' +
+        renderSelectorProveedorRef(cotId, ref) +
+        '<span><label>Entrega esperada</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="fechaEntregaProveedor" /></span>')
+      : "") +
+    '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia"' + attrs + ">Eliminar referencia</button>" +
+    "</div>" +
+    "</div>" +
+    "</div>";
+
+  // Una referencia de proveedor (prenda ya hecha) no tiene tela que cortar
+  // ni una receta completa que aplicar desde una plantilla/producto — por
+  // eso NO ofrece esos dos atajos. Pero sí puede necesitar insumos o mano
+  // de obra ADICIONALES por encima de la compra (ej. estampar un DTF sobre
+  // la camiseta comprada, o una planchada final en el taller) — el usuario
+  // lo pidió explícito 2026-09-21: "aunque la compre hecha a un proveedor
+  // de todas maneras necesito agregar un insumo como el DTF... también la
+  // mano de obra como las planchadas". Misma tabla de insumos que "se
+  // fabrica en el taller" (renderTablaInsumosRef), sin el campo "Consumo
+  // tela (MT)" de arriba (ya condicionado a !esProveedor) y sin
+  // "Aplicar plantilla"/"Aplicar producto".
+  if (esProveedor) {
+    html += renderRefProveedorResumen(ref, calc);
+    html += renderTablaInsumosRef(cotId, ref, false);
+    html += renderDetalleReferencia(cotId, ref);
+    html += "</div>"; // .ref-card
+    return html;
+  }
+
+  html += renderTablaInsumosRef(cotId, ref, true);
 
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda' +
@@ -1582,7 +1606,7 @@ export var actions = {
     var actual = ref.filter(function (r) { return r.id === refId; })[0];
     if (actual && (actual.origen || "taller") === origen) return;
     if (origen === "proveedor" && actual && (actual.insumos || []).length) {
-      if (!window.confirm("Esta referencia pasa a comprarse hecha a un proveedor: sus " + actual.insumos.length + " insumo(s) y el consumo de tela dejan de aplicar y se quitan.\n\n¿Seguir?")) return;
+      if (!window.confirm("Esta referencia pasa a comprarse hecha a un proveedor: sus " + actual.insumos.length + " insumo(s) (pensados para fabricarla desde cero, con su consumo de tela) se quitan. Si necesitas algún insumo o mano de obra extra sobre la compra (ej. un DTF, una planchada), lo agregas de nuevo después.\n\n¿Seguir?")) return;
     }
     mapRef(cotId, refId, function (r) {
       if (origen === "proveedor") {

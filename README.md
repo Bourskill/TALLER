@@ -259,6 +259,29 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo novena ronda: una referencia comprada a proveedor ya puede llevar insumos y mano de obra adicionales — ej. un DTF o una planchada sobre la prenda comprada)
+
+El usuario planteó el caso: compra una camiseta hecha a un proveedor,
+pero de todas formas necesita agregarle un insumo (DTF) y mano de obra
+propia (planchada). Antes, una referencia `origen: "proveedor"` no
+tenía ninguna tabla de insumos — ni en el formulario ni en los
+cálculos, así que ese costo extra no tenía dónde registrarse.
+
+- **Fix:** se extrajo la tabla de insumos de "se fabrica en el taller"
+  a una función compartida (`renderTablaInsumosRef`,
+  modules/cotizaciones.js), reusada también para "se compra a
+  proveedor" — mismos pickers de insumo, sin duplicar código. Solo se
+  ocultan "Aplicar plantilla"/"Aplicar producto" (reemplazan la receta
+  completa de una prenda fabricada desde cero, no aplica sobre algo ya
+  comprado) y "Consumo tela (MT)" (ya oculto desde antes).
+- `calcCostoUnitarioRef` y `agregarInsumosDeReferencias`
+  (core/calc.js): para una referencia de proveedor, ahora SUMAN el
+  costo de los insumos extra al precio de compra, en vez de
+  ignorarlos — cada insumo aparece además como su propia línea en la
+  lista de compras, y uno marcado como mano de obra sigue el mismo
+  camino que corte/confección de siempre.
+- Ver CONTABILIDAD.md, "Hallazgo #30".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo octava ronda: comprar más insumo del que un pedido necesita ya no cuenta como su sobrecosto — "compra de insumo" aparte)
 
 El usuario planteó una situación sin modelar, no un bug: "muchas veces

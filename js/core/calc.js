@@ -1992,8 +1992,17 @@ export function calcRefTotalesConGlobales(cot, ref) {
 }
 
 export function calcCostoUnitarioRef(ref) {
-  if (ref && ref.origen === "proveedor") return num(ref.costoCompra);
-  return (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);
+  var costoInsumos = (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);
+  // Una referencia de proveedor llega hecha, así que su costo base es el
+  // precio de compra — pero puede tener insumos/mano de obra ADICIONALES
+  // por encima (ej. un DTF que se estampa después de comprada, una
+  // planchada en el taller), que se suman, nunca reemplazan. Antes de
+  // 2026-09-21 `ref.insumos` de una referencia de proveedor se ignoraba
+  // por completo acá — mismo criterio en agregarInsumosDeReferencias
+  // (más abajo, alimenta la lista de compras), no se puede sumar el
+  // costo en un lado y no aparecer para comprar en el otro.
+  if (ref && ref.origen === "proveedor") return num(ref.costoCompra) + costoInsumos;
+  return costoInsumos;
 }
 export function calcRefTotales(ref) {
   var costoUnit = calcCostoUnitarioRef(ref);
@@ -2267,13 +2276,18 @@ function agregarInsumosDeReferencias(referencias) {
   var mapa = {};
   (referencias || []).forEach(function (ref) {
     var cantidadPedida = num(ref.cantidadPedida) || 0;
-    // Referencia comprada a proveedor: lo que hay que comprar NO son insumos
-    // sueltos (no se corta ni se cose nada) sino la prenda entera, y su costo
-    // se define por referencia. Por eso emite UNA línea —la referencia misma—
-    // en vez de recorrer insumos que no tiene. Esa línea es también la que
-    // aparece como destino al registrar un costo real (ver renderTabProduccion
-    // en modules/cotizaciones.js), que es justo lo que se pidió: costo real
-    // por referencia, no por insumo individual.
+    // Referencia comprada a proveedor: la prenda entera es UNA línea de
+    // compra —la referencia misma—, no insumos sueltos (no se corta ni se
+    // cose nada). Esa línea es también la que aparece como destino al
+    // registrar un costo real (ver renderTabProduccion en
+    // modules/cotizaciones.js), que es justo lo que se pidió: costo real
+    // por referencia, no por insumo individual. Pero la prenda comprada
+    // puede de todas formas necesitar insumos o mano de obra ADICIONALES
+    // por encima de la compra (ej. un DTF que se estampa después, una
+    // planchada en el taller, ver calcCostoUnitarioRef) — esos SÍ son
+    // insumos sueltos normales, así que no se corta la función acá: se
+    // sigue de largo hacia el mismo bucle de abajo que ya los procesa
+    // para "taller". 2026-09-21, pedido explícito del usuario.
     if (ref.origen === "proveedor") {
       var nombreRef = (ref.nombre || "Producto de proveedor").trim();
       var keyRef = "producto|" + nombreRef.toLowerCase();
@@ -2281,7 +2295,6 @@ function agregarInsumosDeReferencias(referencias) {
       mapa[keyRef].cantidadFisica += cantidadPedida;
       mapa[keyRef].costoTotal += num(ref.costoCompra) * cantidadPedida;
       if (!mapa[keyRef].proveedorId && ref.proveedorId) mapa[keyRef].proveedorId = ref.proveedorId;
-      return;
     }
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();

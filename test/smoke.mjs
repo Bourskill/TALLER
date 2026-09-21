@@ -5406,6 +5406,77 @@ state.pedidos = pedidosPreviosConjExcTest; state.cotizaciones = cotizacionesPrev
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
+// --- Una referencia comprada a proveedor puede necesitar insumos o mano de
+// obra ADICIONALES sobre la compra — ej. una camiseta comprada hecha que de
+// todas formas necesita un DTF estampado (insumo) y una planchada en el
+// taller (mano de obra). El usuario lo pidió 2026-09-21: "si compro la
+// camiseta hecha a un proveedor... me gustaría la posibilidad de poder
+// agregarle [un insumo como el DTF]... también la mano de obra... el
+// formulario viene siendo casi igual al de 'se fabrica en taller' pero sin
+// el consumo de tela". Antes, una referencia de proveedor no tenía NINGUNA
+// tabla de insumos (agregarInsumosDeReferencias/calcCostoUnitarioRef
+// ignoraban ref.insumos por completo para origen "proveedor").
+const pedidosPreviosProvInsTest = state.pedidos, cotizacionesPreviasProvInsTest = state.cotizaciones,
+  plantillasPreviasProvInsTest = state.plantillasPrendas, productosPreviosProvInsTest = state.productos;
+state.plantillasPrendas = [{ id: "pla-provins-test", nombre: "Plantilla Provins", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "", insumos: [] }];
+state.productos = [{ id: "pro-provins-test", nombre: "Producto Provins", origen: "taller", precioVenta: 1000, costoCompra: 0, proveedorId: "", imagenUrl: "", consumoSugerido: 1, flujoEstadosId: "", insumos: [], tallas: [] }];
+state.clientes.push({ id: "cli-provins-test", nombre: "Cliente Provins", tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] });
+state.cotizaciones = [{
+  id: "cot-provins-test", clienteId: "cli-provins-test", cliente: "Cliente Provins", descripcion: "Prueba insumo sobre compra", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cprovins1",
+  referencias: [{
+    id: "ref-provins-test", nombre: "Camiseta comprada", imagenUrl: "", consumoAprox: 0, cantidadPedida: 5, precioVenta: 35000, origen: "proveedor", costoCompra: 20000, proveedorId: "",
+    insumos: [], detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-provins-test"]');
+var refCardProvInsTest = document.querySelector('[data-ref-id="ref-provins-test"]');
+assert(!!refCardProvInsTest.querySelector('[data-action="abrir-insumo-picker"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "una referencia de proveedor ahora SÍ tiene la tabla de insumos (\"Insumos predeterminados…\")");
+assert(!!refCardProvInsTest.querySelector('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "...y \"+ Insumo personalizado\", igual que \"se fabrica en el taller\"");
+assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-plantilla"]'), "pero NO \"Aplicar plantilla\" — reemplazaría la receta completa de una prenda fabricada desde cero, que no aplica sobre algo ya comprado hecho");
+assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-producto"]'), "...ni \"Aplicar producto\", por la misma razón");
+assert(!refCardProvInsTest.querySelector('input[data-campo="consumoAprox"]'), "...ni el campo \"Consumo tela (MT)\" — no hay nada que cortar en una prenda ya comprada");
+assert(refCardProvInsTest.textContent.indexOf("Sin insumos aún") !== -1, "sin insumos agregados todavía, se ve el mismo mensaje vacío que en \"taller\"");
+
+click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
+var refTrasDtfTest = state.cotizaciones[0].referencias[0];
+var dtfIdTest = refTrasDtfTest.insumos[refTrasDtfTest.insumos.length - 1].id;
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + dtfIdTest + '"][data-campo="nombre"]', "DTF");
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + dtfIdTest + '"][data-campo="costo"]', "3000");
+setChange('[data-ref-id="ref-provins-test"] select[data-ins="' + dtfIdTest + '"][data-campo="tipo"]', "por_prenda");
+
+click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
+var refTrasPlanchadaTest = state.cotizaciones[0].referencias[0];
+var planchadaIdTest = refTrasPlanchadaTest.insumos[refTrasPlanchadaTest.insumos.length - 1].id;
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + planchadaIdTest + '"][data-campo="nombre"]', "Planchada");
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + planchadaIdTest + '"][data-campo="costo"]', "2000");
+setChange('[data-ref-id="ref-provins-test"] select[data-ins="' + planchadaIdTest + '"][data-campo="tipo"]', "por_prenda");
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + planchadaIdTest + '"][data-campo="unidad"]', "servicio");
+
+const { calcCostoUnitarioRef: calcCostoUnitRefProvInsTest, calcRefTotales: calcRefTotalesProvInsTest, calcListaCompras: calcListaComprasProvInsTest } = await import("../js/core/calc.js");
+var refFinalProvInsTest = state.cotizaciones[0].referencias[0];
+assert(refFinalProvInsTest.insumos.length === 2, "los dos insumos (DTF y Planchada) quedan agregados a la referencia de proveedor");
+assert(calcCostoUnitRefProvInsTest(refFinalProvInsTest) === 25000, "el costo unitario SUMA la compra y los insumos extra (20.000 + 3.000 + 2.000 = 25.000), no reemplaza uno por el otro");
+assert(calcRefTotalesProvInsTest(refFinalProvInsTest).costoTotal === 125000, "...y el costo total de la referencia lo refleja (25.000 × 5 = 125.000)");
+
+var cotProvInsTestObj = state.cotizaciones[0];
+var listaProvInsTest = calcListaComprasProvInsTest(cotProvInsTestObj);
+var lineaCamisetaTest = listaProvInsTest.filter(function (l) { return l.nombre === "Camiseta comprada"; })[0];
+var lineaDtfTest = listaProvInsTest.filter(function (l) { return l.nombre === "DTF"; })[0];
+var lineaPlanchadaTest = listaProvInsTest.filter(function (l) { return l.nombre === "Planchada"; })[0];
+assert(!!lineaCamisetaTest && lineaCamisetaTest.tipo === "producto_proveedor" && lineaCamisetaTest.costoTotal === 100000, "la lista de compras sigue trayendo la compra al proveedor como UNA línea (20.000 × 5 = 100.000)");
+assert(!!lineaDtfTest && lineaDtfTest.costoTotal === 15000, "...y APARTE, una línea propia para el DTF (3.000 × 5 = 15.000) — antes ni existía, se perdía silenciosamente");
+assert(!!lineaPlanchadaTest && lineaPlanchadaTest.costoTotal === 10000 && lineaPlanchadaTest.esServicio === true, "...y otra para la Planchada (2.000 × 5 = 10.000), reconocida como mano de obra propia (esServicio), igual que corte/confección en una referencia de taller");
+
+state.pedidos = pedidosPreviosProvInsTest; state.cotizaciones = cotizacionesPreviasProvInsTest;
+state.plantillasPrendas = plantillasPreviasProvInsTest; state.productos = productosPreviosProvInsTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

@@ -1133,6 +1133,56 @@ avisarle al usuario.
 
 ---
 
+### 🟡 Hallazgo #30 — una referencia comprada a proveedor no podía llevar insumos ni mano de obra adicionales sobre la compra. ✅ IMPLEMENTADO (feature nueva)
+
+Planteado por el usuario 2026-09-21: "cuando en la cotización necesito
+agregar 2 productos de distinta marca y de distinta operación (1
+producto se hace en el taller y el otro es de proveedor)... si compro la
+camiseta hecha a un proveedor pero de todas maneras necesito agregar un
+insumo como lo es el DTF me gustaría la posibilidad de poder
+agregárselo, también la mano de obra como lo son las planchadas". Antes,
+una referencia con `origen: "proveedor"` no tenía NINGUNA tabla de
+insumos: `agregarInsumosDeReferencias` (alimenta la lista de compras) y
+`calcCostoUnitarioRef` (el costo/margen de la referencia) ignoraban
+`ref.insumos` por completo para ese origen — el formulario ni siquiera
+la mostraba. Cualquier insumo o mano de obra extra sobre una prenda
+comprada hecha (DTF, planchada, bordado) no tenía dónde registrarse: se
+perdía del costo real sin que nadie se diera cuenta.
+
+**Fix — se reusa, no se duplica, la tabla de insumos que ya existe para
+"se fabrica en el taller":** se extrajo a `renderTablaInsumosRef(cotId,
+ref, permitirRecetas)` (modules/cotizaciones.js) — misma tabla, mismos
+pickers ("Insumos predeterminados…", "+ Insumo personalizado"), ahora
+compartida entre los dos orígenes. La única diferencia real entre
+"taller" y "proveedor" son los DOS atajos que no tienen sentido sobre
+algo ya comprado hecho: "Aplicar plantilla"/"Aplicar producto"
+(`permitirRecetas=false` para proveedor) reemplazan la RECETA COMPLETA
+de una prenda fabricada desde cero, y el campo "Consumo tela (MT)" de
+la referencia (ya condicionado a `!esProveedor` desde antes) no aplica
+porque no hay nada que cortar.
+
+**`calcCostoUnitarioRef`:** para `origen === "proveedor"` ahora es
+`costoCompra + suma(insumos)`, no solo `costoCompra` — el insumo/mano
+de obra extra se SUMA al precio de compra, nunca lo reemplaza.
+`agregarInsumosDeReferencias` (core/calc.js) ya no corta con un
+`return` temprano para proveedor: sigue emitiendo la línea de la
+compra al proveedor (`producto_proveedor`, como siempre) Y ADEMÁS
+recorre `ref.insumos` igual que para "taller" — un insumo de tipo
+normal (ej. DTF) aparece como su propia línea en "Compras del pedido",
+y uno marcado como mano de obra (unidad "servicio", ej. Planchada)
+entra por el mismo camino que corte/confección de siempre (cuenta como
+costo real, no genera movimiento instantáneo en Finanzas, se paga vía
+nómina).
+
+Verificado end-to-end (la tabla de insumos aparece para una referencia
+de proveedor; "Aplicar plantilla"/"Aplicar producto" NO aparecen;
+"Consumo tela (MT)" tampoco; agregar un insumo normal y uno de mano de
+obra suma correctamente al costo unitario/total de la referencia; la
+lista de compras trae las TRES líneas por separado — la compra al
+proveedor, el insumo y la mano de obra) antes de avisarle al usuario.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la
