@@ -1473,6 +1473,80 @@ clic afuera (adentro no cierra, afuera sí) — ver test/smoke.mjs.
 
 ---
 
+### 🟡 Hallazgo #34 — el Enlace seguía sin sumar automáticamente: faltaba una forma de asignarle categoría a un insumo escrito directo en la cotización. ✅ IMPLEMENTADO
+
+El mismo día, tras el Hallazgo #33, el usuario probó de nuevo y reportó
+dos cosas más: "en el desplegable de cotización faltan las categorías"
+y "sigue pasando la misma situación, pero ahora ya funciona cuando
+selecciono los insumos manualmente, pero debería de funcionar
+automáticamente, si sublimación ya viene enlazado a la categoría
+'telas', entonces las cantidades de telas que hayan ya deberían
+sumarse, a menos que manualmente yo deseleccione la categoría y
+seleccione manualmente qué telas se sublimen y cuáles no". De paso,
+una tercera observación: "en vez de mostrar '2' (número de insumos)
+mostrar '23' (las cantidades de insumos, metros o unidades etc)".
+
+**Causa raíz, la de fondo esta vez:** el Hallazgo #33 reparó
+`categoriaId` en insumos que en algún momento SÍ vinieron del
+catálogo (por `origenCatalogoId`). Pero un insumo escrito DIRECTO en
+una referencia, plantilla o producto — el camino más común para una
+tela que no vale la pena pre-registrar en el catálogo de Insumos — no
+tiene NINGÚN campo para asignarle una categoría: a diferencia de
+Catálogo (que sí tiene su columna "Categoría"), la tabla de insumos de
+una referencia nunca la mostró. Sin `categoriaId`, ese insumo nunca
+podía ser el DESTINO de un enlace por categoría de otro insumo, sin
+importar que ese enlace ya viniera predefinido correctamente — de ahí
+que "funcionara manual" (por nombre específico, que no depende de
+`categoriaId`) pero no "automático" (por categoría). Y como el panel
+de Cotización, desde el Hallazgo #33, solo muestra las categorías que
+YA usa algún insumo de la referencia, con ningún insumo categorizado
+esa lista queda vacía — el síntoma "faltan las categorías" es el mismo
+problema visto desde el otro lado.
+
+**Corrección:** nuevo selector "Este insumo pertenece a…" dentro del
+propio panel de Enlace (`renderEnlacePanel`, core/components.js,
+detrás de `o.propiaCategoriaAction`) — escribe directo el
+`categoriaId` del insumo (`set-ins-categoria-propia` en
+cotizaciones.js, `set-pla-ins-categoria-propia` en plantillas.js,
+`set-pro-ins-categoria-propia` en productos.js; no se agrega en
+Catálogo, que ya tiene su propia columna). Como `cantidadEfectivaInsumo`
+siempre recalcula en vivo y el `enlace.categorias` de "Sublimación" no
+cambia con esto, el efecto es automático en el sentido exacto que pidió
+el usuario: asignarle la categoría a la tela hace que CUALQUIER insumo
+ya enlazado a esa categoría la sume sola, sin tocar ese otro insumo
+para nada — y si el usuario prefiere elegir a mano qué telas entran,
+sigue pudiendo desmarcar la categoría en el panel de "Sublimación" y
+marcar insumos específicos, sin perder esa opción.
+
+Extraído `renderCategoriaSelectOptions` (core/components.js) del
+selector de Categoría que ya existía en Catálogo/Insumos, para no
+repetir el mismo árbol madre/subcategoría con `<optgroup>` dos veces
+(ver [[reutilizar-antes-de-crear]]).
+
+**Ajuste #3 — el botón de Enlace mostraba cuántas reglas había, no
+cuánto sumaban:** el botón resumen (`"🔗 " + N`) usaba
+`categorias.length + insumos.length` (ej. "🔗 2" por una categoría más
+un insumo específico) mientras la celda "Cant." de al lado, para el
+MISMO insumo, ya mostraba la suma real (ej. "🔗 7") — dos números
+distintos con el mismo ícono en la misma fila. Se agregó `o.contenedor`
+a `renderEnlacePanel`: cuando se pasa (Cotización/Plantillas/
+Productos, donde sí hay insumos reales que sumar), el botón muestra
+`cantidadEfectivaInsumo(insumo, contenedor)`, igual que la celda
+"Cant.". En Catálogo (sin `contenedor`, un insumo del catálogo no tiene
+hermanos con cantidad real) se sigue mostrando la cuenta de reglas,
+ahora con la palabra "regla(s)" para no confundirse con una cantidad.
+
+Verificado reproduciendo la causa raíz exacta (Sublimación ya enlazada
+a "Telas", una Tela escrita directo sin categoría, suma en 0 y
+categoría ausente del panel) y confirmando que asignar la categoría
+SOLO desde el panel de la Tela —sin tocar Sublimación— hace aparecer
+la categoría en su panel YA marcada y corrige la suma en pantalla; y
+que el botón de Enlace muestra la suma real, distinta del número de
+reglas, en un caso donde ambos números difieren (7 vs. 2) — ver
+test/smoke.mjs.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

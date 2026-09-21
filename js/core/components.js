@@ -3,7 +3,7 @@
 // en vez de duplicar el combobox.
 
 import { esc, norm, fmt, num } from "./utils.js";
-import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo } from "./calc.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo, categoriasMadre, subcategoriasDe } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
@@ -108,21 +108,77 @@ export function renderTipoCostoOptions(current, enCotizacion) {
 // NOMBRE — ver cantidadEfectivaInsumo). En Cotización son los insumos que
 // YA están en esa misma referencia — son los únicos que de verdad tienen
 // una cantidad que sumar ahí.
+// `<option>`/`<optgroup>` de un <select> de categoría del catálogo — mismo
+// árbol de dos niveles que categoriasAplanadas, pero con jerarquía NATIVA
+// del <select> (<optgroup> agrupa las subcategorías bajo su madre) en vez
+// de indentación a mano, porque así lo pintaba ya el selector de Categoría
+// de Catálogo/Insumos (ver renderFilaInsumo en modules/catalogo.js) antes
+// de que este helper existiera — se extrajo acá para no repetirlo al
+// agregar el mismo selector dentro del panel de Enlace (ver más abajo).
+export function renderCategoriaSelectOptions(categorias, valorActual) {
+  return '<option value="">Sin categoría</option>' +
+    categoriasMadre(categorias || []).map(function (madre) {
+      var opcionMadre = '<option value="' + madre.id + '" ' + (valorActual === madre.id ? "selected" : "") + ">" + esc(madre.nombre) + "</option>";
+      var hijas = subcategoriasDe(categorias, madre.id);
+      if (!hijas.length) return opcionMadre;
+      return opcionMadre + '<optgroup label="' + esc(madre.nombre) + '">' +
+        hijas.map(function (h) { return '<option value="' + h.id + '" ' + (valorActual === h.id ? "selected" : "") + ">" + esc(h.nombre) + "</option>"; }).join("") +
+        "</optgroup>";
+    }).join("");
+}
+
 // `o`: { abierto, busqueda, toggleAction, catAction, insAction,
-//        buscarAction, attrsBase } — attrsBase trae los data-* que ya
+//        buscarAction, attrsBase, contenedor?, categoriasEnlazables?,
+//        propiaCategoriaAction? } — attrsBase trae los data-* que ya
 // identifican al insumo en ESE módulo (data-cot/data-ref/data-ins, o
-// data-pla/data-ins, data-pro/data-ins, data-id), comunes a las 4 acciones.
+// data-pla/data-ins, data-pro/data-ins, data-id), comunes a las acciones.
+// `contenedor` (objeto con `.insumos`, ej. la referencia/plantilla/producto
+// dueño de este insumo): cuando se pasa, el botón resumen muestra la SUMA
+// YA CALCULADA ("🔗 23") en vez de cuántas reglas hay marcadas ("🔗 2") —
+// pedido del usuario 2026-09-21, que confundía las dos cosas: "en vez de
+// mostrar '2' (número de insumos) mostrar '23' (las cantidades)". En
+// Catálogo no hay `contenedor` (un insumo del catálogo no tiene una
+// cantidad real que sumar, solo predefine una regla) — ahí se sigue
+// mostrando cuántas reglas hay, con esa palabra de por medio para no
+// parecer una cantidad.
+// `categoriasEnlazables` (opcional): recorta las categorías que se
+// OFRECEN para enlazar (checkboxes) — en Cotización, solo las que ya usa
+// algún insumo de esa referencia (ver categoriasUsadasPorInsumos en
+// core/calc.js). Si no se pasa, se usa el árbol completo de `categorias`.
+// `propiaCategoriaAction` (opcional): si se pasa, agrega un selector "Este
+// insumo pertenece a…" que escribe la categoría PROPIA del insumo
+// (`insumo.categoriaId`) — necesario en Cotización/Plantillas/Productos,
+// donde un insumo no tiene ningún otro campo para asignársela (a
+// diferencia de Catálogo, que ya tiene su propia columna "Categoría" y por
+// eso no pasa esta opción). Sin esto, un insumo escrito directo en una
+// referencia (sin pasar por el catálogo) nunca puede ser el DESTINO de un
+// enlace por categoría de otro insumo — quedaría siempre invisible para
+// "Sublimación enlazada a Telas", sin ninguna forma de solucionarlo desde
+// la cotización misma.
 export function renderEnlacePanel(insumo, candidatos, categorias, o) {
   var enlace = insumo.enlace || {};
   var catsSel = enlace.categorias || [];
   var insSel = enlace.insumos || [];
-  var total = catsSel.length + insSel.length;
+  var nReglas = catsSel.length + insSel.length;
+  var resumen = !nReglas ? "Sin enlace"
+    : o.contenedor ? "🔗 " + cantidadEfectivaInsumo(insumo, o.contenedor)
+    : "🔗 " + nReglas + " regla" + (nReglas === 1 ? "" : "s");
   var html = '<button type="button" class="btn ghost small" data-action="' + o.toggleAction + '"' + o.attrsBase + '>' +
-    (total ? "🔗 " + total : "Sin enlace") + (o.abierto ? " ▾" : " ▸") + "</button>";
+    resumen + (o.abierto ? " ▾" : " ▸") + "</button>";
   if (!o.abierto) return html;
 
   html += '<div class="enlace-panel">';
-  var catsAplanadas = categoriasAplanadas(categorias || []);
+
+  if (o.propiaCategoriaAction) {
+    html += '<div class="enlace-panel-titulo">Este insumo pertenece a' +
+      renderHelp("La categoría del catálogo que le corresponde a ESTE insumo — así un insumo que enlace por categoría (ej. \"Sublimación\" enlazada a \"Telas\") lo encuentra y lo suma solo, sin elegirlo uno por uno. Solo hace falta si OTROS insumos lo van a sumar por categoría.") +
+      "</div>" +
+      '<select class="mini-input" style="width:100%" data-action-change="' + o.propiaCategoriaAction + '"' + o.attrsBase + '>' +
+      renderCategoriaSelectOptions(categorias, insumo.categoriaId) +
+      "</select>";
+  }
+
+  var catsAplanadas = categoriasAplanadas((o.categoriasEnlazables || categorias) || []);
   if (catsAplanadas.length) {
     html += '<div class="enlace-panel-titulo">Categorías</div>' +
       catsAplanadas.map(function (c) {

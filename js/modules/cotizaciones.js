@@ -1002,10 +1002,13 @@ function renderTablaInsumosRef(cotId, ref) {
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
       '<span class="mobile-th">Enlace</span><span class="enlace-celda" data-ins-celda="' + i.id + '">' +
       (TIPOS_ENLAZABLES.indexOf(i.tipo) !== -1
-        ? renderEnlacePanel(i, ref.insumos || [], categoriasUsadasPorInsumos(state.catalogoCategorias, ref.insumos || []), {
+        ? renderEnlacePanel(i, ref.insumos || [], state.catalogoCategorias, {
             abierto: !!(state.enlacePanelAbierto || {})[i.id],
             busqueda: (state.enlaceBusqueda || {})[i.id] || "",
             toggleAction: "toggle-enlace-panel", catAction: "toggle-ins-enlace-categoria", insAction: "toggle-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+            propiaCategoriaAction: "set-ins-categoria-propia",
+            categoriasEnlazables: categoriasUsadasPorInsumos(state.catalogoCategorias, ref.insumos || []),
+            contenedor: ref,
             attrsBase: attrsIdent
           })
         : '<span class="section-sub" style="margin:0;">—</span>') +
@@ -1763,6 +1766,26 @@ export var actions = {
         var patch = { enlace: nuevoEnlace };
         if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, r);
         return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, r, { insumos: insumos });
+    });
+  },
+  // A qué categoría del catálogo pertenece ESTE insumo (ver "Este insumo
+  // pertenece a…" en renderEnlacePanel, core/components.js) — a diferencia
+  // de Catálogo, un insumo de una referencia no tiene ningún otro campo
+  // para asignarla, así que un insumo escrito directo en la cotización (sin
+  // pasar por el catálogo) nunca podía ser el DESTINO de un enlace por
+  // categoría de otro insumo. Reportado en producción 2026-09-21: el
+  // enlace "funcionaba cuando selecciono los insumos manualmente" (por
+  // NOMBRE específico) pero no por categoría — porque esas telas nunca
+  // tuvieron categoriaId. Ver Hallazgo #34 en CONTABILIDAD.md.
+  "set-ins-categoria-propia": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
+    var valor = el.value;
+    mapRef(cotId, refId, function (r) {
+      var insumos = (r.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        return Object.assign({}, i, { categoriaId: valor });
       });
       return Object.assign({}, r, { insumos: insumos });
     });

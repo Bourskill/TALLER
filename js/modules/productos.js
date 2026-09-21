@@ -366,6 +366,8 @@ function renderCosteoProduccion(p) {
             abierto: !!(state.enlacePanelAbierto || {})[i.id],
             busqueda: (state.enlaceBusqueda || {})[i.id] || "",
             toggleAction: "toggle-enlace-panel", catAction: "toggle-pro-ins-enlace-categoria", insAction: "toggle-pro-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+            propiaCategoriaAction: "set-pro-ins-categoria-propia",
+            contenedor: p,
             attrsBase: attrsIdent
           })
         : '<span class="section-sub" style="margin:0;">—</span>') +
@@ -651,6 +653,19 @@ export var actions = {
         var patch = { enlace: nuevoEnlace };
         if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, p);
         return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, p, { insumos: insumos });
+    });
+  },
+  // A qué categoría del catálogo pertenece ESTE insumo — ver mismo criterio
+  // en set-ins-categoria-propia, modules/cotizaciones.js.
+  "set-pro-ins-categoria-propia": function (el) {
+    var id = el.getAttribute("data-pro"), insId = el.getAttribute("data-ins");
+    var valor = el.value;
+    mapPro(id, function (p) {
+      var insumos = (p.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        return Object.assign({}, i, { categoriaId: valor });
       });
       return Object.assign({}, p, { insumos: insumos });
     });

@@ -1,7 +1,7 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
 import { esc, num, uid, exigirCampos } from "../core/utils.js";
 import { TIPOS_COSTO, TIPOS_ENLAZABLES } from "../core/constants.js";
-import { renderTipoCostoOptions, renderEnlacePanel, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
+import { renderTipoCostoOptions, renderEnlacePanel, renderCategoriaSelectOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categoriasMadre, subcategoriasDe, idsConSubcategorias } from "../core/calc.js";
 
@@ -429,19 +429,13 @@ function renderFilaInsumo(c, categorias) {
     '<span class="mobile-th">Proveedor</span>' + renderSelectorProveedorInsumo(c) +
 
     '<span class="mobile-th">Categoría</span><select class="mini-input insumo-categoria" style="width:100%"' + attrs + ' data-campo="categoriaId">' +
-    '<option value="">Sin categoría</option>' +
     // La madre es una opción seleccionable por su cuenta (un insumo puede
     // clasificarse ahí directo, sin subcategoría); sus subcategorías van
     // agrupadas debajo con <optgroup> — jerarquía nativa del <select>, sin
-    // inventar indentación a mano.
-    categoriasMadre(categorias).map(function (madre) {
-      var opcionMadre = '<option value="' + madre.id + '" ' + (c.categoriaId === madre.id ? "selected" : "") + ">" + esc(madre.nombre) + "</option>";
-      var hijas = subcategoriasDe(categorias, madre.id);
-      if (!hijas.length) return opcionMadre;
-      return opcionMadre + '<optgroup label="' + esc(madre.nombre) + '">' +
-        hijas.map(function (h) { return '<option value="' + h.id + '" ' + (c.categoriaId === h.id ? "selected" : "") + ">" + esc(h.nombre) + "</option>"; }).join("") +
-        "</optgroup>";
-    }).join("") +
+    // inventar indentación a mano. Extraído a renderCategoriaSelectOptions
+    // (core/components.js) para reutilizarlo también dentro del panel de
+    // Enlace, que necesita este mismo selector.
+    renderCategoriaSelectOptions(categorias, c.categoriaId) +
     "</select>" +
 
     // Un insumo recién creado no se guarda solo con escribir: se ve un botón

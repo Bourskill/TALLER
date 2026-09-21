@@ -5909,6 +5909,172 @@ state.catalogoCategorias = catCategoriasPreviasShrinkTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 
+// ---------------------------------------------------------------------------
+// Segunda ronda de correcciones al Enlace, EL MISMO DÍA: "en el desplegable
+// de cotización faltan las categorías" + "sigue pasando la misma
+// situación, pero ahora ya funciona cuando selecciono los insumos
+// manualmente, pero debería de funcionar automáticamente, si sublimación
+// ya viene enlazado a la categoría 'telas', entonces las cantidades de
+// telas que hayan ya deberían sumarse" + "en la columna... en vez de
+// mostrar '2' (número de insumos) mostrar '23' (las cantidades)".
+//
+// Causa raíz: un insumo escrito DIRECTO en una referencia/plantilla/
+// producto (sin pasar por el catálogo) nunca tenía forma de que se le
+// asignara una categoría — sin categoriaId, nunca podía ser el DESTINO de
+// un enlace por categoría de otro insumo, sin importar que ese enlace ya
+// viniera predefinido. Se agrega un selector "Este insumo pertenece a…"
+// dentro del propio panel de Enlace (renderEnlacePanel, core/
+// components.js), y el botón resumen pasa de mostrar cuántas reglas hay
+// marcadas a mostrar la SUMA ya calculada cuando hay un contenedor real
+// que sumar (Cotización/Plantillas/Productos) — en Catálogo, sin insumos
+// reales que sumar, sigue mostrando la cuenta, ahora con la palabra
+// "regla(s)" para no parecer una cantidad.
+// ---------------------------------------------------------------------------
+
+// -- Cotización: sin categoriaId en la Tela, Sublimación (ya enlazada a
+// "Telas") no suma nada y la categoría ni siquiera aparece como opción;
+// asignarle la categoría a la Tela desde SU PROPIO panel hace que
+// Sublimación empiece a sumar sola, sin tocar su propio checkbox --
+const pedidosPreviosAutoTest = state.pedidos, cotizacionesPreviasAutoTest = state.cotizaciones,
+  catCategoriasPreviasAutoTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.cotizaciones = [{
+  id: "cot-auto-test", clienteId: "", cliente: "Cliente Auto", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cauto1",
+  referencias: [{
+    id: "ref-auto-test", nombre: "Ref auto", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-subauto-test", nombre: "Sublimación auto", unidad: "m", costo: 1000, tipo: "por_prenda", cantidad: 1, origenCatalogoId: "", categoriaId: "", esServicio: false, enlace: { categorias: ["cat-telas-enl"], insumos: [] } },
+      { id: "ins-telaauto-test", nombre: "Tela auto", unidad: "m", costo: 5000, tipo: "tela", cantidad: 5, origenCatalogoId: "", categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+var refAutoTest = state.cotizaciones[0].referencias[0];
+assert(cantEfectivaTest(refAutoTest.insumos[0], refAutoTest) === 0, "sin categoriaId en la Tela, la suma de Sublimación (ya enlazada a \"Telas\") sigue dando 0 — el mismo síntoma reportado");
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-auto-test"]');
+click('[data-action="toggle-enlace-panel"][data-ins="ins-subauto-test"]');
+assert(!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subauto-test"][data-cat="cat-telas-enl"]'), "\"Telas\" ni siquiera aparece como opción en el panel de Sublimación — ningún insumo de la referencia tiene esa categoría todavía (el síntoma \"faltan las categorías\")");
+click('[data-action="toggle-enlace-panel"][data-ins="ins-subauto-test"]');
+
+click('[data-action="toggle-enlace-panel"][data-ins="ins-telaauto-test"]');
+assert(!!document.querySelector('select[data-action-change="set-ins-categoria-propia"][data-ins="ins-telaauto-test"]'), "la Tela, al ser un insumo enlazable, también tiene su propio panel — y dentro, el selector NUEVO \"Este insumo pertenece a…\" para asignarle su categoría");
+setChange('select[data-action-change="set-ins-categoria-propia"][data-ins="ins-telaauto-test"]', "cat-telas-enl");
+var refTrasCategoriaPropiaTest = state.cotizaciones[0].referencias[0];
+assert(refTrasCategoriaPropiaTest.insumos[1].categoriaId === "cat-telas-enl", "elegir \"Telas\" en el selector le asigna esa categoría a la Tela — sin tocar Sublimación para nada");
+assert(cantEfectivaTest(refTrasCategoriaPropiaTest.insumos[0], refTrasCategoriaPropiaTest) === 5, "...y con eso, Sublimación (que YA venía enlazada a \"Telas\") empieza a sumar SOLA — automático, sin que el usuario haya tocado su propio checkbox de categoría");
+click('[data-action="toggle-enlace-panel"][data-ins="ins-telaauto-test"]');
+
+click('[data-action="toggle-enlace-panel"][data-ins="ins-subauto-test"]');
+var checkTelasTrasCategoriaTest = document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subauto-test"][data-cat="cat-telas-enl"]');
+assert(!!checkTelasTrasCategoriaTest, "ahora \"Telas\" SÍ aparece como opción en el panel de Sublimación — ya hay un insumo de esa categoría en la referencia");
+assert(checkTelasTrasCategoriaTest.checked === true, "...y aparece YA MARCADA, porque el enlace de Sublimación siempre incluyó \"Telas\" — no hizo falta volver a marcarla a mano");
+var celdaSubAutoTest = document.querySelector('[data-ins-row][data-ins="ins-subauto-test"]').textContent;
+assert(celdaSubAutoTest.indexOf("🔗 5") !== -1, "la fila de Sublimación ya muestra la suma real (🔗 5), no un contador de reglas");
+
+state.pedidos = pedidosPreviosAutoTest; state.cotizaciones = cotizacionesPreviasAutoTest;
+state.catalogoCategorias = catCategoriasPreviasAutoTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// -- el botón de "Enlace" en Cotización muestra la SUMA calculada, no el
+// número de reglas marcadas: "en vez de mostrar '2' (número de insumos)
+// mostrar '23' (las cantidades de insumos, metros o unidades etc)" --
+const pedidosPreviosBadgeSumaTest = state.pedidos, cotizacionesPreviasBadgeSumaTest = state.cotizaciones,
+  catCategoriasPreviasBadgeSumaTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.cotizaciones = [{
+  id: "cot-badgesuma-test", clienteId: "", cliente: "Cliente Badge", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cbadgesuma1",
+  referencias: [{
+    id: "ref-badgesuma-test", nombre: "Ref badge suma", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-telabadge-test", nombre: "Tela badge", unidad: "m", costo: 1000, tipo: "tela", cantidad: 3, categoriaId: "cat-telas-enl", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-botonbadge-test", nombre: "Botón badge", unidad: "UND", costo: 100, tipo: "por_prenda", cantidad: 4, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-subbadge-test", nombre: "Sublimación badge", unidad: "m", costo: 500, tipo: "por_prenda", cantidad: 1, categoriaId: "", esServicio: false, enlace: { categorias: ["cat-telas-enl"], insumos: ["botón badge"] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-badgesuma-test"]');
+var botonBadgeSumaTest = document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-subbadge-test"]');
+assert(!!botonBadgeSumaTest, "el botón de Enlace de Sublimación existe");
+assert(botonBadgeSumaTest.textContent.indexOf("🔗 7") !== -1, "el botón muestra la SUMA calculada (3 de la tela + 4 del botón específico = 7)...");
+assert(botonBadgeSumaTest.textContent.indexOf("🔗 2") === -1, "...NO el número de reglas marcadas (2: una categoría + un insumo específico) — eso confundía \"cuántos enlaces\" con \"cuánto suma\"");
+state.pedidos = pedidosPreviosBadgeSumaTest; state.cotizaciones = cotizacionesPreviasBadgeSumaTest;
+state.catalogoCategorias = catCategoriasPreviasBadgeSumaTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// -- en Catálogo, sin un "contenedor" real que sumar (un insumo del
+// catálogo predefine una regla, no tiene insumos hermanos con cantidad),
+// el botón sigue mostrando cuántas REGLAS hay marcadas — con esa palabra
+// de por medio para no parecer una cantidad --
+const catalogoPrevioBadgeTest = state.catalogoInsumos, catCategoriasPreviasBadgeTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-badge-test", nombre: "Insumo badge test", unidad: "m", costo: 100, tipo: "por_prenda", categoriaId: "", proveedorId: "", enlace: { categorias: ["cat-telas-enl"], insumos: [] } }
+]);
+state.tab = "catalogo"; render();
+var botonBadgeCatalogoTest = document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="cat-badge-test"]');
+assert(!!botonBadgeCatalogoTest && botonBadgeCatalogoTest.textContent.indexOf("🔗 1 regla") !== -1, "en Catálogo el botón muestra \"N regla(s)\", no una cantidad — ahí no hay insumos reales que sumar, sería engañoso mostrar un número como si lo hubiera");
+state.catalogoInsumos = catalogoPrevioBadgeTest; state.catalogoCategorias = catCategoriasPreviasBadgeTest;
+
+// -- también en Plantillas y Productos: el selector "Este insumo pertenece
+// a…" existe y dispara el mismo automatismo (el usuario pidió explícito
+// que el enlace fuera editable en los 4 módulos, no solo en Cotización) --
+const plantillasPreviasAutoTest = state.plantillasPrendas, catCategoriasPreviasAutoPlaTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.plantillasPrendas = [{
+  id: "pla-auto-test", nombre: "Plantilla auto", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [
+    { id: "plains-subauto-test", nombre: "Sublimación pla auto", unidad: "m", costo: 1000, tipo: "por_prenda", cantidad: 1, categoriaId: "", enlace: { categorias: ["cat-telas-enl"], insumos: [] } },
+    { id: "plains-telaauto-test", nombre: "Tela pla auto", unidad: "m", costo: 3000, tipo: "tela", cantidad: 4, categoriaId: "", enlace: { categorias: [], insumos: [] } }
+  ]
+}];
+state.tab = "plantillas"; state.plantillasVista = "plantillas"; state.plantillaEditando = "pla-auto-test"; render();
+var plaAutoTestRef = state.plantillasPrendas[0];
+assert(cantEfectivaTest(plaAutoTestRef.insumos[0], plaAutoTestRef) === 0, "misma situación en Plantillas: sin categoriaId en la Tela, Sublimación no suma nada todavía");
+click('[data-action="toggle-enlace-panel"][data-pla="pla-auto-test"][data-ins="plains-telaauto-test"]');
+assert(!!document.querySelector('select[data-action-change="set-pla-ins-categoria-propia"][data-pla="pla-auto-test"][data-ins="plains-telaauto-test"]'), "Plantillas también tiene el selector \"Este insumo pertenece a…\"");
+setChange('select[data-action-change="set-pla-ins-categoria-propia"][data-pla="pla-auto-test"][data-ins="plains-telaauto-test"]', "cat-telas-enl");
+var plaAutoTrasTest = state.plantillasPrendas[0];
+assert(cantEfectivaTest(plaAutoTrasTest.insumos[0], plaAutoTrasTest) === 4, "...y Sublimación suma sola, sin tocar su propio enlace");
+state.plantillasPrendas = plantillasPreviasAutoTest; state.catalogoCategorias = catCategoriasPreviasAutoPlaTest;
+state.plantillaEditando = ""; state.plantillasVista = "plantillas";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+const productosPreviosAutoTest = state.productos, catCategoriasPreviasAutoProTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.productos = [{
+  id: "pro-auto-test", nombre: "Producto auto", origen: "taller", precioVenta: 0, costoCompra: 0, proveedorId: "", imagenUrl: "", consumoSugerido: 1, flujoEstadosId: "",
+  insumos: [
+    { id: "proins-subauto-test", nombre: "Sublimación pro auto", unidad: "m", costo: 1000, tipo: "por_prenda", cantidad: 1, categoriaId: "", enlace: { categorias: ["cat-telas-enl"], insumos: [] } },
+    { id: "proins-telaauto-test", nombre: "Tela pro auto", unidad: "m", costo: 2000, tipo: "tela", cantidad: 6, categoriaId: "", enlace: { categorias: [], insumos: [] } }
+  ],
+  tallas: []
+}];
+state.tab = "productos"; state.productosVista = "nueva"; state.productoEditando = "pro-auto-test"; render();
+var proAutoTestRef = state.productos[0];
+assert(cantEfectivaTest(proAutoTestRef.insumos[0], proAutoTestRef) === 0, "misma situación en Productos: sin categoriaId en la Tela, Sublimación no suma nada todavía");
+click('[data-action="toggle-enlace-panel"][data-pro="pro-auto-test"][data-ins="proins-telaauto-test"]');
+assert(!!document.querySelector('select[data-action-change="set-pro-ins-categoria-propia"][data-pro="pro-auto-test"][data-ins="proins-telaauto-test"]'), "Productos también tiene el selector \"Este insumo pertenece a…\"");
+setChange('select[data-action-change="set-pro-ins-categoria-propia"][data-pro="pro-auto-test"][data-ins="proins-telaauto-test"]', "cat-telas-enl");
+var proAutoTrasTest = state.productos[0];
+assert(cantEfectivaTest(proAutoTrasTest.insumos[0], proAutoTrasTest) === 6, "...y Sublimación suma sola, sin tocar su propio enlace");
+state.productos = productosPreviosAutoTest; state.catalogoCategorias = catCategoriasPreviasAutoProTest;
+state.productoEditando = ""; state.productosVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

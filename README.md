@@ -259,6 +259,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo quinta ronda: un insumo escrito directo en la cotización no tenía forma de recibir una categoría — el Enlace automático seguía sin funcionar)
+
+El mismo día de la ronda anterior, segunda vuelta: "en el desplegable
+de cotización faltan las categorías" y "sigue pasando la misma
+situación... debería de funcionar automáticamente, si sublimación ya
+viene enlazado a la categoría 'telas', entonces las cantidades de
+telas que hayan ya deberían sumarse".
+
+- **Causa raíz:** una tela escrita DIRECTO en una referencia/plantilla/
+  producto (sin pasar por el catálogo) nunca tenía ningún campo para
+  asignarle una categoría — a diferencia de Catálogo, que sí tiene su
+  columna "Categoría". Sin `categoriaId`, nunca podía ser el destino de
+  un enlace por categoría, aunque ese enlace ya viniera predefinido.
+- Nuevo selector **"Este insumo pertenece a…"** dentro del propio panel
+  de Enlace (Cotización/Plantillas/Productos — no en Catálogo, que ya
+  tiene su columna). Asignarlo hace que cualquier insumo ya enlazado a
+  esa categoría la sume SOLO, sin tocar ese otro insumo — automático,
+  tal como se pidió, con la opción de seguir eligiendo a mano si se
+  prefiere (desmarcar la categoría, marcar insumos específicos).
+- El botón de Enlace mostraba cuántas REGLAS había marcadas ("🔗 2"),
+  no cuánto sumaban — confuso al lado de la celda "Cant.", que sí
+  mostraba la suma real. Ahora el botón muestra la suma cuando hay
+  insumos reales que sumar (Cotización/Plantillas/Productos); en
+  Catálogo sigue mostrando la cuenta, con la palabra "regla(s)".
+- Ver CONTABILIDAD.md, "Hallazgo #34".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo cuarta ronda: el Enlace no sumaba en referencias viejas por falta de reparación retroactiva, más lista de categorías acortada y cierre al hacer clic afuera)
 
 El mismo día de la ronda anterior, el usuario reportó: "seleccioné el
