@@ -259,6 +259,31 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésima ronda: rediseño visual de la tabla de insumos — armonía, jerarquía y mejor uso del espacio)
+
+Pedido de estilo: "no me gusta mucho la estetica de esa tabla,
+mejorala, metele estilo, que haya armonia, ten en cuenta el poco
+espacio, una buena distribucion".
+
+- La tabla de insumos de Cotización/Plantillas/Productos era la ÚNICA
+  de la app sin el "chrome" de las demás (padding, esquinas
+  redondeadas, hover) — y el catálogo de Insumos ya tenía un
+  tratamiento más refinado que nunca se replicó ahí. Se reutiliza ese
+  mismo lenguaje visual en vez de inventar uno nuevo.
+- Insumo y Costo se leen como texto hasta que se interactúa con ellos
+  (mismo criterio que Catálogo); Insumo gana peso visual como "título"
+  de la fila, Costo queda monospace y alineado a la derecha.
+- Cantidad y Costo x prenda también quedan alineadas a la derecha, con
+  sus encabezados alineados igual — se leen como una columna de cifras
+  comparables.
+- El botón de Enlace pasa a ser una pastilla (misma familia visual que
+  las etiquetas de estado de la app): apagada sin enlace, teñida de
+  acento con enlace, para saltar a la vista por la tabla.
+- El botón "✕" de quitar una fila pasa a un círculo chico de bajo
+  perfil, en vez de competir con botones de acción como "Eliminar
+  referencia".
+- Ver CONTABILIDAD.md, "Hallazgo #39".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo novena ronda: corrección del pulido anterior — el botón de Enlace conservaba texto largo y envolvía en varias líneas)
 
 El mismo día de la ronda anterior: "está horrible porque hay espacios

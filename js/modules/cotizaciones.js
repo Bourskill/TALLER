@@ -903,7 +903,7 @@ function renderFilasGlobales(cotId, ref) {
       // La cantidad no aplica: se paga una vez, no por prenda.
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="1" disabled />' +
       '<span class="mobile-th">Costo x prenda</span><span class="amount" title="' + fmt(g.costo) + " entre " + unidades + ' prenda(s) del pedido">' + fmt(calcCostoPrendaGlobal(cot, g)) + "</span>" +
-      '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '">✕</button>' +
+      '<button class="ins-remove-btn" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '" title="Quitar" aria-label="Quitar">✕</button>' +
       "</div>";
     if (cambio) html += renderAvisoInsumoCambio(cotId, "", g.id, cambio);
   });
@@ -936,7 +936,7 @@ function renderFilasServicios(cotId) {
     // por prenda), así que reusar el encabezado de la tabla de insumos las
     // haría leer al revés.
     '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';">' +
-    "<span>Servicio</span><span>Unidad</span><span>Te cuesta</span><span>Tipo de costo</span><span></span><span>Le cobras</span><span>Ganancia</span><span></span></div>";
+    "<span>Servicio</span><span>Unidad</span><span class=\"ins-th-num\">Te cuesta</span><span>Tipo de costo</span><span></span><span class=\"ins-th-num\">Le cobras</span><span class=\"ins-th-num\">Ganancia</span><span></span></div>";
   servicios.forEach(function (s) {
     var attrs = ' data-action-change="set-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '"';
     var ganancia = num(s.precio) - num(s.costo);
@@ -954,7 +954,7 @@ function renderFilasServicios(cotId) {
       "<span></span>" +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
       '<span class="mobile-th">Ganancia</span><span class="amount' + (ganancia < 0 ? " neg" : "") + '" title="Lo que le cobras menos lo que te cuesta">' + fmt(ganancia) + "</span>" +
-      '<button class="btn danger small" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '">✕</button>' +
+      '<button class="ins-remove-btn" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '" title="Quitar" aria-label="Quitar">✕</button>' +
       "</div>";
     if (cambio) html += renderAvisoInsumoCambio(cotId, "", s.id, cambio);
   });
@@ -979,7 +979,7 @@ function renderFilasServicios(cotId) {
 // los dos puede incluir una "prenda comprada" como parte de su receta).
 function renderTablaInsumosRef(cotId, ref) {
   var html = '<div class="ins-table">' +
-    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
+    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';"><span>Insumo</span><span>Unidad</span><span class="ins-th-num">Costo</span><span>Tipo de costo</span><span>Enlace</span><span class="ins-th-num">Cant.</span><span class="ins-th-num">Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
     // El insumo se copió del catálogo al agregarlo (costo incluido) para que
     // esta cotización no cambie de precio sola si el catálogo se repone más
@@ -1028,7 +1028,7 @@ function renderTablaInsumosRef(cotId, ref) {
       // no se edita a mano: se calcula solo, ver renderCeldaCantidadInsumo.
       '<span class="mobile-th">Cant.</span>' + renderCeldaCantidadInsumo(i, ref, attrsIns) +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
-      '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
+      '<button class="ins-remove-btn" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '" title="Quitar" aria-label="Quitar">✕</button>' +
       "</div>";
     if (cambio) html += renderAvisoInsumoCambio(cotId, ref.id, i.id, cambio);
   });

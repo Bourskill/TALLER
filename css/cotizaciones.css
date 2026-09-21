@@ -85,7 +85,16 @@
 .ref-fields span{display:flex;align-items:center;gap:8px;}
 .ref-fields label{flex:0 0 128px;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
 .ins-table{width:100%;margin-top:10px;font-size:12px;}
-.ins-row{display:grid;grid-template-columns:1fr 60px 90px 90px 90px 30px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border-soft);}
+/* Pulido 2026-09-21 ("no me gusta la estética de esa tabla... metele
+   estilo, que haya armonía"): antes cada fila era borde a borde, sin
+   padding lateral ni resalte al pasar el mouse — la única tabla de
+   insumos de la app sin ese "chrome" (compárese con .tx-row en
+   tables.css, que sí lo tiene). Se le da el mismo tacto: padding propio,
+   esquinas redondeadas y fondo al pasar el mouse, MANTENIENDO el alto
+   compacto (7px, no los 13px de .tx-row) porque acá caben muchas filas
+   seguidas y el espacio es limitado (pedido explícito del usuario). */
+.ins-row{display:grid;grid-template-columns:1fr 60px 90px 90px 90px 30px;gap:8px;align-items:center;padding:7px 8px;border-radius:var(--radius-sm);border-bottom:1px solid var(--border-soft);transition:background .12s ease;}
+.ins-row:not(.head):hover{background:var(--surface-2);}
 /* Manijo para arrastrar y reordenar con SortableJS (ver reordenarInsumos en
    modules/cotizaciones.js y su inicialización en core/dom.js):
    position:absolute a propósito — así NO cuenta como hijo del grid ni
@@ -99,11 +108,49 @@
 .ins-row[data-ins-row].cambio-catalogo{padding-left:28px;}
 .ins-drag-handle{position:absolute;left:0;top:50%;transform:translateY(-50%);cursor:grab;color:var(--ink-faint);font-size:15px;padding:6px 4px;user-select:none;touch-action:none;}
 .ins-drag-handle:active{cursor:grabbing;}
+/* Botón "✕" para quitar una fila (insumo, costo global, servicio
+   cobrado…): antes era el mismo .btn.danger.small de cualquier otra parte
+   de la app — con su padding normal (6px 11px) apenas cabía en la columna
+   de 30px reservada acá. Un círculo chico y sin relleno hasta el hover se
+   siente más liviano dentro de una fila ya densa, y deja claro que es una
+   acción "de bajo perfil" (quitar UNA fila) y no un botón de acción
+   primaria como "Eliminar referencia". */
+.ins-remove-btn{background:none;border:none;width:24px;height:24px;border-radius:50%;color:var(--ink-faint);font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;box-shadow:none;transition:background .12s ease,color .12s ease;}
+.ins-remove-btn:hover{background:var(--danger-soft);color:var(--danger-ink);}
 /* Clases que SortableJS agrega solas durante el arrastre — sin esto se ve el
    comportamiento por defecto (que ya es aceptable), esto solo lo afina un
    poco al estilo del resto de la app. */
 .ins-row.sortable-ghost{opacity:.35;}
 .ins-row.sortable-chosen{background:var(--surface-3);}
+
+/* Nombre y Costo se leen como TEXTO hasta que se interactúa con ellos —
+   mismo criterio ya probado en la fila de insumos de Catálogo (ver
+   .tx-row.insumo/.insumo-nombre/.insumo-costo en catalogo.css): con 6-8
+   campos por fila, tenerlos TODOS con el mismo borde sólido se sentía como
+   una pared de cajas idénticas, no como una tabla ordenada. Insumo es la
+   columna protagonista (ver INS_COLS_REF, modules/cotizaciones.js) —
+   font-weight:600 lo remarca como el "título" de la fila. Costo es dinero:
+   monospace y alineado a la derecha, igual que Costo x prenda de al lado
+   (.amount más abajo), para poder comparar precios de un vistazo por la
+   columna. El borde/fondo reaparece al pasar el mouse por la FILA entera
+   (no solo el campo) o al enfocar el campo mismo — así sigue siendo obvio
+   que es editable sin tener que adivinar. */
+.ins-row input[data-campo="nombre"]{background:transparent;border-color:transparent;font-weight:600;padding-left:4px;}
+.ins-row:hover input[data-campo="nombre"]{background:var(--surface-3);border-color:var(--border);}
+.ins-row input[data-campo="nombre"]:focus{background:var(--surface-3);border-color:var(--accent);}
+.ins-row input[data-campo="costo"]{background:transparent;border-color:transparent;text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;}
+.ins-row:hover input[data-campo="costo"]{background:var(--surface-3);border-color:var(--border);}
+/* Al escribir, vuelve a alinearse a la izquierda: leer bien alineado a la
+   derecha es lo que importa en reposo, pero escribir un número así se
+   siente raro con el cursor "flotando" lejos del último dígito. */
+.ins-row input[data-campo="costo"]:focus{background:var(--surface-3);border-color:var(--accent);text-align:left;}
+/* Cantidad y Costo x prenda, la MISMA lógica de "columna de números,
+   alineada a la derecha" — Cantidad es la única que también puede ser un
+   campo editable (ver renderCeldaCantidadInsumo, core/components.js), el
+   resto de las veces es la suma ya calculada de un enlace. */
+.ins-row input[data-campo="cantidad"]{text-align:right;}
+.ins-row input[data-campo="cantidad"]:focus{text-align:left;}
+.ins-row .amount{text-align:right;display:block;}
 
 /* Barra de "cambios sin guardar" de una cotización. Sticky: en una cotización
    larga hay que poder guardar sin volver hasta arriba, y sobre todo no perder
@@ -193,7 +240,15 @@
    TODA la fila (reportado en producción: "está horrible porque hay espacios
    entre filas"). text-overflow:ellipsis es la red de seguridad para el caso
    límite de una suma con muchos dígitos, en vez de volver a envolver. */
-.btn.small.enlace-toggle{padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;display:block;}
+/* Forma de "pill", la misma familia visual que .tag/.status-pill/.badge
+   (ver tables.css: "deberían leerse como una sola familia, no tres") — sin
+   enlace queda plano y apagado (el caso más común, no debe llamar la
+   atención); CON enlace ("🔗 N") se tiñe de acento para que salte a la
+   vista de un vistazo por la tabla, igual que un badge de estado. */
+.btn.small.enlace-toggle{padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;display:block;text-align:center;border-radius:999px;border-color:transparent;background:transparent;color:var(--ink-faint);font-weight:700;box-shadow:none;}
+.btn.small.enlace-toggle:hover{background:var(--surface-3);color:var(--ink-soft);}
+.btn.small.enlace-toggle.enlace-activo{background:var(--accent-soft);color:var(--accent-ink);}
+.btn.small.enlace-toggle.enlace-activo:hover{filter:brightness(1.1);}
 .enlace-panel{position:absolute;z-index:5;top:100%;left:0;margin-top:4px;min-width:220px;max-width:280px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);box-shadow:0 4px 14px rgba(0,0,0,.18);padding:8px 10px 10px;display:flex;flex-direction:column;gap:4px;}
 .enlace-panel-titulo{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);margin-top:6px;}
 .enlace-panel-titulo:first-child{margin-top:0;}
@@ -239,7 +294,14 @@
   .picker-side::-webkit-scrollbar{display:none;}
   .picker-cat{flex:0 0 auto;}
 }
-.ins-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;}
+.ins-row.head{color:var(--ink-faint);text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.03em;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:2px;}
+/* Las etiquetas de columnas de número (Costo, Cant., Costo x prenda) se
+   alinean a la derecha, igual que su dato debajo — si no, el título queda
+   a la izquierda de una columna de cifras derechadas, ver el mismo criterio
+   en catalogo.css (".tx-row.head.insumo > span:nth-child(2)"). El header
+   de "Enlace" también se recorta al ancho de su columna, angosta a
+   propósito (ver .enlace-toggle). */
+.ins-row.head span.ins-th-num{text-align:right;}
 /* .ref-summary / .rs-item se mudaron a layout.css: los usa tambien Pedidos, y
    este archivo se carga DESPUES que pedidos.css, asi que cualquier modificador
    de Pedidos perdia por orden contra la regla base. Mismo motivo por el que

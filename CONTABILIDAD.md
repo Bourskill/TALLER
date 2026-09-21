@@ -1711,6 +1711,71 @@ la palabra "regla(s)") — ver test/smoke.mjs.
 
 ---
 
+### 🟢 Hallazgo #39 — rediseño visual de la tabla de insumos: armonía, jerarquía y mejor uso del espacio. ✅ IMPLEMENTADO
+
+Pedido explícito de estilo, no un bug: "no me gusta mucho la estética
+de esa tabla, mejorala, metele estilo, que haya armonia, ten en cuenta
+el poco espacio, una buena distribucion".
+
+**Diagnóstico:** la tabla de insumos de Cotización/Plantillas/Productos
+(`.ins-row`, css/cotizaciones.css) era la ÚNICA tabla de la app sin el
+"chrome" que ya tienen las demás (comparar con `.tx-row` en
+tables.css: padding lateral, esquinas redondeadas, resalte al pasar el
+mouse) — borde a borde, sin aire, sin feedback de hover. De paso, el
+catálogo de Insumos (`.tx-row.insumo`, catalogo.css) YA tenía un
+tratamiento más refinado (nombre y costo se leen como texto plano
+hasta que se interactúa, costo alineado a la derecha en monospace) que
+nunca se replicó en las otras 3 tablas — la falta de "armonía" era
+literal: dos estilos de tabla de insumos conviviendo en la misma app.
+
+**Corrección — reutilizar el lenguaje visual YA probado, no inventar
+uno nuevo** (ver [[reutilizar-antes-de-crear]]):
+- `.ins-row` gana padding propio, esquinas redondeadas y fondo al
+  pasar el mouse — MANTENIENDO el alto compacto (7px, no los 13px de
+  `.tx-row`) porque acá caben muchas filas seguidas y el espacio es
+  limitado (pedido explícito).
+- Insumo (columna protagonista) y Costo se leen como TEXTO hasta que
+  se interactúa con ellos — mismo criterio ya probado en
+  `.tx-row.insumo`/`.insumo-nombre`/`.insumo-costo` de Catálogo: con
+  6-8 columnas por fila, tenerlas TODAS con el mismo borde sólido se
+  sentía como una pared de cajas idénticas. Insumo suma
+  `font-weight:600` (se lee como el "título" de la fila); Costo queda
+  monospace y alineado a la derecha.
+- Cantidad y Costo x prenda (las otras dos columnas numéricas) también
+  quedan alineadas a la derecha, con sus encabezados alineados igual
+  (clase `ins-th-num`) — se lee como una columna de cifras comparables
+  de un vistazo, no texto disperso.
+- El botón de Enlace pasa de "botón fantasma" a una PASTILLA (misma
+  familia visual que `.tag`/`.status-pill`/`.badge`, ver tables.css:
+  "deberían leerse como una sola familia, no tres") — apagada cuando
+  no hay enlace (el caso más común, no debe llamar la atención), teñida
+  de acento cuando sí lo hay (clase `enlace-activo`, calculada en
+  `renderEnlacePanel`), para que salte a la vista por la tabla igual
+  que cualquier otro indicador de estado de la app.
+- El botón "✕" de quitar una fila pasa de `.btn.danger.small` (pensado
+  para acciones de página completa, con su padding normal) a
+  `.ins-remove-btn`: un círculo chico, sin relleno hasta el hover — se
+  siente "de bajo perfil" (quitar UNA fila) dentro de una tabla ya
+  densa, en vez de competir visualmente con "Eliminar referencia".
+
+Aplicado a los 4 módulos: Cotizaciones (`INS_COLS_REF`), Plantillas y
+Productos (`INS_COLS`, misma CSS compartida vía `.ins-row`) heredan
+todo automáticamente; Catálogo (`.tx-row.insumo`, con su propio CSS ya
+refinado) solo suma la pastilla de Enlace y el botón "✕" circular,
+que son componentes compartidos entre los 4.
+
+Verificado que el chip de Enlace lleva la clase `enlace-activo` en
+cuanto hay algo enlazado y la pierde al desenlazar — ver
+test/smoke.mjs. El resto (padding, colores, alineación) es CSS puro
+sin lógica que probar; no se pudo verificar visualmente en el
+navegador esta ronda porque una ventana emergente de inicio de sesión
+de Google, disparada por la propia app al montar la vista previa,
+bloqueó la ejecución de JavaScript en el resto de la pestaña — se
+revisó en su lugar reutilizando exactamente los mismos tokens/clases
+ya probados visualmente en Catálogo y en el resto de la app.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

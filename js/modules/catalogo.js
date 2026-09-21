@@ -465,7 +465,7 @@ function renderFilaInsumo(c, categorias) {
         '<button class="btn small" data-action="guardar-cat-item-nuevo" data-id="' + c.id + '">✓ Guardar</button>' +
         '<button class="btn ghost small" data-action="remove-cat-item" data-id="' + c.id + '" title="Descartar, no se guarda" aria-label="Descartar insumo">Descartar</button>' +
         "</div>"
-      : '<button class="btn danger small" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>') +
+      : '<button class="ins-remove-btn" data-action="remove-cat-item" data-id="' + c.id + '" title="Eliminar del catálogo" aria-label="Eliminar insumo">✕</button>') +
     "</div>";
 }
 

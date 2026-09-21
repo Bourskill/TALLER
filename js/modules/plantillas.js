@@ -281,7 +281,7 @@ function renderPlantillaCard(p) {
 
   html += '<hr class="stitch" />';
   html += '<div class="cot-col-title">Insumos de la plantilla</div>';
-  html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant./mult.</span><span></span></div>';
+  html += '<div class="ins-table"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span class="ins-th-num">Costo</span><span>Tipo de costo</span><span>Enlace</span><span class="ins-th-num">Cant./mult.</span><span></span></div>';
   insumos.forEach(function (i) {
     // Reordenar por arrastre con SortableJS (ver bindEvents en core/dom.js y
     // reordenarInsumosPlantilla más abajo) — mismo mecanismo y misma clase
@@ -309,7 +309,7 @@ function renderPlantillaCard(p) {
         : '<span class="section-sub" style="margin:0;">—</span>') +
       "</span>" +
       '<span class="mobile-th">Cant./mult.</span>' + renderCeldaCantidadInsumo(i, p, attrsIns) +
-      '<button class="btn danger small" data-action="remove-pla-insumo" data-pla="' + p.id + '" data-ins="' + i.id + '">✕</button>' +
+      '<button class="ins-remove-btn" data-action="remove-pla-insumo" data-pla="' + p.id + '" data-ins="' + i.id + '" title="Quitar" aria-label="Quitar">✕</button>' +
       "</div>";
   });
   if (!insumos.length) { html += '<div class="empty" style="padding:12px 0;">Sin insumos en esta plantilla.</div>'; }

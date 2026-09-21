@@ -180,7 +180,11 @@ export function renderEnlacePanel(insumo, candidatos, categorias, o) {
   var resumen = !nReglas ? "—"
     : o.contenedor ? "🔗 " + cantidadEfectivaInsumo(insumo, o.contenedor)
     : "🔗 " + nReglas;
-  var html = '<button type="button" class="btn ghost small enlace-toggle" data-action="' + o.toggleAction + '" title="' + (o.abierto ? "Clic para cerrar" : "Clic para configurar el enlace") + '"' + o.attrsBase + '>' +
+  // "enlace-activo" tiñe el botón de acento (mismo lenguaje visual que
+  // .tag/.status-pill/.badge, ver tables.css) SOLO cuando de verdad hay
+  // algo enlazado — así resalta de un vistazo por la tabla, sin llamar la
+  // atención en el caso más común (sin enlace, "—" apagado).
+  var html = '<button type="button" class="btn ghost small enlace-toggle' + (nReglas ? " enlace-activo" : "") + '" data-action="' + o.toggleAction + '" title="' + (o.abierto ? "Clic para cerrar" : "Clic para configurar el enlace") + '"' + o.attrsBase + '>' +
     resumen + "</button>";
   if (!o.abierto) return html;
 

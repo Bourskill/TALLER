@@ -5689,12 +5689,14 @@ click('[data-action="abrir-cotizacion-editor"][data-id="cot-enlace-test"]');
 assert(!!document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]'), "cada insumo enlazable de una referencia tiene su propio botón \"Enlace\"");
 assert(!!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "sin enlazar todavía, \"Cant.\" de Sublimación sigue siendo un campo editable normal");
 assert(document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]').textContent.trim() === "—", "...y el botón muestra \"—\" (sin texto largo que envuelva en varias líneas en la columna angosta)");
+assert(!document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]').classList.contains("enlace-activo"), "...y sin la clase \"enlace-activo\" (el chip queda apagado, no teñido de acento, mientras no haya enlace)");
 
 click('[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]');
 assert(!!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-sub-test"][data-cat="cat-telas-enl"]'), "al abrir el panel aparecen las categorías del catálogo como checkboxes (no un desplegable de tipos de costo)");
 click('[data-action="toggle-ins-enlace-categoria"][data-ins="ins-sub-test"][data-cat="cat-telas-enl"]');
 var refTrasEnlazarTest = state.cotizaciones[0].referencias[0];
 assert(refTrasEnlazarTest.insumos.filter(function (i) { return i.id === "ins-sub-test"; })[0].enlace.categorias.indexOf("cat-telas-enl") !== -1, "marcar la categoría \"Telas\" la agrega a la lista de enlace del insumo");
+assert(document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]').classList.contains("enlace-activo"), "en cuanto hay algo enlazado, el chip se tiñe de acento (\"enlace-activo\") para que salte a la vista en la tabla");
 assert(!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "una vez enlazada, \"Cant.\" de Sublimación DEJA de ser un campo editable...");
 var celdaCantSubTest = document.querySelector('[data-ins-row][data-ins="ins-sub-test"]').textContent;
 assert(celdaCantSubTest.indexOf("🔗 3") !== -1, "...y muestra la suma ya calculada (madre 1 + subcategoría 2 = 3), con el ícono de enlace");
