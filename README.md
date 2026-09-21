@@ -259,6 +259,47 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo primera ronda: nueva pestaña "Compras conjuntas" en Finanzas — repartir a prorrata un insumo comprado junto para varios pedidos)
+
+Pedido del usuario: al producir varios pedidos a la vez, es común que
+compartan un insumo (la misma tela, por ejemplo) y se compre todo junto en
+una sola salida — igual que dos referencias de UNA cotización ya se juntan
+solas en su lista de compras, pero a través de varios pedidos. Ejemplo
+exacto que dio: lista1 necesita 10m, lista2 necesita 20m, se compran 33m ->
+lista1 registra 1m de más, lista2 registra 2m de más — el sobrante (o
+faltante) se reparte a PRORRATA de lo que cada uno necesitaba, nunca
+parejo entre todos.
+
+- **Nueva pestaña "Compras conjuntas" en Finanzas** (modules/finanzas.js):
+  elegir 2+ pedidos con compras pendientes arma una fila por cada insumo
+  que se repita entre ellos (mismo `clave` de `calcListaCompras` — los
+  costos globales/servicios cobrados de cada pedido nunca se cruzan entre
+  sí, porque su clave incluye el id propio de la cotización). Se escribe
+  cuánto se compró y costó EN TOTAL, con una vista previa del reparto antes
+  de confirmar.
+- **`repartirProporcional(total, pesos, decimales)`** (core/calc.js): reparto
+  a prorrata sin perder ni un centavo/unidad por el redondeo — parte entera
+  primero, el residuo del redondeo hacia abajo se lo lleva quien tenga el
+  residuo más grande (método del mayor residuo), así la suma de las partes
+  es SIEMPRE exactamente el total que se entró.
+- **`calcGruposCompraCompartida(pedidoIds)`** (core/calc.js): arma esas
+  filas consolidadas a partir de los pedidos elegidos.
+- Registrar una compra conjunta reutiliza la MISMA sincronización con
+  Finanzas que ya usa "Actualizar movimientos financieros" (extraída a
+  `sincronizarComprasFinanzasDe`, exportada desde modules/cotizaciones.js):
+  cada pedido queda con su propio movimiento de gasto, nunca uno solo
+  repartido a mano entre todos.
+- **Rastro sutil en la lista de compras individual:** cada compra que salió
+  de este reparto queda con `compra.compartida` (id de grupo, fecha,
+  etiquetas de los pedidos participantes) y "Compras del pedido" le agrega
+  una insignia pequeña "🔗 compartida" junto al nombre del insumo, con el
+  detalle en el tooltip (sin mencionarse a sí misma) — a propósito
+  discreta, sin avisos ni banners que interrumpan la tabla.
+- El borrador de esta pestaña (pedidos elegidos + números escritos por
+  insumo) se protege igual que cualquier otro formulario de "+ Nuevo" (ver
+  `FORMULARIOS_CON_BORRADOR` en core/store.js) — si se recarga la pestaña a
+  medio llenar, no se pierde.
+
 ## Registro de cambios — septiembre 2026 (sexagésima ronda: la causa universal de "Origen eliminado" — el "1" de esInsumo leído como origenGastoFijoPeriodo)
 
 Con el campo/valor exacto ahora visible en el tooltip (ronda anterior),

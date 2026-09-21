@@ -263,6 +263,12 @@ export const state = {
   // `servicios`: [{nombre, monto}] — igual que en formNominaPago, solo se
   // ofrece para tipo "gasto"/"nomina" (ver renderAsignarServicios).
   formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] },
+  // Borrador de "Compras conjuntas" (ver modules/finanzas.js): qué pedidos se
+  // eligieron para comprar juntos, y por cada insumo compartido (clave =
+  // misma de calcListaCompras) lo que se lleva escrito antes de pulsar
+  // "Registrar esta compra" — `porClave[clave]` = {cantidadTotal, costoTotal,
+  // proveedorId}.
+  formCompraConjunta: { seleccion: [], porClave: {} },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -989,7 +995,8 @@ export var ETIQUETA_CLAVE = {
   formNominaPago: "un pago de nómina a medio llenar",
   formReembolso: "un reembolso a medio llenar",
   formAbono: "un abono a medio llenar",
-  formPend: "una nota a medio llenar"
+  formPend: "una nota a medio llenar",
+  formCompraConjunta: "una compra conjunta a medio llenar"
 };
 
 // Únicas claves que de verdad viven en la Sheet (ver KEYS en constants.js).
@@ -1273,7 +1280,17 @@ var FORMULARIOS_CON_BORRADOR = {
   formNominaPago: function (f) { return !!(String(f.bono || "").trim() || String(f.descuento || "").trim()); },
   formReembolso: function (f) { return !!(String(f.monto || "").trim() || (f.motivo || "").trim()); },
   formAbono: function (f) { return !!String(f.monto || "").trim(); },
-  formPend: function (f) { return !!((f.titulo || "").trim() || (f.texto || "").trim()); }
+  formPend: function (f) { return !!((f.titulo || "").trim() || (f.texto || "").trim()); },
+  // La sola selección de pedidos no cuenta (rehacer 2 clics no es perder
+  // trabajo) — lo que sí importa es si ya se escribió algún número real en
+  // alguna fila de reparto.
+  formCompraConjunta: function (f) {
+    var porClave = f.porClave || {};
+    return Object.keys(porClave).some(function (k) {
+      var d = porClave[k] || {};
+      return !!(String(d.cantidadTotal || "").trim() || String(d.costoTotal || "").trim());
+    });
+  }
   // formReporte queda afuera a propósito: es un filtro de fechas para
   // consultar, no trabajo que se pueda perder.
 };

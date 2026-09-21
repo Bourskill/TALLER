@@ -660,9 +660,22 @@ function renderFilaCompra(c, linea) {
       ? (proveedor ? '<span class="badge">📦 ' + esc(proveedor.nombre) + "</span>" : '<span class="muted">Proveedor sin definir</span>')
       : (linea.refs.length ? linea.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>'));
 
+  // Rastro sutil de "Compras conjuntas" (ver modules/finanzas.js): un ícono +
+  // tooltip, no un aviso que interrumpa — el usuario pidió explícitamente que
+  // no rompiera la armonía de la tabla. El tooltip excluye la etiqueta de
+  // ESTE mismo pedido de la lista de "con quién" (no tiene sentido decir que
+  // se compartió consigo mismo).
+  var tagCompartida = "";
+  if (compra.compartida) {
+    var pedidoDeEsta = (state.pedidos || []).filter(function (p) { return p.cotizacionId === c.id; })[0];
+    var etiquetaPropia = pedidoDeEsta ? (pedidoDeEsta.numeroOp || "OP-????") + " · " + (pedidoDeEsta.cliente || "Sin cliente") : "";
+    var otras = (compra.compartida.etiquetas || []).filter(function (e) { return e !== etiquetaPropia; });
+    tagCompartida = ' <span class="tag" title="Comprada junto con ' + esc(otras.join(", ") || "otro pedido") + " el " + esc(compra.compartida.fecha || "") + '">🔗 compartida</span>';
+  }
+
   var html = '<div class="tx-row" style="grid-template-columns:' + COMPRA_COLS + ';">' +
     '<span class="mobile-th">Qué comprar</span><span>' + (linea.esGlobal ? "🌐 " : (linea.esProducto ? "📦 " : "")) + esc(linea.nombre) +
-    (linea.esServicio ? ' <span class="tag">servicio</span>' : "") + "</span>" +
+    (linea.esServicio ? ' <span class="tag">servicio</span>' : "") + tagCompartida + "</span>" +
     '<span class="mobile-th">Para / a quién</span><span>' + paraQuien + "</span>" +
     '<span class="mobile-th">Cant. est.</span><span class="amount">' + estimadoCant + "</span>" +
     '<span class="mobile-th">Costo est.</span><span class="amount">' + fmt(linea.costoTotal) + "</span>" +
@@ -1781,98 +1794,16 @@ export var actions = {
         "Si además llevas las compras reales, el costo de este pedido va a contarse DOS veces.\n\n" +
         "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
     }
-    var lineas = calcListaCompras(cot);
-    var creados = 0, actualizados = 0, borrados = 0, huerfanas = 0;
-
-    var compras = (cot.compras || []).map(function (compra) {
-      var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
-      // Sin `linea`, el insumo/referencia/costo global/servicio cobrado que
-      // originó esta compra ya no existe en la cotización — pero "no hay
-      // línea con esta clave EXACTA" no siempre significa "se borró":
-      // solo la clave de un costo global es un id estable ("global|" +
-      // g.id, ver calcListaCompras). La de un insumo o una referencia de
-      // proveedor se arma con su NOMBRE + unidad/tipo (para poder sumar
-      // el mismo insumo repetido en varias referencias) — así que
-      // corregir un nombre, una unidad o un tipo (una edición normal, no
-      // un borrado) también cambia esa clave. Tratar ESO como huérfana
-      // borraba de verdad una compra real y desconectaba su movimiento en
-      // Finanzas (quedaba con la insignia "Origen eliminado" sin que nada
-      // se hubiera borrado). Pasó de verdad: reportado por el usuario el
-      // mismo día que se agregó este chequeo. Auditoría 2026-09-20,
-      // corregido el mismo día tras el reporte.
-      if (!linea && compra.clave.indexOf("global|") === 0) {
-        if (compra.txId) {
-          state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
-        }
-        huerfanas++;
-        return null;
-      }
-      if (!linea) return compra; // insumo/producto: clave inestable ante una edición, no se toca
-      var nombre = linea.nombre;
-      var monto = num(compra.costoReal);
-
-      // Solo "Sí" (pagado de verdad, aparte) genera un movimiento en
-      // Finanzas. "Servicio" (mano de obra propia, va a nómina) y "No" no
-      // deberían: si esta línea tenía un movimiento de un estado anterior
-      // (ej. se cambió de "Sí" a "Servicio"), se retira.
-      if (estadoCompra(compra) !== "si" || monto <= 0) {
-        if (compra.txId) {
-          state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
-          borrados++;
-          return Object.assign({}, compra, { txId: "" });
-        }
-        return compra;
-      }
-
-      var proveedor = compra.proveedorId ? clienteById(compra.proveedorId) : null;
-      var datos = {
-        tipo: "gasto",
-        concepto: "Compra — " + nombre + " — " + cot.descripcion,
-        monto: monto,
-        contraparte: proveedor ? proveedor.nombre : "",
-        fecha: compra.fecha || todayStr(),
-        pedidoId: pedidoIdDeCotParaTx(cot),
-        cotizacionId: cot.id,
-        // Una compra de la lista es, por definición, insumo/material del
-        // pedido — de acá sale el desglose "Gasto en insumos" del reporte.
-        esInsumo: "1",
-        proveedorId: compra.proveedorId || "",
-        insumoNombre: nombre,
-        cantidad: compra.cantidadReal !== "" && compra.cantidadReal !== undefined ? num(compra.cantidadReal) : (linea && !linea.esServicio ? num(linea.cantidadFisica) : ""),
-        unidad: linea ? (linea.unidad || "") : "",
-        // Marca de origen: es lo que permite reconocer "este movimiento lo
-        // generó esta línea de compra" al volver a sincronizar.
-        origenCompraClave: compra.clave
-      };
-
-      // El chequeo de cotizacionId es a propósito, no redundante: una
-      // cotización duplicada ANTES de este fix pudo quedar con un txId
-      // heredado del original (ver duplicarCotizacionCompleta) — sin esto,
-      // "sincronizar" desde el duplicado encontraba el tx del original (por
-      // id) y lo reescribía en vez de crear uno nuevo, dejando al original
-      // sin su propio movimiento. Un txId que apunta a un tx de OTRA
-      // cotización se trata como si no existiera: se crea uno nuevo, propio.
-      var existente = compra.txId ? state.tx.filter(function (t) { return t.id === compra.txId && t.cotizacionId === cot.id; })[0] : null;
-      if (existente) {
-        Object.assign(existente, datos);
-        actualizados++;
-        return compra;
-      }
-      var txId = uid();
-      state.tx.unshift(Object.assign({ id: txId }, datos));
-      creados++;
-      return Object.assign({}, compra, { txId: txId });
-    }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
-
+    var r = sincronizarComprasFinanzasDe(cot);
     state.cotizaciones = state.cotizaciones.map(function (c) {
-      return c.id === id ? Object.assign({}, c, { compras: compras }) : c;
+      return c.id === id ? Object.assign({}, c, { compras: r.compras }) : c;
     });
     guardarCotizaciones(); persist("tx"); notify();
     var partes = [];
-    if (creados) partes.push(creados + " movimiento(s) creado(s)");
-    if (actualizados) partes.push(actualizados + " actualizado(s)");
-    if (borrados) partes.push(borrados + " retirado(s)");
-    if (huerfanas) partes.push(huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
+    if (r.creados) partes.push(r.creados + " movimiento(s) creado(s)");
+    if (r.actualizados) partes.push(r.actualizados + " actualizado(s)");
+    if (r.borrados) partes.push(r.borrados + " retirado(s)");
+    if (r.huerfanas) partes.push(r.huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
     mostrarToast(partes.length ? "✓ Finanzas al día: " + partes.join(", ") + "." : "Nada que sincronizar — marca alguna compra primero.");
   },
   // ---------- Costos globales del pedido ----------
@@ -2508,6 +2439,106 @@ function repartirCostosGlobales(cot, lineas) {
 // pedido siguiera ahí y el vínculo (pedidoOrigenId ↔ cotizacionId) también.
 function pedidoIdDeCotParaTx(cot) {
   return (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
+}
+
+// Sincroniza las compras de UNA cotización contra Finanzas: por cada línea
+// marcada "Sí" crea o actualiza su movimiento de gasto, y por cada línea que
+// dejó de estarlo (o cuyo insumo/costo global ya no existe) retira el suyo.
+// Es el cuerpo puro de la acción "sincronizar-compras-finanzas" de abajo,
+// extraído para que la compra COMPARTIDA entre varios pedidos (ver
+// "registrar-compra-conjunta" en modules/finanzas.js) deje a cada uno al día
+// en Finanzas con la MISMA lógica exacta, sin reimplementarla aparte — dos
+// caminos distintos para "crear el movimiento de una compra" es justo el
+// tipo de cosa que se desincroniza sola con el tiempo (ver CONTABILIDAD.md).
+//
+// Muta `state.tx` directamente (crea/actualiza/retira movimientos) y
+// devuelve el nuevo `compras` de la cotización — quien llama decide qué
+// hacer con eso (asignarlo a `state.cotizaciones`, persistir, avisar).
+export function sincronizarComprasFinanzasDe(cot) {
+  var lineas = calcListaCompras(cot);
+  var creados = 0, actualizados = 0, borrados = 0, huerfanas = 0;
+
+  var compras = (cot.compras || []).map(function (compra) {
+    var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
+    // Sin `linea`, el insumo/referencia/costo global/servicio cobrado que
+    // originó esta compra ya no existe en la cotización — pero "no hay
+    // línea con esta clave EXACTA" no siempre significa "se borró":
+    // solo la clave de un costo global es un id estable ("global|" +
+    // g.id, ver calcListaCompras). La de un insumo o una referencia de
+    // proveedor se arma con su NOMBRE + unidad/tipo (para poder sumar
+    // el mismo insumo repetido en varias referencias) — así que
+    // corregir un nombre, una unidad o un tipo (una edición normal, no
+    // un borrado) también cambia esa clave. Tratar ESO como huérfana
+    // borraba de verdad una compra real y desconectaba su movimiento en
+    // Finanzas (quedaba con la insignia "Origen eliminado" sin que nada
+    // se hubiera borrado). Pasó de verdad: reportado por el usuario el
+    // mismo día que se agregó este chequeo. Auditoría 2026-09-20,
+    // corregido el mismo día tras el reporte.
+    if (!linea && compra.clave.indexOf("global|") === 0) {
+      if (compra.txId) {
+        state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
+      }
+      huerfanas++;
+      return null;
+    }
+    if (!linea) return compra; // insumo/producto: clave inestable ante una edición, no se toca
+    var nombre = linea.nombre;
+    var monto = num(compra.costoReal);
+
+    // Solo "Sí" (pagado de verdad, aparte) genera un movimiento en
+    // Finanzas. "Servicio" (mano de obra propia, va a nómina) y "No" no
+    // deberían: si esta línea tenía un movimiento de un estado anterior
+    // (ej. se cambió de "Sí" a "Servicio"), se retira.
+    if (estadoCompra(compra) !== "si" || monto <= 0) {
+      if (compra.txId) {
+        state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
+        borrados++;
+        return Object.assign({}, compra, { txId: "" });
+      }
+      return compra;
+    }
+
+    var proveedor = compra.proveedorId ? clienteById(compra.proveedorId) : null;
+    var datos = {
+      tipo: "gasto",
+      concepto: "Compra — " + nombre + " — " + cot.descripcion,
+      monto: monto,
+      contraparte: proveedor ? proveedor.nombre : "",
+      fecha: compra.fecha || todayStr(),
+      pedidoId: pedidoIdDeCotParaTx(cot),
+      cotizacionId: cot.id,
+      // Una compra de la lista es, por definición, insumo/material del
+      // pedido — de acá sale el desglose "Gasto en insumos" del reporte.
+      esInsumo: "1",
+      proveedorId: compra.proveedorId || "",
+      insumoNombre: nombre,
+      cantidad: compra.cantidadReal !== "" && compra.cantidadReal !== undefined ? num(compra.cantidadReal) : (linea && !linea.esServicio ? num(linea.cantidadFisica) : ""),
+      unidad: linea ? (linea.unidad || "") : "",
+      // Marca de origen: es lo que permite reconocer "este movimiento lo
+      // generó esta línea de compra" al volver a sincronizar.
+      origenCompraClave: compra.clave
+    };
+
+    // El chequeo de cotizacionId es a propósito, no redundante: una
+    // cotización duplicada ANTES de este fix pudo quedar con un txId
+    // heredado del original (ver duplicarCotizacionCompleta) — sin esto,
+    // "sincronizar" desde el duplicado encontraba el tx del original (por
+    // id) y lo reescribía en vez de crear uno nuevo, dejando al original
+    // sin su propio movimiento. Un txId que apunta a un tx de OTRA
+    // cotización se trata como si no existiera: se crea uno nuevo, propio.
+    var existente = compra.txId ? state.tx.filter(function (t) { return t.id === compra.txId && t.cotizacionId === cot.id; })[0] : null;
+    if (existente) {
+      Object.assign(existente, datos);
+      actualizados++;
+      return compra;
+    }
+    var txId = uid();
+    state.tx.unshift(Object.assign({ id: txId }, datos));
+    creados++;
+    return Object.assign({}, compra, { txId: txId });
+  }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
+
+  return { compras: compras, creados: creados, actualizados: actualizados, borrados: borrados, huerfanas: huerfanas };
 }
 
 // ---------- El pedido como espejo de su cotización ----------

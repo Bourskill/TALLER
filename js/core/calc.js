@@ -2280,6 +2280,82 @@ export function repararComprasSinSeguimiento(tx, cotizaciones) {
   return huboReparacion;
 }
 
+// ---------- compras compartidas entre varios pedidos ----------
+// Cuando dos (o más) pedidos se producen a la vez y comparten un insumo —la
+// misma tela, por ejemplo— y se compran juntos en una sola salida, esto arma
+// una fila consolidada por cada insumo que aparezca PENDIENTE ("No", nada
+// registrado todavía) en 2 o más de los pedidos elegidos. Es el mismo
+// principio que ya junta insumos repetidos entre las referencias de UNA
+// cotización (ver agregarInsumosDeReferencias), extendido a través de varias
+// cotizaciones: mismo `clave` = mismo insumo físico.
+//
+// Solo entran líneas pendientes y no-servicio: una ya marcada "Sí" o
+// "Servicio" ya se resolvió por su cuenta, y un servicio (corte, confección)
+// no se compra por cantidad — no hay nada que repartir. Los costos globales
+// del pedido (domicilio, diseño) y los servicios cobrados al cliente NUNCA
+// aparecen acá aunque coincidan en nombre entre dos pedidos: su `clave`
+// incluye el id propio de la cotización (ver calcListaCompras), así que dos
+// "domicilio" de pedidos distintos nunca son la MISMA clave — no son el
+// mismo insumo físico solo por llamarse igual.
+export function calcGruposCompraCompartida(pedidoIds) {
+  var mapa = {};
+  (pedidoIds || []).forEach(function (pedidoId) {
+    var pedido = (state.pedidos || []).filter(function (p) { return p.id === pedidoId; })[0];
+    if (!pedido || !pedido.cotizacionId) return;
+    var cot = (state.cotizaciones || []).filter(function (c) { return c.id === pedido.cotizacionId; })[0];
+    if (!cot) return;
+    calcListaCompras(cot).forEach(function (linea) {
+      if (linea.esServicio) return;
+      if (estadoLineaCompra(cot, linea) !== "no") return;
+      if (!mapa[linea.clave]) {
+        mapa[linea.clave] = { clave: linea.clave, nombre: linea.nombre, unidad: linea.unidad, tipo: linea.tipo, esProducto: !!linea.esProducto, participantes: [] };
+      }
+      mapa[linea.clave].participantes.push({
+        pedidoId: pedido.id, cotId: cot.id,
+        etiqueta: (pedido.numeroOp || "OP-????") + " · " + (pedido.cliente || "Sin cliente"),
+        cantidadEstimada: num(linea.cantidadFisica), costoEstimado: num(linea.costoTotal),
+        proveedorId: linea.proveedorId || ""
+      });
+    });
+  });
+  return Object.keys(mapa).map(function (k) { return mapa[k]; })
+    // "compartida" = el mismo insumo pendiente en 2 o más de los elegidos.
+    .filter(function (g) { return g.participantes.length > 1; })
+    .map(function (g) {
+      g.totalCantidadEstimada = g.participantes.reduce(function (a, p) { return a + p.cantidadEstimada; }, 0);
+      g.totalCostoEstimado = g.participantes.reduce(function (a, p) { return a + p.costoEstimado; }, 0);
+      return g;
+    })
+    .sort(function (a, b) { return b.totalCostoEstimado - a.totalCostoEstimado; });
+}
+
+// Reparte `total` entre `pesos` a PRORRATA (proporcional a cada peso) sin
+// perder ni un centavo/unidad por el redondeo: primero calcula la parte
+// entera de cada quien, y lo que sobra por redondear hacia abajo se lo lleva
+// quien tenga el residuo más grande — así la suma de las partes es SIEMPRE
+// exactamente igual al total que se entró (criterio bancario: cero
+// descuadres, ver auditoría financiera estricta 2026-09-20). Ejemplo real:
+// 10m/20m estimados, se compran 33m -> [11, 22], nunca [11, 21.99] ni
+// [10.5, 22.5] repartido "parejo" sin mirar cuánto necesitaba cada quien.
+// Con todos los pesos en 0 (o sin pesos), reparte por partes iguales.
+export function repartirProporcional(total, pesos, decimales) {
+  var factor = Math.pow(10, decimales || 0);
+  var totalEntero = Math.round(num(total) * factor);
+  var base = (pesos || []).map(function (p) { return Math.max(0, num(p)); });
+  if (!base.length) return [];
+  var sumaBase = base.reduce(function (a, p) { return a + p; }, 0);
+  var usados = sumaBase > 0 ? base : base.map(function () { return 1; });
+  var sumaUsada = usados.reduce(function (a, p) { return a + p; }, 0);
+  var partes = usados.map(function (p) { return totalEntero * p / sumaUsada; });
+  var pisos = partes.map(Math.floor);
+  var asignado = pisos.reduce(function (a, p) { return a + p; }, 0);
+  var faltan = totalEntero - asignado;
+  var orden = partes.map(function (p, i) { return { i: i, residuo: p - pisos[i] }; })
+    .sort(function (a, b) { return b.residuo - a.residuo; });
+  for (var k = 0; k < faltan; k++) { pisos[orden[k % orden.length].i]++; }
+  return pisos.map(function (p) { return p / factor; });
+}
+
 // ---------- costeo de productos del catálogo ----------
 // Un producto del catálogo se costea con la MISMA fórmula que una referencia
 // de cotización, tratándolo como "una referencia de cantidad 1": así un

@@ -4758,6 +4758,121 @@ assert(JSON.stringify(COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; })) 
   "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId"
 ]), "el orden de columnas de tablaMovimientos no cambió: una columna nueva se agregó al final, nunca insertada en medio (ver el incidente del 2026-09-20 arriba)");
 
+// --- Compras conjuntas: varios pedidos que comparten un insumo (ver
+// modules/finanzas.js) — reportado por el usuario 2026-09-20: "hay pedidos
+// que comparten insumos... quiero un apartado para eso... se reparten
+// equitativamente el insumo comprado". Ejemplo EXACTO que dio: lista1
+// necesita 10m, lista2 necesita 20m, se compran 33m -> lista1 +1, lista2 +2.
+const { repartirProporcional: repartirTest, calcGruposCompraCompartida: calcGruposTest } = await import("../js/core/calc.js");
+
+// -- repartirProporcional: el ejemplo exacto del usuario --
+assert(JSON.stringify(repartirTest(33, [10, 20], 2)) === JSON.stringify([11, 22]), "repartirProporcional reparte 33m entre quien necesitaba 10 y quien necesitaba 20 -> 11 y 22 (el ejemplo exacto que dio el usuario)");
+assert(JSON.stringify(repartirTest(99000, [10, 20], 0)) === JSON.stringify([33000, 66000]), "...y el costo total pagado se reparte en la MISMA proporción (1/3, 2/3)");
+// -- nunca pierde ni gana nada por el redondeo, aunque no divida parejo --
+const repartoImparTest = repartirTest(100, [1, 1, 1], 0);
+assert(repartoImparTest.reduce(function (a, b) { return a + b; }, 0) === 100, "repartirProporcional nunca pierde ni gana un centavo por el redondeo: la suma de las partes es SIEMPRE el total exacto, aunque no divida parejo (100 entre 3 pesos iguales) — criterio bancario: cero descuadres");
+assert(Math.max.apply(null, repartoImparTest) - Math.min.apply(null, repartoImparTest) <= 1, "...la diferencia entre la parte mayor y la menor nunca es de más de 1 (el residuo se reparte, no se lo lleva uno solo)");
+// -- sin ningún estimado que usar de referencia (pesos en 0), reparte parejo en vez de fallar --
+assert(JSON.stringify(repartirTest(30, [0, 0], 0)) === JSON.stringify([15, 15]), "todos los pesos en 0: reparte parejo en vez de repartir todo a uno solo o fallar");
+assert(JSON.stringify(repartirTest(100, [], 0)) === JSON.stringify([]), "sin participantes, no reparte nada (ni truena)");
+
+// -- calcGruposCompraCompartida: arma la fila consolidada por insumo --
+const pedidosPreviosConjuntaTest = state.pedidos, cotizacionesPreviasConjuntaTest = state.cotizaciones, txPreviosConjuntaTest = state.tx;
+function cotConTela(id, pedidoId, cantidadPedida) {
+  return {
+    id: id, clienteId: "", cliente: "Cliente Conjunta", descripcion: "Pedido " + id, fecha: "2026-01-01",
+    estado: "convertida", pedidoId: pedidoId, pedidoOrigenId: "",
+    vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cconj" + id,
+    referencias: [{
+      id: "r-" + id, nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: cantidadPedida, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+      insumos: [{ id: "i-" + id, nombre: "Tela algodón", unidad: "m", costo: 3000, tipo: "tela", cantidad: 1, categoriaId: "", proveedorId: "" }],
+      detalle: [], estado: "nuevo", estadosDef: null
+    }],
+    costosGlobales: [], serviciosCobrados: [], compras: []
+  };
+}
+function pedidoConjuntaTest(id, cotId, numeroOp) {
+  return {
+    id: id, numeroOp: numeroOp, cliente: "Cliente Conjunta", descripcion: "Pedido de prueba",
+    cantidad: "1", total: 500000, costo: 30000, abono: 0, estado: "nuevo", estadosDef: null,
+    fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: cotId,
+    abonos: [], lineas: [], stockConsumido: [], vendedor: null
+  };
+}
+const cotConjA = cotConTela("cot-conjA-test", "ped-conjA-test", 10);
+const cotConjB = cotConTela("cot-conjB-test", "ped-conjB-test", 20);
+const pedConjA = pedidoConjuntaTest("ped-conjA-test", "cot-conjA-test", "OP-CONJA");
+const pedConjB = pedidoConjuntaTest("ped-conjB-test", "cot-conjB-test", "OP-CONJB");
+state.pedidos = [pedConjA, pedConjB];
+state.cotizaciones = [cotConjA, cotConjB];
+state.tx = [];
+
+assert(calcGruposTest([pedConjA.id]).length === 0, "con un solo pedido elegido, no hay nada 'compartido' que mostrar (hace falta 2 o más)");
+
+const gruposTest = calcGruposTest([pedConjA.id, pedConjB.id]);
+assert(gruposTest.length === 1, "detecta la Tela algodón como un insumo pendiente compartido entre los dos pedidos");
+const grupoTelaTest = gruposTest[0];
+assert(grupoTelaTest.participantes.length === 2, "con los dos participantes");
+assert(grupoTelaTest.totalCantidadEstimada === 30, "necesitan 10 + 20 = 30 metros en total, exactamente el ejemplo del usuario");
+const partATest = grupoTelaTest.participantes.filter(function (p) { return p.cotId === "cot-conjA-test"; })[0];
+const partBTest = grupoTelaTest.participantes.filter(function (p) { return p.cotId === "cot-conjB-test"; })[0];
+assert(partATest.cantidadEstimada === 10 && partBTest.cantidadEstimada === 20, "cada participante trae su propia cantidad estimada (10 y 20)");
+assert(partATest.etiqueta.indexOf("OP-CONJA") !== -1 && partBTest.etiqueta.indexOf("OP-CONJB") !== -1, "cada participante se identifica con su número de OP");
+
+// -- una línea que YA se marcó "Sí" por su cuenta deja de estar "pendiente": no aparece más en el grupo --
+cotConjA.compras = [{ clave: grupoTelaTest.clave, estado: "si", costoReal: 30000, cantidadReal: 10, txId: "" }];
+assert(calcGruposTest([pedConjA.id, pedConjB.id]).length === 0, "si un pedido ya compró su parte por su cuenta (estado \"Sí\"), deja de contar como pendiente compartido — ya no queda nadie con quien repartir");
+cotConjA.compras = [];
+
+// -- flujo completo a través del DOM: elegir los 2 pedidos, escribir el
+// total comprado y pagado, registrar, y verificar el reparto exacto --
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjA.id + '"]'), "Compras conjuntas lista los pedidos con compras pendientes para elegir");
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjA.id + '"]');
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjB.id + '"]');
+assert(state.formCompraConjunta.seleccion.length === 2, "marca los dos pedidos elegidos");
+assert(!document.querySelector('[data-action="registrar-compra-conjunta"]'), "sin escribir cantidad/costo todavía, no aparece el botón de registrar (nada que registrar aún)");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="cantidadTotal"]', "33");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="costoTotal"]', "99000");
+assert(!!document.querySelector('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]'), "con los dos números escritos, aparece 'Registrar esta compra'");
+const previewTextoTest = document.getElementById("app").textContent;
+assert(previewTextoTest.indexOf("11.00") !== -1 && previewTextoTest.indexOf("22.00") !== -1, "antes de confirmar, ya se ve el reparto exacto que se va a aplicar (11 y 22)");
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]');
+
+const cotATrasRegistroTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
+const cotBTrasRegistroTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
+const compraATest = cotATrasRegistroTest.compras.filter(function (c) { return c.clave === grupoTelaTest.clave; })[0];
+const compraBTest = cotBTrasRegistroTest.compras.filter(function (c) { return c.clave === grupoTelaTest.clave; })[0];
+assert(compraATest.estado === "si" && compraBTest.estado === "si", "el registro deja las dos compras marcadas \"Sí\"");
+assert(compraATest.cantidadReal === 11 && compraBTest.cantidadReal === 22, "reparte los 33m: 11 para quien necesitaba 10, 22 para quien necesitaba 20 — EXACTO el ejemplo que dio el usuario");
+assert(compraATest.costoReal + compraBTest.costoReal === 99000, "el costo total pagado se reparte SIN perder ni un peso: la suma vuelve a dar el total exacto");
+assert(compraATest.costoReal === 33000 && compraBTest.costoReal === 66000, "el costo se reparte en la misma proporción (1/3 y 2/3): 33.000 y 66.000");
+assert(!!compraATest.compartida && !!compraBTest.compartida, "las dos quedan con el rastro de 'compra compartida'");
+assert(compraATest.compartida.grupoId === compraBTest.compartida.grupoId, "...con el MISMO id de grupo — es el mismo evento de compra visto desde los dos pedidos");
+
+assert(!!compraATest.txId && !!compraBTest.txId, "cada pedido queda con su PROPIO movimiento en Finanzas (no uno solo repartido a mano)");
+const txATest = state.tx.filter(function (t) { return t.id === compraATest.txId; })[0];
+const txBTest = state.tx.filter(function (t) { return t.id === compraBTest.txId; })[0];
+assert(!!txATest && !!txBTest && txATest.id !== txBTest.id, "los dos movimientos existen y son DISTINTOS");
+assert(txATest.monto === 33000 && txBTest.monto === 66000, "cada movimiento tiene el monto que le tocó a SU pedido, no el total compartido");
+assert(txATest.cotizacionId === "cot-conjA-test" && txBTest.cotizacionId === "cot-conjB-test", "cada movimiento queda ligado a su propia cotización");
+
+assert(!state.formCompraConjunta.porClave[grupoTelaTest.clave], "tras registrar, el borrador de esa fila se limpia solo");
+assert(!document.querySelector('[data-action="registrar-compra-conjunta"]'), "y la fila ya comprada desaparece de \"Compras conjuntas\" (ya no está pendiente)");
+
+// -- el rastro se ve, sutil, en la lista de compras de CADA cotización --
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-conjA-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-conjA-test"][data-val="produccion"]');
+const tagsCompartidaTest = Array.prototype.filter.call(document.querySelectorAll(".tag"), function (t) { return t.textContent.indexOf("compartida") !== -1; });
+assert(tagsCompartidaTest.length === 1, "la fila de Tela algodón en 'Compras del pedido' de A muestra la insignia '🔗 compartida', sutil (un solo tag chico, no un aviso grande)");
+assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJB") !== -1, "...cuyo tooltip menciona el OTRO pedido (OP-CONJB)");
+assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJA") === -1, "...pero NO se menciona a sí misma (no tiene sentido decir que se compartió consigo misma)");
+
+state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPreviasConjuntaTest; state.tx = txPreviosConjuntaTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

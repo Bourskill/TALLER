@@ -1,7 +1,8 @@
-import { state, persist, notify } from "../core/store.js";
+import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcListaCompras, estadoLineaCompra, calcGruposCompraCompartida, repartirProporcional, pedidoCancelado } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
+import { sincronizarComprasFinanzasDe } from "./cotizaciones.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -21,6 +22,8 @@ export function render() {
   var html = renderTabsFinanzas(vista);
   if (vista === "historial") {
     html += state.filtroTxVista === "papelera" ? renderPapelera() : renderHistorial();
+  } else if (vista === "conjuntas") {
+    html += renderComprasConjuntas();
   } else {
     html += renderFormMovimiento();
   }
@@ -32,7 +35,109 @@ function renderTabsFinanzas(vista) {
   return '<div class="gsheet-tabs">' +
     '<button class="gsheet-tab ' + (vista === "nuevo" ? "active" : "") + '" data-action="finanzas-vista" data-val="nuevo">+ Registrar movimiento</button>' +
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="finanzas-vista" data-val="historial">Historial' + (state.tx.length ? " (" + state.tx.length + ")" : "") + "</button>" +
+    '<button class="gsheet-tab ' + (vista === "conjuntas" ? "active" : "") + '" data-action="finanzas-vista" data-val="conjuntas">Compras conjuntas</button>' +
     "</div>";
+}
+
+// ---------- Compras conjuntas: varios pedidos que comparten insumo ----------
+// Cuando se produce varios pedidos a la vez y comparten un insumo (la misma
+// tela, por ejemplo), esto deja elegir cuáles y arma una fila por cada
+// insumo que se repita entre ellos — igual que las referencias de UNA
+// cotización ya se juntan solas en su lista de compras (ver
+// agregarInsumosDeReferencias en core/calc.js), pero a través de varios
+// pedidos. Lo comprado en total se reparte a PRORRATA de lo que cada uno
+// necesitaba (ver repartirProporcional): si se compra de más o de menos
+// frente a la suma de lo estimado, esa diferencia también se reparte
+// proporcional, no parejo entre todos. Reportado por el usuario 2026-09-20.
+function renderComprasConjuntas() {
+  var sel = state.formCompraConjunta.seleccion || [];
+  var candidatos = state.pedidos.filter(function (p) {
+    if (pedidoCancelado(p) || !p.cotizacionId) return false;
+    var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
+    if (!cot) return false;
+    return calcListaCompras(cot).some(function (l) { return !l.esServicio && estadoLineaCompra(cot, l) === "no"; });
+  });
+
+  var html = '<div class="card">';
+  html += '<div class="cot-col-title" style="margin-top:0;">Elige los pedidos que vas a comprar juntos' +
+    renderHelp("Marca dos o más pedidos que compartan un mismo insumo (la misma tela, por ejemplo). Abajo se arma una fila por cada insumo que se repita entre los que elijas, para repartir la compra real entre ellos a prorrata de lo que cada uno necesitaba.") +
+    "</div>";
+
+  if (!candidatos.length) {
+    html += '<div class="empty">No hay pedidos con compras pendientes todavía — marca algún insumo en "No" en la pestaña Producción de una cotización.</div></div>';
+    return html;
+  }
+
+  html += '<div class="picker-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:var(--radius-sm);">';
+  candidatos.forEach(function (p) {
+    var marcado = sel.indexOf(p.id) !== -1;
+    html += '<label class="picker-item ' + (marcado ? "sel" : "") + '" style="grid-template-columns:20px 1fr;">' +
+      '<input type="checkbox" data-action="toggle-compra-conjunta-pedido" data-id="' + p.id + '" ' + (marcado ? "checked" : "") + " />" +
+      '<span class="picker-item-info"><b>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente || "Sin cliente") + "</b><small>" + esc(p.descripcion || "") + "</small></span>" +
+      "</label>";
+  });
+  html += "</div></div>";
+
+  if (sel.length > 1) {
+    html += renderGruposCompraConjunta(calcGruposCompraCompartida(sel));
+  } else if (sel.length === 1) {
+    html += '<div class="empty" style="margin-top:12px;">Elige al menos un segundo pedido para ver qué insumos comparten.</div>';
+  }
+  return html;
+}
+
+function renderGruposCompraConjunta(grupos) {
+  if (!grupos.length) {
+    return '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen ningún insumo pendiente en común.</div>';
+  }
+  var draft = state.formCompraConjunta.porClave || {};
+  var html = '<div class="cot-col-title" style="margin-top:16px;">Insumos que se repiten' +
+    renderHelp('Cada fila es un insumo pendiente ("No") en 2 o más de los pedidos elegidos. Escribe cuánto compraste EN TOTAL y cuánto costó — se reparte solo entre esos pedidos a prorrata de lo que cada uno necesitaba, y deja cada compra marcada "Sí" (con su movimiento en Finanzas incluido, igual que "Actualizar movimientos financieros").') +
+    "</div>";
+  grupos.forEach(function (g) { html += renderFilaGrupoCompraConjunta(g, draft[g.clave] || {}); });
+  return html;
+}
+
+function renderFilaGrupoCompraConjunta(g, d) {
+  var html = '<div class="card" style="margin-top:10px;">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
+    "<b>" + esc(g.nombre) + "</b>" +
+    '<span class="section-sub" style="margin:0;">Necesitan en total ' + num(g.totalCantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + " · estimado " + fmt(g.totalCostoEstimado) + "</span>" +
+    "</div>";
+  html += '<div class="section-sub" style="margin:4px 0 8px;">' +
+    g.participantes.map(function (p) { return esc(p.etiqueta) + " (" + num(p.cantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + ")"; }).join(" · ") +
+    "</div>";
+
+  html += '<div class="form-grid">' +
+    '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" placeholder="' + num(g.totalCantidadEstimada).toFixed(2) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
+    '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
+    '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
+    "</div>";
+
+  var cantidadTotal = num(d.cantidadTotal), costoTotal = num(d.costoTotal);
+  if (cantidadTotal > 0 && costoTotal > 0) {
+    var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
+    var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
+    var costos = repartirProporcional(costoTotal, pesos, 0);
+    html += '<div class="section-sub" style="margin-top:8px;">Se reparte: ' +
+      g.participantes.map(function (p, i) { return esc(p.etiqueta) + " → " + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + " · " + fmt(costos[i]); }).join(" · ") +
+      "</div>";
+    html += '<div class="row-actions" style="margin-top:8px;"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
+  }
+  html += "</div>";
+  return html;
+}
+
+function renderSelectProveedorConjunta(g, d) {
+  var proveedores = proveedoresDeContactos();
+  if (!proveedores.length) {
+    return '<label>Proveedor</label><span class="section-sub" style="margin:0;">Sin proveedores en Contactos.</span>';
+  }
+  var actual = d.proveedorId || "";
+  return '<label>Proveedor (opcional)</label><select class="mini-input" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="proveedorId">' +
+    '<option value="">Sin especificar</option>' +
+    proveedores.map(function (p) { return '<option value="' + p.id + '" ' + (actual === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
+    "</select>";
 }
 
 // El formulario de un movimiento, en TRES bloques con jerarquía propia en vez
@@ -544,5 +649,77 @@ export var actions = {
     if (!window.confirm("Esto elimina el movimiento para siempre y no se puede deshacer. ¿Continuar?")) return;
     state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
     persist("txPapelera"); notify();
+  },
+  "toggle-compra-conjunta-pedido": function (el) {
+    var id = el.getAttribute("data-id");
+    var sel = (state.formCompraConjunta.seleccion || []).slice();
+    var idx = sel.indexOf(id);
+    if (idx === -1) sel.push(id); else sel.splice(idx, 1);
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { seleccion: sel });
+    notify();
+  },
+  "set-compra-conjunta-campo": function (el) {
+    var clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
+    var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
+    var fila = Object.assign({}, porClave[clave] || {});
+    fila[campo] = el.value;
+    porClave[clave] = fila;
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
+    notify();
+  },
+  // El corazón de "Compras conjuntas": reparte lo comprado de verdad entre
+  // los pedidos que compartían ese insumo (a prorrata de lo que cada uno
+  // necesitaba, ver repartirProporcional en core/calc.js), deja cada compra
+  // marcada "Sí" con su cantidad/costo real, y usa la MISMA sincronización
+  // que "Actualizar movimientos financieros" (ver sincronizarComprasFinanzasDe
+  // en modules/cotizaciones.js) para que cada pedido quede con su propio
+  // movimiento en Finanzas — nunca uno solo repartido a mano entre todos.
+  "registrar-compra-conjunta": function (el) {
+    var clave = el.getAttribute("data-clave");
+    var sel = state.formCompraConjunta.seleccion || [];
+    var grupo = calcGruposCompraCompartida(sel).filter(function (g) { return g.clave === clave; })[0];
+    if (!grupo) return;
+    var draft = (state.formCompraConjunta.porClave || {})[clave] || {};
+    var cantidadTotal = num(draft.cantidadTotal), costoTotal = num(draft.costoTotal);
+    if (cantidadTotal <= 0 || costoTotal <= 0) {
+      window.alert("Escribe cuánto se compró en total y cuánto costó antes de registrar.");
+      return;
+    }
+    var pesos = grupo.participantes.map(function (p) { return p.cantidadEstimada; });
+    var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
+    var costos = repartirProporcional(costoTotal, pesos, 0);
+    var grupoId = uid(), fecha = todayStr();
+    var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
+    var proveedorId = draft.proveedorId || "";
+    var reparto = {};
+    grupo.participantes.forEach(function (p, i) {
+      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i] };
+    });
+
+    var afectadas = 0;
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (!reparto[c.id]) return c;
+      afectadas++;
+      var compras = (c.compras || []).slice();
+      var idx = -1;
+      compras.forEach(function (x, j) { if (x.clave === clave) idx = j; });
+      var base = idx >= 0 ? compras[idx] : { clave: clave, observaciones: "", txId: "" };
+      var actualizada = Object.assign({}, base, {
+        clave: clave, estado: "si",
+        cantidadReal: reparto[c.id].cantidadReal, costoReal: reparto[c.id].costoReal,
+        proveedorId: proveedorId || base.proveedorId || "",
+        fecha: base.fecha || fecha,
+        compartida: { grupoId: grupoId, fecha: fecha, etiquetas: etiquetas }
+      });
+      if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
+      var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
+      return Object.assign({}, c, { compras: sinc.compras });
+    });
+
+    var porClaveNuevo = Object.assign({}, state.formCompraConjunta.porClave || {});
+    delete porClaveNuevo[clave];
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClaveNuevo });
+    persist("cotizaciones"); persist("tx"); notify();
+    mostrarToast("✓ Compra compartida registrada entre " + afectadas + " pedidos.");
   }
 };
