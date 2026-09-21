@@ -1403,6 +1403,76 @@ marcado) antes de avisarle al usuario por segunda vez.
 
 ---
 
+### 🟡 Hallazgo #33 — el Enlace por categoría no sumaba en referencias viejas, y dos ajustes de UX. ✅ IMPLEMENTADO
+
+El mismo día que se corrigió el Hallazgo #32, el usuario reportó: "en
+cotización, seleccioné el insumo 'sublimación' que previamente estaba
+enlazado a la categoría 'telas' y 1, no se veía esa actualización y 2,
+aunque se la coloqué manualmente esta no se enlazó con los insumos que
+había ahí que pertenecen a la categoría telas... no sumó las cantidades
+de las telas en sublimación" — más dos pedidos de UX en el mismo
+mensaje: acortar la lista de categorías del panel en Cotización, y
+contraer el panel al hacer clic afuera.
+
+**Causa raíz del bug:** `insumo.categoriaId` (el campo que
+`cantidadEfectivaInsumo` usa para reconocer "estos insumos son de la
+categoría Telas") solo se PROPAGA al copiar un insumo — en
+`nuevoInsumo` (modules/cotizaciones.js) y las copias equivalentes de
+plantillas.js/productos.js, todas del mismo día (Hallazgo #32). Un
+insumo copiado ANTES de esa propagación (cualquier tela o insumo ya
+agregado a una referencia en un día anterior) se quedó sin
+`categoriaId` para siempre — exactamente el mismo hueco que ya se
+había encontrado y corregido para `origenCatalogoId`
+(`repararOrigenCatalogoInsumos`, ver el aviso de "el catálogo cambió"
+más arriba), pero sin su reparación retroactiva equivalente. Con la
+Tela sin `categoriaId`, un enlace por categoría armado sobre ella
+—aunque el usuario lo marcara a mano, correctamente— nunca encontraba
+con qué sumar: la suma daba 0 en silencio.
+
+**Corrección — `repararCategoriaIdInsumos` (core/store.js):** mismo
+patrón que `repararOrigenCatalogoInsumos`, corriendo justo después en
+`loadAll()` porque se apoya en `origenCatalogoId` (ya reconstruido por
+la reparación anterior si hacía falta): para cada insumo de
+plantillas/productos/cotizaciones sin `categoriaId` pero con
+`origenCatalogoId`, busca el insumo real del catálogo y copia su
+categoría. Un insumo escrito a mano (sin `origenCatalogoId`) no se
+toca — no hay con qué adivinar su categoría, mejor no reparar que
+adivinar mal. Idempotente (una vez reparado, no vuelve a tocarlo).
+
+**Ajuste de UX #1 — la lista de categorías del panel se acorta en
+Cotización:** "las opciones disponibles seleccionables son los
+insumos que ya hay agregados o su respectiva categoría, esto para
+disminuir los elementos de la lista". Nueva función
+`categoriasUsadasPorInsumos` (core/calc.js): de todo el árbol de
+categorías del catálogo, deja solo las que YA usa algún insumo de la
+referencia (más la categoría MADRE de cualquier subcategoría en uso,
+aunque ningún insumo caiga directo en la madre — si no, el árbol, que
+se arma recorriendo madres primero, la dejaría invisible). Solo se
+aplica en Cotización, donde el conjunto de insumos ya es real y fijo;
+Catálogo/Plantillas/Productos siguen mostrando el árbol completo
+porque ahí se predefine un enlace sin saber todavía qué insumos
+terminarán compartiendo referencia.
+
+**Ajuste de UX #2 — clic afuera contrae el panel:** "que esta lista se
+contraiga cuando haga click fuera de ella". Un listener de clic en
+fase de CAPTURA, registrado una sola vez en core/dom.js (mismo patrón
+que `listenerClicRenovacion` en core/auth.js), revisa en cada clic si
+hay algún panel de Enlace abierto (`state.enlacePanelAbierto`) cuya
+celda (`.enlace-celda[data-ins-celda]`) no contenga el clic — de ser
+así, lo cierra. Corre en captura para enterarse ANTES de que el
+`stopPropagation()` del patrón genérico de `data-action` (bindEvents)
+detenga el clic; un clic DENTRO del panel (un checkbox, el buscador)
+queda contenido en su celda y no lo cierra.
+
+Verificado con una reproducción end-to-end de la causa raíz (una tela
+"vieja" sin `categoriaId`, una Sublimación ya enlazada a mano —igual
+que hizo el usuario— con la suma dando 0 antes de la reparación y el
+valor correcto después, visible en pantalla como "🔗 N"), la lista de
+categorías acortada en un panel real de Cotización, y el cierre por
+clic afuera (adentro no cierra, afuera sí) — ver test/smoke.mjs.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

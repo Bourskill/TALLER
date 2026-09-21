@@ -360,7 +360,7 @@ function renderCosteoProduccion(p) {
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '"' + attrsIns + ' data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
-      '<span class="mobile-th">Enlace</span><span class="enlace-celda">' +
+      '<span class="mobile-th">Enlace</span><span class="enlace-celda" data-ins-celda="' + i.id + '">' +
       (TIPOS_ENLAZABLES.indexOf(i.tipo) !== -1
         ? renderEnlacePanel(i, state.catalogoInsumos || [], state.catalogoCategorias, {
             abierto: !!(state.enlacePanelAbierto || {})[i.id],

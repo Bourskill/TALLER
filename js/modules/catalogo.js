@@ -415,7 +415,7 @@ function renderFilaInsumo(c, categorias) {
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
 
-    '<span class="mobile-th">Enlace' + renderHelp("Predefine que la cantidad de este insumo se calcule sola, sumando la de todos los insumos que compartan una categoría (ej. \"Telas\") o un insumo puntual que elijas — se hereda al agregar este insumo a una plantilla, producto o cotización, ajustable ahí si hace falta.") + '</span><span class="enlace-celda">' +
+    '<span class="mobile-th">Enlace' + renderHelp("Predefine que la cantidad de este insumo se calcule sola, sumando la de todos los insumos que compartan una categoría (ej. \"Telas\") o un insumo puntual que elijas — se hereda al agregar este insumo a una plantilla, producto o cotización, ajustable ahí si hace falta.") + '</span><span class="enlace-celda" data-ins-celda="' + c.id + '">' +
     (TIPOS_ENLAZABLES.indexOf(c.tipo) !== -1
       ? renderEnlacePanel(c, state.catalogoInsumos || [], categorias, {
           abierto: !!(state.enlacePanelAbierto || {})[c.id],

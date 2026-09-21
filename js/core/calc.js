@@ -1925,6 +1925,31 @@ export function idsConSubcategorias(categorias, categoriaId) {
   return [categoriaId].concat(subcategoriasDe(categorias, categoriaId).map(function (c) { return c.id; }));
 }
 
+// Recorta la lista de categorías del panel de Enlace (ver renderEnlacePanel
+// en core/components.js) a solo las que YA tiene algún insumo de este
+// contenedor — a diferencia de Catálogo/Plantillas/Productos (donde el
+// enlace se predefine sin saber todavía qué insumos terminarán compartiendo
+// referencia, así que ahí se sigue mostrando el árbol completo), en
+// Cotización el conjunto de insumos ya es real y fijo: mostrar categorías
+// que ningún insumo de la referencia usa solo alarga la lista sin ninguna
+// utilidad. Pedido del usuario 2026-09-21: "las opciones disponibles...
+// son los insumos que ya hay agregados o su respectiva categoria, esto
+// para disminuir los elementos de la lista". Si una SUBcategoría está en
+// uso, su madre se incluye también aunque ningún insumo caiga directo en
+// ella — si no, categoriasAplanadas (que arma el árbol recorriendo madres)
+// la deja invisible.
+export function categoriasUsadasPorInsumos(categorias, insumos) {
+  var usadas = {};
+  (insumos || []).forEach(function (i) { if (i.categoriaId) usadas[i.categoriaId] = true; });
+  var porId = {};
+  (categorias || []).forEach(function (c) { porId[c.id] = c; });
+  Object.keys(usadas).forEach(function (id) {
+    var c = porId[id];
+    if (c && c.parentId) usadas[c.parentId] = true;
+  });
+  return (categorias || []).filter(function (c) { return usadas[c.id]; });
+}
+
 // Todas las unidades de medida que ya se han escrito en algún lugar de la
 // app, para que el campo "Unidad" (renderComboUnidad, ver core/components.js)
 // las ofrezca como sugerencia — así "MT", "docena" o cualquier cosa rara que

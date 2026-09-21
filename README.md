@@ -259,6 +259,33 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo cuarta ronda: el Enlace no sumaba en referencias viejas por falta de reparación retroactiva, más lista de categorías acortada y cierre al hacer clic afuera)
+
+El mismo día de la ronda anterior, el usuario reportó: "seleccioné el
+insumo 'sublimación' que previamente estaba enlazado a la categoría
+'telas'... aunque se la coloqué manualmente esta no se enlazó con los
+insumos que había ahí que pertenecen a la categoría telas... no sumó
+las cantidades de las telas en sublimación".
+
+- **Causa raíz:** `categoriaId` solo se propaga al COPIAR un insumo
+  (ronda anterior) — un insumo ya agregado a una referencia ANTES de
+  ese cambio se quedó sin `categoriaId` para siempre, así que un
+  enlace por categoría armado sobre él (aunque bien marcado a mano)
+  nunca encontraba con qué sumar. Mismo hueco que ya se había corregido
+  para `origenCatalogoId` (ronda sexagésimo sexta), sin su reparación
+  retroactiva equivalente.
+- Nueva `repararCategoriaIdInsumos` (core/store.js), mismo patrón que
+  `repararOrigenCatalogoInsumos`: reconstruye `categoriaId` por
+  `origenCatalogoId` en insumos ya guardados, sin tocar los escritos a
+  mano (sin ese vínculo no hay con qué adivinar).
+- En Cotización, el panel de Enlace ya no muestra el árbol COMPLETO de
+  categorías del catálogo — solo las que YA usa algún insumo de esa
+  referencia (`categoriasUsadasPorInsumos`, core/calc.js), para
+  "disminuir los elementos de la lista" como pidió el usuario.
+- El panel se contrae solo al hacer clic afuera de él (clic adentro —
+  un checkbox, el buscador — no lo cierra).
+- Ver CONTABILIDAD.md, "Hallazgo #33".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo tercera ronda: corregido el mecanismo de enlace — por categoría del catálogo o insumo puntual, no por "tipo de costo")
 
 El mismo día, el usuario reportó el mecanismo de la ronda anterior como

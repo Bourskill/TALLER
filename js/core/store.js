@@ -707,6 +707,45 @@ export function repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, produc
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a
+// una plantilla, un producto, o de ahí a una referencia de cotización —
+// mismo hueco que `origenCatalogoId` de arriba, pero para el campo que el
+// Enlace por categoría (ver cantidadEfectivaInsumo en core/calc.js) necesita
+// para reconocer "estos insumos son de la categoría Telas" sin ir al
+// catálogo en vivo. La propagación en el origen (nuevoInsumo en
+// modules/cotizaciones.js y las copias equivalentes en plantillas.js/
+// productos.js) es nueva de 2026-09-21 — cualquier insumo copiado ANTES de
+// ese cambio se quedó sin `categoriaId` para siempre, así que un enlace por
+// categoría armado sobre esos insumos viejos no encontraba con qué sumar
+// (reportado en producción: "no sumó las cantidades de las telas en
+// sublimación"). Se apoya en `origenCatalogoId` (por eso corre DESPUÉS de
+// repararOrigenCatalogoInsumos, que lo reconstruye primero si hacía falta)
+// para ir al insumo real del catálogo y copiar su categoría — no intenta
+// adivinar por nombre aparte, ya que origenCatalogoId ya resolvió esa
+// ambigüedad.
+export function repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos, cotizaciones) {
+  var catalogoPorId = {};
+  (catalogoInsumos || []).forEach(function (i) { catalogoPorId[i.id] = i; });
+  function repararLista(insumos) {
+    var hubo = false;
+    (insumos || []).forEach(function (ins) {
+      if (ins.categoriaId || !ins.origenCatalogoId) return;
+      var origen = catalogoPorId[ins.origenCatalogoId];
+      if (!origen || !origen.categoriaId) return;
+      ins.categoriaId = origen.categoriaId;
+      hubo = true;
+    });
+    return hubo;
+  }
+  var huboReparacion = false;
+  (plantillas || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (productos || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (cotizaciones || []).forEach(function (c) {
+    (c.referencias || []).forEach(function (r) { if (repararLista(r.insumos)) huboReparacion = true; });
+  });
+  return huboReparacion;
+}
+
 // Repara, mutando en el sitio, insumos tipo "tela" que todavía no tienen su
 // PROPIO consumo (ver calcCostoPrenda en core/calc.js): antes CUALQUIER
 // tela de una referencia/plantilla/producto usaba el mismo
@@ -1083,6 +1122,15 @@ export async function loadAll() {
     // están corregidos, esto solo reconstruye lo ya guardado). Mismo
     // criterio de "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararOrigenCatalogoInsumos(state.catalogoInsumos, state.plantillasPrendas, state.productos, state.cotizaciones)) {
+      persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
+    }
+
+    // Auto-reparación: categoriaId perdido en insumos copiados antes de que
+    // el Enlace por categoría existiera (ver repararCategoriaIdInsumos más
+    // arriba) — corre después de la de arriba porque se apoya en
+    // origenCatalogoId ya reconstruido. Mismo criterio de "solo con red
+    // real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararCategoriaIdInsumos(state.catalogoInsumos, state.plantillasPrendas, state.productos, state.cotizaciones)) {
       persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
     }
 

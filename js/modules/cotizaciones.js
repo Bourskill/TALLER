@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, cantidadEfectivaInsumo } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, cantidadEfectivaInsumo, categoriasUsadasPorInsumos } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -1000,9 +1000,9 @@ function renderTablaInsumosRef(cotId, ref) {
       renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
-      '<span class="mobile-th">Enlace</span><span class="enlace-celda">' +
+      '<span class="mobile-th">Enlace</span><span class="enlace-celda" data-ins-celda="' + i.id + '">' +
       (TIPOS_ENLAZABLES.indexOf(i.tipo) !== -1
-        ? renderEnlacePanel(i, ref.insumos || [], state.catalogoCategorias, {
+        ? renderEnlacePanel(i, ref.insumos || [], categoriasUsadasPorInsumos(state.catalogoCategorias, ref.insumos || []), {
             abierto: !!(state.enlacePanelAbierto || {})[i.id],
             busqueda: (state.enlaceBusqueda || {})[i.id] || "",
             toggleAction: "toggle-enlace-panel", catAction: "toggle-ins-enlace-categoria", insAction: "toggle-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",

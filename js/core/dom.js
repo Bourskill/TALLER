@@ -1217,6 +1217,33 @@ if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("offline", notify);
 }
 
+// Cierra el panel de "Enlace" (ver renderEnlacePanel en core/components.js)
+// al hacer clic afuera de él — pedido del usuario 2026-09-21. Registrado UNA
+// sola vez en fase de CAPTURA (mismo patrón que listenerClicRenovacion en
+// core/auth.js), así se entera de cualquier clic ANTES que el manejador de
+// data-action de ese mismo clic llame a stopPropagation() (patrón genérico 4
+// más arriba en bindEvents). Recorre las celdas `.enlace-celda` realmente
+// en pantalla (una por cada insumo enlazable visible en la pestaña activa):
+// si el panel de esa celda está abierto en `state.enlacePanelAbierto` y el
+// clic cayó afuera de ella, se cierra. Un insumo con el panel abierto en una
+// pestaña que ya no está a la vista (cambió de pestaña sin cerrar antes) no
+// tiene celda que revisar — se queda como estaba, sin falso positivo.
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", function (e) {
+    var abiertos = state.enlacePanelAbierto;
+    if (!abiertos || !Object.keys(abiertos).length) return;
+    var celdas = document.querySelectorAll(".enlace-celda[data-ins-celda]");
+    var nuevos = null;
+    celdas.forEach(function (celda) {
+      var insId = celda.getAttribute("data-ins-celda");
+      if (!abiertos[insId] || celda.contains(e.target)) return;
+      if (!nuevos) nuevos = Object.assign({}, abiertos);
+      delete nuevos[insId];
+    });
+    if (nuevos) { state.enlacePanelAbierto = nuevos; notify(); }
+  }, true);
+}
+
 // Navegación por teclado de toda la app (Enter entre campos, Esc para cerrar,
 // Alt+número para saltar de sección, flechas en el menú…): vive en
 // core/teclado.js. Acá solo se le entregan las tres cosas que necesita de

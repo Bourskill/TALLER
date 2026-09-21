@@ -5652,11 +5652,15 @@ const { calcCostoPrenda: calcCostoPrendaEnlaceTest, calcListaCompras: calcListaC
 assert(calcCostoPrendaEnlaceTest(refTrasEnlazarTest.insumos[2], refTrasEnlazarTest) === 15000, "el costo x prenda de Sublimación ya usa la cantidad enlazada (5.000 × 3 = 15.000)");
 
 // -- buscar y agregar un insumo ESPECÍFICO además de la categoría (se combinan) --
+// "+ Insumo personalizado" cae AFUERA de la celda de enlace de Sublimación —
+// con el cierre por clic-afuera (ver más abajo, "pedido de UX") ese clic la
+// contrae sola, así que hay que volver a abrirla antes de seguir.
 click('[data-action="add-insumo-personalizado"][data-cot="cot-enlace-test"][data-ref="ref-enlace-test"]');
 var refTrasBotonTest = state.cotizaciones[0].referencias[0];
 var botonIdTest = refTrasBotonTest.insumos[refTrasBotonTest.insumos.length - 1].id;
 setChange('[data-ref-id="ref-enlace-test"] input[data-ins="' + botonIdTest + '"][data-campo="nombre"]', "Botón especial");
 setChange('[data-ref-id="ref-enlace-test"] input[data-ins="' + botonIdTest + '"][data-campo="cantidad"]', "4");
+click('[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]');
 setChange('[data-action-change="set-enlace-busqueda"][data-ins="ins-sub-test"]', "botón");
 assert(!!document.querySelector('input[data-action="toggle-ins-enlace-insumo"][data-ins="ins-sub-test"][data-nombre="botón especial"]'), "el buscador filtra los insumos de ESTA referencia por nombre y ofrece un checkbox por cada uno");
 click('[data-action="toggle-ins-enlace-insumo"][data-ins="ins-sub-test"][data-nombre="botón especial"]');
@@ -5769,6 +5773,140 @@ const { calcTotalesProducto: calcTotalesEnlaceProTest } = await import("../js/co
 assert(calcTotalesEnlaceProTest(proTrasEnlaceTest).costoUnit === 5000 + 3000 + 1000 * 2, "el costo del producto YA refleja el enlace: Corte cuesta 1.000 × (1 + 1) = 2.000, sumado a las dos telas (5.000 + 3.000 + 2.000 = 10.000)");
 state.productos = productosPreviosEnlaceTest; state.catalogoCategorias = catCategoriasPreviasEnlaceProTest;
 state.productoEditando = ""; state.productosVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// ---------------------------------------------------------------------------
+// Correcciones al Enlace reportadas en producción 2026-09-21, EL MISMO DÍA
+// que se lanzó: "seleccioné el insumo sublimación que previamente estaba
+// enlazado a la categoria telas y 1, no se veia esa actualización y 2,
+// aunque se la coloqué manualmente esta no se enlazó con los insumos que
+// habían ahí que pertenecen a la categoría telas... no sumó las cantidades
+// de las telas en sublimación" — más dos pedidos de UX en el mismo mensaje:
+// acortar la lista de categorías del panel en Cotización a solo las que YA
+// usa algún insumo de la referencia, y contraer el panel al hacer clic
+// afuera de él.
+// ---------------------------------------------------------------------------
+
+// -- causa raíz del bug: `categoriaId` (necesario para que el enlace por
+// categoría encuentre con qué sumar, ver cantidadEfectivaInsumo) solo se
+// propaga al COPIAR un insumo (nuevoInsumo en modules/cotizaciones.js y
+// equivalentes) — un insumo copiado ANTES de que esa propagación existiera
+// (2026-09-21) se quedó sin categoriaId para siempre, sin ninguna
+// reparación retroactiva (mismo hueco que ya se corrigió para
+// origenCatalogoId, ver repararOrigenCatalogoInsumos arriba) --
+const { repararCategoriaIdInsumos: repararCatIdTest } = await import("../js/core/store.js");
+const catalogoPrevioCatIdTest = state.catalogoInsumos;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-telavieja-catid-test", nombre: "Tela vieja catálogo", unidad: "m", costo: 9000, tipo: "tela", categoriaId: "cat-telas-catid-test", proveedorId: "" }
+]);
+const plantillasCatIdTest = [{
+  id: "pla-catid-test", nombre: "Plantilla catid", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [{ id: "plains-telavieja-catid", nombre: "Tela vieja", unidad: "m", costo: 9000, tipo: "tela", cantidad: 1, origenCatalogoId: "cat-telavieja-catid-test", categoriaId: "", enlace: { categorias: [], insumos: [] } }]
+}];
+const huboRepCatIdTest = repararCatIdTest(state.catalogoInsumos, plantillasCatIdTest, [], []);
+assert(huboRepCatIdTest === true, "la reparación retroactiva de categoriaId sí encuentra algo que arreglar");
+assert(plantillasCatIdTest[0].insumos[0].categoriaId === "cat-telas-catid-test", "...y copia la categoría del insumo REAL del catálogo (localizado por origenCatalogoId) al insumo viejo que nunca la tuvo");
+assert(repararCatIdTest(state.catalogoInsumos, plantillasCatIdTest, [], []) === false, "correr la reparación de nuevo sobre un insumo ya reparado no hace nada (idempotente)");
+const plantillasSinOrigenCatIdTest = [{
+  id: "pla-catid-test2", nombre: "Plantilla sin origen", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [{ id: "plains-manual-catid", nombre: "Escrito a mano", unidad: "UND", costo: 100, tipo: "por_prenda", cantidad: 1, origenCatalogoId: "", categoriaId: "", enlace: { categorias: [], insumos: [] } }]
+}];
+assert(repararCatIdTest(state.catalogoInsumos, plantillasSinOrigenCatIdTest, [], []) === false, "un insumo escrito a mano (sin origenCatalogoId) no se toca — no hay con qué adivinar su categoría, mejor no reparar que adivinar mal");
+state.catalogoInsumos = catalogoPrevioCatIdTest;
+
+// -- repro end-to-end exacta del reporte: una Tela "vieja" (origenCatalogoId
+// sí, categoriaId no) y una Sublimación YA enlazada A MANO a "Telas" (tal
+// como el usuario dijo que hizo) --
+const pedidosPreviosBugCatIdTest = state.pedidos, cotizacionesPreviasBugCatIdTest = state.cotizaciones,
+  catalogoPrevioBugCatIdTest = state.catalogoInsumos, catCategoriasPreviasBugCatIdTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasEnlaceTest;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-telavieja2-test", nombre: "Tela vieja 2", unidad: "m", costo: 7000, tipo: "tela", categoriaId: "cat-telas-enl", proveedorId: "" }
+]);
+state.cotizaciones = [{
+  id: "cot-bugcatid-test", clienteId: "", cliente: "Cliente Bug CategoriaId", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cbugcatid1",
+  referencias: [{
+    id: "ref-bugcatid-test", nombre: "Ref bug categoriaId", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-telavieja2-test", nombre: "Tela vieja 2", unidad: "m", costo: 7000, tipo: "tela", cantidad: 3, origenCatalogoId: "cat-telavieja2-test", categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-subvieja-test", nombre: "Sublimación vieja", unidad: "m", costo: 4000, tipo: "por_prenda", cantidad: 1, origenCatalogoId: "", categoriaId: "", esServicio: false, enlace: { categorias: ["cat-telas-enl"], insumos: [] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+var refBugCatIdTest = state.cotizaciones[0].referencias[0];
+assert(cantEfectivaTest(refBugCatIdTest.insumos[1], refBugCatIdTest) === 0, "BUG reproducido: aunque Sublimación ya está enlazada A MANO a \"Telas\", la suma da 0 — la Tela vieja no tiene categoriaId, así que nunca hace match (\"no sumó las cantidades de las telas en sublimación\")");
+
+repararCatIdTest(state.catalogoInsumos, [], [], state.cotizaciones);
+assert(refBugCatIdTest.insumos[0].categoriaId === "cat-telas-enl", "la reparación retroactiva le da a la Tela vieja su categoriaId, tomado del insumo real del catálogo");
+assert(cantEfectivaTest(refBugCatIdTest.insumos[1], refBugCatIdTest) === 3, "...y con eso, el mismo enlace que el usuario ya había marcado a mano empieza a sumar solo: 3 (la cantidad de la Tela vieja), sin que él tenga que volver a tocar nada");
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-bugcatid-test"]');
+var celdaSubViejaTest = document.querySelector('[data-ins-row][data-ins="ins-subvieja-test"]').textContent;
+assert(celdaSubViejaTest.indexOf("🔗 3") !== -1, "en pantalla, la celda \"Cant.\" de Sublimación ya muestra la suma correcta (🔗 3) en vez de un enlace que no sumaba nada");
+
+state.pedidos = pedidosPreviosBugCatIdTest; state.cotizaciones = cotizacionesPreviasBugCatIdTest;
+state.catalogoInsumos = catalogoPrevioBugCatIdTest; state.catalogoCategorias = catCategoriasPreviasBugCatIdTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- pedido de UX (mismo mensaje): en Cotización el panel de categorías se
+// acorta a solo las que YA usa algún insumo de la referencia, no el árbol
+// completo del catálogo — "las opciones disponibles seleccionables son los
+// insumos que ya hay agregados o su respectiva categoria, esto para
+// disminuir los elementos de la lista" --
+const { categoriasUsadasPorInsumos: categoriasUsadasTest } = await import("../js/core/calc.js");
+const categoriasShrinkTest = [
+  { id: "cat-telas-shrink", nombre: "Telas", parentId: "" },
+  { id: "cat-telasdeportivas-shrink", nombre: "Telas Deportivas", parentId: "cat-telas-shrink" },
+  { id: "cat-accesorios-shrink", nombre: "Accesorios", parentId: "" }
+];
+assert(categoriasUsadasTest(categoriasShrinkTest, [{ categoriaId: "cat-telasdeportivas-shrink" }]).length === 2, "el cálculo puro deja solo la subcategoría en uso y su madre (2 de las 3 categorías del catálogo)");
+assert(categoriasUsadasTest(categoriasShrinkTest, []).length === 0, "sin insumos, la lista queda vacía");
+
+const pedidosPreviosShrinkTest = state.pedidos, cotizacionesPreviasShrinkTest = state.cotizaciones,
+  catCategoriasPreviasShrinkTest = state.catalogoCategorias;
+state.catalogoCategorias = categoriasShrinkTest;
+state.cotizaciones = [{
+  id: "cot-shrink-test", clienteId: "", cliente: "Cliente Shrink", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cshrink1",
+  referencias: [{
+    id: "ref-shrink-test", nombre: "Ref shrink", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-telashrink-test", nombre: "Tela shrink", unidad: "m", costo: 1000, tipo: "tela", cantidad: 1, categoriaId: "cat-telasdeportivas-shrink", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-subshrink-test", nombre: "Sublimación shrink", unidad: "m", costo: 500, tipo: "por_prenda", cantidad: 1, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-shrink-test"]');
+click('[data-action="toggle-enlace-panel"][data-ins="ins-subshrink-test"]');
+assert(!!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subshrink-test"][data-cat="cat-telasdeportivas-shrink"]'), "\"Telas Deportivas\", en uso por la Tela shrink, SÍ aparece en el panel de Sublimación");
+assert(!!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subshrink-test"][data-cat="cat-telas-shrink"]'), "...su categoría MADRE \"Telas\" también aparece, aunque ningún insumo caiga directo ahí — si no, el árbol (que se arma recorriendo madres) la dejaría invisible");
+assert(!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subshrink-test"][data-cat="cat-accesorios-shrink"]'), "pero \"Accesorios\" NO aparece: ningún insumo de ESTA referencia pertenece a ella, aunque exista en el catálogo — es la lista acortada que se pidió");
+
+// -- pedido de UX (mismo mensaje): "que esta lista se contraiga cuando haga
+// click fuera de ella" --
+assert(!!document.querySelector(".enlace-panel"), "el panel de Sublimación sigue abierto justo antes del clic afuera");
+document.body.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+assert(!document.querySelector(".enlace-panel"), "un clic afuera del panel (acá, en el body) lo contrae solo, sin tener que volver a pulsar el botón \"Enlace\"");
+assert(!(state.enlacePanelAbierto || {})["ins-subshrink-test"], "...y el estado queda limpio: este insumo ya no figura en enlacePanelAbierto");
+
+click('[data-action="toggle-enlace-panel"][data-ins="ins-subshrink-test"]');
+click('[data-action="toggle-ins-enlace-categoria"][data-ins="ins-subshrink-test"][data-cat="cat-telasdeportivas-shrink"]');
+assert(!!document.querySelector(".enlace-panel"), "en cambio, un clic DENTRO del panel (acá, un checkbox) no lo cierra — el clic cayó adentro de .enlace-celda");
+
+state.pedidos = pedidosPreviosShrinkTest; state.cotizaciones = cotizacionesPreviasShrinkTest;
+state.catalogoCategorias = catCategoriasPreviasShrinkTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 
 console.log("\n✅ Todos los checks de humo pasaron.");
