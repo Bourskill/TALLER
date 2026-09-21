@@ -623,6 +623,21 @@ export function repararMarcasOrigenInconsistentes(tx) {
       t[campo] = "";
       huboReparacion = true;
     });
+    // Chequeo más preciso, más allá del tipo: origenGastoFijoPeriodo SIEMPRE
+    // se escribe como "<id del gasto fijo>|<periodo>" (ver
+    // toggle-gasto-fijo-pagado en modules/pendientes.js) — un valor sin "|"
+    // es estructuralmente imposible, sea cual sea el tipo del tx. Explica
+    // el caso más extendido de todos, confirmado en producción por el
+    // usuario ("afecta a TODOS los pedidos"): toda compra de insumo escribe
+    // `esInsumo: "1"` — con el corrimiento de columnas del 2026-09-10, ese
+    // mismo "1" quedó leyéndose exactamente en la posición de
+    // origenGastoFijoPeriodo. Como "gasto" SÍ es un tipo válido para ese
+    // campo (una compra real también es "gasto"), el chequeo de arriba
+    // —por tipo— no lo detecta; este sí, porque "1" nunca tiene "|".
+    if (t.origenGastoFijoPeriodo && String(t.origenGastoFijoPeriodo).indexOf("|") === -1) {
+      t.origenGastoFijoPeriodo = "";
+      huboReparacion = true;
+    }
   });
   return huboReparacion;
 }

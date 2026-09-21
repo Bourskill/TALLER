@@ -768,6 +768,33 @@ este caso puntual y hay que seguir investigando con más datos concretos
 `origenCompraClave` guardado en el tx, algo que hoy no es visible desde
 la UI).
 
+### 🔴 Hallazgo #22 — la causa universal ("afecta a TODOS los pedidos"): el "1" de `esInsumo` leído como `origenGastoFijoPeriodo`. ✅ CORREGIDO
+
+Con el campo/valor exacto ahora visible en el tooltip (ver el cambio de
+arriba), el usuario reportó: `origenGastoFijoPeriodo: 1`. Eso lo explica
+todo: `esInsumo: "1"` es un campo que escribe TODA compra de insumo real
+(`sincronizar-compras-finanzas`), sin excepción — con el corrimiento de
+columnas del 2026-09-10 (ver Hallazgo #19), ese "1" quedó leyéndose
+exactamente en la posición de `origenGastoFijoPeriodo`. El Hallazgo #19
+no lo detectaba porque su chequeo es por `tipo` de tx, y "gasto" SÍ es un
+tipo válido para `origenGastoFijoPeriodo` (un gasto fijo real también es
+"gasto") — la combinación tipo/campo es posible, solo el VALOR es
+imposible.
+
+**Fix:** chequeo adicional, más preciso que por tipo:
+`origenGastoFijoPeriodo` SIEMPRE se escribe como
+`"<id del gasto fijo>|<periodo>"` (ver `toggle-gasto-fijo-pagado`,
+modules/pendientes.js) — cualquier valor sin `"|"` es estructuralmente
+imposible sea cual sea el tipo del tx, así que se limpia igual.
+`repararMarcasOrigenInconsistentes` (core/store.js) ahora hace las dos
+pasadas: por tipo (Hallazgo #19) y por forma (esta).
+
+**Por qué "afecta a todos los pedidos":** exactamente porque `esInsumo`
+es el campo MÁS UNIVERSAL de todos los que se corrieron — toda compra
+real lo escribe, a diferencia de un insumo renombrado (Hallazgo #18, caso
+puntual) o una cotización duplicada (Hallazgo #21, caso puntual). Esta es
+la explicación que faltaba para el alcance total del problema.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

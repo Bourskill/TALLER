@@ -259,6 +259,25 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésima ronda: la causa universal de "Origen eliminado" — el "1" de esInsumo leído como origenGastoFijoPeriodo)
+
+Con el campo/valor exacto ahora visible en el tooltip (ronda anterior),
+el usuario reportó `origenGastoFijoPeriodo: 1`. Eso explica por qué
+"afecta a TODOS los pedidos": `esInsumo: "1"` lo escribe TODA compra de
+insumo real, sin excepción — con el corrimiento de columnas del
+2026-09-10, ese "1" quedó leyéndose en la posición de
+`origenGastoFijoPeriodo`. La ronda de #19 no lo detectaba porque su
+chequeo es por `tipo` de tx, y "gasto" SÍ es válido para ese campo (un
+gasto fijo real también es "gasto") — la combinación es posible, solo el
+VALOR es imposible.
+
+- **Fix:** chequeo adicional en `repararMarcasOrigenInconsistentes`
+  (core/store.js): `origenGastoFijoPeriodo` siempre se escribe como
+  `"<id>|<periodo>"` — cualquier valor sin "|" es estructuralmente
+  imposible sea cual sea el tipo, así que se limpia igual.
+- Ver CONTABILIDAD.md, "Hallazgo #22" — la explicación que faltaba para
+  el alcance total del problema reportado.
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo novena ronda: duplicar una cotización dejaba costos globales/servicios cobrados con el mismo id que el original)
 
 Confirmando el Hallazgo #20 en otro pedido, el usuario dio un argumento

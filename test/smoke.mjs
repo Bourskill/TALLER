@@ -2372,6 +2372,22 @@ assert(txNominaConColchonFalso.origenColchonId === "", "un pago de nómina con o
 assert(txComisionRealIntacta.origenComisionPedidoId === "ped-vendedor-perdido", "...pero una comisión real (tipo \"comision\") con esa misma marca NO se toca");
 assert(repararMarcasOrigenInconsistentes([txComisionRealIntacta]) === false, "y sobre datos ya limpios, no reporta ninguna reparación");
 
+// El caso MÁS extendido, confirmado por el usuario tras agregar el
+// campo/valor exacto al tooltip: "origenGastoFijoPeriodo: 1" en una compra
+// real. Ese "1" es el `esInsumo: "1"` de TODA compra de insumo (ver
+// sincronizar-compras-finanzas en modules/cotizaciones.js), leído en la
+// posición equivocada por el corrimiento de columnas del 2026-09-10. Como
+// "gasto" SÍ es válido para origenGastoFijoPeriodo (un gasto fijo real
+// también es "gasto"), el chequeo por tipo NO alcanza acá — hace falta el
+// chequeo de forma ("<id>|<periodo>", nunca solo "1").
+const txCompraConGastoFijoFalso = { id: "tx-compra-gastofijo-falso", tipo: "gasto", concepto: "Compra — Ojales Herraje — Bandera del equipo x1", contraparte: "", monto: 6400, origenGastoFijoPeriodo: "1", origenCompraClave: "global|cg-ojales-real" };
+const txGastoFijoRealIntacto = { id: "tx-gastofijo-real-intacto", tipo: "gasto", concepto: "Gasto fijo — Arriendo", contraparte: "Arriendo", monto: 500000, origenGastoFijoPeriodo: "gf-arriendo|2026-09" };
+let reparoGastoFijoFalso = repararMarcasOrigenInconsistentes([txCompraConGastoFijoFalso, txGastoFijoRealIntacto]);
+assert(reparoGastoFijoFalso === true, "repararMarcasOrigenInconsistentes también avisa que reparó esto");
+assert(txCompraConGastoFijoFalso.origenGastoFijoPeriodo === "", "origenGastoFijoPeriodo sin \"|\" (el \"1\" de esInsumo, leído en la posición equivocada) queda limpio, aunque \"gasto\" sea un tipo válido para ese campo");
+assert(txCompraConGastoFijoFalso.origenCompraClave === "global|cg-ojales-real", "...y NO toca origenCompraClave — la marca real de esta compra sigue intacta, así que ahora SÍ puede respaldarla si la línea existe");
+assert(txGastoFijoRealIntacto.origenGastoFijoPeriodo === "gf-arriendo|2026-09", "un origenGastoFijoPeriodo real (con \"<id>|<periodo>\") no se toca");
+
 // ---------------------------------------------------------------------------
 // Reporte en producción, mismo día: el usuario notó que "Origen eliminado"
 // solo le salía en SALIDAS de dinero (gastos), nunca en ingresos — pista
