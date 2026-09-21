@@ -2457,11 +2457,21 @@ const cotComisionPagadaParaDuplicar = {
   estado: "convertida", pedidoId: "ped-dup-comision-test", pedidoOrigenId: "",
   vendedor: { nombre: "Vendedor Duplicado", tipo: "fijo", valor: 90000, estado: "pagado", fechaPago: "2026-01-05" },
   gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cdct1",
-  referencias: [], costosGlobales: [], serviciosCobrados: [], compras: []
+  referencias: [],
+  costosGlobales: [{ id: "cg-original-dup-test", nombre: "Domicilio", costo: 17000, proveedorId: "", esServicio: false }],
+  serviciosCobrados: [{ id: "sc-original-dup-test", nombre: "Diseño", costo: 20000, proveedorId: "" }],
+  compras: []
 };
 const copiaConComisionReseteada = duplicarCotTest(cotComisionPagadaParaDuplicar);
 assert(copiaConComisionReseteada.vendedor.nombre === "Vendedor Duplicado", "duplicar una cotización conserva el NOMBRE del vendedor");
 assert(copiaConComisionReseteada.vendedor.estado === "pendiente" && copiaConComisionReseteada.vendedor.fechaPago === "", "...pero resetea el estado 'pagado' — la copia no tiene ningún pago real detrás (auditoría 2026-09-20)");
+// Post-mortem 2026-09-20: un costo global/servicio cobrado con el MISMO id
+// que el original hace que su clave en calcListaCompras ("global|"+id) sea
+// IDÉNTICA entre las dos cotizaciones — dos registros que deberían ser
+// independientes comparten identidad por accidente (el mismo hueco que
+// referencias/insumos ya tenían tapado arriba).
+assert(copiaConComisionReseteada.costosGlobales[0].nombre === "Domicilio" && copiaConComisionReseteada.costosGlobales[0].id !== "cg-original-dup-test", "el costo global se conserva (mismo nombre/costo) pero con un id PROPIO, no el del original");
+assert(copiaConComisionReseteada.serviciosCobrados[0].nombre === "Diseño" && copiaConComisionReseteada.serviciosCobrados[0].id !== "sc-original-dup-test", "...mismo criterio para un servicio cobrado");
 
 // --- 2) Escalar un pedido con comisión ya pagada a cotización también la resetea ---
 const pedidosPreviosEscComision = state.pedidos, cotizacionesPreviasEscComision = state.cotizaciones;

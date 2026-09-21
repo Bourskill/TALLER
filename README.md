@@ -259,6 +259,26 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo novena ronda: duplicar una cotización dejaba costos globales/servicios cobrados con el mismo id que el original)
+
+Confirmando el Hallazgo #20 en otro pedido, el usuario dio un argumento
+sólido: el botón "↗ Origen" funciona (pedido/cotización existen), la
+línea sigue en la lista de compras con Estado "Sí" — y aun así salía
+"Origen eliminado". Se confirmó que son dos chequeos distintos
+(`origenDeTx`, lenient, vs. `MARCAS_ORIGEN_SISTEMA`, estricto por clave
+exacta), no una contradicción del código, pero seguía sin explicarse por
+qué la clave no coincide si la línea "sigue ahí".
+
+- **Bug real encontrado:** `duplicarCotizacionCompleta` regeneraba ids
+  nuevos para `referencias`/`insumos` al duplicar, pero nunca para
+  `costosGlobales`/`serviciosCobrados` — un "Domicilio" duplicado nacía
+  con el MISMO id que el original, clave idéntica en `calcListaCompras`
+  entre las dos cotizaciones. Fix: ahora también reciben id propio.
+- **Nota honesta:** no se confirmó todavía si esto explica el caso
+  puntual reportado (si el pedido pasó por "Duplicar" alguna vez) — es un
+  bug real y corregido, pero falta el dato para saber si es la causa
+  completa. Ver CONTABILIDAD.md, "Hallazgo #21".
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo octava ronda: reconectar, no solo evitar, las compras que ya se habían desconectado)
 
 El usuario dio la pista clave tras la ronda anterior: "solo pasa con las

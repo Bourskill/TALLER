@@ -730,6 +730,44 @@ id, mismo monto) — ningún movimiento nuevo. Si la línea genuinamente ya
 no existe, no toca nada: se deja huérfana, que es el comportamiento
 correcto.
 
+### 🟡 Hallazgo #21 — costo global/servicio cobrado duplicado conserva el id del original (posible explicación de más casos de "Origen eliminado"). ✅ CORREGIDO EL BUG DE ORIGEN, sin confirmar aún que sea la causa del caso puntual reportado
+
+Confirmando el Hallazgo #20 en otro pedido ("Bandera del equipo x1"), el
+usuario mostró un argumento sólido: el botón "↗ Origen" SÍ funciona (el
+pedido/cotización existen), la línea sigue en la lista de compras con
+Estado "Sí" — y aun así la insignia "Origen eliminado" seguía apareciendo
+en varios GASTOS. Se confirmó que "↗ Origen" (`origenDeTx`, chequeo
+LENIENTE: solo pregunta si el pedido/cotización existen) y "Origen
+eliminado" (`origenSistemaHuerfano`/`MARCAS_ORIGEN_SISTEMA`, chequeo
+ESTRICTO: pregunta si `cot.compras` tiene la clave EXACTA) son dos
+preguntas distintas — no es una contradicción del código, pero deja
+abierta la pregunta de por qué la clave exacta no coincide si la línea
+"sigue ahí".
+
+**Bug real encontrado (no confirmado aún como la causa de este caso
+puntual):** `duplicarCotizacionCompleta` (modules/cotizaciones.js) regenera
+ids nuevos para `referencias`/`insumos` al duplicar una cotización (para
+que la copia sea independiente del original), pero **nunca hacía lo mismo
+para `costosGlobales`/`serviciosCobrados`** — un "Domicilio" o
+"Sublimación" duplicado nace con el MISMO id que el original, así que su
+clave en `calcListaCompras` (`"global|"` + id) es IDÉNTICA entre las dos
+cotizaciones. Hoy `compras` nace vacío en la copia (ya protegido desde
+antes) así que no hay contaminación cruzada inmediata, pero dos registros
+que deberían ser independientes quedan compartiendo identidad — el mismo
+tipo de riesgo que ya se había tapado para referencias/insumos.
+
+**Fix:** `costosGlobales`/`serviciosCobrados` ahora también reciben un id
+propio al duplicar, igual que referencias/insumos.
+
+**Pendiente de confirmar:** no se pudo verificar todavía si "Bandera del
+equipo x1" (o los pedidos anteriores con el mismo síntoma) pasaron
+alguna vez por "Duplicar" — si el usuario confirma que sí, esto explica
+el patrón completo; si no, sigue habiendo una causa sin identificar para
+este caso puntual y hay que seguir investigando con más datos concretos
+(ideal: comparar el id interno del costo global actual contra el
+`origenCompraClave` guardado en el tx, algo que hoy no es visible desde
+la UI).
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

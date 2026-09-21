@@ -34,6 +34,17 @@ export function duplicarCotizacionCompleta(cot) {
     r.id = uid();
     (r.insumos || []).forEach(function (i) { i.id = uid(); });
   });
+  // Mismo motivo que referencias/insumos arriba: un costo global o un
+  // servicio cobrado con el MISMO id que el original hace que su clave en
+  // calcListaCompras ("global|" + id / "servicio|" + id, ver core/calc.js)
+  // sea IDÉNTICA en las dos cotizaciones — dos registros distintos que
+  // deberían ser independientes comparten identidad por accidente. `compras`
+  // ya nace vacío (arriba) así que no hay nada que reconectar mal HOY, pero
+  // deja la puerta abierta a que una reparación futura (o el propio usuario
+  // corrigiendo un nombre) confunda una compra de ESTA cotización con la de
+  // su gemela. Auditoría financiera 2026-09-20, post-mortem.
+  (copia.costosGlobales || []).forEach(function (g) { g.id = uid(); });
+  (copia.serviciosCobrados || []).forEach(function (s) { s.id = uid(); });
   // `compras` (estado/costoReal/cantidadReal/txId por línea) y
   // `estimadoTxId` son el historial REAL de compras/movimientos de ESTE
   // pedido — no del duplicado, que todavía no ha comprado ni pagado nada.
