@@ -1800,15 +1800,25 @@ export function clientesFiltrados() {
 // usuario notó que "Costo x prenda" ya reflejaba el consumo pero "Cant."
 // seguía en 1 sin relación visible — se simplificó a un solo factor real.
 // Cantidad EFECTIVA de un insumo: la que escribió el usuario a mano, o —si
-// tiene un enlace (`insumo.enlaceTipo`, ver TIPOS_ENLAZABLES en
-// core/constants.js)— la SUMA de la cantidad de todos los DEMÁS insumos de
-// ESE tipo en el mismo contenedor (una referencia, una plantilla o un
-// producto — cualquier objeto con `.insumos`). Nunca se guarda el
-// resultado: se recalcula siempre a partir de los insumos actuales, así
-// que nunca queda desincronizado si se edita cualquiera de los insumos de
-// origen. Pedido del usuario 2026-09-21 — ejemplo real: "Sublimación"
-// enlazado a "Tela" suma sola los metros de TODAS las telas de la
-// referencia, sin tener que corregirlo a mano cada vez que cambia una.
+// tiene un enlace (`insumo.enlace = {categorias, insumos}`, ver
+// renderEnlacePanel en core/components.js)— la SUMA de la cantidad de
+// todos los DEMÁS insumos del mismo contenedor (una referencia, una
+// plantilla o un producto — cualquier objeto con `.insumos`) que hagan
+// match, por CATEGORÍA del catálogo (`categorias`, con sus subcategorías
+// incluidas — mismo criterio que idsConSubcategorias) o por NOMBRE
+// específico (`insumos`, nombres normalizados — la única forma estable de
+// referirse a "ese insumo puntual" a través de catálogo→plantilla/
+// producto→cotización, donde los ids se regeneran en cada copia). Nunca se
+// guarda el resultado: se recalcula siempre a partir de los insumos
+// actuales, así que nunca queda desincronizado si se edita cualquiera de
+// los insumos de origen. Pedido del usuario 2026-09-21 — ejemplo real:
+// "Sublimación" enlazada a la categoría "Telas" suma sola los metros de
+// TODAS las telas de la referencia, sin tener que corregirlo a mano cada
+// vez que cambia una. Corregido el mismo día tras un primer intento
+// (enlazar por TIPO de costo) que el usuario señaló como equivocado: "lo
+// que quiero enlazar son cantidades", no agrupar por cómo se calcula el
+// costo — lo que corresponde es la categoría del catálogo o un insumo
+// puntual, no el tipo tela/por_prenda/producto_comprado.
 //
 // A propósito NO resuelve el enlace de los insumos de origen de forma
 // recursiva (suma su `cantidad` cruda, no su cantidadEfectiva) — evita
@@ -1817,9 +1827,20 @@ export function clientesFiltrados() {
 // cubre los casos reales pedidos (sublimación/corte enlazados a tela).
 export function cantidadEfectivaInsumo(insumo, contenedor) {
   if (!insumo) return 0;
-  if (!insumo.enlaceTipo) return num(insumo.cantidad);
+  var enlace = insumo.enlace || {};
+  var categorias = enlace.categorias || [];
+  var nombres = enlace.insumos || [];
+  if (!categorias.length && !nombres.length) return num(insumo.cantidad);
+  var categoriasCatalogo = state.catalogoCategorias || [];
+  var idsObjetivo = categorias.reduce(function (a, catId) { return a.concat(idsConSubcategorias(categoriasCatalogo, catId)); }, []);
+  var nombresObjetivo = nombres.map(norm);
   return ((contenedor && contenedor.insumos) || [])
-    .filter(function (i) { return i.id !== insumo.id && i.tipo === insumo.enlaceTipo; })
+    .filter(function (i) {
+      if (i.id === insumo.id) return false;
+      if (i.categoriaId && idsObjetivo.indexOf(i.categoriaId) !== -1) return true;
+      if (nombresObjetivo.indexOf(norm(i.nombre || "")) !== -1) return true;
+      return false;
+    })
     .reduce(function (a, i) { return a + num(i.cantidad); }, 0);
 }
 export function calcCostoPrenda(insumo, ref) {

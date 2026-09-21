@@ -1355,6 +1355,52 @@ predefinición desde el Catálogo se hereda al agregar el insumo; y que
 Plantillas y Productos también soportan enlazar y su costeo lo refleja)
 antes de avisarle al usuario.
 
+**Corrección el mismo día — el mecanismo de arriba (enlazar por TIPO de
+costo) era el equivocado:** el usuario lo señaló directo apenas lo vio
+en producción: "el desplegable de enlace está mal, porque me salen
+'tipos de costos'... lo que quiero enlazar son cantidades". Confundí
+`insumo.tipo` (tela/por_prenda/producto_comprado — la fórmula de
+costeo) con lo que el usuario había pedido desde el principio: la
+CATEGORÍA del catálogo (ej. "Telas", con sus subcategorías) o un
+insumo PUNTUAL elegido a mano, con buscador — un desplegable de un
+solo valor tampoco alcanzaba, pidió poder "agregarle o quitarle
+enlaces" (varios a la vez).
+
+**Rediseño:** `insumo.enlaceTipo` (string) se reemplazó por
+`insumo.enlace = { categorias: [...], insumos: [...] }` — una LISTA de
+categorías del catálogo (con subcategorías incluidas, mismo criterio
+que `idsConSubcategorias`) y una lista de insumos específicos
+(identificados por NOMBRE normalizado, no por id — es la única forma
+estable de referirse a "ese insumo puntual" a través de catálogo→
+plantilla/producto→cotización, donde los ids se regeneran en cada
+copia). Las dos listas se COMBINAN (unión, no modos exclusivos).
+`cantidadEfectivaInsumo` se actualizó para matchear por `categoriaId`
+(nuevo campo que ahora SÍ se propaga a los insumos de una referencia/
+plantilla/producto, cosa que antes se evitaba a propósito) o por
+nombre normalizado.
+
+**UI:** el desplegable se reemplazó por un panel desplegable
+(`renderEnlacePanel`, core/components.js) — un botón resumen ("🔗 N" /
+"Sin enlace") que al abrirse muestra checkboxes de categorías
+(indentadas por subcategoría) y un buscador con checkboxes de insumos
+específicos. Marcar/desmarcar un checkbox ES la forma de "agregar o
+quitar" un enlace — sin necesitar una lista de chips aparte. En
+Catálogo/Plantillas/Productos el buscador filtra OTROS insumos del
+catálogo (predefiniendo una regla que se resuelve por nombre más
+adelante); en Cotización filtra los insumos que YA están en esa misma
+referencia — son los únicos que de verdad tienen una cantidad que
+sumar ahí. Estado de UI (panel abierto, texto del buscador) vive en
+`state.enlacePanelAbierto`/`enlaceBusqueda`, transversal a los 4
+módulos (acciones genéricas en `coreActions`, core/dom.js) porque no
+depende de dónde vive el insumo.
+
+Reverificado end-to-end con el nuevo mecanismo (categoría + subcategoría
+se combinan correctamente; categoría + insumo específico se combinan
+entre sí, no son modos exclusivos; el panel se abre/cierra, filtra por
+buscador y los checkboxes reflejan el estado guardado; congelar al
+desenlazar sigue funcionando, ahora quitando el ÚLTIMO checkbox
+marcado) antes de avisarle al usuario por segunda vez.
+
 ---
 
 ## Próximos pasos

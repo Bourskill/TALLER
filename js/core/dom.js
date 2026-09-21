@@ -130,6 +130,28 @@ var coreActions = {
   tab: function (el) {
     irAPestana(el.getAttribute("data-tab"));
   },
+  // Panel de "Enlace" de un insumo (ver renderEnlacePanel en
+  // core/components.js) — abrir/cerrar y el texto del buscador son estado
+  // de UI puro, sin dueño de datos (no importa si el insumo vive en
+  // Catálogo, Plantillas, Productos o una referencia de Cotización), así
+  // que viven acá, transversales, en vez de repetirse en los 4 módulos.
+  // `data-ins` es siempre el id del INSUMO (en Catálogo también, además de
+  // su `data-id` propio) — ya es único en toda la app (uid()), así que una
+  // sola clave por insumo alcanza sin necesitar el id de su dueño.
+  "toggle-enlace-panel": function (el) {
+    var insId = el.getAttribute("data-ins");
+    var abiertos = Object.assign({}, state.enlacePanelAbierto || {});
+    if (abiertos[insId]) delete abiertos[insId]; else abiertos[insId] = true;
+    state.enlacePanelAbierto = abiertos;
+    notify();
+  },
+  "set-enlace-busqueda": function (el) {
+    var insId = el.getAttribute("data-ins");
+    var busquedas = Object.assign({}, state.enlaceBusqueda || {});
+    busquedas[insId] = el.value;
+    state.enlaceBusqueda = busquedas;
+    notify();
+  },
   "kpi-nav": function (el) {
     state.tab = el.getAttribute("data-tab");
     state.sidebarMobileOpen = false;

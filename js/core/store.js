@@ -425,6 +425,14 @@ export const state = {
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.
   compraDetalleAbierto: {},
+  // { [insumoId]: true } — qué panel de "Enlace" (ver renderEnlacePanel en
+  // core/components.js) está desplegado, y { [insumoId]: texto } lo que hay
+  // escrito en su buscador de insumo específico. Estado de UI: nunca se
+  // persiste. Por id de INSUMO (no por fila/cotización) porque un id de
+  // insumo ya es único en toda la app (uid()), así que sirve igual para el
+  // panel de Insumos, Plantillas, Productos o una referencia de Cotización.
+  enlacePanelAbierto: {},
+  enlaceBusqueda: {},
   // id de la cotización cuyo listado de tallas está en modo "repartir entre
   // referencias" (ver renderRepartoReferencias en modules/cotizaciones.js), o "".
   detalleModoRefs: "",

@@ -1,12 +1,12 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, cantidadEfectivaInsumo } from "../core/calc.js";
-import { renderTipoCostoOptions, renderEnlaceOptions, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
+import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { todosNumerosOp, sincronizarEventoPedido } from "./pedidos.js";
-import { TIPOS_COSTO } from "../core/constants.js";
+import { TIPOS_COSTO, TIPOS_ENLAZABLES } from "../core/constants.js";
 import { ajustarStockProducto } from "../core/stock.js";
 
 function nuevaReferencia() {
@@ -83,13 +83,16 @@ function nuevoInsumo(fuente, ref) {
     // core/calc.js), o por la casilla vieja— la referencia hereda ese
     // resultado ya resuelto: es lo que hace que la lista de compras diga
     // "servicio" en vez de pedir N unidades de algo que no se mide. Se
-    // resuelve UNA vez, al copiar (igual que el costo): la referencia no
-    // guarda `categoriaId`, así que si luego cambias la categoría en el
-    // catálogo, esta copia ya hecha no se entera — mismo criterio que ya se
-    // usa para el costo, para no cambiarle los números a una cotización ya
-    // armada sin que nadie lo pida.
+    // resuelve UNA vez, al copiar (igual que el costo), para no cambiarle
+    // los números a una cotización ya armada sin que nadie lo pida.
     esServicio: !!(fuente && esInsumoServicio(fuente)),
     proveedorId: (fuente && fuente.proveedorId) || "",
+    // La categoría del catálogo SÍ se copia (2026-09-21, antes no se
+    // guardaba acá) — no para el costeo (eso sigue resuelto por tipo), sino
+    // para que un ENLACE por categoría (ver más abajo) pueda reconocer,
+    // dentro de esta misma referencia, cuáles insumos son "de la categoría
+    // Telas" sin tener que ir a consultar el catálogo en vivo.
+    categoriaId: (fuente && fuente.categoriaId) || "",
     // Para una tela, el consumo (metros) es PROPIO de este insumo, no de la
     // referencia (ver calcCostoPrenda en core/calc.js) — arranca en 1 (sin
     // valor de arranque a nivel de referencia desde 2026-09-21, el usuario
@@ -107,11 +110,11 @@ function nuevoInsumo(fuente, ref) {
     // directo en la cotización (sin pasar por el catálogo) no trae vínculo:
     // no hay con qué compararlo, y no debe avisar de nada.
     origenCatalogoId: fuente ? fuente.id : "",
-    // El enlace (ver TIPOS_ENLAZABLES en core/constants.js) se hereda igual
-    // que esServicio/origenCatalogoId si el catálogo ya lo tenía predefinido
-    // (ej. "Sublimación" enlazado a "Tela") — editable después en esta
-    // misma fila si hace falta ajustarlo.
-    enlaceTipo: (fuente && fuente.enlaceTipo) || ""
+    // El enlace (ver renderEnlacePanel en core/components.js) se hereda
+    // igual que esServicio/origenCatalogoId si el catálogo ya lo tenía
+    // predefinido (ej. "Sublimación" enlazada a la categoría "Telas") —
+    // editable después en esta misma fila si hace falta ajustarlo.
+    enlace: { categorias: ((fuente && fuente.enlace && fuente.enlace.categorias) || []).slice(), insumos: ((fuente && fuente.enlace && fuente.enlace.insumos) || []).slice() }
   };
 }
 
@@ -981,7 +984,8 @@ function renderTablaInsumosRef(cotId, ref) {
     // cotización sigue funcionando igual con el número que tenía, hasta que
     // alguien decida actualizarla.
     var cambio = insumoCambioDeCatalogo(i);
-    var attrsIns = ' data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '"';
+    var attrsIdent = ' data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '"';
+    var attrsIns = ' data-action-change="set-ins-campo"' + attrsIdent;
     // Reordenar por arrastre con SortableJS (ver bindEvents en core/dom.js y
     // reordenarInsumos más abajo) — no con el API nativo de drag-and-drop:
     // esta librería trae soporte real por touch de fábrica, que el nativo no
@@ -996,7 +1000,16 @@ function renderTablaInsumosRef(cotId, ref) {
       renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
-      '<span class="mobile-th">Enlace</span><select class="mini-input" style="width:100%"' + attrsIns + ' data-campo="enlaceTipo" title="Suma sola la cantidad de todos los insumos del tipo elegido, en vez de escribirla a mano — ej. \'Sublimación\' enlazado a \'Tela\' suma los metros de todas las telas de esta referencia.">' + renderEnlaceOptions(i.enlaceTipo) + "</select>" +
+      '<span class="mobile-th">Enlace</span><span class="enlace-celda">' +
+      (TIPOS_ENLAZABLES.indexOf(i.tipo) !== -1
+        ? renderEnlacePanel(i, ref.insumos || [], state.catalogoCategorias, {
+            abierto: !!(state.enlacePanelAbierto || {})[i.id],
+            busqueda: (state.enlaceBusqueda || {})[i.id] || "",
+            toggleAction: "toggle-enlace-panel", catAction: "toggle-ins-enlace-categoria", insAction: "toggle-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+            attrsBase: attrsIdent
+          })
+        : '<span class="section-sub" style="margin:0;">—</span>') +
+      "</span>" +
       // Para "tela", la cantidad ES el consumo (metros) de ESTA tela — ya
       // no la comparte con la referencia (ver calcCostoPrenda en
       // core/calc.js): dos sublimados distintos en la misma referencia
@@ -1705,13 +1718,50 @@ export var actions = {
       var insumos = (r.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
         var patch = {}; patch[campo] = valor;
-        // Al DESenlazar (enlaceTipo pasa a ""), se congela la última
-        // cantidad calculada en el campo manual — si no, "Cant." saltaría
-        // de golpe al valor viejo que tenía guardado desde antes de
-        // enlazarse (nunca se actualizó mientras estuvo enlazado, ver
-        // cantidadEfectivaInsumo en core/calc.js), como si se hubiera
-        // corregido algo sin que nadie lo tocara.
-        if (campo === "enlaceTipo" && !valor && i.enlaceTipo) patch.cantidad = cantidadEfectivaInsumo(i, r);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, r, { insumos: insumos });
+    });
+  },
+  // Marcar/desmarcar una CATEGORÍA o un insumo ESPECÍFICO en el panel de
+  // enlace (ver renderEnlacePanel en core/components.js) — el checkbox ES
+  // la forma de "agregar o quitar" un enlace, el usuario lo pidió explícito
+  // tras corregir el primer intento (enlazar por tipo de costo, equivocado
+  // — "lo que quiero enlazar son cantidades"). Si al quitar el último
+  // enlace la lista queda vacía, se congela la última cantidad calculada en
+  // el campo manual — si no, "Cant." saltaría de golpe al valor viejo que
+  // tenía guardado desde antes de enlazarse (nunca se actualizó mientras
+  // estuvo enlazado, ver cantidadEfectivaInsumo en core/calc.js), como si
+  // se hubiera corregido algo sin que nadie lo tocara.
+  "toggle-ins-enlace-categoria": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins"), catId = el.getAttribute("data-cat");
+    mapRef(cotId, refId, function (r) {
+      var insumos = (r.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var categorias = (enlace.categorias || []).slice();
+        var idx = categorias.indexOf(catId);
+        if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
+        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [] };
+        var patch = { enlace: nuevoEnlace };
+        if (!categorias.length && !nuevoEnlace.insumos.length) patch.cantidad = cantidadEfectivaInsumo(i, r);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, r, { insumos: insumos });
+    });
+  },
+  "toggle-ins-enlace-insumo": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins"), nombreClave = el.getAttribute("data-nombre");
+    mapRef(cotId, refId, function (r) {
+      var insumos = (r.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var lista = (enlace.insumos || []).slice();
+        var idx = lista.indexOf(nombreClave);
+        if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista };
+        var patch = { enlace: nuevoEnlace };
+        if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, r);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, r, { insumos: insumos });
@@ -1737,7 +1787,7 @@ export var actions = {
         // referencia — sin esto, la reparación retroactiva
         // (repararConsumoTelaPorInsumo en core/store.js) lo pisaría con
         // consumoAprox de la referencia en el próximo loadAll().
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", enlaceTipo: ins.enlaceTipo || "" };
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice() } };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1777,7 +1827,7 @@ export var actions = {
         patch.insumos = (r.insumos || []).concat([{
           id: uid(), nombre: prod.nombre || "Producto de proveedor", unidad: "UND",
           costo: num(prod.costoCompra), tipo: "producto_comprado", cantidad: 1,
-          esServicio: false, proveedorId: prod.proveedorId || "", origenCatalogoId: "", enlaceTipo: ""
+          esServicio: false, proveedorId: prod.proveedorId || "", origenCatalogoId: "", categoriaId: "", enlace: { categorias: [], insumos: [] }
         }]);
       } else {
         patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
@@ -1785,7 +1835,7 @@ export var actions = {
           // confirmar-insumo-picker-producto en modules/productos.js).
           // `origenCatalogoId`/`consumoPropio` se heredan igual — ver el
           // mismo comentario en "aplicar-plantilla" más arriba.
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", enlaceTipo: ins.enlaceTipo || "" };
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice() } };
         }));
       }
       if (prod.flujoEstadosId) {

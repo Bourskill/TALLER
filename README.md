@@ -259,6 +259,29 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo tercera ronda: corregido el mecanismo de enlace — por categoría del catálogo o insumo puntual, no por "tipo de costo")
+
+El mismo día, el usuario reportó el mecanismo de la ronda anterior como
+equivocado: "el desplegable de enlace está mal, porque me salen 'tipos
+de costos'... lo que quiero enlazar son cantidades". `insumo.tipo`
+(tela/por_prenda/producto_comprado) es la fórmula de costeo, no lo que
+el usuario quería agrupar — pidió la CATEGORÍA del catálogo (ej.
+"Telas") o un insumo puntual, con buscador, y poder agregar/quitar
+varios enlaces a la vez.
+
+- `insumo.enlaceTipo` (un solo valor) → `insumo.enlace = {categorias:
+  [...], insumos: [...]}` (listas que se combinan). Las subcategorías
+  se incluyen solas al enlazar a la madre.
+- El desplegable se reemplazó por un **panel** (`renderEnlacePanel`,
+  core/components.js): un botón resumen que despliega checkboxes de
+  categorías + un buscador con checkboxes de insumos específicos —
+  marcar/desmarcar ES agregar/quitar el enlace.
+- Los insumos de una referencia/plantilla/producto ahora SÍ recuerdan
+  de qué categoría del catálogo vinieron (`categoriaId`), necesario
+  para que el enlace por categoría los reconozca sin consultar el
+  catálogo en vivo.
+- Ver CONTABILIDAD.md, seguimiento del "Hallazgo #32".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo segunda ronda: enlazar la cantidad de un insumo a la suma de otros — ej. "Sublimación" enlazada a "Tela")
 
 Efecto secundario de la ronda anterior (consumo de tela independiente

@@ -1,7 +1,7 @@
 import { state, persist, notify, aprobarPropuesta, descartarPropuesta } from "../core/store.js";
 import { esc, num, uid, exigirCampos } from "../core/utils.js";
-import { TIPOS_COSTO } from "../core/constants.js";
-import { renderTipoCostoOptions, renderEnlaceOptions, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
+import { TIPOS_COSTO, TIPOS_ENLAZABLES } from "../core/constants.js";
+import { renderTipoCostoOptions, renderEnlacePanel, renderHelp, renderBuscador, renderComboUnidad } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categoriasMadre, subcategoriasDe, idsConSubcategorias } from "../core/calc.js";
 
@@ -415,7 +415,16 @@ function renderFilaInsumo(c, categorias) {
 
     '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions(c.tipo) + "</select>" +
 
-    '<span class="mobile-th">Enlace' + renderHelp("Predefine que la cantidad de este insumo se calcule sola, sumando la de todos los insumos de un tipo elegido (ej. \"Sublimación\" enlazado a \"Tela\" suma los metros de todas las telas). Se hereda al agregar este insumo a una plantilla, producto o cotización — se puede ajustar ahí si hace falta.") + '</span><select class="mini-input" style="width:100%"' + attrs + ' data-campo="enlaceTipo">' + renderEnlaceOptions(c.enlaceTipo) + "</select>" +
+    '<span class="mobile-th">Enlace' + renderHelp("Predefine que la cantidad de este insumo se calcule sola, sumando la de todos los insumos que compartan una categoría (ej. \"Telas\") o un insumo puntual que elijas — se hereda al agregar este insumo a una plantilla, producto o cotización, ajustable ahí si hace falta.") + '</span><span class="enlace-celda">' +
+    (TIPOS_ENLAZABLES.indexOf(c.tipo) !== -1
+      ? renderEnlacePanel(c, state.catalogoInsumos || [], categorias, {
+          abierto: !!(state.enlacePanelAbierto || {})[c.id],
+          busqueda: (state.enlaceBusqueda || {})[c.id] || "",
+          toggleAction: "toggle-enlace-panel", catAction: "toggle-cat-ins-enlace-categoria", insAction: "toggle-cat-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+          attrsBase: ' data-ins="' + c.id + '"'
+        })
+      : '<span class="section-sub" style="margin:0;">—</span>') +
+    "</span>" +
 
     '<span class="mobile-th">Proveedor</span>' + renderSelectorProveedorInsumo(c) +
 
@@ -588,6 +597,36 @@ export var actions = {
       if (c.id !== id) return c;
       var patch = {}; patch[campo] = valor;
       return Object.assign({}, c, patch);
+    });
+    persist("catalogoInsumos"); notify();
+  },
+  // Predefine el enlace de este insumo (ver renderEnlacePanel en
+  // core/components.js) — se hereda al agregarlo a una plantilla, producto
+  // o cotización. Un insumo del catálogo no tiene "cantidad" propia (esa
+  // solo existe una vez usado en algún lado), así que acá no hace falta
+  // congelar nada al quitar el último enlace, a diferencia de los otros 3
+  // módulos.
+  "toggle-cat-ins-enlace-categoria": function (el) {
+    var id = el.getAttribute("data-ins"), catId = el.getAttribute("data-cat");
+    state.catalogoInsumos = (state.catalogoInsumos || []).map(function (c) {
+      if (c.id !== id) return c;
+      var enlace = c.enlace || { categorias: [], insumos: [] };
+      var categorias = (enlace.categorias || []).slice();
+      var idx = categorias.indexOf(catId);
+      if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
+      return Object.assign({}, c, { enlace: { categorias: categorias, insumos: enlace.insumos || [] } });
+    });
+    persist("catalogoInsumos"); notify();
+  },
+  "toggle-cat-ins-enlace-insumo": function (el) {
+    var id = el.getAttribute("data-ins"), nombreClave = el.getAttribute("data-nombre");
+    state.catalogoInsumos = (state.catalogoInsumos || []).map(function (c) {
+      if (c.id !== id) return c;
+      var enlace = c.enlace || { categorias: [], insumos: [] };
+      var lista = (enlace.insumos || []).slice();
+      var idx = lista.indexOf(nombreClave);
+      if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
+      return Object.assign({}, c, { enlace: { categorias: enlace.categorias || [], insumos: lista } });
     });
     persist("catalogoInsumos"); notify();
   },

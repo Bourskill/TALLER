@@ -3,8 +3,8 @@
 // en vez de duplicar el combobox.
 
 import { esc, norm, fmt, num } from "./utils.js";
-import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias } from "./calc.js";
-import { TIPOS_COSTO, TIPOS_ENLAZABLES } from "./constants.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo } from "./calc.js";
+import { TIPOS_COSTO } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
 // Compartido entre Cotizaciones, Catálogo y Plantillas para que el texto de
@@ -90,11 +90,68 @@ export function renderTipoCostoOptions(current, enCotizacion) {
 // y cantidadEfectivaInsumo en core/calc.js) — compartido entre Catálogo,
 // Plantillas, Productos y Cotizaciones para que el texto salga idéntico en
 // los cuatro lugares donde se puede definir o ver un enlace.
-export function renderEnlaceOptions(current) {
-  return '<option value="">Sin enlace</option>' +
-    TIPOS_ENLAZABLES.map(function (k) {
-      return '<option value="' + k + '" ' + (k === current ? "selected" : "") + '>' + esc(TIPOS_COSTO[k].label) + "</option>";
-    }).join("");
+// Panel de "Enlace" de un insumo — compartido entre Catálogo/Insumos,
+// Plantillas, Productos y Cotizaciones. Corregido 2026-09-21 tras el primer
+// intento (enlazar por TIPO de costo): el usuario lo señaló equivocado —
+// "lo que quiero enlazar son cantidades", y lo que corresponde es la
+// CATEGORÍA del catálogo (con sus subcategorías, ej. "Telas") o un insumo
+// PUNTUAL elegido a mano, con buscador — nunca el tipo tela/por_prenda que
+// solo describe la fórmula de costeo. Colapsado por defecto (un botón con
+// el resumen); al abrirse muestra las categorías como checkboxes y un
+// buscador con checkboxes de insumos específicos — marcar/desmarcar
+// cualquiera de los dos ES la forma de "agregar o quitar" un enlace, sin
+// necesitar una lista de chips aparte.
+//
+// `candidatos`: de dónde salen las opciones de "insumo específico". En
+// Catálogo/Plantillas/Productos son otros insumos del CATÁLOGO (se
+// predefine un enlace hacia un insumo que, cuando exista, se reconoce por
+// NOMBRE — ver cantidadEfectivaInsumo). En Cotización son los insumos que
+// YA están en esa misma referencia — son los únicos que de verdad tienen
+// una cantidad que sumar ahí.
+// `o`: { abierto, busqueda, toggleAction, catAction, insAction,
+//        buscarAction, attrsBase } — attrsBase trae los data-* que ya
+// identifican al insumo en ESE módulo (data-cot/data-ref/data-ins, o
+// data-pla/data-ins, data-pro/data-ins, data-id), comunes a las 4 acciones.
+export function renderEnlacePanel(insumo, candidatos, categorias, o) {
+  var enlace = insumo.enlace || {};
+  var catsSel = enlace.categorias || [];
+  var insSel = enlace.insumos || [];
+  var total = catsSel.length + insSel.length;
+  var html = '<button type="button" class="btn ghost small" data-action="' + o.toggleAction + '"' + o.attrsBase + '>' +
+    (total ? "🔗 " + total : "Sin enlace") + (o.abierto ? " ▾" : " ▸") + "</button>";
+  if (!o.abierto) return html;
+
+  html += '<div class="enlace-panel">';
+  var catsAplanadas = categoriasAplanadas(categorias || []);
+  if (catsAplanadas.length) {
+    html += '<div class="enlace-panel-titulo">Categorías</div>' +
+      catsAplanadas.map(function (c) {
+        var marcado = catsSel.indexOf(c.id) !== -1;
+        return '<label class="enlace-check" style="padding-left:' + (c.nivel * 14) + 'px;">' +
+          '<input type="checkbox" ' + (marcado ? "checked" : "") + ' data-action="' + o.catAction + '"' + o.attrsBase + ' data-cat="' + c.id + '" /> ' + esc(c.nombre) + "</label>";
+      }).join("");
+  }
+
+  html += '<div class="enlace-panel-titulo">Insumo específico</div>' +
+    '<input class="mini-input" type="search" placeholder="Buscar insumo…" value="' + esc(o.busqueda || "") + '" data-action-change="' + o.buscarAction + '"' + o.attrsBase + ' />';
+  var q = norm(o.busqueda || "").trim();
+  var vistos = {};
+  var visibles = (candidatos || []).filter(function (c) {
+    if (c.id === insumo.id) return false;
+    var key = norm(c.nombre || "");
+    if (!key || vistos[key]) return false;
+    vistos[key] = true;
+    return !q || key.indexOf(q) !== -1;
+  }).slice(0, 30);
+  html += !visibles.length
+    ? '<div class="section-sub" style="margin:4px 0;">Sin resultados.</div>'
+    : visibles.map(function (c) {
+        var key = norm(c.nombre || "");
+        var marcado = insSel.indexOf(key) !== -1;
+        return '<label class="enlace-check"><input type="checkbox" ' + (marcado ? "checked" : "") + ' data-action="' + o.insAction + '"' + o.attrsBase + ' data-nombre="' + esc(key) + '" /> ' + esc(c.nombre) + "</label>";
+      }).join("");
+  html += "</div>";
+  return html;
 }
 
 // Celda "Cant." de un insumo dentro de una referencia/plantilla/producto —
@@ -106,12 +163,15 @@ export function renderEnlaceOptions(current) {
 // cantidadEfectivaInsumo), con el desglose de dónde sale en el tooltip —
 // para que enlazar no se sienta como una caja negra.
 export function renderCeldaCantidadInsumo(insumo, contenedor, attrs) {
-  if (insumo.enlaceTipo) {
-    var fuentes = ((contenedor && contenedor.insumos) || []).filter(function (i) { return i.id !== insumo.id && i.tipo === insumo.enlaceTipo; });
-    var total = fuentes.reduce(function (a, i) { return a + num(i.cantidad); }, 0);
-    var tipoLabel = (TIPOS_COSTO[insumo.enlaceTipo] || {}).label || insumo.enlaceTipo;
-    var desglose = fuentes.length ? fuentes.map(function (i) { return num(i.cantidad); }).join(" + ") + " = " + total : "ninguno todavía";
-    return '<span class="amount" title="Enlazado a ' + fuentes.length + ' insumo(s) tipo \'' + esc(tipoLabel) + "': " + esc(desglose) + '">🔗 ' + total + "</span>";
+  var enlace = insumo.enlace || {};
+  var catsSel = enlace.categorias || [];
+  var insSel = enlace.insumos || [];
+  if (catsSel.length || insSel.length) {
+    var total = cantidadEfectivaInsumo(insumo, contenedor);
+    var partes = [];
+    if (catsSel.length) partes.push(catsSel.length + " categoría(s)");
+    if (insSel.length) partes.push(insSel.length + " insumo(s) específico(s)");
+    return '<span class="amount" title="Enlazado a ' + esc(partes.join(" + ")) + " — suma " + total + '">🔗 ' + total + "</span>";
   }
   return '<input type="number" class="mini-input" style="width:100%" value="' + esc(insumo.cantidad) + '"' + attrs + ' data-campo="cantidad" ' + (insumo.tipo === "fijo_pedido" ? "disabled" : "") + " />";
 }

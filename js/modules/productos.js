@@ -15,12 +15,12 @@
 // detalle completo en la otra pestaña. Nunca las dos cosas a la vez.
 import { state, persist, notify } from "../core/store.js";
 import { esc, num, uid, val, opt, norm, exigirCampos } from "../core/utils.js";
-import { renderTipoCostoOptions, renderEnlaceOptions, renderCeldaCantidadInsumo, renderHelp, renderTarjetaMini, renderToggleSeccion, renderExploradorInsumos } from "../core/components.js";
+import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderTarjetaMini, renderToggleSeccion, renderExploradorInsumos } from "../core/components.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { ajustarStockProducto, proponerCambioProducto, aprobarPropuestaProducto, descartarPropuestaProducto } from "../core/stock.js";
 import { calcTotalesProducto, stockTotalProducto, proveedoresDeContactos, esInsumoServicio, cantidadEfectivaInsumo } from "../core/calc.js";
 import { getSession } from "../core/auth.js";
-import { ORIGEN_PRODUCCION, TIPOS_COSTO } from "../core/constants.js";
+import { ORIGEN_PRODUCCION, TIPOS_COSTO, TIPOS_ENLAZABLES } from "../core/constants.js";
 
 var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 110px 70px 30px";
 var TALLA_COLS = "minmax(90px,1fr) 90px 30px";
@@ -353,13 +353,23 @@ function renderCosteoProduccion(p) {
 
   html += '<div class="ins-table" style="margin-top:10px;"><div class="ins-row head" style="grid-template-columns:' + INS_COLS + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant./mult.</span><span></span></div>';
   insumos.forEach(function (i) {
-    var attrsIns = ' data-action-change="set-pro-ins-campo" data-pro="' + p.id + '" data-ins="' + i.id + '"';
+    var attrsIdent = ' data-pro="' + p.id + '" data-ins="' + i.id + '"';
+    var attrsIns = ' data-action-change="set-pro-ins-campo"' + attrsIdent;
     html += '<div class="ins-row" style="grid-template-columns:' + INS_COLS + ';">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '"' + attrsIns + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><input class="mini-input" style="width:100%" value="' + esc(i.unidad) + '"' + attrsIns + ' data-campo="unidad" />' +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '"' + attrsIns + ' data-campo="costo" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrsIns + ' data-campo="tipo">' + renderTipoCostoOptions(i.tipo) + "</select>" +
-      '<span class="mobile-th">Enlace</span><select class="mini-input" style="width:100%"' + attrsIns + ' data-campo="enlaceTipo" title="Suma sola la cantidad de todos los insumos del tipo elegido, en vez de escribirla a mano.">' + renderEnlaceOptions(i.enlaceTipo) + "</select>" +
+      '<span class="mobile-th">Enlace</span><span class="enlace-celda">' +
+      (TIPOS_ENLAZABLES.indexOf(i.tipo) !== -1
+        ? renderEnlacePanel(i, state.catalogoInsumos || [], state.catalogoCategorias, {
+            abierto: !!(state.enlacePanelAbierto || {})[i.id],
+            busqueda: (state.enlaceBusqueda || {})[i.id] || "",
+            toggleAction: "toggle-enlace-panel", catAction: "toggle-pro-ins-enlace-categoria", insAction: "toggle-pro-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+            attrsBase: attrsIdent
+          })
+        : '<span class="section-sub" style="margin:0;">—</span>') +
+      "</span>" +
       '<span class="mobile-th">Cant./mult.</span>' + renderCeldaCantidadInsumo(i, p, attrsIns) +
       '<button class="btn danger small" data-action="remove-pro-insumo" data-pro="' + p.id + '" data-ins="' + i.id + '">✕</button>' +
       "</div>";
@@ -584,7 +594,7 @@ export var actions = {
         // producto — mismo criterio que en plantillas.js/nuevoInsumo.
         var nuevos = items.map(function (item) {
           var esTela = item.tipo === "tela";
-          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id, enlaceTipo: item.enlaceTipo || "" };
+          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id, categoriaId: item.categoriaId || "", enlace: { categorias: ((item.enlace && item.enlace.categorias) || []).slice(), insumos: ((item.enlace && item.enlace.insumos) || []).slice() } };
         });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
@@ -604,9 +614,42 @@ export var actions = {
       var insumos = (p.insumos || []).map(function (i) {
         if (i.id !== insId) return i;
         var patch = {}; patch[campo] = numerico ? num(el.value) : el.value;
-        // Al desenlazar, congela la última cantidad calculada (ver mismo
-        // criterio en set-ins-campo, modules/cotizaciones.js).
-        if (campo === "enlaceTipo" && !el.value && i.enlaceTipo) patch.cantidad = cantidadEfectivaInsumo(i, p);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, p, { insumos: insumos });
+    });
+  },
+  // Enlace por categoría/insumo específico — ver mismo criterio en
+  // toggle-ins-enlace-categoria/insumo, modules/cotizaciones.js.
+  "toggle-pro-ins-enlace-categoria": function (el) {
+    var id = el.getAttribute("data-pro"), insId = el.getAttribute("data-ins"), catId = el.getAttribute("data-cat");
+    mapPro(id, function (p) {
+      var insumos = (p.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var categorias = (enlace.categorias || []).slice();
+        var idx = categorias.indexOf(catId);
+        if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
+        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [] };
+        var patch = { enlace: nuevoEnlace };
+        if (!categorias.length && !nuevoEnlace.insumos.length) patch.cantidad = cantidadEfectivaInsumo(i, p);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, p, { insumos: insumos });
+    });
+  },
+  "toggle-pro-ins-enlace-insumo": function (el) {
+    var id = el.getAttribute("data-pro"), insId = el.getAttribute("data-ins"), nombreClave = el.getAttribute("data-nombre");
+    mapPro(id, function (p) {
+      var insumos = (p.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var lista = (enlace.insumos || []).slice();
+        var idx = lista.indexOf(nombreClave);
+        if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista };
+        var patch = { enlace: nuevoEnlace };
+        if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, p);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, p, { insumos: insumos });
