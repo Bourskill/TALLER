@@ -5018,6 +5018,67 @@ assert(state.tx.length === 0, "\"Ahorro\" no crea ningún movimiento en Finanzas
 state.pedidos = pedidosPreviosAhorroTest; state.cotizaciones = cotizacionesPreviasAhorroTest; state.tx = txPreviosAhorroTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
+// --- El aviso de "el catálogo cambió" también debe verse cuando ese
+// insumo se reclasificó como "Costo global del pedido" o "Se cobra aparte
+// al cliente" — antes solo se revisaba mientras seguía siendo un insumo
+// DENTRO de una referencia; moverlo a cualquiera de esas dos listas
+// preserva el vínculo con el catálogo (origenCatalogoId, ver
+// moverInsumoAGlobal/AServicio) pero nadie volvía a comparar el costo ahí,
+// así que el aviso (y su botón "Actualizar") dejaban de verse para
+// siempre. Reportado en producción 2026-09-21: "actualicé el valor de un
+// insumo y no se vio reflejado en cotización... guardado o no, no se
+// actualiza el insumo".
+const pedidosPreviosCatGlobalTest = state.pedidos, cotizacionesPreviasCatGlobalTest = state.cotizaciones;
+state.catalogoInsumos.push({ id: "ins-catglobal-test", nombre: "Domicilio Test", unidad: "UND", costo: 5000, tipo: "por_prenda", categoriaId: "", proveedorId: "" });
+state.catalogoInsumos.push({ id: "ins-catserv-test", nombre: "Diseño Test", unidad: "UND", costo: 3000, tipo: "por_prenda", categoriaId: "", proveedorId: "" });
+state.cotizaciones = [{
+  id: "cot-catglobal-test", clienteId: "", cliente: "Cliente CatGlobal", descripcion: "Prueba aviso catálogo", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "ccatglobal1",
+  referencias: [{
+    id: "ref-catglobal-test", nombre: "Camiseta CatGlobal", imagenUrl: "", consumoAprox: 1, cantidadPedida: 5, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [], detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [
+    { id: "cg-catglobal-test", nombre: "Domicilio Test", unidad: "UND", costo: 5000, proveedorId: "", esServicio: false, origenCatalogoId: "ins-catglobal-test" }
+  ],
+  serviciosCobrados: [
+    { id: "sc-catglobal-test", nombre: "Diseño Test", unidad: "UND", costo: 3000, precio: 8000, proveedorId: "", esServicio: true, origenCatalogoId: "ins-catserv-test" }
+  ],
+  compras: []
+}];
+state.pedidos = [];
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-catglobal-test"]');
+assert(!document.querySelector(".ins-aviso-cambio"), "sin diferencia todavía con el catálogo, no hay ningún aviso");
+
+state.tab = "catalogo"; render();
+setChange('[data-action-change="set-cat-campo"][data-id="ins-catglobal-test"][data-campo="costo"]', "9000");
+setChange('[data-action-change="set-cat-campo"][data-id="ins-catserv-test"][data-campo="costo"]', "6000");
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-catglobal-test"]');
+
+assert(document.querySelectorAll(".ins-aviso-cambio").length === 2, "reclasificar un insumo como \"Costo global del pedido\" o \"Se cobra aparte al cliente\" NO le hace perder el aviso de \"el catálogo cambió\" — antes nadie lo revisaba en esas dos listas y se perdía para siempre");
+
+const btnActualizarGlobalTest = document.querySelector('[data-action="actualizar-insumo-catalogo"][data-ins="cg-catglobal-test"]');
+assert(!!btnActualizarGlobalTest && btnActualizarGlobalTest.textContent.indexOf("9.000") !== -1, "el botón \"Actualizar\" del costo global ofrece el nuevo valor del catálogo ($9.000)");
+click('[data-action="actualizar-insumo-catalogo"][data-ins="cg-catglobal-test"]');
+var cotTrasActualizarGlobal = state.cotizaciones.filter(function (c) { return c.id === "cot-catglobal-test"; })[0];
+assert(cotTrasActualizarGlobal.costosGlobales[0].costo === 9000, "\"Actualizar\" sí trae el costo nuevo del catálogo al costo global de la cotización");
+assert(state.cotSucia === "cot-catglobal-test", "y deja la cotización marcada como \"con cambios sin guardar\", igual que cualquier otra edición (protegida contra pérdida de borrador)");
+assert(!document.querySelector('[data-action="actualizar-insumo-catalogo"][data-ins="cg-catglobal-test"]'), "...y su propio aviso desaparece, ya con los dos costos iguales");
+
+const btnMantenerServicioTest = document.querySelector('[data-action="descartar-aviso-insumo-cambio"][data-ins="sc-catglobal-test"]');
+assert(!!btnMantenerServicioTest, "el servicio cobrado también tiene su aviso, con \"Mantener\"");
+click('[data-action="descartar-aviso-insumo-cambio"][data-ins="sc-catglobal-test"]');
+var cotTrasMantenerServicio = state.cotizaciones.filter(function (c) { return c.id === "cot-catglobal-test"; })[0];
+assert(cotTrasMantenerServicio.serviciosCobrados[0].costo === 3000, "\"Mantener\" deja el costo del servicio cobrado TAL CUAL (no lo actualiza)");
+assert(!document.querySelector('[data-action="actualizar-insumo-catalogo"][data-ins="sc-catglobal-test"]'), "...y su aviso desaparece — ya se decidió, a conciencia, mantener el número de la cotización");
+
+state.pedidos = pedidosPreviosCatGlobalTest; state.cotizaciones = cotizacionesPreviasCatGlobalTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

@@ -909,6 +909,46 @@ predeterminado) y a la nueva opcion 'ahorro'"):**
   (como "Servicio") nunca genera un gasto en Finanzas — correcto, no hubo
   plata de por medio.
 
+### 🔴 Hallazgo #26 — el aviso de "el catálogo cambió" no revisaba costos globales ni servicios cobrados. ✅ CORREGIDO
+
+Reportado en producción 2026-09-21: "actualicé el valor de un insumo y no
+se vio reflejado en cotización... guardado o no, no se actualiza el
+insumo". Se descartaron una por una las explicaciones normales (insumo
+escrito a mano, insumo borrado del catálogo, aviso ya descartado antes) —
+el usuario confirmó que ninguna aplicaba. Se reprodujo el caso completo
+con un script de prueba aislado (agregar el insumo desde el catálogo,
+guardar, editar el catálogo, reabrir) y el mecanismo SÍ funcionó — hasta
+que se probó la variante real: el insumo se había reclasificado como
+**"Costo global del pedido"** (el ejemplo típico, "Domicilio") o **"Se
+cobra aparte al cliente"**.
+
+**Causa:** `insumoCambioDeCatalogo` (core/calc.js) es una función pura que
+compara cualquier línea con `origenCatalogoId` contra el catálogo vigente
+— y SÍ detecta la diferencia correctamente sea cual sea la línea. El
+problema es que solo `renderRefCard` (la tabla de insumos DENTRO de una
+referencia) la llamaba. `renderFilasGlobales` y `renderFilasServicios`
+— las otras dos listas donde un insumo agregado del catálogo puede
+terminar, sin perder su `origenCatalogoId` (ver `moverInsumoAGlobal`/
+`moverInsumoAServicio`) — nunca la llamaban. El vínculo con el catálogo
+seguía intacto y la comparación seguía siendo correcta; simplemente nadie
+la pedía ahí.
+
+**Fix:** `renderFilasGlobales`/`renderFilasServicios` ahora también llaman
+`insumoCambioDeCatalogo` por cada línea y muestran el mismo aviso
+(`renderAvisoInsumoCambio`, reutilizado tal cual). Las acciones
+"actualizar-insumo-catalogo"/"descartar-aviso-insumo-cambio" se
+generalizaron: sin `refId` (el caso de un costo global o servicio
+cobrado), buscan la línea en `costosGlobales`/`serviciosCobrados` en vez
+de en una referencia (`aplicarCambioCatalogoFueraDeReferencia`, nueva,
+comparte la búsqueda entre las dos acciones).
+
+**Lección:** el mismo patrón de "protección en un solo lugar, no en
+todos los lugares equivalentes" que ya generó el incidente de
+borradores (ver `[[incidente_perdida_borrador_2026-08]]` en memoria) —
+esta vez con un insumo que puede vivir en 3 listas distintas de una
+cotización (insumo de referencia, costo global, servicio cobrado) pero
+solo UNA de ellas tenía la comparación contra el catálogo.
+
 ---
 
 ## Próximos pasos

@@ -259,6 +259,28 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo quinta ronda: el aviso de "el catálogo cambió" no revisaba costos globales ni servicios cobrados)
+
+El usuario reportó: "actualicé el valor de un insumo y no se vio
+reflejado en cotización... guardado o no, no se actualiza el insumo". Se
+descartaron una por una las explicaciones normales con su confirmación, y
+se reprodujo el caso completo con un script de prueba aislado — el
+mecanismo SÍ funciona para un insumo dentro de una referencia. Falló solo
+en la variante real: el insumo se había reclasificado como "Costo global
+del pedido" (el típico "Domicilio") o "Se cobra aparte al cliente".
+
+- **Causa:** `insumoCambioDeCatalogo` (core/calc.js) es correcta y
+  genérica, pero solo `renderRefCard` la llamaba. `renderFilasGlobales` y
+  `renderFilasServicios` — las otras dos listas donde un insumo agregado
+  del catálogo puede terminar sin perder su vínculo — nunca la llamaban.
+- **Fix:** las dos funciones ahora también revisan cada línea y muestran
+  el mismo aviso ("Actualizar a $X" / "Mantener $Y"). Las acciones que ya
+  existían se generalizaron para buscar en `costosGlobales`/
+  `serviciosCobrados` cuando la línea no viene de una referencia.
+- Mismo patrón que el incidente de borradores de 2026-08: una protección
+  que vive en un solo lugar de varios equivalentes.
+- Ver CONTABILIDAD.md, "Hallazgo #26".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo cuarta ronda: nuevo estado "Ahorro" en Compras del pedido — decidir a propósito no comprar/hacer algo, sin "Sí" + "0")
 
 El usuario notó la incomodidad que quedaba tras el Hallazgo #23: para

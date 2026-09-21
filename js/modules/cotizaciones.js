@@ -867,17 +867,26 @@ function renderFilasGlobales(cotId, ref) {
     "</span></div>";
   globales.forEach(function (g) {
     var attrs = ' data-action-change="set-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '"';
-    html += '<div class="ins-row global" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+    // Un insumo agregado del catálogo puede terminar acá (ver
+    // moverInsumoAGlobal más abajo) sin perder su vínculo — el mismo aviso
+    // de "el catálogo cambió" que ya existe para un insumo de referencia
+    // aplica igual acá; antes NADIE lo revisaba en esta lista, así que un
+    // insumo reclasificado como "Costo global del pedido" (ej. Domicilio)
+    // dejaba de avisar para siempre aunque el vínculo siguiera intacto.
+    // Reportado en producción 2026-09-21.
+    var cambio = insumoCambioDeCatalogo(g);
+    html += '<div class="ins-row global' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" placeholder="Ej. domicilio, diseño" value="' + esc(g.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotglobal-unidad-' + g.id + '" style="width:100%" value="' + esc(g.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
       renderComboUnidad({ id: "cotglobal-unidad-" + g.id }) + "</span>" +
-      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" />' +
+      '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(g.costo) + '"' + attrs + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("global", true) + "</select>" +
       // La cantidad no aplica: se paga una vez, no por prenda.
       '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="1" disabled />' +
       '<span class="mobile-th">Costo x prenda</span><span class="amount" title="' + fmt(g.costo) + " entre " + unidades + ' prenda(s) del pedido">' + fmt(calcCostoPrendaGlobal(cot, g)) + "</span>" +
       '<button class="btn danger small" data-action="remove-costo-global" data-cot="' + cotId + '" data-global="' + g.id + '">✕</button>' +
       "</div>";
+    if (cambio) html += renderAvisoInsumoCambio(cotId, "", g.id, cambio);
   });
   return html;
 }
@@ -912,16 +921,22 @@ function renderFilasServicios(cotId) {
   servicios.forEach(function (s) {
     var attrs = ' data-action-change="set-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '"';
     var ganancia = num(s.precio) - num(s.costo);
-    html += '<div class="ins-row servicio" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+    // Mismo aviso de "el catálogo cambió" que ya existe para un insumo de
+    // referencia — un insumo agregado del catálogo puede terminar acá (ver
+    // moverInsumoAServicio) sin perder su vínculo, y antes nadie lo
+    // revisaba en esta lista. Reportado en producción 2026-09-21.
+    var cambio = insumoCambioDeCatalogo(s);
+    html += '<div class="ins-row servicio' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:' + INS_COLS_REF + ';">' +
       '<span class="mobile-th">Servicio</span><input class="mini-input" style="width:100%" placeholder="Ej. diseño" value="' + esc(s.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotserv-unidad-' + s.id + '" style="width:100%" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
       renderComboUnidad({ id: "cotserv-unidad-" + s.id }) + "</span>" +
-      '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0." />' +
+      '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0.") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
       '<span class="mobile-th">Ganancia</span><span class="amount' + (ganancia < 0 ? " neg" : "") + '" title="Lo que le cobras menos lo que te cuesta">' + fmt(ganancia) + "</span>" +
       '<button class="btn danger small" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '">✕</button>' +
       "</div>";
+    if (cambio) html += renderAvisoInsumoCambio(cotId, "", s.id, cambio);
   });
   return html;
 }
@@ -1620,17 +1635,27 @@ export var actions = {
   // Trae a esta cotización el costo que el insumo tiene HOY en el catálogo.
   // Limpia cualquier "mantener" anterior (avisoInsumoDescartado): si el
   // catálogo vuelve a cambiar más adelante, tiene que poder avisar de nuevo.
+  // Sin `refId` (ver renderFilasGlobales/renderFilasServicios) el insumo ya
+  // no vive en una referencia — se reclasificó a "Costo global del pedido"
+  // o "Se cobra aparte al cliente" (ver moverInsumoAGlobal/AServicio), pero
+  // sigue apuntando al mismo insumo del catálogo.
   "actualizar-insumo-catalogo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
-    mapRef(cotId, refId, function (r) {
-      return Object.assign({}, r, {
-        insumos: (r.insumos || []).map(function (i) {
-          if (i.id !== insId) return i;
-          var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
-          if (!actual) return i;
-          return Object.assign({}, i, { costo: num(actual.costo), avisoInsumoDescartado: undefined });
-        })
+    if (refId) {
+      mapRef(cotId, refId, function (r) {
+        return Object.assign({}, r, {
+          insumos: (r.insumos || []).map(function (i) {
+            if (i.id !== insId) return i;
+            var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
+            if (!actual) return i;
+            return Object.assign({}, i, { costo: num(actual.costo), avisoInsumoDescartado: undefined });
+          })
+        });
       });
+      return;
+    }
+    aplicarCambioCatalogoFueraDeReferencia(cotId, insId, function (linea, actual) {
+      return Object.assign({}, linea, { costo: num(actual.costo), avisoInsumoDescartado: undefined });
     });
   },
   // "Mantener": el usuario ya vio que el catálogo cambió y decide, a
@@ -1640,15 +1665,21 @@ export var actions = {
   // que si el catálogo cambia OTRA vez después, vuelve a avisar.
   "descartar-aviso-insumo-cambio": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
-    mapRef(cotId, refId, function (r) {
-      return Object.assign({}, r, {
-        insumos: (r.insumos || []).map(function (i) {
-          if (i.id !== insId) return i;
-          var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
-          if (!actual) return i;
-          return Object.assign({}, i, { avisoInsumoDescartado: num(actual.costo) });
-        })
+    if (refId) {
+      mapRef(cotId, refId, function (r) {
+        return Object.assign({}, r, {
+          insumos: (r.insumos || []).map(function (i) {
+            if (i.id !== insId) return i;
+            var actual = (state.catalogoInsumos || []).filter(function (c) { return c.id === i.origenCatalogoId; })[0];
+            if (!actual) return i;
+            return Object.assign({}, i, { avisoInsumoDescartado: num(actual.costo) });
+          })
+        });
       });
+      return;
+    }
+    aplicarCambioCatalogoFueraDeReferencia(cotId, insId, function (linea, actual) {
+      return Object.assign({}, linea, { avisoInsumoDescartado: num(actual.costo) });
     });
   },
   "set-ins-campo": function (el) {
@@ -2813,6 +2844,39 @@ export function reordenarInsumos(cotId, refId, nuevoOrdenIds) {
   persist("cotizaciones");
   tomarSnapshotCotizacion(); // el nuevo punto de retorno de "Descartar" ya incluye este orden
   notify();
+}
+
+// Aplica un cambio (actualizar al costo del catálogo, o marcarlo
+// descartado) a un costo global o un servicio cobrado que vino del
+// catálogo — los dos únicos lugares, aparte de un insumo de referencia,
+// donde puede vivir un `origenCatalogoId` (ver moverInsumoAGlobal/
+// moverInsumoAServicio abajo). `patchFn(linea, actual)` recibe la línea
+// actual y el insumo vigente del catálogo, y devuelve la línea ya
+// parchada — así "actualizar" y "descartar" (arriba, en `actions`)
+// comparten toda la búsqueda y solo difieren en el parche.
+function aplicarCambioCatalogoFueraDeReferencia(cotId, insId, patchFn) {
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    var enGlobales = (c.costosGlobales || []).some(function (g) { return g.id === insId; });
+    var enServicios = !enGlobales && (c.serviciosCobrados || []).some(function (s) { return s.id === insId; });
+    if (!enGlobales && !enServicios) return c;
+    var patch = {};
+    if (enGlobales) {
+      patch.costosGlobales = c.costosGlobales.map(function (g) {
+        if (g.id !== insId) return g;
+        var actual = (state.catalogoInsumos || []).filter(function (i) { return i.id === g.origenCatalogoId; })[0];
+        return actual ? patchFn(g, actual) : g;
+      });
+    } else {
+      patch.serviciosCobrados = c.serviciosCobrados.map(function (s) {
+        if (s.id !== insId) return s;
+        var actual = (state.catalogoInsumos || []).filter(function (i) { return i.id === s.origenCatalogoId; })[0];
+        return actual ? patchFn(s, actual) : s;
+      });
+    }
+    return Object.assign({}, c, patch);
+  });
+  marcarSucia(cotId);
 }
 
 function moverInsumoAGlobal(cotId, refId, insId) {
