@@ -21,7 +21,9 @@ import { subirImagenReferencia } from "../core/drive.js";
 import { calcCostoUnitarioRef, esInsumoServicio, cantidadEfectivaInsumo } from "../core/calc.js";
 import { TIPOS_ENLAZABLES } from "../core/constants.js";
 
-var INS_COLS = "minmax(130px,1fr) 60px 90px 150px 110px 70px 30px";
+// Insumo protagonista, Unidad/Enlace/Cant. angostas (Enlace casi un ícono),
+// Costo mediano — mismo criterio que INS_COLS_REF en modules/cotizaciones.js.
+var INS_COLS = "minmax(150px,1fr) 55px 75px 150px 46px 55px 30px";
 
 var AYUDA_PLANTILLAS = "Define de una vez los insumos típicos de cada tipo de prenda (t-shirt básica, polo, manga ranglán…) y aplícalos a cualquier referencia de una cotización con un clic. Si le asignas un \"Flujo de producción\" (ej. uno que incluya la etapa de sublimación), ese flujo de etapas se carga automáticamente junto con los insumos.";
 

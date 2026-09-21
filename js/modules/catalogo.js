@@ -14,7 +14,9 @@ import { proveedoresDeContactos, esInsumoServicio, categoriasAplanadas, categori
 // el nombre (la columna que MÁS necesita espacio real) es la primera en
 // quedarse sin nada si el contenedor aprieta — ver el porqué grande junto a
 // ".tx-row" en css/tables.css.
-var COLS = "minmax(150px,1.6fr) 120px 88px 155px 130px 150px 140px 32px";
+// Enlace angosta, casi un ícono (el botón "🔗 N" no necesita más espacio) —
+// mismo criterio que INS_COLS_REF en modules/cotizaciones.js.
+var COLS = "minmax(150px,1.6fr) 120px 88px 155px 46px 150px 140px 32px";
 var CAMPO_LABEL = { catalogoInsumos: "insumos", catalogoCategorias: "categorías" };
 
 function renderPropuestasPendientes(session) {

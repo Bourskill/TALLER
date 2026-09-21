@@ -832,7 +832,12 @@ function renderReferenciasTabs(c) {
   return html;
 }
 
-var INS_COLS_REF = "minmax(130px,1fr) 90px 90px 165px 115px 70px 90px 30px";
+// Insumo es la columna protagonista (crece con 1fr); Unidad/Enlace/Cant. se
+// dejan angostas (Enlace prácticamente un ícono — el botón "🔗 N" no
+// necesita más espacio); Costo/Costo x prenda quedan medianas. Pedido del
+// usuario 2026-09-21: "que insumo sea más grandesito y con mayor
+// protagonismo... enlace que prácticamente sea un icono".
+var INS_COLS_REF = "minmax(150px,1fr) 55px 75px 165px 46px 55px 85px 30px";
 
 // Aviso de que un insumo cambió en el catálogo desde que se copió a esta
 // referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
@@ -974,7 +979,7 @@ function renderFilasServicios(cotId) {
 // los dos puede incluir una "prenda comprada" como parte de su receta).
 function renderTablaInsumosRef(cotId, ref) {
   var html = '<div class="ins-table">' +
-    '<div class="ins-row head" style="grid-template-columns:1fr 90px 90px 165px 115px 70px 90px 30px;"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
+    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';"><span>Insumo</span><span>Unidad</span><span>Costo</span><span>Tipo de costo</span><span>Enlace</span><span>Cant.</span><span>Costo x prenda</span><span></span></div>';
   (ref.insumos || []).forEach(function (i) {
     // El insumo se copió del catálogo al agregarlo (costo incluido) para que
     // esta cotización no cambie de precio sola si el catálogo se repone más
@@ -993,7 +998,7 @@ function renderTablaInsumosRef(cotId, ref) {
     // css/cotizaciones.css) para no participar del grid ni de las parejas
     // etiqueta/valor del colapso responsivo (ver responsive.css) — no hizo
     // falta tocar esa lógica para nada.
-    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:1fr 90px 90px 165px 115px 70px 90px 30px;" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
+    html += '<div class="ins-row' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:' + INS_COLS_REF + ';" data-ins-row data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '">' +
       '<span class="ins-drag-handle" title="Arrastra para reordenar">⠿</span>' +
       '<span class="mobile-th">Insumo</span><input class="mini-input" style="width:100%" value="' + esc(i.nombre) + '"' + attrsIns + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotins-unidad-' + i.id + '" style="width:100%" value="' + esc(i.unidad) + '"' + attrsIns + ' data-campo="unidad" />' +

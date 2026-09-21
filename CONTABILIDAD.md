@@ -1637,6 +1637,40 @@ línea SÍ lo marca de inmediato — ver test/smoke.mjs.
 
 ---
 
+### 🟢 Hallazgo #37 — pulido: redondeo de la suma de insumos enlazados y proporciones de columnas. ✅ IMPLEMENTADO
+
+Pedido de pulido, no un bug de dinero: "en la suma de los insumos
+redondearlos un poquito para que no se hagan más de 2 decimales" +
+ajustar el ancho de las columnas de la tabla de insumos ("und, enlace
+y cant" angostas, "costo y costo x prenda" medianas, "insumo" con
+mayor protagonismo, "enlace" casi un ícono).
+
+- `cantidadEfectivaInsumo` (core/calc.js) ahora redondea su resultado
+  a 2 decimales (`redondear2`, nuevo helper en core/utils.js) — evita
+  el residuo típico de sumar decimales en JS (`0.1 + 0.2 !==
+  0.3`) y limita la cifra mostrada ("🔗 N") a 2 decimales aunque los
+  insumos de origen tengan más. Se redondea en la ÚNICA fuente de este
+  valor (no en cada sitio que lo muestra), así el número que se ve es
+  EXACTAMENTE el que entra a `calcCostoPrenda` — mismo criterio de "una
+  sola fuente por fórmula" de siempre.
+- Columnas de la tabla de insumos reproporcionadas en los 4 módulos
+  (Cotizaciones, Plantillas, Productos, Catálogo): Unidad/Enlace/Cant.
+  angostas (Enlace casi solo el ícono "🔗"), Costo/Costo x prenda
+  medianas, Insumo (que ya crecía con `1fr`) gana el espacio que las
+  demás sueltan. De paso, en Cotizaciones se eliminó una duplicación:
+  la fila de cabecera y cada fila de insumo tenían el ancho de columnas
+  escrito DOS VECES a mano (una ligeramente distinta de `INS_COLS_REF`,
+  sin `minmax`) — ahora las tres referencian la misma variable, para
+  que no puedan volver a desalinearse entre sí.
+
+Verificado con sumas que en JS puro dan residuo de coma flotante
+(0.1 + 0.2, y una suma de 3 decimales) confirmando que el resultado
+queda en exactamente 2 — ver test/smoke.mjs. Los anchos de columna son
+puramente visuales (CSS), sin una prueba dedicada — no hay lógica que
+verificar ahí.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

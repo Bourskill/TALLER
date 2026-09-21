@@ -4,7 +4,7 @@
 // sin arrastrar código de HTML.
 
 import { state } from "./store.js";
-import { num, norm, todayStr, diasPagoDe, fmt } from "./utils.js";
+import { num, norm, todayStr, diasPagoDe, fmt, redondear2 } from "./utils.js";
 import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
 // Flujo por defecto para una referencia que solo trae prendas COMPRADAS ya
@@ -1851,7 +1851,14 @@ export function cantidadEfectivaInsumo(insumo, contenedor) {
   var categoriasCatalogo = state.catalogoCategorias || [];
   var idsObjetivo = categorias.reduce(function (a, catId) { return a.concat(idsConSubcategorias(categoriasCatalogo, catId)); }, []);
   var nombresObjetivo = nombres.map(norm);
-  return ((contenedor && contenedor.insumos) || [])
+  // Redondeado a 2 decimales — sumar varias cantidades con decimales (ej.
+  // tres telas de 0.333m) puede arrastrar el residuo típico de coma
+  // flotante, y el usuario lo pidió explícito: "redondearlos un poquito
+  // para que no se hagan más de 2 decimales". Se redondea acá, en la ÚNICA
+  // fuente de este valor, para que el número que se ve (renderCeldaCantidadInsumo/
+  // renderEnlacePanel) sea EXACTAMENTE el mismo que entra a calcCostoPrenda
+  // — nunca dos redondeos por separado que puedan desalinearse.
+  return redondear2(((contenedor && contenedor.insumos) || [])
     .filter(function (i) {
       if (i.id === insumo.id) return false;
       if (mismoTipo && i.tipo === insumo.tipo) return true;
@@ -1859,7 +1866,7 @@ export function cantidadEfectivaInsumo(insumo, contenedor) {
       if (nombresObjetivo.indexOf(norm(i.nombre || "")) !== -1) return true;
       return false;
     })
-    .reduce(function (a, i) { return a + num(i.cantidad); }, 0);
+    .reduce(function (a, i) { return a + num(i.cantidad); }, 0));
 }
 export function calcCostoPrenda(insumo, ref) {
   var costo = num(insumo.costo);

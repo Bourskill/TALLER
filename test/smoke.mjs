@@ -5642,6 +5642,28 @@ assert(cantEfectivaTest(contSelfEnlaceTest.insumos[0], contSelfEnlaceTest) === 0
 assert(cantEfectivaTest(null, contEnlaceTest) === 0, "sin insumo, no truena: devuelve 0");
 state.catalogoCategorias = prevCatalogoCategoriasEnlaceTest;
 
+// -- redondeo a 2 decimales, pedido del usuario 2026-09-21: "redondearlos
+// un poquito para que no se hagan más de 2 decimales" — sumar varios
+// decimales sin redondear arrastra el residuo típico de coma flotante
+// (0.1 + 0.2 === 0.30000000000000004 en JS puro) --
+const contRedondeoTest = {
+  insumos: [
+    { id: "rd1", tipo: "tela", cantidad: 0.1, nombre: "Tela rd1" },
+    { id: "rd2", tipo: "tela", cantidad: 0.2, nombre: "Tela rd2" },
+    { id: "rd3", tipo: "tela", cantidad: 1, nombre: "Sub rd", enlace: { categorias: [], insumos: [], mismoTipo: true } }
+  ]
+};
+assert(0.1 + 0.2 !== 0.3, "sanity de JS puro: sin redondear, 0.1 + 0.2 NO da exactamente 0.3 (el problema real que se pidió corregir)");
+assert(cantEfectivaTest(contRedondeoTest.insumos[2], contRedondeoTest) === 0.3, "cantidadEfectivaInsumo SÍ redondea: 0.1 + 0.2 da exactamente 0.3, sin el residuo de coma flotante");
+const contRedondeoTresDecTest = {
+  insumos: [
+    { id: "rt1", tipo: "tela", cantidad: 1.333, nombre: "Tela rt1" },
+    { id: "rt2", tipo: "tela", cantidad: 1.334, nombre: "Tela rt2" },
+    { id: "rt3", tipo: "tela", cantidad: 1, nombre: "Sub rt", enlace: { categorias: [], insumos: [], mismoTipo: true } }
+  ]
+};
+assert(cantEfectivaTest(contRedondeoTresDecTest.insumos[2], contRedondeoTresDecTest) === 2.67, "una suma con 3+ decimales en los insumos de origen (1.333 + 1.334 = 2.667) también se redondea a 2 (2.67), no se muestra con más decimales de los pedidos");
+
 // -- flujo completo en una cotización: 2 telas (madre + subcategoría) + "Sublimación" enlazada por categoría --
 const pedidosPreviosEnlaceTest = state.pedidos, cotizacionesPreviasEnlaceTest = state.cotizaciones,
   catCategoriasPreviasEnlaceTest = state.catalogoCategorias;

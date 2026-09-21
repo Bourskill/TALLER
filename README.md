@@ -259,6 +259,24 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo octava ronda: pulido — redondeo de la suma de insumos y proporciones de columnas en las 4 tablas de insumos)
+
+Pedido de pulido, no un bug: redondear la suma de insumos enlazados y
+reacomodar el ancho de las columnas.
+
+- La suma de un insumo enlazado (🔗 N) ahora se redondea a 2 decimales
+  (`redondear2`, core/utils.js) — evita el residuo de sumar decimales
+  en JS (`0.1 + 0.2 !== 0.3`) y se redondea en la ÚNICA fuente
+  (`cantidadEfectivaInsumo`), no en cada sitio que lo muestra.
+- Columnas de la tabla de insumos reproporcionadas en Cotizaciones,
+  Plantillas, Productos y Catálogo: Unidad/Enlace/Cant. angostas
+  (Enlace casi solo el ícono), Costo/Costo x prenda medianas, Insumo
+  gana el espacio que las demás sueltan. De paso, en Cotizaciones se
+  quitó una duplicación: el ancho de columnas estaba escrito dos veces
+  a mano (cabecera y fila), ligeramente distinto entre sí — ahora las
+  dos referencian la misma variable.
+- Ver CONTABILIDAD.md, "Hallazgo #37".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo séptima ronda: el aviso de "cambios sin guardar" salía sin fundamento al abrir una línea vacía de pedido rápido)
 
 Reportado en producción: "me sale mucho esto incluso sin fundamento",

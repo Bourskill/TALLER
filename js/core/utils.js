@@ -78,6 +78,16 @@ export function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Redondea a 2 decimales sin el residuo de coma flotante típico de sumar
+// varios decimales (ej. 0.1 + 0.2 sin esto da 0.30000000000000004). Se usa
+// para cantidades sumadas (ver cantidadEfectivaInsumo en core/calc.js) que
+// antes se mostraban con todos los decimales que la suma diera, sin
+// redondear — pedido del usuario 2026-09-21: "redondearlos un poquito para
+// que no se hagan más de 2 decimales".
+export function redondear2(n) {
+  return Math.round((num(n) + Number.EPSILON) * 100) / 100;
+}
+
 // Nombre de archivo seguro para descargas (PDF/CSV): minúsculas, espacios y
 // puntuación pasan a "_", pero SIN perder tildes/eñes — antes usábamos una
 // regex que solo dejaba a-z0-9 y por eso "básica" quedaba como "b_sica" (la
