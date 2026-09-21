@@ -259,6 +259,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo sexta ronda: corregir el nombre de un insumo lo marcaba "Origen eliminado" sin haberse borrado)
+
+El usuario reportó un pedido real con 3 compras marcadas "ORIGEN
+ELIMINADO" en Finanzas, insistiendo en que nada se había borrado — tenía
+razón, era un falso positivo del fix de compras huérfanas de esta misma
+auditoría (ronda de Servicios).
+
+- **Causa:** ese fix asumía que "no hay línea con esta clave exacta en
+  calcListaCompras" siempre significa "se borró". Cierto para un costo
+  global (clave = id estable), FALSO para un insumo/producto de
+  proveedor, cuya clave se arma con nombre+unidad+tipo (para poder sumar
+  el mismo insumo repetido en varias referencias) — corregir el NOMBRE de
+  un insumo ya marcado "Sí" cambia esa clave sin que nada se haya
+  borrado.
+- **Fix:** `sincronizar-compras-finanzas` (modules/cotizaciones.js) solo
+  limpia automáticamente una compra sin línea actual cuando su clave es
+  de un costo global (`"global|"`, identidad estable por id); para
+  insumos/productos, si no hay línea que coincida, la compra se deja
+  intacta.
+- Ver CONTABILIDAD.md, "Hallazgo #18". Los movimientos que ya quedaron
+  con "Origen eliminado" por este bug siguen contando bien en
+  Caja/Balance — la insignia es solo de navegación, no hace falta
+  recrearlos.
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo quinta ronda: la pestaña "Movimientos" se quedó corta de columnas — causa raíz real de "Caja actual" mal)
 
 La barra de aviso de la ronda anterior reveló el error real apenas se

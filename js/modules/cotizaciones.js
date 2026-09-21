@@ -1776,19 +1776,27 @@ export var actions = {
     var compras = (cot.compras || []).map(function (compra) {
       var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
       // Sin `linea`, el insumo/referencia/costo global/servicio cobrado que
-      // originó esta compra ya no existe en la cotización (se borró
-      // después de marcarla) — sin este chequeo, la entrada seguía viva
-      // para siempre: si estaba en "Sí" volvía a crear/actualizar su
-      // movimiento cada vez que se pulsaba este botón, invisible en la
-      // tabla de compras (que solo muestra lo que existe HOY). Se retira
-      // junto con su movimiento, si tenía uno. Auditoría 2026-09-20.
-      if (!linea) {
+      // originó esta compra ya no existe en la cotización — pero "no hay
+      // línea con esta clave EXACTA" no siempre significa "se borró":
+      // solo la clave de un costo global es un id estable ("global|" +
+      // g.id, ver calcListaCompras). La de un insumo o una referencia de
+      // proveedor se arma con su NOMBRE + unidad/tipo (para poder sumar
+      // el mismo insumo repetido en varias referencias) — así que
+      // corregir un nombre, una unidad o un tipo (una edición normal, no
+      // un borrado) también cambia esa clave. Tratar ESO como huérfana
+      // borraba de verdad una compra real y desconectaba su movimiento en
+      // Finanzas (quedaba con la insignia "Origen eliminado" sin que nada
+      // se hubiera borrado). Pasó de verdad: reportado por el usuario el
+      // mismo día que se agregó este chequeo. Auditoría 2026-09-20,
+      // corregido el mismo día tras el reporte.
+      if (!linea && compra.clave.indexOf("global|") === 0) {
         if (compra.txId) {
           state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
         }
         huerfanas++;
         return null;
       }
+      if (!linea) return compra; // insumo/producto: clave inestable ante una edición, no se toca
       var nombre = linea.nombre;
       var monto = num(compra.costoReal);
 

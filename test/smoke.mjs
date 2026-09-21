@@ -684,7 +684,15 @@ const cotHuerfanaTest = {
     { id: "cg-huerfana", nombre: "Domicilio", costo: 50000, proveedorId: "", esServicio: false },
     { id: "cg-se-queda", nombre: "Empaque", costo: 5000, proveedorId: "", esServicio: false }
   ],
-  serviciosCobrados: [], compras: [{ clave: "global|cg-huerfana", estado: "si", costoReal: 75000, txId: "tx-huerfana-test" }]
+  // "Empaque" también viene YA sincronizada de antes (su propio tx real) —
+  // sirve para probar el caso que reportó el usuario en producción
+  // (2026-09-20): una compra que SIGUE existiendo de verdad no se puede
+  // marcar huérfana solo por volver a pulsar el botón sin haber cambiado
+  // nada.
+  serviciosCobrados: [], compras: [
+    { clave: "global|cg-huerfana", estado: "si", costoReal: 75000, txId: "tx-huerfana-test" },
+    { clave: "global|cg-se-queda", estado: "si", costoReal: 5000, txId: "tx-se-queda-test" }
+  ]
 };
 state.pedidos = [{
   id: "ped-huerfana-test", numeroOp: "OP-HUERFANA", cliente: "Cliente Huérfana", descripcion: "Prueba",
@@ -693,7 +701,10 @@ state.pedidos = [{
   abonos: [], lineas: [], stockConsumido: [], vendedor: null
 }];
 state.cotizaciones = [cotHuerfanaTest];
-state.tx = [{ id: "tx-huerfana-test", tipo: "gasto", concepto: "Compra — Domicilio — Prueba huérfana", monto: 75000, contraparte: "", fecha: "2026-01-02", pedidoId: "ped-huerfana-test", cotizacionId: "cot-huerfana-test", origenCompraClave: "global|cg-huerfana" }];
+state.tx = [
+  { id: "tx-huerfana-test", tipo: "gasto", concepto: "Compra — Domicilio — Prueba huérfana", monto: 75000, contraparte: "", fecha: "2026-01-02", pedidoId: "ped-huerfana-test", cotizacionId: "cot-huerfana-test", origenCompraClave: "global|cg-huerfana" },
+  { id: "tx-se-queda-test", tipo: "gasto", concepto: "Compra — Empaque — Prueba huérfana", monto: 5000, contraparte: "", fecha: "2026-01-02", pedidoId: "ped-huerfana-test", cotizacionId: "cot-huerfana-test", origenCompraClave: "global|cg-se-queda" }
+];
 const { calcCotGastosReales: calcCotGastosRealesTest } = await import("../js/core/calc.js");
 assert(calcCotGastosRealesTest(cotHuerfanaTest) === 25000, "sanity: con el costo global todavía ahí, la variación es 75.000 (real) − 50.000 (estimado) = 25.000");
 // Se borra SOLO "Domicilio" (como haría "remove-costo-global") SIN limpiar
@@ -707,9 +718,61 @@ click('[data-action="abrir-cotizacion-editor"][data-id="cot-huerfana-test"]');
 click('[data-action="set-cot-tab"][data-id="cot-huerfana-test"][data-val="produccion"]');
 click('[data-action="sincronizar-compras-finanzas"][data-id="cot-huerfana-test"]');
 const cotHuerfanaTrasSync = state.cotizaciones.find(function (c) { return c.id === "cot-huerfana-test"; });
-assert(!!cotHuerfanaTrasSync && cotHuerfanaTrasSync.compras.length === 0, "\"Actualizar movimientos financieros\" limpia la compra huérfana de la cotización");
+assert(!!cotHuerfanaTrasSync && cotHuerfanaTrasSync.compras.length === 1, "\"Actualizar movimientos financieros\" limpia SOLO la compra huérfana de la cotización (Domicilio), no las dos");
 assert(!state.tx.some(function (t) { return t.id === "tx-huerfana-test"; }), "...y retira su movimiento de Finanzas (ya no hay insumo real detrás)");
+// El reporte real del usuario en producción: "Empaque" (que SIGUE
+// existiendo en costosGlobales, sin tocar) no se marca huérfana solo por
+// haber pulsado el botón — su compra y su tx tienen que sobrevivir intactos.
+assert(cotHuerfanaTrasSync.compras[0].clave === "global|cg-se-queda", "...y la compra que SÍ sigue existiendo (Empaque) permanece en la cotización, sin falsos positivos");
+assert(state.tx.some(function (t) { return t.id === "tx-se-queda-test"; }), "...su movimiento en Finanzas tampoco se borra — no queda con la insignia \"Origen eliminado\" estando vivo de verdad");
 state.pedidos = pedidosPreviosHuerfanaTest; state.cotizaciones = cotizacionesPreviasHuerfanaTest; state.tx = txPreviosHuerfanaTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// --- Reporte real en producción (2026-09-20): a diferencia de un costo
+// global (clave = "global|" + su id, estable), la clave de un INSUMO se
+// arma con nombre+unidad+tipo (para poder sumar el mismo insumo repetido
+// en varias referencias — ver agregarInsumosDeReferencias) — así que
+// CORREGIR el nombre de un insumo ya marcado "Sí" (una edición normal,
+// nada se borró) cambia esa clave. El usuario reportó exactamente esto:
+// "Bordado bolsillero"/"Sublimación"/"Riquelme" con la insignia "Origen
+// eliminado" sin que nada estuviera eliminado de verdad.
+const pedidosPreviosRenameTest = state.pedidos, cotizacionesPreviasRenameTest = state.cotizaciones, txPreviosRenameTest = state.tx;
+const cotRenameTest = {
+  id: "cot-rename-test", clienteId: "", cliente: "Cliente Rename", descripcion: "Prueba rename", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-rename-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "chrn1",
+  referencias: [{
+    id: "r-rename-test", nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 1, precioVenta: 100000, origen: "taller", costoCompra: 0, proveedorId: "",
+    // Nombre YA corregido ("Bordado bolsillero" en vez de "Bordado") — la
+    // clave actual de calcListaCompras ya no es la que se guardó en
+    // cot.compras cuando se marcó "Sí" la primera vez.
+    insumos: [{ id: "i-rename-test", nombre: "Bordado bolsillero", unidad: "UND", costo: 8400, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [],
+  // Clave vieja (antes de corregir el nombre a "Bordado bolsillero"): ya
+  // no coincide con ninguna línea actual.
+  compras: [{ clave: "bordado|und|por_prenda", estado: "si", costoReal: 8400, txId: "tx-rename-test" }]
+};
+state.pedidos = [{
+  id: "ped-rename-test", numeroOp: "OP-RENAME", cliente: "Cliente Rename", descripcion: "Prueba",
+  cantidad: "1", total: 100000, costo: 8400, abono: 100000, estado: "nuevo", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-rename-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotRenameTest];
+state.tx = [{ id: "tx-rename-test", tipo: "gasto", concepto: "Compra — Bordado — Prueba rename", monto: 8400, contraparte: "", fecha: "2026-01-02", pedidoId: "ped-rename-test", cotizacionId: "cot-rename-test", origenCompraClave: "bordado|und|por_prenda" }];
+const { origenSistemaHuerfano: origenHuerfanoRenameTest } = await import("../js/core/calc.js");
+assert(!origenHuerfanoRenameTest(state.tx[0]), "sanity: ANTES de sincronizar, la clave vieja de cot.compras y la de la tx siguen coincidiendo entre sí — el mismatch solo se nota al comparar contra calcListaCompras, que es justo lo que hace \"Actualizar movimientos financieros\"");
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-rename-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-rename-test"][data-val="produccion"]');
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-rename-test"]');
+const cotRenameTrasSync = state.cotizaciones.find(function (c) { return c.id === "cot-rename-test"; });
+assert(!!cotRenameTrasSync && cotRenameTrasSync.compras.length === 1, "corregir el NOMBRE de un insumo ya marcado \"Sí\" no lo deja huérfano al sincronizar — sigue en la cotización");
+assert(state.tx.some(function (t) { return t.id === "tx-rename-test"; }), "...su movimiento en Finanzas tampoco se borra — nada se eliminó de verdad, solo se corrigió un nombre");
+assert(!origenHuerfanoRenameTest(state.tx[0]), "...y ya no aparece con la insignia \"Origen eliminado\" en Finanzas — antes SÍ quedaba así tras pulsar el botón, con el nombre corregido pero nada más");
+state.pedidos = pedidosPreviosRenameTest; state.cotizaciones = cotizacionesPreviasRenameTest; state.tx = txPreviosRenameTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
 // --- Nómina: servicio por defecto de un empleado + "si no alcanza, varios" ---

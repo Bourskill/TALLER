@@ -604,6 +604,40 @@ no volver a repetir esto. Test que reproduce el límite REAL de Google
 `gridColumnCount` con el mismo 400 exacto) y confirma que la grilla se
 agranda antes de escribir.
 
+### 🔴 Hallazgo #18 — post-mortem 2026-09-20: corregir el nombre de un insumo lo dejaba con la insignia "Origen eliminado" sin que nada se hubiera borrado. ✅ CORREGIDO
+
+El usuario reportó un pedido real (OP-6416) con 3 movimientos de compra
+("Bordado bolsillero", "Sublimación", "Riquelme") marcados "ORIGEN
+ELIMINADO" en Finanzas, insistiendo en que nada se había borrado. Tenía
+razón: era un falso positivo, causado por el mismo Hallazgo #2 de esta
+auditoría (filas repetidas/`sincronizar-compras-finanzas`, corregido en
+la ronda de Servicios) — al agregar ahí la limpieza de compras huérfanas,
+se asumió que "no hay línea con esta clave EXACTA en
+`calcListaCompras`" siempre significa "se borró". Cierto para un costo
+global (`clave = "global|" + su id`, estable), FALSO para un insumo o una
+referencia de proveedor: su clave se arma con `nombre + unidad + tipo`
+(para poder sumar el mismo insumo repetido en varias referencias, ver
+`agregarInsumosDeReferencias`) — corregir el NOMBRE de un insumo ya
+marcado "Sí" (una edición normal, nada se borró) cambia esa clave. Al
+pulsar "Actualizar movimientos financieros", la compra real se
+desconectaba de la cotización (aunque el movimiento en Finanzas seguía
+vivo, ver por qué en el propio código) y `MARCAS_ORIGEN_SISTEMA` ya no
+encontraba con qué respaldarla.
+
+**Fix:** `sincronizar-compras-finanzas` solo limpia automáticamente una
+compra sin línea actual cuando su clave es de un costo global
+(`"global|"` — identidad estable por id). Para insumos/productos de
+proveedor (clave inestable ante una edición), si no hay línea que
+coincida, la compra se deja intacta — vuelve al comportamiento de antes
+de esta auditoría para ese caso puntual (invisible en la tabla mientras
+no se re-sincronice del todo, pero sin desconectar nada real).
+
+**Si esto ya te pasó:** los movimientos con "Origen eliminado" que NO
+hayas borrado con el 🗑️ siguen contando bien en Caja/Balance — la
+insignia es solo de navegación (no se puede volver a la cotización desde
+ahí), no una señal de que la plata esté mal contada. No hace falta
+recrearlos.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la
