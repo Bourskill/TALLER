@@ -5688,7 +5688,7 @@ state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
 click('[data-action="abrir-cotizacion-editor"][data-id="cot-enlace-test"]');
 assert(!!document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]'), "cada insumo enlazable de una referencia tiene su propio botón \"Enlace\"");
 assert(!!document.querySelector('input[data-ins="ins-sub-test"][data-campo="cantidad"]'), "sin enlazar todavía, \"Cant.\" de Sublimación sigue siendo un campo editable normal");
-assert(document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]').textContent.indexOf("Sin enlace") !== -1, "...y el botón dice \"Sin enlace\"");
+assert(document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]').textContent.trim() === "—", "...y el botón muestra \"—\" (sin texto largo que envuelva en varias líneas en la columna angosta)");
 
 click('[data-action="toggle-enlace-panel"][data-ins="ins-sub-test"]');
 assert(!!document.querySelector('input[data-action="toggle-ins-enlace-categoria"][data-ins="ins-sub-test"][data-cat="cat-telas-enl"]'), "al abrir el panel aparecen las categorías del catálogo como checkboxes (no un desplegable de tipos de costo)");
@@ -6067,8 +6067,11 @@ state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 
 // -- en Catálogo, sin un "contenedor" real que sumar (un insumo del
 // catálogo predefine una regla, no tiene insumos hermanos con cantidad),
-// el botón sigue mostrando cuántas REGLAS hay marcadas — con esa palabra
-// de por medio para no parecer una cantidad --
+// el botón muestra cuántas reglas hay marcadas — solo ícono + número, sin
+// palabra ("regla(s)") de por medio: reportado en producción 2026-09-21,
+// con la columna angosta cualquier texto envolvía en varias líneas y
+// disparaba la altura de la fila ("está horrible... la columna de enlace
+// conservó los textos, en vez de solo el icono+numero") --
 const catalogoPrevioBadgeTest = state.catalogoInsumos, catCategoriasPreviasBadgeTest = state.catalogoCategorias;
 state.catalogoCategorias = categoriasEnlaceTest;
 state.catalogoInsumos = state.catalogoInsumos.concat([
@@ -6076,7 +6079,7 @@ state.catalogoInsumos = state.catalogoInsumos.concat([
 ]);
 state.tab = "catalogo"; render();
 var botonBadgeCatalogoTest = document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="cat-badge-test"]');
-assert(!!botonBadgeCatalogoTest && botonBadgeCatalogoTest.textContent.indexOf("🔗 1 regla") !== -1, "en Catálogo el botón muestra \"N regla(s)\", no una cantidad — ahí no hay insumos reales que sumar, sería engañoso mostrar un número como si lo hubiera");
+assert(!!botonBadgeCatalogoTest && botonBadgeCatalogoTest.textContent.trim() === "🔗 1", "en Catálogo el botón muestra solo \"🔗 N\" (aquí 1 regla marcada) — sin la palabra \"regla(s)\" que antes hacía envolver el texto en la columna angosta");
 state.catalogoInsumos = catalogoPrevioBadgeTest; state.catalogoCategorias = catCategoriasPreviasBadgeTest;
 
 // -- también en Plantillas y Productos: el selector "Este insumo pertenece
@@ -6216,7 +6219,7 @@ state.tab = "catalogo"; render();
 click('[data-action="toggle-enlace-panel"][data-ins="cat-mismotipo-test"]');
 click('[data-action="toggle-cat-ins-enlace-mismotipo"][data-ins="cat-mismotipo-test"]');
 var botonMismoTipoCatalogoTest = document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="cat-mismotipo-test"]');
-assert(botonMismoTipoCatalogoTest.textContent.indexOf("🔗 1 regla") !== -1, "en Catálogo, marcar SOLO \"mismo tipo\" ya cuenta como 1 regla en el botón resumen");
+assert(botonMismoTipoCatalogoTest.textContent.trim() === "🔗 1", "en Catálogo, marcar SOLO \"mismo tipo\" ya cuenta como 1 regla en el botón resumen (solo ícono + número)");
 state.catalogoInsumos = catalogoPrevioMismoTipoTest;
 state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 

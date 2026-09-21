@@ -171,11 +171,17 @@ export function renderEnlacePanel(insumo, candidatos, categorias, o) {
   var insSel = enlace.insumos || [];
   var mismoTipo = !!enlace.mismoTipo;
   var nReglas = catsSel.length + insSel.length + (mismoTipo ? 1 : 0);
-  var resumen = !nReglas ? "Sin enlace"
+  // Solo ícono + número, sin texto ("Sin enlace"/"regla(s)") ni flecha — con
+  // la columna angosta (pedido del usuario), cualquier palabra envolvía en
+  // 3-4 líneas y disparaba la altura de la fila. "—" es el mismo símbolo
+  // de "no aplica" que ya usan las columnas de al lado (ver TIPOS_ENLAZABLES
+  // más abajo en cotizaciones.js/plantillas.js/productos.js) — no hace
+  // falta abrir el panel para saber que no hay enlace.
+  var resumen = !nReglas ? "—"
     : o.contenedor ? "🔗 " + cantidadEfectivaInsumo(insumo, o.contenedor)
-    : "🔗 " + nReglas + " regla" + (nReglas === 1 ? "" : "s");
-  var html = '<button type="button" class="btn ghost small" data-action="' + o.toggleAction + '"' + o.attrsBase + '>' +
-    resumen + (o.abierto ? " ▾" : " ▸") + "</button>";
+    : "🔗 " + nReglas;
+  var html = '<button type="button" class="btn ghost small enlace-toggle" data-action="' + o.toggleAction + '" title="' + (o.abierto ? "Clic para cerrar" : "Clic para configurar el enlace") + '"' + o.attrsBase + '>' +
+    resumen + "</button>";
   if (!o.abierto) return html;
 
   html += '<div class="enlace-panel">';

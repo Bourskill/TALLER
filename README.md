@@ -259,6 +259,24 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo novena ronda: corrección del pulido anterior — el botón de Enlace conservaba texto largo y envolvía en varias líneas)
+
+El mismo día de la ronda anterior: "está horrible porque hay espacios
+entre filas, debido a que la columna de enlace conservo los textos, en
+vez de solo el icono+numero".
+
+- El botón de Enlace nunca se simplificó al achicar la columna —
+  seguía diciendo "Sin enlace" o "N regla(s)" más una flecha, texto
+  que envolvía en 3-4 líneas y estiraba solo ESA fila.
+- Ahora muestra SOLO ícono + número: "—" sin enlace, "🔗 N" con
+  enlace — sin palabras ni flecha (el estado abierto/cerrado queda en
+  un `title` al pasar el mouse).
+- Nueva clase `.enlace-toggle` con padding recortado y
+  `white-space:nowrap` (con `text-overflow:ellipsis` como respaldo) —
+  la columna sube de 46px a 58px, suficiente para el peor caso sin
+  volver a envolver.
+- Ver CONTABILIDAD.md, "Hallazgo #38".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo octava ronda: pulido — redondeo de la suma de insumos y proporciones de columnas en las 4 tablas de insumos)
 
 Pedido de pulido, no un bug: redondear la suma de insumos enlazados y

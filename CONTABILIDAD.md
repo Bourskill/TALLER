@@ -1671,6 +1671,46 @@ verificar ahí.
 
 ---
 
+### 🟢 Hallazgo #38 — corrección del pulido anterior: el botón de Enlace conservaba texto largo y envolvía en varias líneas. ✅ IMPLEMENTADO
+
+El mismo día, tras el Hallazgo #37: "está horrible porque hay espacios
+entre filas, debido a que la columna de enlace conservo los textos, en
+vez de solo el icono+numero" — con un screenshot mostrando filas de
+distinta altura porque el botón seguía diciendo "Sin enlace" (o, en
+Catálogo, "N regla(s)"), y ese texto envolvía en 3-4 líneas dentro de
+la columna ya angosta (46px) del Hallazgo #37.
+
+**Causa raíz doble:** (1) el contenido del botón nunca se simplificó
+al achicar la columna — seguía mostrando el texto completo ("Sin
+enlace", "N regla(s)") más la flecha ▾/▸, que a esa columna nunca le
+iba a caber; y (2) el botón (`.btn.small`, forms.css) usa
+`padding:6px 11px` sin `white-space:nowrap`, así que CUALQUIER
+contenido que no cupiera envolvía verticalmente en vez de desbordar u
+opacar — y como todas las filas comparten el mismo grid, una sola fila
+con texto envuelto estiraba la altura de ESA fila nada más, dejando la
+tabla dispareja.
+
+**Corrección:**
+- El botón resumen (`renderEnlacePanel`, core/components.js) ahora
+  muestra SOLO ícono + número: "—" cuando no hay enlace (mismo símbolo
+  de "no aplica" que ya usan las celdas vecinas), "🔗 N" cuando sí —
+  sin la palabra "Sin enlace", sin "regla(s)", sin la flecha ▾/▸ (el
+  estado abierto/cerrado se indica con un `title` al pasar el mouse en
+  vez de texto en el botón).
+- Nueva clase `.enlace-toggle` (css/cotizaciones.css) con padding
+  recortado, `white-space:nowrap` y `text-overflow:ellipsis` como red
+  de seguridad — si una suma con muchos dígitos no cabe, trunca con
+  "…" en vez de volver a envolver.
+- La columna Enlace pasa de 46px a 58px (Cotizaciones, Plantillas,
+  Productos, Catálogo) — margen suficiente para "🔗 108.5" con el
+  padding recortado, sin dejar de ser angosta frente a las demás.
+
+Verificado que el botón sin enlace muestra exactamente "—" y que, en
+Catálogo, el botón con reglas marcadas muestra exactamente "🔗 N" (sin
+la palabra "regla(s)") — ver test/smoke.mjs.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

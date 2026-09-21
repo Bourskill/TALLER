@@ -186,6 +186,14 @@
    (checkboxes filtrados). Mismo "chrome" que .compra-detalle pero sin
    forzar ancho de columna: la celda "Enlace" es angosta. */
 .enlace-celda{position:relative;}
+/* Botón resumen del enlace ("🔗 N" / "—"): la columna es angosta a propósito
+   (pedido del usuario, "que enlace prácticamente sea un icono") — sin este
+   padding recortado y white-space:nowrap, hasta un texto corto como "🔗 3.73"
+   podía envolver en 2-3 líneas dentro de esos ~58px y disparar la altura de
+   TODA la fila (reportado en producción: "está horrible porque hay espacios
+   entre filas"). text-overflow:ellipsis es la red de seguridad para el caso
+   límite de una suma con muchos dígitos, en vez de volver a envolver. */
+.btn.small.enlace-toggle{padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;display:block;}
 .enlace-panel{position:absolute;z-index:5;top:100%;left:0;margin-top:4px;min-width:220px;max-width:280px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-sm);box-shadow:0 4px 14px rgba(0,0,0,.18);padding:8px 10px 10px;display:flex;flex-direction:column;gap:4px;}
 .enlace-panel-titulo{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);margin-top:6px;}
 .enlace-panel-titulo:first-child{margin-top:0;}

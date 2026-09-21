@@ -837,7 +837,7 @@ function renderReferenciasTabs(c) {
 // necesita más espacio); Costo/Costo x prenda quedan medianas. Pedido del
 // usuario 2026-09-21: "que insumo sea más grandesito y con mayor
 // protagonismo... enlace que prácticamente sea un icono".
-var INS_COLS_REF = "minmax(150px,1fr) 55px 75px 165px 46px 55px 85px 30px";
+var INS_COLS_REF = "minmax(150px,1fr) 55px 75px 165px 58px 55px 85px 30px";
 
 // Aviso de que un insumo cambió en el catálogo desde que se copió a esta
 // referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
