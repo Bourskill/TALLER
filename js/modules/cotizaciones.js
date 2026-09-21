@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra } from "../core/calc.js";
 import { renderTipoCostoOptions, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -693,9 +693,17 @@ function renderFilaCompra(c, linea) {
   // "no lo compré"). Ver set-cot-compra: al elegir "Ahorro" los deja en 0
   // explícito solo (no hace falta que el usuario los toque).
   var esAhorro = estado === "ahorro";
+  // Cuánto de esta compra se separó como excedente (compra de insumo aparte,
+  // no cuenta como costo de este pedido) — ver cantidadExcedenteCompra en
+  // core/calc.js. Un tag sutil en la fila para que se note sin tener que
+  // abrir el detalle, mismo criterio que tagCompartida arriba.
+  var excTag = "";
+  if (estado === "si" && cantidadExcedenteCompra(compra) > 0) {
+    excTag = ' <span class="tag" title="' + esc(cantidadExcedenteCompra(compra).toFixed(2) + " " + (linea.unidad || "") + " (" + fmt(costoExcedenteCompra(compra)) + ") separados como compra de insumo aparte — no cuentan como costo de este pedido") + '">📦 excedente</span>';
+  }
   var html = '<div class="tx-row" style="grid-template-columns:' + COMPRA_COLS + ';">' +
     '<span class="mobile-th">Qué comprar</span><span>' + (linea.esGlobal ? "🌐 " : (linea.esProducto ? "📦 " : "")) + esc(linea.nombre) +
-    (linea.esServicio ? ' <span class="tag">servicio</span>' : "") + tagCompartida + "</span>" +
+    (linea.esServicio ? ' <span class="tag">servicio</span>' : "") + tagCompartida + excTag + "</span>" +
     '<span class="mobile-th">Para / a quién</span><span>' + paraQuien + "</span>" +
     '<span class="mobile-th">Cant. est.</span><span class="amount">' + estimadoCant + "</span>" +
     '<span class="mobile-th">Costo est.</span><span class="amount">' + fmt(linea.costoTotal) + "</span>" +
@@ -721,9 +729,30 @@ function renderFilaCompra(c, linea) {
     html += '<div class="compra-detalle">' +
       '<div class="field"><label>Proveedor</label>' + renderSelectProveedorCompra(c, linea, proveedorId, attrs) + "</div>" +
       '<div class="field" style="flex:1;"><label>Observaciones</label><input class="mini-input" style="width:100%" placeholder="Ej. quedó pendiente medio rollo, precio subió" value="' + esc(compra.observaciones || "") + '"' + attrs + ' data-campo="observaciones" /></div>' +
+      (estado === "si" && !linea.esServicio ? renderCampoExcedenteCompra(compra, linea, attrs) : "") +
       "</div>";
   }
   return html;
+}
+
+// Cuánto de lo comprado se separa como "compra de insumo" aparte (mínimo del
+// proveedor, conviene comprar de más, quedó material disponible para otro
+// pedido) — esa parte no es costo ni sobrecosto de ESTE pedido. Se sugiere
+// sola al escribir "Cant. real" (ver set-cot-compra), pero queda editable
+// por si en realidad todo se usó en el pedido (ej. por daño/desperdicio) o
+// si solo una parte del sobrante aplica. Ver conversación con el usuario
+// 2026-09-21 y costoRealPedido/cantidadExcedenteCompra en core/calc.js.
+function renderCampoExcedenteCompra(compra, linea, attrs) {
+  var costoExc = costoExcedenteCompra(compra);
+  var costoPedido = costoRealPedido(compra);
+  return '<div class="field"><label>Excedente → compra de insumo' +
+    renderHelp("Cuánto de lo comprado sobra para otro pedido — esa parte no cuenta como costo ni sobrecosto de ESTE pedido: se registra sola como una compra de insumo aparte en Finanzas (Gasto, \"Es insumo\"), vinculada a esta compra.") +
+    "</label>" +
+    '<input type="number" class="mini-input" style="width:100%" placeholder="0" value="' + esc(compra.cantidadExcedente !== undefined && compra.cantidadExcedente !== "" ? compra.cantidadExcedente : "") + '"' + attrs + ' data-campo="cantidadExcedente" />' +
+    (costoExc > 0
+      ? '<span class="section-sub" style="margin:4px 0 0;">De ' + fmt(num(compra.costoReal)) + " pagados: " + fmt(costoPedido) + " quedan en este pedido, " + fmt(costoExc) + " se separan como compra de insumo.</span>"
+      : "") +
+    "</div>";
 }
 
 function renderSelectProveedorCompra(c, linea, proveedorId, attrs) {
@@ -1809,7 +1838,8 @@ export var actions = {
   // insumos nuevos no le cambia el dueño a un dato ya registrado.
   "set-cot-compra": function (el) {
     var cotId = el.getAttribute("data-cot"), clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
-    var valor = (campo === "cantidadReal" || campo === "costoReal") ? num(el.value) : el.value;
+    var esNumerico = campo === "cantidadReal" || campo === "costoReal" || campo === "cantidadExcedente";
+    var valor = esNumerico ? num(el.value) : el.value;
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       var compras = (c.compras || []).slice();
@@ -1822,8 +1852,8 @@ export var actions = {
       // "Costo real" la dejaría silenciosamente en "no".
       var estadoInicial = linea && linea.esServicio ? "servicio" : "no";
       var base = idx >= 0 ? compras[idx] : {
-        clave: clave, cantidadReal: "", costoReal: "", proveedorId: (linea && linea.proveedorId) || "",
-        observaciones: "", estado: estadoInicial, txId: "", fecha: ""
+        clave: clave, cantidadReal: "", costoReal: "", cantidadExcedente: "", proveedorId: (linea && linea.proveedorId) || "",
+        observaciones: "", estado: estadoInicial, txId: "", excedenteTxId: "", fecha: ""
       };
       var patch = {}; patch[campo] = valor;
       if (campo === "estado" && valor !== "no") {
@@ -1835,6 +1865,7 @@ export var actions = {
           // cantidad/costo que hubiera quedado de un estado anterior.
           patch.costoReal = 0;
           patch.cantidadReal = 0;
+          patch.cantidadExcedente = 0;
         } else if (!num(base.costoReal) && linea) {
           // Elegir "Sí" o "Servicio" sin haber escrito el costo real toma
           // el estimado como el valor: es el caso corriente (se
@@ -1843,6 +1874,19 @@ export var actions = {
           patch.costoReal = num(linea.costoTotal);
         }
         if (!base.fecha) patch.fecha = todayStr();
+      }
+      // Al escribir cuánto se compró en total, si es más de lo que este
+      // pedido necesitaba se sugiere el excedente solo — pero nunca
+      // pisando un valor que el usuario ya haya escrito a mano (ver
+      // excedenteYaEscrito): puede ser 0 a propósito (todo se usó en el
+      // pedido, ej. por daño/desperdicio, ver conversación con el
+      // usuario 2026-09-21) y eso no se debe revertir solo.
+      if (campo === "cantidadReal" && linea && !linea.esServicio) {
+        var excedenteYaEscrito = base.cantidadExcedente !== "" && base.cantidadExcedente !== undefined && base.cantidadExcedente !== null;
+        if (!excedenteYaEscrito) {
+          var sugerido = valor - num(linea.cantidadFisica);
+          if (sugerido > 0) patch.cantidadExcedente = sugerido;
+        }
       }
       var actualizada = Object.assign({}, base, patch);
       if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
@@ -2559,64 +2603,111 @@ export function sincronizarComprasFinanzasDe(cot) {
       if (compra.txId) {
         state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
       }
+      if (compra.excedenteTxId) {
+        state.tx = state.tx.filter(function (t) { return t.id !== compra.excedenteTxId; });
+      }
       huerfanas++;
       return null;
     }
     if (!linea) return compra; // insumo/producto: clave inestable ante una edición, no se toca
     var nombre = linea.nombre;
-    var monto = num(compra.costoReal);
+    var esCompraSi = estadoCompra(compra) === "si";
+    var proveedor = compra.proveedorId ? clienteById(compra.proveedorId) : null;
+    var resultado = compra;
 
+    // --- Costo que le corresponde al PEDIDO (neto, sin el excedente) ---
     // Solo "Sí" (pagado de verdad, aparte) genera un movimiento en
     // Finanzas. "Servicio" (mano de obra propia, va a nómina) y "No" no
     // deberían: si esta línea tenía un movimiento de un estado anterior
     // (ej. se cambió de "Sí" a "Servicio"), se retira.
-    if (estadoCompra(compra) !== "si" || monto <= 0) {
-      if (compra.txId) {
-        state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
+    var monto = esCompraSi ? costoRealPedido(compra) : 0;
+    if (!esCompraSi || monto <= 0) {
+      if (resultado.txId) {
+        state.tx = state.tx.filter(function (t) { return t.id !== resultado.txId; });
         borrados++;
-        return Object.assign({}, compra, { txId: "" });
+        resultado = Object.assign({}, resultado, { txId: "" });
       }
-      return compra;
+    } else {
+      var datos = {
+        tipo: "gasto",
+        concepto: "Compra — " + nombre + " — " + cot.descripcion,
+        monto: monto,
+        contraparte: proveedor ? proveedor.nombre : "",
+        fecha: compra.fecha || todayStr(),
+        pedidoId: pedidoIdDeCotParaTx(cot),
+        cotizacionId: cot.id,
+        // Una compra de la lista es, por definición, insumo/material del
+        // pedido — de acá sale el desglose "Gasto en insumos" del reporte.
+        esInsumo: "1",
+        proveedorId: compra.proveedorId || "",
+        insumoNombre: nombre,
+        cantidad: compra.cantidadReal !== "" && compra.cantidadReal !== undefined ? cantidadRealPedido(compra) : (!linea.esServicio ? num(linea.cantidadFisica) : ""),
+        unidad: linea.unidad || "",
+        // Marca de origen: es lo que permite reconocer "este movimiento lo
+        // generó esta línea de compra" al volver a sincronizar.
+        origenCompraClave: compra.clave
+      };
+      // El chequeo de cotizacionId es a propósito, no redundante: una
+      // cotización duplicada ANTES de este fix pudo quedar con un txId
+      // heredado del original (ver duplicarCotizacionCompleta) — sin esto,
+      // "sincronizar" desde el duplicado encontraba el tx del original (por
+      // id) y lo reescribía en vez de crear uno nuevo, dejando al original
+      // sin su propio movimiento. Un txId que apunta a un tx de OTRA
+      // cotización se trata como si no existiera: se crea uno nuevo, propio.
+      var existente = resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id; })[0] : null;
+      if (existente) {
+        Object.assign(existente, datos);
+        actualizados++;
+      } else {
+        var txId = uid();
+        state.tx.unshift(Object.assign({ id: txId }, datos));
+        creados++;
+        resultado = Object.assign({}, resultado, { txId: txId });
+      }
     }
 
-    var proveedor = compra.proveedorId ? clienteById(compra.proveedorId) : null;
-    var datos = {
-      tipo: "gasto",
-      concepto: "Compra — " + nombre + " — " + cot.descripcion,
-      monto: monto,
-      contraparte: proveedor ? proveedor.nombre : "",
-      fecha: compra.fecha || todayStr(),
-      pedidoId: pedidoIdDeCotParaTx(cot),
-      cotizacionId: cot.id,
-      // Una compra de la lista es, por definición, insumo/material del
-      // pedido — de acá sale el desglose "Gasto en insumos" del reporte.
-      esInsumo: "1",
-      proveedorId: compra.proveedorId || "",
-      insumoNombre: nombre,
-      cantidad: compra.cantidadReal !== "" && compra.cantidadReal !== undefined ? num(compra.cantidadReal) : (linea && !linea.esServicio ? num(linea.cantidadFisica) : ""),
-      unidad: linea ? (linea.unidad || "") : "",
-      // Marca de origen: es lo que permite reconocer "este movimiento lo
-      // generó esta línea de compra" al volver a sincronizar.
-      origenCompraClave: compra.clave
-    };
-
-    // El chequeo de cotizacionId es a propósito, no redundante: una
-    // cotización duplicada ANTES de este fix pudo quedar con un txId
-    // heredado del original (ver duplicarCotizacionCompleta) — sin esto,
-    // "sincronizar" desde el duplicado encontraba el tx del original (por
-    // id) y lo reescribía en vez de crear uno nuevo, dejando al original
-    // sin su propio movimiento. Un txId que apunta a un tx de OTRA
-    // cotización se trata como si no existiera: se crea uno nuevo, propio.
-    var existente = compra.txId ? state.tx.filter(function (t) { return t.id === compra.txId && t.cotizacionId === cot.id; })[0] : null;
-    if (existente) {
-      Object.assign(existente, datos);
-      actualizados++;
-      return compra;
+    // --- Excedente: lo comprado de más, separado como compra de insumo
+    // aparte (ver cantidadExcedenteCompra en core/calc.js) — su PROPIO
+    // movimiento en Finanzas, independiente del de arriba, para que no
+    // cuente como costo ni sobrecosto de este pedido. Solo aplica a una
+    // compra "Sí" real de algo con cantidad física (un servicio no se
+    // compra por cantidad). Se evalúa aparte del bloque de arriba a
+    // propósito: si TODO lo comprado resultó excedente (monto del pedido
+    // en 0), igual hay que registrar el excedente completo.
+    var costoExc = (esCompraSi && !linea.esServicio) ? costoExcedenteCompra(compra) : 0;
+    if (costoExc > 0) {
+      var datosExc = {
+        tipo: "gasto",
+        concepto: "Compra de insumo (excedente) — " + nombre + " — " + cot.descripcion,
+        monto: costoExc,
+        contraparte: proveedor ? proveedor.nombre : "",
+        fecha: compra.fecha || todayStr(),
+        pedidoId: pedidoIdDeCotParaTx(cot),
+        cotizacionId: cot.id,
+        esInsumo: "1",
+        proveedorId: compra.proveedorId || "",
+        insumoNombre: nombre,
+        cantidad: cantidadExcedenteCompra(compra),
+        unidad: linea.unidad || "",
+        origenCompraExcedenteClave: compra.clave
+      };
+      var existenteExc = resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id; })[0] : null;
+      if (existenteExc) {
+        Object.assign(existenteExc, datosExc);
+        actualizados++;
+      } else {
+        var excId = uid();
+        state.tx.unshift(Object.assign({ id: excId }, datosExc));
+        creados++;
+        resultado = Object.assign({}, resultado, { excedenteTxId: excId });
+      }
+    } else if (resultado.excedenteTxId) {
+      state.tx = state.tx.filter(function (t) { return t.id !== resultado.excedenteTxId; });
+      borrados++;
+      resultado = Object.assign({}, resultado, { excedenteTxId: "" });
     }
-    var txId = uid();
-    state.tx.unshift(Object.assign({ id: txId }, datos));
-    creados++;
-    return Object.assign({}, compra, { txId: txId });
+
+    return resultado;
   }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
 
   return { compras: compras, creados: creados, actualizados: actualizados, borrados: borrados, huerfanas: huerfanas };

@@ -398,6 +398,14 @@ var MARCAS_ORIGEN_SISTEMA = [
     }
   },
   {
+    campo: "origenCompraExcedenteClave", que: "el excedente de una compra (compra de insumo aparte)",
+    donde: "Cotizaciones → la cotización → Producción → ajusta o quita la cantidad \"Excedente\" de esa compra",
+    existe: function (t) {
+      var c = state.cotizaciones.filter(function (x) { return x.id === t.cotizacionId; })[0];
+      return !!(c && (c.compras || []).some(function (co) { return co.clave === t.origenCompraExcedenteClave; }));
+    }
+  },
+  {
     campo: "deudaId", que: "el pago de una cuota de una deuda",
     donde: "Pendientes → Deudas (o su historial, si ya quedó saldada) → botón \"↩ Deshacer último pago\"",
     existe: function (t) {
@@ -465,6 +473,12 @@ export function origenSistemaHuerfano(t) {
 export function movimientosGeneradosPorCotizacion(cot) {
   if (!cot) return [];
   var idsCompra = (cot.compras || []).map(function (c) { return c.txId; }).filter(Boolean);
+  // El excedente de una compra (ver cantidadExcedenteCompra) genera su PROPIO
+  // movimiento aparte (compra de insumo suelta) — vinculado a la misma
+  // compra, así que se borra junto con la cotización igual que el principal:
+  // el usuario lo pidió explícito ("al estar vinculados deberían borrarse
+  // juntos"), no huérfano como otros orígenes.
+  var idsExcedente = (cot.compras || []).map(function (c) { return c.excedenteTxId; }).filter(Boolean);
   return state.tx.filter(function (t) {
     if (t.origenComisionCotId === cot.id) return true;
     // t.cotizacionId === cot.id de más en las dos siguientes: una cotización
@@ -474,6 +488,8 @@ export function movimientosGeneradosPorCotizacion(cot) {
     // movimiento real del original, que nada tenía que ver.
     if (cot.estimadoTxId && t.id === cot.estimadoTxId && t.cotizacionId === cot.id) return true;
     if (idsCompra.indexOf(t.id) !== -1 && t.cotizacionId === cot.id) return true;
+    if (idsExcedente.indexOf(t.id) !== -1 && t.cotizacionId === cot.id) return true;
+    if (t.origenCompraExcedenteClave && t.cotizacionId === cot.id) return true;
     return !!(t.origenCompraClave && t.cotizacionId === cot.id);
   });
 }
@@ -2071,6 +2087,42 @@ export function compraDeLinea(cot, clave) {
   return ((cot && cot.compras) || []).filter(function (c) { return c.clave === clave; })[0] || null;
 }
 
+// A veces se compra más de lo que el pedido necesita a propósito (mínimo del
+// proveedor, conviene comprar de más, queda como material disponible para
+// otro pedido) — ese excedente NO es costo de este pedido ni sobrecosto, es
+// una compra de insumo aparte (ver sincronizarComprasFinanzasDe). Vive en
+// `compra.cantidadExcedente`, siempre una porción de `compra.cantidadReal`
+// (nunca más que eso, aunque alguien haya escrito un número mayor a mano).
+export function cantidadExcedenteCompra(compra) {
+  if (!compra) return 0;
+  var cantidadReal = num(compra.cantidadReal);
+  if (!cantidadReal) return 0;
+  var excedente = num(compra.cantidadExcedente);
+  if (excedente <= 0) return 0;
+  return Math.min(excedente, cantidadReal);
+}
+// Costo del excedente, al mismo costo unitario real de la compra (costoReal
+// ÷ cantidadReal) — nunca al estimado, porque es plata de la MISMA factura.
+export function costoExcedenteCompra(compra) {
+  var cantidadReal = num(compra && compra.cantidadReal);
+  var excedente = cantidadExcedenteCompra(compra);
+  if (!cantidadReal || !excedente) return 0;
+  var costoUnitario = num(compra.costoReal) / cantidadReal;
+  return costoUnitario * excedente;
+}
+// Lo que de verdad le corresponde al PEDIDO de una compra registrada,
+// descontando el excedente que se separó como compra de insumo aparte. Esta
+// es la única puerta por la que "costo real de una compra" debe leerse de
+// acá en adelante (calcCotGastosReales, calcResumenCompras,
+// sincronizarComprasFinanzasDe) — nunca `compra.costoReal` directo, que es
+// el bruto de toda la factura.
+export function costoRealPedido(compra) {
+  return num(compra && compra.costoReal) - costoExcedenteCompra(compra);
+}
+export function cantidadRealPedido(compra) {
+  return num(compra && compra.cantidadReal) - cantidadExcedenteCompra(compra);
+}
+
 // Estado de una compra: "no" (nada registrado), "si" (se pagó de verdad y
 // aparte — genera movimiento en Finanzas) o "servicio" (mano de obra propia,
 // ej. corte/confección hechos en el taller: cuenta como costo real porque de
@@ -2153,7 +2205,10 @@ export function calcCotGastosReales(cot) {
     // mano, una forma confusa de decir "no lo compré").
     var costoEscrito = c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
     if (!costoEscrito) return a;
-    return a + (num(c.costoReal) - linea.costoTotal);
+    // costoRealPedido, no c.costoReal a secas: si se compró de más y esa
+    // parte se separó como excedente (compra de insumo aparte), esa parte
+    // no es sobrecosto de ESTE pedido — ver cantidadExcedenteCompra.
+    return a + (costoRealPedido(c) - linea.costoTotal);
   }, 0);
   var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
   return deCompras + deGastos;
@@ -2167,12 +2222,12 @@ export function calcCotGastosReales(cot) {
 // distinto para la caja del taller.
 export function calcResumenCompras(cot) {
   var lineas = calcListaCompras(cot);
-  var acc = { total: lineas.length, compradas: 0, servicio: 0, ahorro: 0, estimado: 0, real: 0, realServicio: 0, ahorrado: 0 };
+  var acc = { total: lineas.length, compradas: 0, servicio: 0, ahorro: 0, estimado: 0, real: 0, realServicio: 0, ahorrado: 0, excedente: 0 };
   lineas.forEach(function (l) {
     acc.estimado += num(l.costoTotal);
     var c = compraDeLinea(cot, l.clave);
     var estado = estadoLineaCompra(cot, l);
-    if (estado === "si") { acc.compradas++; acc.real += num(c.costoReal); }
+    if (estado === "si") { acc.compradas++; acc.real += costoRealPedido(c); acc.excedente += costoExcedenteCompra(c); }
     else if (estado === "servicio") {
       acc.servicio++;
       // Ojo con "||": si de verdad se registró costoReal = 0 (se corrigió una

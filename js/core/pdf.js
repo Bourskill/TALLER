@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -978,12 +978,18 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // "(estimado)": el usuario la pidió sin ese paréntesis.
           var estado = estadoLineaCompra(cot, c);
           var hayCantReal = compra.cantidadReal !== undefined && compra.cantidadReal !== "" && compra.cantidadReal !== null;
+          // Si se compró de más y se separó como excedente (compra de
+          // insumo aparte, ver cantidadExcedenteCompra), acá se muestra
+          // solo lo que le corresponde a ESTE pedido, con una nota — nunca
+          // el bruto de la factura, que inflaría "cuánto se usó aquí".
+          var excCant = cantidadExcedenteCompra(compra);
+          var notaExc = excCant > 0 ? " (+" + numFmt(excCant) + (c.unidad ? " " + c.unidad : "") + " excedente)" : "";
           // "Ahorro" no pide cantidad ni costo (por definición es $0, ver
           // renderFilaCompra en modules/cotizaciones.js) — se muestra "—"
           // igual que un servicio, no "0 MT" (que se leería como un dato
           // real escrito, no como "no hizo falta").
           var cantReal = (c.esServicio || estado === "ahorro") ? "—" :
-            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst);
+            (hayCantReal ? numFmt(cantidadRealPedido(compra)) + (c.unidad ? " " + c.unidad : "") + notaExc : cantEst);
           // Una línea de servicio SIN costoReal escrito (nadie la tocó
           // todavía) igual cuenta como costo real en el resumen en pantalla
           // (ver calcResumenCompras) — acá se muestra igual, con el
@@ -991,7 +997,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // hay que apartar.
           var costoRealTxt = "—";
           if (estado === "si" && num(compra.costoReal)) {
-            costoRealTxt = money(compra.costoReal);
+            var excCosto = costoExcedenteCompra(compra);
+            costoRealTxt = money(costoRealPedido(compra)) + (excCosto > 0 ? " (+" + money(excCosto) + " excedente)" : "");
           } else if (estado === "servicio") {
             var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
             costoRealTxt = money(hayCostoReal ? compra.costoReal : c.costoTotal) + (hayCostoReal ? " (servicio)" : " (servicio, estimado)");

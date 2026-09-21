@@ -111,6 +111,9 @@ function renderFilaGrupoCompraConjunta(g, d) {
   html += '<div class="form-grid">' +
     '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" placeholder="' + num(g.totalCantidadEstimada).toFixed(2) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
     '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
+    '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
+    renderHelp("Cuánto de lo comprado sobra para otro pedido (mínimo del proveedor, conviene comprar de más) — se reparte igual que el resto entre estos pedidos, pero cada parte se registra como una compra de insumo aparte, sin contar como costo ni sobrecosto de ninguno de ellos.") +
+    '</label><input type="number" class="mini-input" placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
     '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
     "</div>";
 
@@ -119,8 +122,13 @@ function renderFilaGrupoCompraConjunta(g, d) {
     var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
     var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
     var costos = repartirProporcional(costoTotal, pesos, 0);
+    var cantidadExcedente = num(d.cantidadExcedente);
+    var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, 2) : null;
     html += '<div class="section-sub" style="margin-top:8px;">Se reparte: ' +
-      g.participantes.map(function (p, i) { return esc(p.etiqueta) + " → " + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + " · " + fmt(costos[i]); }).join(" · ") +
+      g.participantes.map(function (p, i) {
+        return esc(p.etiqueta) + " → " + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + " · " + fmt(costos[i]) +
+          (excedentes ? " (" + excedentes[i].toFixed(2) + " " + esc(g.unidad || "") + " excedente)" : "");
+      }).join(" · ") +
       "</div>";
     html += '<div class="row-actions" style="margin-top:8px;"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
   }
@@ -688,12 +696,20 @@ export var actions = {
     var pesos = grupo.participantes.map(function (p) { return p.cantidadEstimada; });
     var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
     var costos = repartirProporcional(costoTotal, pesos, 0);
+    // Excedente (compra de insumo aparte): se reparte con el MISMO criterio
+    // que el resto — a prorrata de lo que cada pedido necesitaba — pero cada
+    // parte queda marcada aparte (cantidadExcedente) para que no cuente
+    // como costo/sobrecosto de ese pedido. Mismo mecanismo exacto que una
+    // compra individual (ver sincronizarComprasFinanzasDe), nada especial
+    // por tratarse de varios pedidos a la vez.
+    var cantidadExcedenteTotal = num(draft.cantidadExcedente);
+    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, 2) : null;
     var grupoId = uid(), fecha = todayStr();
     var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
     var proveedorId = draft.proveedorId || "";
     var reparto = {};
     grupo.participantes.forEach(function (p, i) {
-      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i] };
+      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0 };
     });
 
     var afectadas = 0;
@@ -703,10 +719,11 @@ export var actions = {
       var compras = (c.compras || []).slice();
       var idx = -1;
       compras.forEach(function (x, j) { if (x.clave === clave) idx = j; });
-      var base = idx >= 0 ? compras[idx] : { clave: clave, observaciones: "", txId: "" };
+      var base = idx >= 0 ? compras[idx] : { clave: clave, observaciones: "", txId: "", excedenteTxId: "" };
       var actualizada = Object.assign({}, base, {
         clave: clave, estado: "si",
         cantidadReal: reparto[c.id].cantidadReal, costoReal: reparto[c.id].costoReal,
+        cantidadExcedente: reparto[c.id].cantidadExcedente,
         proveedorId: proveedorId || base.proveedorId || "",
         fecha: base.fecha || fecha,
         compartida: { grupoId: grupoId, fecha: fecha, etiquetas: etiquetas }

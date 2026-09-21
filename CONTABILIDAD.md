@@ -1037,6 +1037,102 @@ plantillas.js y `calcTotalesProducto` en core/calc.js).
 
 ---
 
+### 🟡 Hallazgo #29 — comprar más insumo del que un pedido necesita (mínimo del proveedor, conviene comprar de más) se contaba TODO como costo/sobrecosto del pedido. ✅ IMPLEMENTADO (feature nueva, sobre una idea del usuario)
+
+Planteado por el usuario 2026-09-21, no como un bug sino como una
+situación sin modelar: "muchas veces compro más insumos de los
+necesarios... porque el proveedor vende en cantidades mínimas, porque
+quiero dejar inventario disponible... o simplemente porque conviene
+comprar un poco de más". Antes de este cambio, `compra.cantidadReal`/
+`costoReal` (Compras del pedido) se leían tal cual como "el costo real de
+ESTE pedido" en todos lados (`calcCotGastosReales`,
+`calcResumenCompras`, el movimiento de Finanzas que genera
+`sincronizarComprasFinanzasDe`) — comprar 15 necesitando 10 inflaba el
+costo real, el sobrecosto y el gasto en Finanzas del pedido con plata que
+en realidad era material disponible para otro pedido, no un sobrecosto
+de este.
+
+**Por qué NO se modeló como inventario:** la primera propuesta fue un
+sistema de inventario/saldo de sobrantes por insumo — el usuario lo
+rechazó explícito: "en vez de que pase a un inventario como tal que pase
+a una simple compra de insumo". La app ya tiene, desde antes, un
+mecanismo para exactamente esto: el checkbox "Es insumo" del formulario
+de Gasto en Finanzas (`esInsumo`, con `insumoNombre`/`cantidad`/
+`proveedorId`), que registra una compra de insumo suelta, sin pedido —
+lo que el usuario ya usa a mano cuando compra algo sin un pedido
+puntual en mente. El fix reusa ESE mecanismo en vez de crear un concepto
+nuevo de inventario (ver [[reutilizar-antes-de-crear]] en memoria).
+
+**Vínculo con el costo real, no una foto fija:** la segunda vuelta del
+diseño fue del usuario también — pidió que si más tarde se corrige
+cuánto se usó de verdad en el pedido (ej. por daño/desperdicio: se
+creía que sobraban 5, pero 2 se dañaron y tocó usarlos), el excedente ya
+registrado se AJUSTE solo, no que haya que editar dos sitios sueltos.
+Por eso el excedente no es un número fijo calculado una sola vez, sino
+un campo editable (`compra.cantidadExcedente`) que se vuelve a aplicar
+cada vez que se sincroniza — y el movimiento de Finanzas del excedente
+se ACTUALIZA (mismo id vía `excedenteTxId`), nunca se duplica.
+
+**Fix — nuevos campos en `compra` (`cot.compras[]`):**
+- `cantidadExcedente`: cuánto de lo comprado (`cantidadReal`) se separa
+  como "compra de insumo" aparte. Se sugiere solo al escribir la
+  cantidad total (`cantidadReal − linea.cantidadFisica`, si es
+  positivo), pero es editable — nunca pisa un valor que el usuario ya
+  haya escrito a mano, ni siquiera un 0 explícito (todo se usó en el
+  pedido).
+- `excedenteTxId`: el movimiento de Finanzas que representa ese
+  excedente — mismo patrón que `txId`, pero un movimiento aparte,
+  independiente del costo del pedido.
+
+**Nuevos helpers (core/calc.js), la única puerta de ahora en adelante
+para leer "cuánto le corresponde al pedido" de una compra:**
+`cantidadExcedenteCompra`, `costoExcedenteCompra` (al mismo costo
+unitario real de la factura, costoReal ÷ cantidadReal — nunca al
+estimado), `costoRealPedido` y `cantidadRealPedido` (el neto,
+descontado el excedente). `calcCotGastosReales`, `calcResumenCompras` y
+`sincronizarComprasFinanzasDe` (cotizaciones.js) se migraron a usar
+estos helpers en vez de leer `compra.costoReal`/`cantidadReal`
+directo — el mismo criterio de "una sola fuente por fórmula" de
+siempre (ver [[rigor_matematico_dinero]]).
+
+**Dos movimientos independientes en Finanzas, no uno solo:**
+`sincronizarComprasFinanzasDe` ahora gestiona el `txId` de siempre (el
+costo NETO del pedido) y, aparte, el `excedenteTxId` (el excedente,
+`esInsumo: "1"`, sin contar como costo de ningún pedido). Se evalúan
+por separado a propósito: si TODO lo comprado resultó excedente (el
+neto del pedido cae a $0), igual se registra el excedente completo — no
+uno gatea al otro.
+
+**"Deberían borrarse juntos":** corrección explícita del usuario sobre
+mi primera propuesta (que dejaba el excedente huérfano si se borraba la
+compra). Al desmarcar una compra o borrar su cotización, el
+`excedenteTxId` se retira exactamente igual que el `txId` —
+`movimientosGeneradosPorCotizacion` (la función que usa "eliminar
+cotización" para no dejar movimientos sueltos) reconoce los dos ids.
+También se agregó `origenCompraExcedenteClave` a `MARCAS_ORIGEN_SISTEMA`
+para que ese movimiento tampoco se pueda borrar suelto desde Finanzas
+sin pasar por la compra que lo originó.
+
+**Compras conjuntas (Finanzas):** el usuario fue explícito en que el
+mecanismo no debía cambiar por tratarse de varios pedidos: "tienes que
+vincularlo a los 2 pedidos, ya que manejan el mismo insumo, no cambia
+nada, solo se agrega otro pedido, pero el funcionamiento es el mismo".
+El formulario de grupo ganó un campo "Cantidad para compra de insumo
+(excedente)" que se reparte con el MISMO `repartirProporcional` que ya
+reparte cantidad y costo — cada pedido participante termina con su
+PROPIO `cantidadExcedente`/`excedenteTxId`, vinculado a su propia
+cotización, nunca un movimiento suelto sin dueño.
+
+Verificado end-to-end (sugerencia automática del excedente; costo/
+cantidad neta correctos sin variación de precio; sobrecosto real
+correcto cuando el excedente se corrige a la baja; el movimiento de
+excedente se actualiza, nunca se duplica; los dos movimientos se
+reconocen juntos para borrarse con la cotización; desmarcar una compra
+retira los dos; el reparto proporcional en Compras conjuntas) antes de
+avisarle al usuario.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

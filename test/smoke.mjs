@@ -5253,6 +5253,159 @@ assert(state.cotizaciones[0].referencias[0].insumos[0].cantidad === 3, "...así 
 
 state.cotizaciones = cotizacionesPreviasMigTelaTest;
 
+// --- Excedente de una compra: a veces se compra más de lo necesario a
+// propósito (mínimo del proveedor, conviene comprar de más) y esa parte NO
+// es costo ni sobrecosto del pedido — es una compra de insumo aparte. El
+// usuario lo pidió con un ejemplo puntual: comprar 15 necesitando 10, y que
+// si luego resulta que en realidad se usaron 12 (2 de más por un error), al
+// corregirlo el excedente se ajuste solo (de 5 a 3) y el movimiento de
+// Finanzas ya registrado se actualice, no se duplique. También pidió
+// explícito que, al estar vinculados, los dos movimientos (pedido y
+// excedente) se borren juntos. Ver costoRealPedido/costoExcedenteCompra en
+// core/calc.js y conversación con el usuario 2026-09-21.
+const pedidosPreviosExcTest = state.pedidos, cotizacionesPreviasExcTest = state.cotizaciones, txPreviosExcTest = state.tx;
+const cotExcTest = {
+  id: "cot-exc-test", clienteId: "", cliente: "Cliente Excedente", descripcion: "Prueba excedente", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-exc-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cexc1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-exc-test", nombre: "Tela por unidad", costo: 100000, cantidad: 10, unidad: "m", proveedorId: "", esServicio: false }],
+  compras: []
+};
+state.pedidos = [{
+  id: "ped-exc-test", numeroOp: "OP-EXC", cliente: "Cliente Excedente", descripcion: "Prueba",
+  cantidad: "1", total: 200000, costo: 100000, abono: 200000, estado: "entregado", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-exc-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotExcTest];
+state.tx = [];
+
+const { costoRealPedido: costoRealPedidoTest, costoExcedenteCompra: costoExcedenteCompraTest, cantidadRealPedido: cantidadRealPedidoTest, calcCotGastosReales: calcGastosExcTest, calcResumenCompras: calcResumenExcTest, movimientosGeneradosPorCotizacion: movGenExcTest } = await import("../js/core/calc.js");
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-exc-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-exc-test"][data-val="produccion"]');
+const claveExcTest = "global|cg-exc-test";
+const selEstadoExcTest = '[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="estado"]';
+setChange(selEstadoExcTest, "si");
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="cantidadReal"]', "15");
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="costoReal"]', "150000");
+
+var compraExcTest = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0].compras.filter(function (c) { return c.clave === claveExcTest; })[0];
+assert(compraExcTest.cantidadExcedente === 5, "al comprar 15 necesitando 10, se sugiere solo el excedente (5) al escribir la cantidad — el usuario no tiene que calcularlo a mano");
+assert(costoExcedenteCompraTest(compraExcTest) === 50000, "el excedente cuesta al mismo costo unitario real de la factura (150.000 ÷ 15 × 5 = 50.000)");
+assert(costoRealPedidoTest(compraExcTest) === 100000, "lo que le queda al pedido son los otros 10: 150.000 − 50.000 = 100.000, NUNCA el bruto de la factura");
+assert(cantidadRealPedidoTest(compraExcTest) === 10, "...y la cantidad neta del pedido vuelve a ser justo la que necesitaba (10), no las 15 compradas");
+
+var cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
+assert(calcGastosExcTest(cotExcTestObj) === 0, "sin variación de precio real (mismo $10.000/unidad estimado y pagado), el sobrecosto del pedido es $0 — el excedente NO cuenta como sobrecosto");
+var resumenExcTest = calcResumenExcTest(cotExcTestObj);
+assert(resumenExcTest.real === 100000, "calcResumenCompras también usa el neto del pedido, no el bruto de la factura");
+assert(resumenExcTest.excedente === 50000, "...y expone aparte cuánto se separó como excedente (compra de insumo)");
+
+var tagsExcTest = Array.prototype.filter.call(document.querySelectorAll(".tag"), function (t) { return t.textContent.indexOf("excedente") !== -1; });
+assert(tagsExcTest.length === 1, "la fila muestra un tag sutil '📦 excedente' sin tener que abrir el detalle");
+
+click('[data-action="toggle-compra-detalle"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"]');
+var inputExcedenteTest = document.querySelector('input[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="cantidadExcedente"]');
+assert(!!inputExcedenteTest, "el detalle de la compra tiene el campo para ajustar el excedente");
+assert(inputExcedenteTest.value === "5", "...precargado con el excedente ya sugerido/guardado");
+
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
+cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
+compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
+assert(!!compraExcTest.txId, "crea el movimiento del pedido");
+assert(!!compraExcTest.excedenteTxId, "...Y crea aparte el movimiento del excedente (compra de insumo)");
+var txPedidoExcTest = state.tx.filter(function (t) { return t.id === compraExcTest.txId; })[0];
+var txExcedenteTest = state.tx.filter(function (t) { return t.id === compraExcTest.excedenteTxId; })[0];
+assert(txPedidoExcTest.monto === 100000, "el movimiento del pedido queda con el neto (100.000)");
+assert(txExcedenteTest.monto === 50000 && txExcedenteTest.cantidad === 5, "el movimiento del excedente queda con su propio monto y cantidad (50.000, 5)");
+assert(txExcedenteTest.esInsumo === "1" && txExcedenteTest.insumoNombre === "Tela por unidad", "el movimiento del excedente es una compra de insumo normal, reconocible igual que cualquier otra (\"Es insumo\")");
+assert(txExcedenteTest.origenCompraExcedenteClave === claveExcTest, "...vinculado a esta misma compra");
+assert(txPedidoExcTest.id !== txExcedenteTest.id, "son dos movimientos DISTINTOS en Finanzas, no uno repartido a mano");
+
+// -- corrección: en producción se usaron 12, no 10 (2 del "excedente" se
+// gastaron de más por un error) — el usuario ajusta el excedente de 5 a 3 --
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="cantidadExcedente"]', "3");
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
+cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
+compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
+assert(costoRealPedidoTest(compraExcTest) === 120000, "al corregir el excedente de 5 a 3, el costo del pedido sube solo: 150.000 − 30.000 = 120.000");
+assert(calcGastosExcTest(cotExcTestObj) === 20000, "...y ahora SÍ hay sobrecosto real: 120.000 − 100.000 = 20.000, justo los 2 extra a $10.000");
+var txExcedenteTest2 = state.tx.filter(function (t) { return t.id === compraExcTest.excedenteTxId; })[0];
+assert(txExcedenteTest2.id === txExcedenteTest.id, "el movimiento del excedente se ACTUALIZA (mismo id), no se duplica");
+assert(txExcedenteTest2.monto === 30000 && txExcedenteTest2.cantidad === 3, "...con la cifra corregida (30.000, 3 unidades)");
+var txPedidoExcTest2 = state.tx.filter(function (t) { return t.id === compraExcTest.txId; })[0];
+assert(txPedidoExcTest2.id === txPedidoExcTest.id && txPedidoExcTest2.monto === 120000, "el movimiento del pedido también se actualiza solo (mismo id, 120.000)");
+
+var movsExcTest = movGenExcTest(cotExcTestObj);
+assert(movsExcTest.some(function (t) { return t.id === compraExcTest.txId; }) && movsExcTest.some(function (t) { return t.id === compraExcTest.excedenteTxId; }), "al eliminar la cotización, los DOS movimientos (pedido y excedente) se reconocen como generados por ella — se borran juntos, tal como lo pidió el usuario");
+
+// -- desmarcar la compra retira los DOS movimientos, no solo el del pedido --
+setChange(selEstadoExcTest, "no");
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
+cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
+compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
+assert(!state.tx.some(function (t) { return t.id === txPedidoExcTest.id; }) && !state.tx.some(function (t) { return t.id === txExcedenteTest.id; }), "al desmarcar la compra, los DOS movimientos se retiran juntos de Finanzas");
+assert(!compraExcTest.txId && !compraExcTest.excedenteTxId, "...y la compra queda sin ninguno de los dos ids vinculados");
+
+state.pedidos = pedidosPreviosExcTest; state.cotizaciones = cotizacionesPreviasExcTest; state.tx = txPreviosExcTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// --- El mismo excedente, pero repartido entre varios pedidos en "Compras
+// conjuntas" — el usuario fue explícito: "tienes que vincularlo a los 2
+// pedidos, ya que manejan el mismo insumo, no cambia nada, solo se agrega
+// otro pedido, pero el funcionamiento es el mismo". Se reparte con el
+// MISMO repartirProporcional que ya reparte cantidad/costo, y cada pedido
+// termina con su PROPIA compra de insumo aparte, vinculada a SU cotización
+// — nunca una sola suelta sin dueño. Reusa cotConTela/pedidoConjuntaTest/
+// calcGruposTest ya definidas más arriba, en el bloque de Compras
+// conjuntas.
+const pedidosPreviosConjExcTest = state.pedidos, cotizacionesPreviasConjExcTest = state.cotizaciones, txPreviosConjExcTest = state.tx;
+const cotConjExcA = cotConTela("cot-conjexcA-test", "ped-conjexcA-test", 10);
+const cotConjExcB = cotConTela("cot-conjexcB-test", "ped-conjexcB-test", 20);
+const pedConjExcA = pedidoConjuntaTest("ped-conjexcA-test", "cot-conjexcA-test", "OP-CONJEXCA");
+const pedConjExcB = pedidoConjuntaTest("ped-conjexcB-test", "cot-conjexcB-test", "OP-CONJEXCB");
+state.pedidos = [pedConjExcA, pedConjExcB];
+state.cotizaciones = [cotConjExcA, cotConjExcB];
+state.tx = [];
+
+const grupoConjExcTest = calcGruposTest([pedConjExcA.id, pedConjExcB.id])[0];
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcA.id + '"]');
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcB.id + '"]');
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadTotal"]', "36");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="costoTotal"]', "108000");
+var campoExcedenteConjTest = document.querySelector('input[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]');
+assert(!!campoExcedenteConjTest, "el formulario de Compras conjuntas también tiene el campo de excedente");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]', "6");
+var previewExcConjTest = document.getElementById("app").textContent;
+assert(previewExcConjTest.indexOf("excedente") !== -1, "el reparto en pantalla ya muestra cuánto excedente le toca a cada pedido antes de confirmar");
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoConjExcTest.clave + '"]');
+
+var cotConjExcATrasTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcA-test"; })[0];
+var cotConjExcBTrasTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcB-test"; })[0];
+var compraConjExcA = cotConjExcATrasTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+var compraConjExcB = cotConjExcBTrasTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+
+assert(compraConjExcA.cantidadReal === 12 && compraConjExcB.cantidadReal === 24, "el total comprado (36) se reparte a prorrata igual que siempre: 12 y 24");
+assert(compraConjExcA.cantidadExcedente === 2 && compraConjExcB.cantidadExcedente === 4, "el excedente (6) se reparte con el MISMO criterio, cada uno a su propia compra — no uno solo sin dueño");
+assert(cantidadRealPedidoTest(compraConjExcA) === 10 && cantidadRealPedidoTest(compraConjExcB) === 20, "descontado el excedente, a cada pedido le queda justo lo que necesitaba (10 y 20)");
+assert(costoRealPedidoTest(compraConjExcA) === 30000 && costoRealPedidoTest(compraConjExcB) === 60000, "...con su costo neto correspondiente, sin variación de precio (30.000 y 60.000, igual al estimado de cada uno)");
+assert(calcGastosExcTest(cotConjExcATrasTest) === 0 && calcGastosExcTest(cotConjExcBTrasTest) === 0, "ningún pedido queda con sobrecosto: el excedente absorbió exactamente lo comprado de más");
+
+assert(!!compraConjExcA.excedenteTxId && !!compraConjExcB.excedenteTxId, "cada pedido queda con su PROPIO movimiento de excedente, vinculado a su propia compra");
+var txExcConjA = state.tx.filter(function (t) { return t.id === compraConjExcA.excedenteTxId; })[0];
+var txExcConjB = state.tx.filter(function (t) { return t.id === compraConjExcB.excedenteTxId; })[0];
+assert(txExcConjA.monto === 6000 && txExcConjB.monto === 12000, "cada movimiento de excedente tiene el monto que le tocó a SU pedido (6.000 y 12.000)");
+assert(txExcConjA.cotizacionId === "cot-conjexcA-test" && txExcConjB.cotizacionId === "cot-conjexcB-test", "...ligado cada uno a su propia cotización, igual que el movimiento principal");
+assert(txExcConjA.id !== compraConjExcA.txId && txExcConjB.id !== compraConjExcB.txId, "el movimiento de excedente es DISTINTO del movimiento del pedido en cada caso — dos movimientos, no uno mezclado");
+
+state.pedidos = pedidosPreviosConjExcTest; state.cotizaciones = cotizacionesPreviasConjExcTest; state.tx = txPreviosConjExcTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

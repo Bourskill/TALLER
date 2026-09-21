@@ -259,6 +259,38 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo octava ronda: comprar más insumo del que un pedido necesita ya no cuenta como su sobrecosto — "compra de insumo" aparte)
+
+El usuario planteó una situación sin modelar, no un bug: "muchas veces
+compro más insumos de los necesarios... porque el proveedor vende en
+cantidades mínimas... o simplemente porque conviene comprar de más".
+Antes, todo lo comprado en una línea de "Compras del pedido" se contaba
+completo como costo/sobrecosto de ESE pedido — comprar 15 necesitando 10
+inflaba el sobrecosto y el gasto en Finanzas con plata que en realidad
+era material disponible para otro pedido.
+
+- **Sin inventario nuevo:** la primera propuesta fue un saldo de
+  sobrantes por insumo — el usuario la rechazó explícito: "que pase a
+  una simple compra de insumo" en vez de un inventario como tal. El fix
+  reusa el checkbox "Es insumo" que ya existe en el formulario de Gasto
+  de Finanzas, en vez de crear un concepto nuevo.
+- **Fix:** nuevo campo `compra.cantidadExcedente` (se sugiere solo al
+  escribir la cantidad comprada, editable) separa cuánto de lo comprado
+  no es costo de este pedido. Nuevos helpers en core/calc.js
+  (`costoRealPedido`, `cantidadRealPedido`, `costoExcedenteCompra`) son
+  ahora la única puerta para leer "cuánto le corresponde al pedido" de
+  una compra — `calcCotGastosReales`, `calcResumenCompras` y
+  `sincronizarComprasFinanzasDe` se migraron a usarlos.
+- **Vínculo vivo, no una foto fija:** si después se corrige cuánto se
+  usó de verdad (ej. por daño/desperdicio), el excedente se reajusta y
+  su movimiento en Finanzas (`excedenteTxId`) se ACTUALIZA — nunca se
+  duplica. Al desmarcar la compra o borrar la cotización, los dos
+  movimientos (pedido y excedente) se retiran juntos.
+- **Compras conjuntas** ganó el mismo campo: el excedente se reparte
+  proporcional entre los pedidos participantes con el mismo
+  `repartirProporcional` de siempre — cada uno con su propio movimiento.
+- Ver CONTABILIDAD.md, "Hallazgo #29".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo séptima ronda: dos telas distintas en la misma referencia ya no "consumen" la misma cantidad)
 
 El usuario reportó: "cuando hay más de 1 tela sublimada, la cotización
