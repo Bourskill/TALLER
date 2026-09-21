@@ -804,6 +804,44 @@ el origen" (deshacer pago de deuda, comisión, gasto fijo aplicado...) —
 el tx del Colchón está protegido en `MARCAS_ORIGEN_SISTEMA` justo para
 forzar que se deshaga desde ahí. No hace falta ningún cambio.
 
+### 🔴 Hallazgo #23 — un costo real de $0 escrito a propósito no contaba como ahorro (0 es falsy). ✅ CORREGIDO
+
+Reportado en producción 2026-09-21: el usuario marcó "Domicilio" ($10.000
+estimado) y "Rib Sublimable" ($1.500 estimado) como pagados ("Sí") con
+costo real **$0** — de verdad no costaron nada esta vez — y preguntó por
+qué la Ganancia real no reflejaba ese ahorro. Con otras dos líneas de la
+misma cotización con costo real positivo (una variación de solo +$160 en
+total), la app mostraba Costo total real $44.580 (ahorro de apenas $160)
+en vez de los $33.080 que le tocaban (ahorro de $11.660: los $11.500 de
+Domicilio+Rib que de verdad no se gastaron, más la variación de $160 de
+las demás).
+
+**Causa:** `calcCotGastosReales` (core/calc.js) excluía una línea de la
+variación con `!num(c.costoReal)` — como `0` es *falsy* en JavaScript, un
+costo real escrito a propósito en $0 se trataba EXACTAMENTE igual que un
+costo real que nunca se escribió (dato viejo, de antes de que "Sí"
+autorellenara con el estimado). El primer caso es un ahorro real de 100%
+de esa línea; el segundo no es dato y debe ignorarse — la comparación
+falsy no podía distinguirlos. Mismo patrón (0 vs. "nunca se escribió") ya
+identificado y corregido en `calcResumenCompras`, en el mismo archivo,
+pero que se había quedado sin aplicar acá.
+
+**Fix:** cambiar el chequeo a explícito —
+`c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null`
+— igual que ya hace `calcResumenCompras`. Una compra vieja sin `costoReal`
+en absoluto (legado `comprado: true`, sin el campo) sigue ignorándose
+correctamente; una con `costoReal: 0` escrito ahora sí cuenta como el
+ahorro completo frente al estimado.
+
+**Por qué importa tanto:** esta es la MISMA clase de bug que ya generó
+varias rondas de esta auditoría (un valor legítimo tratado como "vacío"
+por accidente de JavaScript) — pero acá, a diferencia de los hallazgos de
+"Origen eliminado", el efecto es que la Ganancia real se queda CORTA, no
+que aparezca un aviso falso. Un usuario que confía en la cifra de Ganancia
+real para decidir precios o comisiones estaba viendo un número
+sistemáticamente más bajo de lo real cada vez que algo terminaba costando
+$0 de lo presupuestado.
+
 ---
 
 ## Próximos pasos

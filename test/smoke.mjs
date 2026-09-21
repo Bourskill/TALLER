@@ -4873,6 +4873,49 @@ state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPre
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
+// --- calcCotGastosReales: un costo real escrito A PROPÓSITO en $0 debe
+// contar como el ahorro completo frente al estimado, no ignorarse igual que
+// "nunca se escribió" — mismo error de "0 es falsy" ya corregido en
+// calcResumenCompras (más arriba en core/calc.js), pero que seguía vivo acá.
+// Reportado en producción 2026-09-21: el usuario marcó "Domicilio" y "Rib
+// Sublimable" como pagados con costo real $0 (de verdad no costaron nada) y
+// la Ganancia real no reflejaba ese ahorro — solo subía por las líneas con
+// costo real positivo, como si el $0 nunca se hubiera escrito.
+const { calcCotGastosReales: calcCeroRealTest, calcCotResultadoReal: calcResultadoCeroRealTest } = await import("../js/core/calc.js");
+const cotCeroRealTest = {
+  id: "cot-ceroreal-test", clienteId: "", cliente: "Cliente CeroReal", descripcion: "Prueba costo real cero", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "ccero1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [
+    { id: "cg-domicilio-cero-test", nombre: "Domicilio", costo: 10000, cantidad: 1, proveedorId: "", esServicio: false },
+    { id: "cg-diseno-cero-test", nombre: "Diseño", costo: 5000, cantidad: 1, proveedorId: "", esServicio: true }
+  ],
+  compras: [
+    // Se marcó "Sí" pero de verdad no costó nada (ej. domicilio gratis) —
+    // el 0 fue ESCRITO a propósito, no es un campo sin tocar.
+    { clave: "global|cg-domicilio-cero-test", estado: "si", costoReal: 0, txId: "" },
+    { clave: "global|cg-diseno-cero-test", estado: "si", costoReal: 6000, txId: "" }
+  ]
+};
+assert(calcCeroRealTest(cotCeroRealTest) === -9000, "un costo real de $0 ESCRITO a propósito cuenta como el ahorro completo frente al estimado (0 − 10.000 = −10.000), sumado a la variación de la otra línea (6.000 − 5.000 = +1.000) = −9.000 — antes el $0 se ignoraba por completo (0 es falsy) y la variación solo daba +1.000, escondiendo 10.000 de ahorro real");
+const resultadoCeroRealTest = calcResultadoCeroRealTest(cotCeroRealTest);
+assert(resultadoCeroRealTest.costoTotal === 15000 - 9000, "...y ese ahorro sí baja el Costo total REAL del panel Estimado vs. Real (estimado 15.000 − 9.000 = 6.000)");
+
+// -- pero una compra VIEJA sin costoReal (nunca se escribió, dato de antes
+// de que "Sí" autorellenara con el estimado — ver set-cot-compra en
+// modules/cotizaciones.js) sigue sin contar como dato, como siempre --
+const cotSinEscribirTest = {
+  id: "cot-sinescribir-test", clienteId: "", cliente: "Cliente Sin Escribir", descripcion: "Prueba sin escribir", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "csinesc1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-viejo-test", nombre: "Costo viejo", costo: 7000, cantidad: 1, proveedorId: "", esServicio: false }],
+  // Dato legado: "comprado" en vez de "estado", sin costoReal en absoluto.
+  compras: [{ clave: "global|cg-viejo-test", comprado: true }]
+};
+assert(calcCeroRealTest(cotSinEscribirTest) === 0, "una compra vieja marcada comprada pero SIN costoReal (nunca se escribió) sigue sin contar como ahorro de $0 — se ignora, como antes de este fix");
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

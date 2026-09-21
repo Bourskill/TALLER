@@ -2112,7 +2112,19 @@ export function calcCotGastosReales(cot) {
     // entra a la variación igual que "si" — la única diferencia entre los dos
     // es si además genera un movimiento en Finanzas (ver sincronizar-compras-
     // finanzas en modules/cotizaciones.js), no si cuenta como costo.
-    if (estadoCompra(c) === "no" || !num(c.costoReal)) return a;
+    if (estadoCompra(c) === "no") return a;
+    // Ojo con "!num(...)": 0 es falsy, así que trataba IGUAL un costo real
+    // escrito A PROPÓSITO en $0 (de verdad no costó nada — ej. un domicilio
+    // que resultó gratis) que uno que NUNCA se escribió (dato viejo, de
+    // antes de que "Sí"/"Servicio" autorellenara con el estimado, ver
+    // set-cot-compra en modules/cotizaciones.js) — el primero es un ahorro
+    // real que hay que contar, el segundo no es dato y hay que ignorarlo.
+    // Con la comparación falsy, el primer caso quedaba invisible: la
+    // ganancia real se quedaba corta exactamente en lo que esa línea sí
+    // ahorró. Mismo patrón ya corregido en calcResumenCompras (más abajo).
+    // Reportado en producción 2026-09-21.
+    var costoEscrito = c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
+    if (!costoEscrito) return a;
     var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
     // Sin `linea` (el insumo/referencia/costo global que la originó ya se
     // borró de la cotización), esta compra quedó huérfana — no es un

@@ -259,6 +259,23 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo segunda ronda: un costo real de $0 escrito a propósito no contaba como ahorro — 0 es falsy)
+
+Reportado por el usuario viendo una cotización real: marcó "Domicilio" y
+"Rib Sublimable" como pagados con costo real **$0** (de verdad no
+costaron nada esta vez) y la Ganancia real no subía lo que debía.
+
+- **Causa:** `calcCotGastosReales` (core/calc.js) usaba `!num(c.costoReal)`
+  para saber si una línea "no tenía dato" — pero `0` es *falsy* en
+  JavaScript, así que un costo real escrito a propósito en $0 se trataba
+  igual que uno que nunca se escribió, y ese ahorro completo quedaba
+  invisible en el panel "Estimado vs. Real". Mismo patrón (0 vs. "nunca se
+  escribió") ya corregido en `calcResumenCompras`, pero que seguía sin
+  aplicarse acá.
+- **Fix:** chequeo explícito (`!== "" && !== undefined && !== null`) en vez
+  de falsy, igual que `calcResumenCompras`.
+- Ver CONTABILIDAD.md, "Hallazgo #23".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo primera ronda: nueva pestaña "Compras conjuntas" en Finanzas — repartir a prorrata un insumo comprado junto para varios pedidos)
 
 Pedido del usuario: al producir varios pedidos a la vez, es común que
