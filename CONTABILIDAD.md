@@ -1547,6 +1547,57 @@ test/smoke.mjs.
 
 ---
 
+### 🟡 Hallazgo #35 — el Enlace por categoría seguía sin ser automático: cada tela había que etiquetarla individualmente. ✅ IMPLEMENTADO
+
+El mismo día, tercera vuelta sobre el Hallazgo #34, con un screenshot
+real: en una referencia con Sublimación, Confección, Corte, Hilo e
+hilaza, Empaque, Elástico, Montreal, Medias y Tela perforada, el
+usuario abrió el panel de Sublimación, marcó "Telas" en "Este insumo
+pertenece a" y también la categoría "Telas" en el panel de enlace —
+pero la suma seguía en 0. Reportó: "está seleccionada la categoria
+telas, pero no lee las telas que ya estan agregadas, no se si es que
+no me has entendido".
+
+**Causa raíz:** el Hallazgo #34 dio una forma de asignar categoría a
+UN insumo (el selector "Este insumo pertenece a…"), pero seguía
+exigiendo repetir esa asignación EN CADA insumo que se quisiera sumar
+— en el ejemplo real, Corte, Elástico y Montreal (las otras 3 telas de
+la referencia, ninguna categorizada) seguían invisibles para el enlace
+de Sublimación aunque "Telas" ya estuviera marcada ahí. El usuario
+esperaba, desde su primer mensaje de todo este hallazgo ("sublimación
+poder detectar la categoría 'tela' del insumo y automáticamente hacer
+el enlace"), que el reconocimiento fuera automático sin etiquetar cada
+tela una por una.
+
+**Corrección — `insumo.enlace.mismoTipo` (booleano):** una casilla
+NUEVA, "Todos los insumos «Tela (según consumo)» de aquí" (el nombre
+del tipo de costo se arma con `TIPOS_COSTO[insumo.tipo].label`), que
+suma automáticamente CUALQUIER insumo hermano con el MISMO `tipo` que
+el insumo enlazado — sin necesitar `categoriaId` en NINGÚN insumo.
+Importante: esto NO revive el primer intento rechazado (un desplegable
+que REEMPLAZABA categoría/insumo específico por un tipo de costo) —
+acá es una casilla ADICIONAL que se COMBINA (unión) con categorías e
+insumos específicos, que siguen existiendo para el caso más fino de
+sumar solo ALGUNAS telas. El match es por `tipo`, no por nombre: un
+insumo llamado "Tela perforada" pero con tipo "Fijo por prenda" NO se
+suma, aunque su nombre sugiera lo contrario.
+
+Se propaga igual que categorías/insumo específico: predefinible en
+Catálogo, se hereda al copiar a Plantillas/Productos/Cotizaciones
+(`nuevoInsumo`, `aplicar-plantilla`, `aplicar-producto`,
+`confirmar-insumo-picker-plantilla/producto`); al desmarcarla (sola,
+sin categorías ni insumos específicos activos) congela la última
+cantidad calculada, mismo criterio que las otras dos.
+
+Verificado reproduciendo el screenshot exacto (4 insumos tipo "tela"
+en la misma referencia, un quinto cuyo NOMBRE sugiere tela pero es de
+otro tipo) y confirmando que marcar la casilla en Sublimación suma las
+otras 3 SIN etiquetar ninguna, que se combina con insumo
+específico/categoría, que se congela al desmarcar, y que se propaga al
+copiar desde el catálogo — ver test/smoke.mjs.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

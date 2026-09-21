@@ -259,6 +259,29 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo sexta ronda: casilla "Todos los insumos de este tipo" — el Enlace por categoría exigía etiquetar cada tela una por una)
+
+Tercera vuelta el mismo día, con un screenshot real: 4 telas en la
+misma referencia (Sublimación, Corte, Elástico, Montreal), "Telas"
+marcada en el panel de Sublimación, y la suma seguía en 0. "está
+seleccionada la categoria telas, pero no lee las telas que ya estan
+agregadas".
+
+- **Causa raíz:** la ronda anterior daba una forma de asignar
+  categoría a UN insumo, pero seguía exigiendo repetirla en CADA tela
+  de la referencia — el usuario esperaba, desde el primer pedido de
+  esta función, reconocimiento automático sin etiquetar una por una.
+- Nueva casilla **"Todos los insumos «Tela (según consumo)» de aquí"**
+  (`insumo.enlace.mismoTipo`) dentro del panel de Enlace: suma
+  automáticamente cualquier insumo hermano con el MISMO tipo de costo,
+  sin necesitar categoría en ninguno. Se COMBINA con categorías e
+  insumos específicos (no los reemplaza) — sigue existiendo la opción
+  fina de sumar solo algunas telas. El match es por TIPO, no por
+  nombre: "Tela perforada" con tipo "Fijo por prenda" no se suma.
+- Se predefine en Catálogo y se hereda igual que categorías/insumo
+  específico al copiar a Plantillas/Productos/Cotizaciones.
+- Ver CONTABILIDAD.md, "Hallazgo #35".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo quinta ronda: un insumo escrito directo en la cotización no tenía forma de recibir una categoría — el Enlace automático seguía sin funcionar)
 
 El mismo día de la ronda anterior, segunda vuelta: "en el desplegable

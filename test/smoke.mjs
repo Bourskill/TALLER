@@ -6075,6 +6075,175 @@ state.productos = productosPreviosAutoTest; state.catalogoCategorias = catCatego
 state.productoEditando = ""; state.productosVista = "nueva";
 state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 
+// ---------------------------------------------------------------------------
+// Tercera vuelta, EL MISMO día: "está seleccionada la categoria telas, pero
+// no lee las telas que ya estan agregadas". Screenshot real: Sublimación,
+// Corte, Elástico y Montreal son tipo "Tela (según consumo)", ninguno
+// tenía categoriaId — el usuario esperaba que marcar "Telas" en Sublimación
+// reconociera esas 3 automáticamente, sin etiquetar cada una a mano.
+//
+// `enlace.mismoTipo` — casilla "Todos los insumos <tipo> de aquí": suma
+// automáticamente cualquier hermano con el MISMO `tipo` (ver
+// cantidadEfectivaInsumo en core/calc.js), sin necesitar categoriaId en
+// NINGÚN insumo. Se combina con categorías/insumo específico, no las
+// reemplaza — sigue existiendo la opción más fina para sumar solo ALGUNAS
+// telas si hace falta.
+// ---------------------------------------------------------------------------
+
+// -- reproducción exacta del screenshot: 4 insumos tipo "tela" en la misma
+// referencia, más un insumo cuyo NOMBRE sugiere tela pero es tipo distinto
+// (para probar que el match es por TIPO, no por nombre) --
+const pedidosPreviosMismoTipoTest = state.pedidos, cotizacionesPreviasMismoTipoTest = state.cotizaciones;
+state.cotizaciones = [{
+  id: "cot-mismotipo-test", clienteId: "", cliente: "Cliente MismoTipo", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cmismotipo1",
+  referencias: [{
+    id: "ref-mismotipo-test", nombre: "Ref mismo tipo", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-sub-mismotipo", nombre: "Sublimación", unidad: "MT", costo: 7000, tipo: "tela", cantidad: 1, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-confeccion-mismotipo", nombre: "Confección", unidad: "UND", costo: 6000, tipo: "por_prenda", cantidad: 1, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-corte-mismotipo", nombre: "Corte", unidad: "MT", costo: 3500, tipo: "tela", cantidad: 2, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-elastico-mismotipo", nombre: "Elastico", unidad: "MT", costo: 1200, tipo: "tela", cantidad: 3, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-montreal-mismotipo", nombre: "Montreal", unidad: "MT", costo: 8400, tipo: "tela", cantidad: 4, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } },
+      { id: "ins-telaperf-mismotipo", nombre: "Tela perforada", unidad: "UND", costo: 7200, tipo: "por_prenda", cantidad: 99, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+var refMismoTipoTest = state.cotizaciones[0].referencias[0];
+var subMismoTipoTest = refMismoTipoTest.insumos[0];
+assert(cantEfectivaTest(subMismoTipoTest, refMismoTipoTest) === 1, "todavía sin marcar nada, Sublimación solo devuelve su cantidad escrita a mano (1)");
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-mismotipo-test"]');
+click('[data-action="toggle-enlace-panel"][data-ins="ins-sub-mismotipo"]');
+var checkMismoTipoTest = document.querySelector('input[data-action="toggle-ins-enlace-mismotipo"][data-ins="ins-sub-mismotipo"]');
+assert(!!checkMismoTipoTest, "el panel de Sublimación tiene la casilla NUEVA \"Todos los insumos... de aquí\"");
+assert(checkMismoTipoTest.parentElement.textContent.indexOf("Tela (según consumo)") !== -1, "...con el nombre del tipo de costo de ESTE insumo (\"Tela (según consumo)\", el mismo que tiene Sublimación)");
+assert(!checkMismoTipoTest.checked, "nace sin marcar");
+
+click('[data-action="toggle-ins-enlace-mismotipo"][data-ins="ins-sub-mismotipo"]');
+refMismoTipoTest = state.cotizaciones[0].referencias[0];
+subMismoTipoTest = refMismoTipoTest.insumos.filter(function (i) { return i.id === "ins-sub-mismotipo"; })[0];
+assert(subMismoTipoTest.enlace.mismoTipo === true, "marcar la casilla activa enlace.mismoTipo");
+assert(cantEfectivaTest(subMismoTipoTest, refMismoTipoTest) === 9, "sin tocar NINGUNA categoría ni insumo específico, Sublimación ya suma las otras 3 telas (Corte 2 + Elástico 3 + Montreal 4 = 9) — automático, sin etiquetar nada");
+assert(cantEfectivaTest(subMismoTipoTest, refMismoTipoTest) !== 108, "\"Tela perforada\" (cantidad 99, tipo \"Fijo por prenda\") NO se suma aunque su NOMBRE sugiera que es tela — el match es por TIPO, no por nombre (2+3+4+99=108, distinto de 9)");
+var celdaSubMismoTipoTest = document.querySelector('[data-ins-row][data-ins="ins-sub-mismotipo"]').textContent;
+assert(celdaSubMismoTipoTest.indexOf("🔗 9") !== -1, "la fila de Sublimación en pantalla ya muestra 🔗 9");
+
+// -- desmarcarla congela el último valor (9), mismo criterio que categoría/insumo específico --
+click('[data-action="toggle-ins-enlace-mismotipo"][data-ins="ins-sub-mismotipo"]');
+var subMismoTipoDesmarcadoTest = state.cotizaciones[0].referencias[0].insumos.filter(function (i) { return i.id === "ins-sub-mismotipo"; })[0];
+assert(subMismoTipoDesmarcadoTest.enlace.mismoTipo === false, "desmarcarla apaga enlace.mismoTipo");
+assert(subMismoTipoDesmarcadoTest.cantidad === 9, "...y CONGELA la cantidad en el último valor calculado (9), no salta al valor viejo (1)");
+assert(!!document.querySelector('input[data-ins="ins-sub-mismotipo"][data-campo="cantidad"]'), "y \"Cant.\" vuelve a ser un campo editable normal");
+
+state.pedidos = pedidosPreviosMismoTipoTest; state.cotizaciones = cotizacionesPreviasMismoTipoTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// -- se combina con categoría/insumo específico (unión, no exclusivo) --
+var contMismoTipoCombinadoTest = {
+  insumos: [
+    { id: "ct1", tipo: "tela", categoriaId: "cat-x", cantidad: 5, nombre: "Tela X" },
+    { id: "ct2", tipo: "tela", categoriaId: "", cantidad: 2, nombre: "Tela sin categoría" },
+    { id: "ct3", tipo: "por_prenda", categoriaId: "", cantidad: 100, nombre: "Insumo específico elegido" },
+    { id: "ct4", tipo: "por_prenda", categoriaId: "", cantidad: 999, nombre: "Otro por_prenda cualquiera" },
+    { id: "subct", tipo: "tela", categoriaId: "", cantidad: 1, nombre: "Sublimación combinada", enlace: { categorias: [], insumos: ["insumo específico elegido"], mismoTipo: true } }
+  ]
+};
+assert(cantEfectivaTest(contMismoTipoCombinadoTest.insumos[4], contMismoTipoCombinadoTest) === 5 + 2 + 100, "mismoTipo (5+2, las dos telas) se COMBINA con el insumo específico elegido (100) = 107 — no son modos exclusivos, igual que categoría + insumo específico");
+
+// -- Catálogo: la cuenta de "reglas" del botón incluye mismoTipo --
+const catalogoPrevioMismoTipoTest = state.catalogoInsumos;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-mismotipo-test", nombre: "Insumo mismotipo test", unidad: "m", costo: 100, tipo: "tela", categoriaId: "", proveedorId: "", enlace: { categorias: [], insumos: [], mismoTipo: false } }
+]);
+state.tab = "catalogo"; render();
+click('[data-action="toggle-enlace-panel"][data-ins="cat-mismotipo-test"]');
+click('[data-action="toggle-cat-ins-enlace-mismotipo"][data-ins="cat-mismotipo-test"]');
+var botonMismoTipoCatalogoTest = document.querySelector('button[data-action="toggle-enlace-panel"][data-ins="cat-mismotipo-test"]');
+assert(botonMismoTipoCatalogoTest.textContent.indexOf("🔗 1 regla") !== -1, "en Catálogo, marcar SOLO \"mismo tipo\" ya cuenta como 1 regla en el botón resumen");
+state.catalogoInsumos = catalogoPrevioMismoTipoTest;
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// -- también en Plantillas y Productos, y se propaga al copiar (nuevoInsumo,
+// aplicar-plantilla/producto, confirmar-insumo-picker-*) --
+const plantillasPreviasMismoTipoTest = state.plantillasPrendas;
+state.plantillasPrendas = [{
+  id: "pla-mismotipo-test", nombre: "Plantilla mismotipo", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "",
+  insumos: [
+    { id: "plains-sub-mismotipo", nombre: "Sublimación pla", unidad: "m", costo: 1000, tipo: "tela", cantidad: 1, categoriaId: "", enlace: { categorias: [], insumos: [] } },
+    { id: "plains-tela-mismotipo", nombre: "Tela pla", unidad: "m", costo: 3000, tipo: "tela", cantidad: 4, categoriaId: "", enlace: { categorias: [], insumos: [] } }
+  ]
+}];
+state.tab = "plantillas"; state.plantillasVista = "plantillas"; state.plantillaEditando = "pla-mismotipo-test"; render();
+click('[data-action="toggle-enlace-panel"][data-pla="pla-mismotipo-test"][data-ins="plains-sub-mismotipo"]');
+assert(!!document.querySelector('input[data-action="toggle-pla-ins-enlace-mismotipo"][data-pla="pla-mismotipo-test"][data-ins="plains-sub-mismotipo"]'), "Plantillas también tiene la casilla \"Todos los insumos... de aquí\"");
+click('[data-action="toggle-pla-ins-enlace-mismotipo"][data-pla="pla-mismotipo-test"][data-ins="plains-sub-mismotipo"]');
+var plaMismoTipoTest = state.plantillasPrendas[0];
+assert(cantEfectivaTest(plaMismoTipoTest.insumos[0], plaMismoTipoTest) === 4, "...y Sublimación suma sola la tela de la plantilla, sin etiquetar categoría");
+state.plantillasPrendas = plantillasPreviasMismoTipoTest;
+state.plantillaEditando = ""; state.plantillasVista = "plantillas";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+const productosPreviosMismoTipoTest = state.productos;
+state.productos = [{
+  id: "pro-mismotipo-test", nombre: "Producto mismotipo", origen: "taller", precioVenta: 0, costoCompra: 0, proveedorId: "", imagenUrl: "", consumoSugerido: 1, flujoEstadosId: "",
+  insumos: [
+    { id: "proins-sub-mismotipo", nombre: "Sublimación pro", unidad: "m", costo: 1000, tipo: "tela", cantidad: 1, categoriaId: "", enlace: { categorias: [], insumos: [] } },
+    { id: "proins-tela-mismotipo", nombre: "Tela pro", unidad: "m", costo: 2000, tipo: "tela", cantidad: 6, categoriaId: "", enlace: { categorias: [], insumos: [] } }
+  ],
+  tallas: []
+}];
+state.tab = "productos"; state.productosVista = "nueva"; state.productoEditando = "pro-mismotipo-test"; render();
+click('[data-action="toggle-enlace-panel"][data-pro="pro-mismotipo-test"][data-ins="proins-sub-mismotipo"]');
+assert(!!document.querySelector('input[data-action="toggle-pro-ins-enlace-mismotipo"][data-pro="pro-mismotipo-test"][data-ins="proins-sub-mismotipo"]'), "Productos también tiene la casilla \"Todos los insumos... de aquí\"");
+click('[data-action="toggle-pro-ins-enlace-mismotipo"][data-pro="pro-mismotipo-test"][data-ins="proins-sub-mismotipo"]');
+var proMismoTipoTest = state.productos[0];
+assert(cantEfectivaTest(proMismoTipoTest.insumos[0], proMismoTipoTest) === 6, "...y Sublimación suma sola la tela del producto, sin etiquetar categoría");
+state.productos = productosPreviosMismoTipoTest;
+state.productoEditando = ""; state.productosVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
+// -- se propaga al copiar: predefinido en el catálogo, se hereda al agregar
+// el insumo a una cotización (mismo criterio que categorías/insumo específico) --
+const pedidosPreviosMismoTipoPropTest = state.pedidos, cotizacionesPreviasMismoTipoPropTest = state.cotizaciones,
+  catalogoPrevioMismoTipoPropTest = state.catalogoInsumos;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "cat-sub-mismotipo-prop", nombre: "Sublimación predefinida mismotipo", unidad: "m", costo: 4000, tipo: "tela", categoriaId: "", proveedorId: "", enlace: { categorias: [], insumos: [], mismoTipo: true } }
+]);
+state.cotizaciones = [{
+  id: "cot-mismotipoprop-test", clienteId: "", cliente: "Cliente MismoTipo Prop", descripcion: "", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cmismotipoprop1",
+  referencias: [{
+    id: "ref-mismotipoprop-test", nombre: "Ref mismotipo prop", imagenUrl: "", cantidadPedida: 1, precioVenta: 0,
+    insumos: [
+      { id: "ins-telaY-mismotipoprop", nombre: "Tela Y", unidad: "m", costo: 5000, tipo: "tela", cantidad: 7, categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } }
+    ],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-mismotipoprop-test"]');
+click('[data-action="abrir-insumo-picker"][data-cot="cot-mismotipoprop-test"][data-ref="ref-mismotipoprop-test"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="cat-sub-mismotipo-prop"]');
+click('[data-action="confirmar-insumo-picker"]');
+var refMismoTipoPropTest = state.cotizaciones[0].referencias[0];
+var subMismoTipoPropTest = refMismoTipoPropTest.insumos.filter(function (i) { return i.origenCatalogoId === "cat-sub-mismotipo-prop"; })[0];
+assert(!!subMismoTipoPropTest && subMismoTipoPropTest.enlace.mismoTipo === true, "un insumo del catálogo con \"mismo tipo\" predefinido lo trae ya puesto al agregarlo a la cotización");
+assert(cantEfectivaTest(subMismoTipoPropTest, refMismoTipoPropTest) === 7, "...y ya suma la tela de la referencia sin ninguna configuración extra");
+state.pedidos = pedidosPreviosMismoTipoPropTest; state.cotizaciones = cotizacionesPreviasMismoTipoPropTest;
+state.catalogoInsumos = catalogoPrevioMismoTipoPropTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

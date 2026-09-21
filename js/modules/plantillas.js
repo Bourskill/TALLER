@@ -300,6 +300,7 @@ function renderPlantillaCard(p) {
             busqueda: (state.enlaceBusqueda || {})[i.id] || "",
             toggleAction: "toggle-enlace-panel", catAction: "toggle-pla-ins-enlace-categoria", insAction: "toggle-pla-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
             propiaCategoriaAction: "set-pla-ins-categoria-propia",
+            mismoTipoAction: "toggle-pla-ins-enlace-mismotipo",
             contenedor: p,
             attrsBase: attrsIdent
           })
@@ -576,7 +577,7 @@ export var actions = {
         // (repararConsumoTelaPorInsumo en core/store.js) la toque.
         var nuevos = items.map(function (item) {
           var esTela = item.tipo === "tela";
-          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id, categoriaId: item.categoriaId || "", enlace: { categorias: ((item.enlace && item.enlace.categorias) || []).slice(), insumos: ((item.enlace && item.enlace.insumos) || []).slice() } };
+          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id, categoriaId: item.categoriaId || "", enlace: { categorias: ((item.enlace && item.enlace.categorias) || []).slice(), insumos: ((item.enlace && item.enlace.insumos) || []).slice(), mismoTipo: !!(item.enlace && item.enlace.mismoTipo) } };
         });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
@@ -612,9 +613,9 @@ export var actions = {
         var categorias = (enlace.categorias || []).slice();
         var idx = categorias.indexOf(catId);
         if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
-        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [] };
+        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [], mismoTipo: !!enlace.mismoTipo };
         var patch = { enlace: nuevoEnlace };
-        if (!categorias.length && !nuevoEnlace.insumos.length) patch.cantidad = cantidadEfectivaInsumo(i, p);
+        if (!categorias.length && !nuevoEnlace.insumos.length && !nuevoEnlace.mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, p);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, p, { insumos: insumos });
@@ -629,9 +630,26 @@ export var actions = {
         var lista = (enlace.insumos || []).slice();
         var idx = lista.indexOf(nombreClave);
         if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
-        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista };
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista, mismoTipo: !!enlace.mismoTipo };
         var patch = { enlace: nuevoEnlace };
-        if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, p);
+        if (!nuevoEnlace.categorias.length && !lista.length && !nuevoEnlace.mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, p);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, p, { insumos: insumos });
+    });
+  },
+  // "Todos los insumos <tipo> de aquí" — ver mismo criterio en
+  // toggle-ins-enlace-mismotipo, modules/cotizaciones.js.
+  "toggle-pla-ins-enlace-mismotipo": function (el) {
+    var id = el.getAttribute("data-pla"), insId = el.getAttribute("data-ins");
+    mapPla(id, function (p) {
+      var insumos = (p.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var mismoTipo = !enlace.mismoTipo;
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: enlace.insumos || [], mismoTipo: mismoTipo };
+        var patch = { enlace: nuevoEnlace };
+        if (!nuevoEnlace.categorias.length && !nuevoEnlace.insumos.length && !mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, p);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, p, { insumos: insumos });

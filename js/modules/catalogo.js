@@ -421,6 +421,7 @@ function renderFilaInsumo(c, categorias) {
           abierto: !!(state.enlacePanelAbierto || {})[c.id],
           busqueda: (state.enlaceBusqueda || {})[c.id] || "",
           toggleAction: "toggle-enlace-panel", catAction: "toggle-cat-ins-enlace-categoria", insAction: "toggle-cat-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
+          mismoTipoAction: "toggle-cat-ins-enlace-mismotipo",
           attrsBase: ' data-ins="' + c.id + '"'
         })
       : '<span class="section-sub" style="margin:0;">—</span>') +
@@ -608,7 +609,7 @@ export var actions = {
       var categorias = (enlace.categorias || []).slice();
       var idx = categorias.indexOf(catId);
       if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
-      return Object.assign({}, c, { enlace: { categorias: categorias, insumos: enlace.insumos || [] } });
+      return Object.assign({}, c, { enlace: { categorias: categorias, insumos: enlace.insumos || [], mismoTipo: !!enlace.mismoTipo } });
     });
     persist("catalogoInsumos"); notify();
   },
@@ -620,7 +621,20 @@ export var actions = {
       var lista = (enlace.insumos || []).slice();
       var idx = lista.indexOf(nombreClave);
       if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
-      return Object.assign({}, c, { enlace: { categorias: enlace.categorias || [], insumos: lista } });
+      return Object.assign({}, c, { enlace: { categorias: enlace.categorias || [], insumos: lista, mismoTipo: !!enlace.mismoTipo } });
+    });
+    persist("catalogoInsumos"); notify();
+  },
+  // "Todos los insumos <tipo> de aquí" — predefine que este insumo del
+  // catálogo sume, al agregarse a una plantilla/producto/cotización,
+  // cualquier hermano con su mismo tipo de costo. Ver mismo criterio en
+  // toggle-ins-enlace-mismotipo, modules/cotizaciones.js.
+  "toggle-cat-ins-enlace-mismotipo": function (el) {
+    var id = el.getAttribute("data-ins");
+    state.catalogoInsumos = (state.catalogoInsumos || []).map(function (c) {
+      if (c.id !== id) return c;
+      var enlace = c.enlace || { categorias: [], insumos: [] };
+      return Object.assign({}, c, { enlace: { categorias: enlace.categorias || [], insumos: enlace.insumos || [], mismoTipo: !enlace.mismoTipo } });
     });
     persist("catalogoInsumos"); notify();
   },

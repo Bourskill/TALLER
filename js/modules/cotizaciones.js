@@ -114,7 +114,7 @@ function nuevoInsumo(fuente, ref) {
     // igual que esServicio/origenCatalogoId si el catálogo ya lo tenía
     // predefinido (ej. "Sublimación" enlazada a la categoría "Telas") —
     // editable después en esta misma fila si hace falta ajustarlo.
-    enlace: { categorias: ((fuente && fuente.enlace && fuente.enlace.categorias) || []).slice(), insumos: ((fuente && fuente.enlace && fuente.enlace.insumos) || []).slice() }
+    enlace: { categorias: ((fuente && fuente.enlace && fuente.enlace.categorias) || []).slice(), insumos: ((fuente && fuente.enlace && fuente.enlace.insumos) || []).slice(), mismoTipo: !!(fuente && fuente.enlace && fuente.enlace.mismoTipo) }
   };
 }
 
@@ -1007,6 +1007,7 @@ function renderTablaInsumosRef(cotId, ref) {
             busqueda: (state.enlaceBusqueda || {})[i.id] || "",
             toggleAction: "toggle-enlace-panel", catAction: "toggle-ins-enlace-categoria", insAction: "toggle-ins-enlace-insumo", buscarAction: "set-enlace-busqueda",
             propiaCategoriaAction: "set-ins-categoria-propia",
+            mismoTipoAction: "toggle-ins-enlace-mismotipo",
             categoriasEnlazables: categoriasUsadasPorInsumos(state.catalogoCategorias, ref.insumos || []),
             contenedor: ref,
             attrsBase: attrsIdent
@@ -1745,9 +1746,9 @@ export var actions = {
         var categorias = (enlace.categorias || []).slice();
         var idx = categorias.indexOf(catId);
         if (idx === -1) categorias.push(catId); else categorias.splice(idx, 1);
-        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [] };
+        var nuevoEnlace = { categorias: categorias, insumos: enlace.insumos || [], mismoTipo: !!enlace.mismoTipo };
         var patch = { enlace: nuevoEnlace };
-        if (!categorias.length && !nuevoEnlace.insumos.length) patch.cantidad = cantidadEfectivaInsumo(i, r);
+        if (!categorias.length && !nuevoEnlace.insumos.length && !nuevoEnlace.mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, r);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, r, { insumos: insumos });
@@ -1762,9 +1763,34 @@ export var actions = {
         var lista = (enlace.insumos || []).slice();
         var idx = lista.indexOf(nombreClave);
         if (idx === -1) lista.push(nombreClave); else lista.splice(idx, 1);
-        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista };
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: lista, mismoTipo: !!enlace.mismoTipo };
         var patch = { enlace: nuevoEnlace };
-        if (!nuevoEnlace.categorias.length && !lista.length) patch.cantidad = cantidadEfectivaInsumo(i, r);
+        if (!nuevoEnlace.categorias.length && !lista.length && !nuevoEnlace.mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, r);
+        return Object.assign({}, i, patch);
+      });
+      return Object.assign({}, r, { insumos: insumos });
+    });
+  },
+  // "Todos los insumos <tipo> de aquí" (ver mismoTipoAction en
+  // renderEnlacePanel, core/components.js) — suma automáticamente
+  // cualquier insumo hermano con el MISMO tipo de costo, sin tener que
+  // asignarle categoría uno por uno. Reportado en producción 2026-09-21:
+  // el usuario ya había enlazado Sublimación a "Telas" y le había
+  // asignado esa categoría a Sublimación misma, pero las demás telas de
+  // la referencia (Corte, Elástico, Montreal) nunca se habían etiquetado
+  // individualmente — "está seleccionada la categoría telas, pero no lee
+  // las telas que ya están agregadas". Mismo criterio de "congelar al
+  // quitar el último enlace" que las otras dos acciones de enlace.
+  "toggle-ins-enlace-mismotipo": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), insId = el.getAttribute("data-ins");
+    mapRef(cotId, refId, function (r) {
+      var insumos = (r.insumos || []).map(function (i) {
+        if (i.id !== insId) return i;
+        var enlace = i.enlace || { categorias: [], insumos: [] };
+        var mismoTipo = !enlace.mismoTipo;
+        var nuevoEnlace = { categorias: enlace.categorias || [], insumos: enlace.insumos || [], mismoTipo: mismoTipo };
+        var patch = { enlace: nuevoEnlace };
+        if (!nuevoEnlace.categorias.length && !nuevoEnlace.insumos.length && !mismoTipo) patch.cantidad = cantidadEfectivaInsumo(i, r);
         return Object.assign({}, i, patch);
       });
       return Object.assign({}, r, { insumos: insumos });
@@ -1810,7 +1836,7 @@ export var actions = {
         // referencia — sin esto, la reparación retroactiva
         // (repararConsumoTelaPorInsumo en core/store.js) lo pisaría con
         // consumoAprox de la referencia en el próximo loadAll().
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice() } };
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice(), mismoTipo: !!(ins.enlace && ins.enlace.mismoTipo) } };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1858,7 +1884,7 @@ export var actions = {
           // confirmar-insumo-picker-producto en modules/productos.js).
           // `origenCatalogoId`/`consumoPropio` se heredan igual — ver el
           // mismo comentario en "aplicar-plantilla" más arriba.
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice() } };
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela", categoriaId: ins.categoriaId || "", enlace: { categorias: ((ins.enlace && ins.enlace.categorias) || []).slice(), insumos: ((ins.enlace && ins.enlace.insumos) || []).slice(), mismoTipo: !!(ins.enlace && ins.enlace.mismoTipo) } };
         }));
       }
       if (prod.flujoEstadosId) {

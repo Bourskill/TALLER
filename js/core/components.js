@@ -155,11 +155,22 @@ export function renderCategoriaSelectOptions(categorias, valorActual) {
 // enlace por categoría de otro insumo — quedaría siempre invisible para
 // "Sublimación enlazada a Telas", sin ninguna forma de solucionarlo desde
 // la cotización misma.
+// `mismoTipoAction` (opcional): agrega la casilla "Todos los insumos de
+// tipo X de aquí" (`insumo.enlace.mismoTipo`) — suma automáticamente
+// CUALQUIER insumo hermano con el mismo `tipo` que este, sin tener que
+// etiquetar categoría por categoría. Se combina con Categorías/Insumo
+// específico (unión, igual criterio que entre esas dos). Reportado en
+// producción 2026-09-21: aun con "Telas" bien marcada en Sublimación, las
+// demás telas de la referencia (Corte, Elástico, Montreal…) nunca habían
+// sido etiquetadas UNA POR UNA con esa categoría — "no lee las telas que
+// ya están agregadas". Esta casilla es la forma de decir "todas, sin
+// etiquetar nada" de una vez.
 export function renderEnlacePanel(insumo, candidatos, categorias, o) {
   var enlace = insumo.enlace || {};
   var catsSel = enlace.categorias || [];
   var insSel = enlace.insumos || [];
-  var nReglas = catsSel.length + insSel.length;
+  var mismoTipo = !!enlace.mismoTipo;
+  var nReglas = catsSel.length + insSel.length + (mismoTipo ? 1 : 0);
   var resumen = !nReglas ? "Sin enlace"
     : o.contenedor ? "🔗 " + cantidadEfectivaInsumo(insumo, o.contenedor)
     : "🔗 " + nReglas + " regla" + (nReglas === 1 ? "" : "s");
@@ -176,6 +187,14 @@ export function renderEnlacePanel(insumo, candidatos, categorias, o) {
       '<select class="mini-input" style="width:100%" data-action-change="' + o.propiaCategoriaAction + '"' + o.attrsBase + '>' +
       renderCategoriaSelectOptions(categorias, insumo.categoriaId) +
       "</select>";
+  }
+
+  if (o.mismoTipoAction) {
+    var tipoLabel = (TIPOS_COSTO[insumo.tipo] && TIPOS_COSTO[insumo.tipo].label) || insumo.tipo;
+    html += '<label class="enlace-check" style="font-weight:600;">' +
+      '<input type="checkbox" ' + (mismoTipo ? "checked" : "") + ' data-action="' + o.mismoTipoAction + '"' + o.attrsBase + ' /> Todos los insumos "' + esc(tipoLabel) + '" de aquí' +
+      "</label>" +
+      renderHelp("Suma automáticamente la cantidad de CUALQUIER insumo de esta referencia con este mismo tipo de costo (" + tipoLabel + "), sin tener que etiquetarlos uno por uno. Se combina con las categorías o insumos específicos de abajo — útil cuando quieres sumar TODAS las telas; si necesitas sumar solo algunas, desmarca esto y elígelas abajo.");
   }
 
   var catsAplanadas = categoriasAplanadas((o.categoriasEnlazables || categorias) || []);
@@ -222,9 +241,11 @@ export function renderCeldaCantidadInsumo(insumo, contenedor, attrs) {
   var enlace = insumo.enlace || {};
   var catsSel = enlace.categorias || [];
   var insSel = enlace.insumos || [];
-  if (catsSel.length || insSel.length) {
+  var mismoTipo = !!enlace.mismoTipo;
+  if (catsSel.length || insSel.length || mismoTipo) {
     var total = cantidadEfectivaInsumo(insumo, contenedor);
     var partes = [];
+    if (mismoTipo) partes.push("mismo tipo de costo");
     if (catsSel.length) partes.push(catsSel.length + " categoría(s)");
     if (insSel.length) partes.push(insSel.length + " insumo(s) específico(s)");
     return '<span class="amount" title="Enlazado a ' + esc(partes.join(" + ")) + " — suma " + total + '">🔗 ' + total + "</span>";

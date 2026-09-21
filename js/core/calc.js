@@ -1825,18 +1825,36 @@ export function clientesFiltrados() {
 // cualquier riesgo de ciclo (A enlazado a B enlazado a A) sin necesitar
 // detección de ciclos: el alcance de v1 es un solo nivel de enlace, que
 // cubre los casos reales pedidos (sublimación/corte enlazados a tela).
+//
+// `enlace.mismoTipo` (2026-09-21, tercera vuelta): además de categorías e
+// insumos específicos, un insumo puede sumar automáticamente CUALQUIER
+// insumo hermano con su MISMO `tipo` (ej. Sublimación, tipo "tela", suma
+// sola cualquier otro insumo tipo "tela" de la referencia — Corte,
+// Elástico, Montreal — sin tener que asignarles categoría uno por uno).
+// Reportado en producción: el usuario ya había marcado "Telas" en
+// Sublimación y asignado esa categoría a Sublimación misma, pero las
+// demás telas de la referencia (Corte, Elástico, Montreal) nunca habían
+// sido etiquetadas individualmente — "está seleccionada la categoría
+// telas, pero no lee las telas que ya están agregadas". Esto NO revive el
+// primer intento rechazado (un desplegable de "tipos de costos" que
+// REEMPLAZABA categoría/insumo específico): acá es una casilla ADICIONAL,
+// que se COMBINA con las otras dos — sigue existiendo la opción de
+// enlazar por categoría o insumo puntual para casos más finos (ej. sumar
+// solo ALGUNAS telas, no todas).
 export function cantidadEfectivaInsumo(insumo, contenedor) {
   if (!insumo) return 0;
   var enlace = insumo.enlace || {};
   var categorias = enlace.categorias || [];
   var nombres = enlace.insumos || [];
-  if (!categorias.length && !nombres.length) return num(insumo.cantidad);
+  var mismoTipo = !!enlace.mismoTipo;
+  if (!categorias.length && !nombres.length && !mismoTipo) return num(insumo.cantidad);
   var categoriasCatalogo = state.catalogoCategorias || [];
   var idsObjetivo = categorias.reduce(function (a, catId) { return a.concat(idsConSubcategorias(categoriasCatalogo, catId)); }, []);
   var nombresObjetivo = nombres.map(norm);
   return ((contenedor && contenedor.insumos) || [])
     .filter(function (i) {
       if (i.id === insumo.id) return false;
+      if (mismoTipo && i.tipo === insumo.tipo) return true;
       if (i.categoriaId && idsObjetivo.indexOf(i.categoriaId) !== -1) return true;
       if (nombresObjetivo.indexOf(norm(i.nombre || "")) !== -1) return true;
       return false;
