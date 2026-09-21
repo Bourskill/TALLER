@@ -844,10 +844,14 @@ function renderSelectorProveedorRef(cotId, ref) {
 // compra — no hay una segunda fórmula acá.
 function renderRefProveedorResumen(ref, calc) {
   var proveedor = ref.proveedorId ? clienteById(ref.proveedorId) : null;
+  // "sin insumos" dejó de ser cierto 2026-09-21: una prenda comprada hecha
+  // puede llevar insumos/mano de obra extra sobre la compra (ver
+  // renderTablaInsumosRef más abajo, en renderRefCard) — el texto se quedó
+  // desactualizado al agregar esa tabla, aunque el código ya funcionara.
   var html = '<div class="section-sub" style="margin:10px 0 0;">📦 Se compra hecha' +
     (proveedor ? " a <b>" + esc(proveedor.nombre) + "</b>" : "") +
     (ref.fechaEntregaProveedor ? " · llega el " + esc(ref.fechaEntregaProveedor) : "") +
-    " — sin insumos ni fases de producción. El progreso se sigue como pendiente/recibido.</div>";
+    " — sin fases de producción propias (el progreso se sigue como pendiente/recibido), pero sí puedes agregar abajo cualquier insumo o mano de obra extra sobre la compra (ej. un DTF, una planchada).</div>";
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda' +
     (calc.costoGlobalUnit

@@ -5442,6 +5442,11 @@ assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-plantilla
 assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-producto"]'), "...ni \"Aplicar producto\", por la misma razón");
 assert(!refCardProvInsTest.querySelector('input[data-campo="consumoAprox"]'), "...ni el campo \"Consumo tela (MT)\" — no hay nada que cortar en una prenda ya comprada");
 assert(refCardProvInsTest.textContent.indexOf("Sin insumos aún") !== -1, "sin insumos agregados todavía, se ve el mismo mensaje vacío que en \"taller\"");
+// El texto de renderRefProveedorResumen decía "sin insumos ni fases de
+// producción" — quedó desactualizado el mismo día que se agregó la tabla
+// de insumos de arriba (el usuario lo notó en producción: "ya se aplicó?
+// es que me sale [ese texto]"). Guarda contra que vuelva a desactualizarse.
+assert(refCardProvInsTest.textContent.indexOf("sin insumos") === -1, "el resumen de \"Se compra hecha\" YA NO dice \"sin insumos\" — sería contradecir la tabla de insumos que aparece justo debajo");
 
 click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
 var refTrasDtfTest = state.cotizaciones[0].referencias[0];
