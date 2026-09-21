@@ -135,7 +135,14 @@
    columna. El borde/fondo reaparece al pasar el mouse por la FILA entera
    (no solo el campo) o al enfocar el campo mismo — así sigue siendo obvio
    que es editable sin tener que adivinar. */
-.ins-row input[data-campo="nombre"]{background:transparent;border-color:transparent;font-weight:600;padding-left:4px;}
+/* La columna Insumo crece con 1fr (absorbe el espacio que las demás
+   columnas sueltan, ver INS_COLS_REF) para que la fila siga llenando el
+   ancho completo de la tarjeta en cualquier pantalla — pero un insumo
+   típico ("Sublimación", "Confección"...) no necesita todo ese ancho: en
+   una pantalla grande el campo quedaba con el texto sin llegar ni a la
+   mitad. El tope va acá, en el INPUT (no en la columna del grid), para no
+   perder ese "1fr" que evita un hueco al final de la fila. */
+.ins-row input[data-campo="nombre"]{background:transparent;border-color:transparent;font-weight:600;padding-left:4px;max-width:230px;}
 .ins-row:hover input[data-campo="nombre"]{background:var(--surface-3);border-color:var(--border);}
 .ins-row input[data-campo="nombre"]:focus{background:var(--surface-3);border-color:var(--accent);}
 .ins-row input[data-campo="costo"]{background:transparent;border-color:transparent;text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;}

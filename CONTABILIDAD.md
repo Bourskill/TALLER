@@ -1774,6 +1774,17 @@ bloqueó la ejecución de JavaScript en el resto de la pestaña — se
 revisó en su lugar reutilizando exactamente los mismos tokens/clases
 ya probados visualmente en Catálogo y en el resto de la app.
 
+**Ajuste el mismo día:** "insumo tiene mucho espacio... los textos no
+llegan ni a la mitad del campo". La columna Insumo crece con `1fr`
+(absorbe el espacio que las demás columnas sueltan, ver
+`INS_COLS_REF`) para que la fila siga llenando el ancho completo de la
+tarjeta en cualquier pantalla — en una pantalla grande eso dejaba el
+campo mucho más ancho de lo que un nombre de insumo típico necesita.
+Se le puso un tope al INPUT mismo (`max-width:230px`), no a la columna
+del grid: así se sigue evitando el hueco al final de la fila (la
+columna sigue siendo flexible) mientras el campo visible queda de un
+tamaño cómodo. Cambio puramente visual, sin prueba dedicada.
+
 ---
 
 ## Próximos pasos

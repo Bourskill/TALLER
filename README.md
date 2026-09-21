@@ -259,6 +259,15 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo primera ronda: la columna Insumo quedó más angosta — el texto no llegaba ni a la mitad del campo)
+
+Ajuste el mismo día de la ronda anterior: la columna Insumo crece con
+`1fr` para que la fila siga llenando el ancho de la tarjeta, pero en
+pantallas grandes eso la dejaba mucho más ancha de lo que un nombre de
+insumo necesita. Se le puso un tope al campo mismo (`max-width:230px`,
+no a la columna del grid — así se sigue evitando un hueco al final de
+la fila). Cambio visual, ver CONTABILIDAD.md.
+
 ## Registro de cambios — septiembre 2026 (octogésima ronda: rediseño visual de la tabla de insumos — armonía, jerarquía y mejor uso del espacio)
 
 Pedido de estilo: "no me gusta mucho la estetica de esa tabla,
