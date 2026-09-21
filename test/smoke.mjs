@@ -3797,6 +3797,34 @@ assert(state.recuperacion === null, "y cierra el aviso de recuperación");
 state.cotSucia = "";
 render();
 
+// (3.5) reportado en producción 2026-09-21: el aviso de recuperación de
+// formPedido salía "incluso sin fundamento" — con solo abrir "+ Línea
+// libre" y no escribir nada más. Causa: fpTieneContenido (ver
+// revisarBorradoresSinGuardar en core/store.js) contaba `lineas.length` a
+// secas — una línea recién agregada nace VACÍA (sin nombre, cantidad 1 de
+// relleno) para llenarse ahí mismo, no es trabajo hecho todavía. El resto
+// de FORMULARIOS_CON_BORRADOR (formTx, formCliente…) ya evitaba este error
+// mirando contenido ESCRITO, nunca solo si un array tenía algo adentro.
+state.tab = "pedidos"; state.pedidosVista = "nueva"; state.filtroPedidosVista = "activos"; state.pedidoEditando = "";
+state.formPedido = {
+  clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
+  vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
+  conFlujoProduccion: true,
+  esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+  lineas: []
+};
+guardadoMod.olvidarBorrador("formPedido");
+render();
+click('[data-action="add-pedido-linea-libre"]');
+assert(state.formPedido.lineas.length === 1, "sanity: la línea libre se agregó");
+assert(guardadoMod.borradoresDeSesionAnterior().indexOf("formPedido") === -1, "una línea recién agregada, TODAVÍA VACÍA (sin nombre), no marca ningún borrador — antes disparaba el aviso con solo abrir '+ Línea libre'");
+const lineaVaciaId = state.formPedido.lineas[0].id;
+setLinea(lineaVaciaId, "productoNombre", "Ya con nombre de verdad");
+assert(guardadoMod.borradoresDeSesionAnterior().indexOf("formPedido") !== -1, "...pero en cuanto se escribe un nombre real en esa línea, SÍ se marca como borrador que proteger");
+guardadoMod.olvidarBorrador("formPedido");
+state.formPedido = { clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "", vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "", conFlujoProduccion: true, esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "", lineas: [] };
+render();
+
 // (4) el caso más delicado: un borrador de "Nuevo pedido rápido" (formPedido)
 // NUNCA tuvo una fila propia en la Sheet — recuperarlo debe restaurarlo EN
 // PANTALLA, pero jamás intentar escribirlo (eso mandaría una clave

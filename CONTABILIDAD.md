@@ -1598,6 +1598,45 @@ copiar desde el catálogo — ver test/smoke.mjs.
 
 ---
 
+### 🟡 Hallazgo #36 — el aviso de "recuperar cambios sin guardar" salía sin fundamento al abrir una línea vacía de pedido rápido. ✅ IMPLEMENTADO
+
+Reportado en producción 2026-09-21: "me sale mucho esto incluso sin
+fundamento", con el aviso de recuperación mostrando "un pedido rápido
+a medio llenar" cuando en realidad no había nada que recuperar.
+
+**Causa raíz:** `revisarBorradoresSinGuardar()` (core/store.js) decide
+si "Nuevo pedido rápido" tiene contenido que proteger con
+`fpTieneContenido = !!(fp.cliente.trim() || fp.lineas.length)` — contar
+`lineas.length` a secas es el error: "+ Línea libre" (ver
+`add-pedido-linea-libre` en modules/pedidos.js) agrega una línea que
+NACE VACÍA (sin nombre, cantidad 1 de relleno) para llenarse ahí
+mismo, no es trabajo hecho todavía. Con solo abrir esa línea y no
+escribir nada más, `lineas.length` ya era 1 y el formulario quedaba
+marcado como "borrador sin guardar" — ese marcador se anota de
+inmediato en disco (`anotarBorradoresEnDisco`, core/guardado.js), así
+que sobrevivía a cambiar de pestaña o cerrar la app y disparaba el
+aviso de recuperación en la siguiente visita, sin que hubiera nada
+real que recuperar.
+
+El resto de `FORMULARIOS_CON_BORRADOR` (formTx, formCliente, formGasto­Fijo…)
+ya evitaba este error — todos miran contenido ESCRITO (un nombre, un
+monto, trimeados), nunca si un array simplemente tiene algo adentro.
+`formPedido` era el único que se salía de ese criterio.
+
+**Corrección:** `fpTieneContenido` ahora exige que al menos una línea
+tenga contenido real — un producto del catálogo elegido
+(`l.productoId`), un nombre escrito a mano (`l.productoNombre`), o una
+observación (`l.observacion`) — no basta con que la línea exista.
+Elegir un producto del catálogo (que sí trae `productoId` desde
+`select-producto-pedido-picker`) sigue contando como contenido real de
+inmediato, como debe ser.
+
+Verificado que abrir "+ Línea libre" y no escribir nada NO marca
+ningún borrador (antes sí), y que escribir un nombre en esa misma
+línea SÍ lo marca de inmediato — ver test/smoke.mjs.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

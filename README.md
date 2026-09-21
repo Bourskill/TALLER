@@ -259,6 +259,24 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo séptima ronda: el aviso de "cambios sin guardar" salía sin fundamento al abrir una línea vacía de pedido rápido)
+
+Reportado en producción: "me sale mucho esto incluso sin fundamento",
+con el aviso ofreciendo recuperar "un pedido rápido a medio llenar"
+que en realidad estaba vacío.
+
+- **Causa raíz:** el detector de borradores de "Nuevo pedido rápido"
+  contaba `lineas.length` a secas — "+ Línea libre" agrega una fila
+  que NACE VACÍA (sin nombre) para llenarse ahí mismo, y con solo
+  abrirla ya se marcaba como "borrador sin guardar", sobreviviendo a
+  disco y disparando el aviso en la próxima visita sin que hubiera
+  nada real que recuperar. El resto de los formularios con borrador
+  (formTx, formCliente…) ya evitaba este error mirando contenido
+  ESCRITO, nunca solo si un array tenía algo adentro.
+- Ahora exige que al menos una línea tenga contenido real: un producto
+  del catálogo elegido, un nombre escrito a mano, o una observación.
+- Ver CONTABILIDAD.md, "Hallazgo #36".
+
 ## Registro de cambios — septiembre 2026 (septuagésimo sexta ronda: casilla "Todos los insumos de este tipo" — el Enlace por categoría exigía etiquetar cada tela una por una)
 
 Tercera vuelta el mismo día, con un screenshot real: 4 telas en la

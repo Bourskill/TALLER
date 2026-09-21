@@ -1543,7 +1543,20 @@ export function revisarBorradoresSinGuardar() {
   }
 
   var fp = state.formPedido;
-  var fpTieneContenido = !!(fp && ((fp.cliente || "").trim() || (fp.lineas || []).length));
+  // Una línea recién agregada (ver "add-pedido-linea-libre" en
+  // modules/pedidos.js) nace VACÍA — cantidad 1 de relleno, sin nombre ni
+  // producto — para llenarse en la misma tarjeta, no es trabajo hecho
+  // todavía. Contar `lineas.length` a secas (como hacía esto antes)
+  // disparaba el aviso de "quedaron cambios sin guardar" con solo abrir
+  // "+ Línea libre" y no escribir nada más, o cambiar de pestaña sin
+  // querer con esa línea en blanco todavía ahí — reportado en producción:
+  // "me sale mucho esto incluso sin fundamento". El resto de
+  // FORMULARIOS_CON_BORRADOR ya evita este error (mira contenido
+  // ESCRITO, nunca solo si un array tiene algo adentro) — esto lo alinea.
+  var lineaPedidoTieneContenido = function (l) {
+    return !!(l.productoId || (l.productoNombre || "").trim() || (l.observacion || "").trim());
+  };
+  var fpTieneContenido = !!(fp && ((fp.cliente || "").trim() || (fp.lineas || []).some(lineaPedidoTieneContenido)));
   if (fpTieneContenido) {
     marcarBorrador("formPedido", function () { return JSON.stringify(state.formPedido); });
     idBorradorNubeActivo.formPedido = true;
