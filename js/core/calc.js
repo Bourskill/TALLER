@@ -1775,7 +1775,18 @@ export function calcCostoPrenda(insumo, ref) {
   var costo = num(insumo.costo);
   var cantidad = num(insumo.cantidad) || 1;
   if (insumo.tipo === "tela") {
-    return costo * (num(ref.consumoAprox) || 0);
+    // El consumo (metros) es del INSUMO, no de la referencia — así dos
+    // telas distintas en la misma referencia (ej. dos sublimados, cada
+    // uno con su propio diseño y costo) pueden consumir cantidades
+    // distintas. Antes usaba ref.consumoAprox para CUALQUIER tela de la
+    // referencia, así que 2+ telas siempre "consumían" exactamente lo
+    // mismo, aunque en la vida real fueran cantidades distintas (ej. 0.8m
+    // delantero + 0.4m mangas se calculaba como 1.2m + 1.2m). Reportado en
+    // producción 2026-09-21: "cuando hay más de 1 tela sublimada, la
+    // cotización está hecha para 1 tela". Ver nuevoInsumo en
+    // modules/cotizaciones.js y repararConsumoTelaPorInsumo en
+    // core/store.js (migración de lo ya guardado).
+    return costo * (num(insumo.cantidad) || 0);
   }
   if (insumo.tipo === "fijo_pedido") {
     var cantidadPedida = num(ref.cantidadPedida) || 1;
@@ -2222,7 +2233,9 @@ function agregarInsumosDeReferencias(referencias) {
       var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
       if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
-      if (ins.tipo === "tela") cantFisica = (num(ref.consumoAprox) || 0) * cantidadPedida;
+      // Consumo PROPIO del insumo, no el de la referencia — ver
+      // calcCostoPrenda, mismo criterio.
+      if (ins.tipo === "tela") cantFisica = (num(ins.cantidad) || 0) * cantidadPedida;
       else if (ins.tipo === "por_prenda") cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;

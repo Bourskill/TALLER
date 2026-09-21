@@ -401,19 +401,29 @@ tipoSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 ref = state.cotizaciones[0].referencias[0];
 assert(ref.insumos[0].tipo === "tela" && ref.insumos[0].costo === 8000, "actualiza costo y tipo de costo del insumo");
 
-// El usuario reportó: "la cantidad del insumo se mantiene en 1... pero el
-// costo x prenda sí refleja el consumo de tela... la cantidad en este caso
-// debería ser la misma que el consumo de tela". Antes "Cant." mostraba
-// insumo.cantidad (que nadie toca, siempre 1) mientras "Costo x prenda" ya
-// usaba consumoAprox — acá se prueba que ahora los dos van de la mano.
-state.cotizaciones[0].referencias[0].consumoAprox = 1.6;
-render();
+// El consumo de una tela es PROPIO de ese insumo, no de la referencia (ver
+// calcCostoPrenda en core/calc.js) — así una referencia con 2 telas
+// sublimadas distintas (ej. 0.8m delantero + 0.4m mangas) puede darle a
+// cada una su propia cantidad, en vez de que las dos "consuman" el mismo
+// número. Reportado en producción 2026-09-21: "cuando hay más de 1 tela
+// sublimada, la cotización está hecha para 1 tela".
 const campoCantTela = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId + '"][data-campo="cantidad"]');
-assert(campoCantTela.value === "1.6", "para tipo \"tela\", \"Cant.\" muestra el consumo aprox. de la referencia, no el insumo.cantidad de siempre");
-assert(campoCantTela.disabled === true, "...y queda deshabilitado (la cantidad la da el consumo, igual que \"fijo_pedido\" con cantidadPedida)");
+assert(campoCantTela.disabled === false, "\"Cant.\" de un insumo tipo \"tela\" ya NO está deshabilitado — cada tela lleva su propio consumo, editable");
+campoCantTela.value = "1.6";
+campoCantTela.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+ref = state.cotizaciones[0].referencias[0];
+assert(ref.insumos[0].cantidad === 1.6, "escribir en \"Cant.\" guarda el consumo PROPIO de esa tela (insumo.cantidad), no el de la referencia");
 const costoPrendaTela = document.querySelector('[data-ref-id="' + refId + '"] [data-ins-row][data-ins="' + insId + '"] .amount');
-assert(costoPrendaTela.textContent.indexOf("12.800") >= 0 || costoPrendaTela.textContent.indexOf("12,800") >= 0, "\"Costo x prenda\" (8.000 × 1.6 = 12.800) coincide con lo que \"Cant.\" muestra — un solo factor, no uno escondido");
+assert(costoPrendaTela.textContent.indexOf("12.800") >= 0 || costoPrendaTela.textContent.indexOf("12,800") >= 0, "\"Costo x prenda\" (8.000 × 1.6 = 12.800) usa el consumo PROPIO de la tela");
+// Cambiar el consumo de la REFERENCIA (el "valor por defecto para telas
+// nuevas") no debe tocar el consumo YA guardado de esta tela — son
+// independientes desde que se editó a mano.
+state.cotizaciones[0].referencias[0].consumoAprox = 99;
+render();
+const campoCantTelaTrasCambioRef = document.querySelector('[data-ref-id="' + refId + '"] input[data-ins="' + insId + '"][data-campo="cantidad"]');
+assert(campoCantTelaTrasCambioRef.value === "1.6", "...y cambiar el \"Consumo tela\" de la referencia NO pisa el consumo ya personalizado de esta tela — son campos independientes");
 state.cotizaciones[0].referencias[0].consumoAprox = 1; // deja la referencia como la esperan las pruebas siguientes
+state.cotizaciones[0].referencias[0].insumos[0].cantidad = 1; // ídem para el insumo
 render();
 
 // --- guardado explícito: editar una cotización NO reescribe los datos
@@ -5156,6 +5166,92 @@ state.pedidos = pedidosPreviosPlaProdTest; state.cotizaciones = cotizacionesPrev
 state.plantillasPrendas = plantillasPreviasPlaProdTest; state.productos = productosPreviosPlaProdTest;
 state.catalogoInsumos = catalogoPrevioPlaProdTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// --- El consumo de una tela (metros) ahora es PROPIO de cada insumo tipo
+// "tela", no de la referencia — antes CUALQUIER tela de una referencia
+// usaba el mismo "Consumo tela (MT)" de la referencia, así que 2 telas
+// sublimadas distintas (ej. 0.8m delantero + 0.4m mangas) se calculaban
+// las dos como si consumieran el total completo. Reportado en producción
+// 2026-09-21: "cuando hay más de 1 tela sublimada, la cotización está
+// hecha para 1 tela". Se prueba el caso real (2 telas, cada una con su
+// propio consumo y costo) y la migración retroactiva de lo ya guardado
+// (que no debe cambiar ni un peso de lo que YA se estaba calculando).
+const pedidosPreviosMultitelaTest = state.pedidos, cotizacionesPreviasMultitelaTest = state.cotizaciones,
+  catalogoPrevioMultitelaTest = state.catalogoInsumos;
+state.catalogoInsumos = state.catalogoInsumos.concat([
+  { id: "ins-tela-a-test", nombre: "Tela sublimada delantero test", unidad: "m", costo: 20000, tipo: "tela", categoriaId: "", proveedorId: "" },
+  { id: "ins-tela-b-test", nombre: "Tela sublimada mangas test", unidad: "m", costo: 15000, tipo: "tela", categoriaId: "", proveedorId: "" }
+]);
+state.clientes.push({ id: "cli-multitela-test", nombre: "Cliente Multitela", tipoRelacion: "cliente", cedula: "", ciudad: "", contactResourceNames: {}, preciosPorInsumo: [], fechaCreacion: "2026-01-01", roster: [] });
+state.cotizaciones = [{
+  id: "cot-multitela-test", clienteId: "cli-multitela-test", cliente: "Cliente Multitela", descripcion: "Camiseta sublimada", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cmultitelatest",
+  referencias: [{
+    id: "ref-multitela-test", nombre: "Camiseta sublimada", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [], detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-multitela-test"]');
+click('[data-action="abrir-insumo-picker"][data-cot="cot-multitela-test"][data-ref="ref-multitela-test"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="ins-tela-a-test"]');
+click('[data-action="toggle-insumo-picker-item"][data-id="ins-tela-b-test"]');
+click('[data-action="confirmar-insumo-picker"]');
+
+var refMultitelaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-multitela-test"; })[0].referencias[0];
+assert(refMultitelaTest.insumos.length === 2, "agrega las 2 telas a la misma referencia");
+var idTelaATest = refMultitelaTest.insumos.filter(function (i) { return i.nombre === "Tela sublimada delantero test"; })[0].id;
+var idTelaBTest = refMultitelaTest.insumos.filter(function (i) { return i.nombre === "Tela sublimada mangas test"; })[0].id;
+
+setChange('[data-action-change="set-ins-campo"][data-cot="cot-multitela-test"][data-ref="ref-multitela-test"][data-ins="' + idTelaATest + '"][data-campo="cantidad"]', "0.8");
+setChange('[data-action-change="set-ins-campo"][data-cot="cot-multitela-test"][data-ref="ref-multitela-test"][data-ins="' + idTelaBTest + '"][data-campo="cantidad"]', "0.4");
+
+const { calcCostoUnitarioRef: calcCostoUnitRefMultitelaTest, calcListaCompras: calcListaComprasMultitelaTest } = await import("../js/core/calc.js");
+refMultitelaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-multitela-test"; })[0].referencias[0];
+assert(refMultitelaTest.insumos.filter(function (i) { return i.id === idTelaATest; })[0].cantidad === 0.8 && refMultitelaTest.insumos.filter(function (i) { return i.id === idTelaBTest; })[0].cantidad === 0.4, "cada tela guarda su PROPIO consumo, independiente de la otra");
+assert(calcCostoUnitRefMultitelaTest(refMultitelaTest) === 22000, "el costo unitario usa el consumo de CADA tela (20.000×0.8 + 15.000×0.4 = 22.000), no el mismo consumo repetido dos veces");
+
+var cotMultitelaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-multitela-test"; })[0];
+var listaMultitelaTest = calcListaComprasMultitelaTest(cotMultitelaTest);
+var lineaTelaATest = listaMultitelaTest.filter(function (l) { return l.nombre === "Tela sublimada delantero test"; })[0];
+var lineaTelaBTest = listaMultitelaTest.filter(function (l) { return l.nombre === "Tela sublimada mangas test"; })[0];
+assert(lineaTelaATest.cantidadFisica === 8 && lineaTelaATest.costoTotal === 160000, "la lista de compras trae la tela A con SU propia cantidad física (0.8m × 10 = 8m) y costo (160.000)");
+assert(lineaTelaBTest.cantidadFisica === 4 && lineaTelaBTest.costoTotal === 60000, "...y la tela B con la SUYA (0.4m × 10 = 4m, 60.000) — antes las dos habrían mostrado el mismo número");
+
+state.pedidos = pedidosPreviosMultitelaTest; state.cotizaciones = cotizacionesPreviasMultitelaTest;
+state.catalogoInsumos = catalogoPrevioMultitelaTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- Migración retroactiva: cotización vieja con UNA tela, sin `consumoPropio`, cantidad todavía en el viejo default --
+const cotizacionesPreviasMigTelaTest = state.cotizaciones;
+const cotViejaTelaTest = {
+  id: "cot-viejatela-test", clienteId: "", cliente: "Cliente Vieja", descripcion: "Prueba migración tela", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cviejatela1",
+  referencias: [{
+    id: "ref-viejatela-test", nombre: "Ref vieja", imagenUrl: "", consumoAprox: 1.5, cantidadPedida: 10, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+    insumos: [{ id: "ins-viejatela-test", nombre: "Tela vieja", unidad: "m", costo: 10000, tipo: "tela", cantidad: 1, esServicio: false, proveedorId: "" }],
+    detalle: [], estado: "nuevo", estadosDef: null
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+};
+state.cotizaciones = [cotViejaTelaTest];
+const { repararConsumoTelaPorInsumo: repararTelaTest } = await import("../js/core/store.js");
+const huboMigracionTelaTest = repararTelaTest(state.plantillasPrendas, state.productos, state.cotizaciones);
+assert(huboMigracionTelaTest === true, "la migración detecta la tela vieja sin consumo propio");
+var insumoMigradoTelaTest = state.cotizaciones[0].referencias[0].insumos[0];
+assert(insumoMigradoTelaTest.cantidad === 1.5, "...y le copia el consumo que la referencia YA tenía (1.5) — el mismo número que SIEMPRE usó calcCostoPrenda, no cambia nada de lo ya cotizado");
+assert(insumoMigradoTelaTest.consumoPropio === true, "...y la marca como ya migrada");
+insumoMigradoTelaTest.cantidad = 3; // el usuario personaliza el consumo DESPUÉS de migrar
+const huboSegundaMigracionTelaTest = repararTelaTest(state.plantillasPrendas, state.productos, state.cotizaciones);
+assert(huboSegundaMigracionTelaTest === false, "correr la migración de nuevo sobre un insumo ya migrado no hace nada");
+assert(state.cotizaciones[0].referencias[0].insumos[0].cantidad === 3, "...así que NO pisa el consumo que el usuario ya personalizó a mano después de migrar");
+
+state.cotizaciones = cotizacionesPreviasMigTelaTest;
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

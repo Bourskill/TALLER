@@ -577,7 +577,13 @@ export var actions = {
         // modules/cotizaciones.js) — sin esto, el aviso de "el catálogo
         // cambió de precio" nunca podía aparecer para un insumo agregado a
         // un producto del catálogo. Reportado en producción 2026-09-21.
-        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item), origenCatalogoId: item.id }; });
+        //
+        // Para una tela, el consumo es PROPIO de ESTE insumo, no del
+        // producto — mismo criterio que en plantillas.js/nuevoInsumo.
+        var nuevos = items.map(function (item) {
+          var esTela = item.tipo === "tela";
+          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id };
+        });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }

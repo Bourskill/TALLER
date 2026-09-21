@@ -72,7 +72,8 @@ export function duplicarCotizacionCompleta(cot) {
   return copia;
 }
 
-function nuevoInsumo(fuente) {
+function nuevoInsumo(fuente, ref) {
+  var esTela = !!(fuente && fuente.tipo === "tela");
   return {
     id: uid(),
     nombre: fuente ? fuente.nombre : "",
@@ -91,7 +92,18 @@ function nuevoInsumo(fuente) {
     // armada sin que nadie lo pida.
     esServicio: !!(fuente && esInsumoServicio(fuente)),
     proveedorId: (fuente && fuente.proveedorId) || "",
-    cantidad: 1,
+    // Para una tela, el consumo (metros) es PROPIO de este insumo, no de la
+    // referencia (ver calcCostoPrenda en core/calc.js) — arranca igual al
+    // que ya tenía la referencia (o 1, si es la primera tela) para que el
+    // caso más común, una sola tela, no pida nada extra; para una segunda
+    // tela distinta (ej. dos sublimados), se edita cada consumo por
+    // separado. `consumoPropio` marca que este insumo YA nació con su
+    // propio valor, para que la reparación retroactiva
+    // (repararConsumoTelaPorInsumo en core/store.js) nunca lo toque.
+    // Reportado en producción 2026-09-21: "cuando hay más de 1 tela
+    // sublimada, la cotización está hecha para 1 tela".
+    cantidad: esTela ? (num(ref && ref.consumoAprox) || 1) : 1,
+    consumoPropio: esTela,
     // Vínculo con el insumo del catálogo del que salió esta copia — no con su
     // costo, con el INSUMO. Es lo que permite, más adelante, avisar si el
     // catálogo cambió de precio y esta cotización se quedó con el viejo (ver
@@ -967,7 +979,9 @@ function renderRefCard(cotId, ref) {
     '<button class="segmented-opcion ' + (esProveedor ? "active" : "") + '" data-action="set-ref-origen"' + attrs + ' data-val="proveedor">📦 Se compra a proveedor</button>' +
     "</div>" +
     '<div class="ref-fields">' +
-    (esProveedor ? "" : '<span><label>Consumo tela (MT)</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="consumoAprox" /></span>') +
+    (esProveedor ? "" : '<span><label>Consumo tela (MT)' +
+      renderHelp("Valor de arranque para cualquier tela nueva que agregues a esta referencia — cada tela lleva su PROPIO consumo (editable en su fila de insumos), así que si hay más de una (ej. dos sublimados distintos), cada una puede llevar una cantidad distinta.") +
+      '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.consumoAprox) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="consumoAprox" /></span>') +
     '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
     '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
     (esProveedor
@@ -1015,18 +1029,15 @@ function renderRefCard(cotId, ref) {
       renderComboUnidad({ id: "cotins-unidad-" + i.id }) + "</span>" +
       '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.costo) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="tipo">' + renderTipoCostoOptions(i.tipo, true) + "</select>" +
-      // Para "tela", la cantidad no es un dato aparte: la determina el
-      // consumo aprox. de LA REFERENCIA (mismo valor que ya usa "Costo x
-      // prenda", ver calcCostoPrenda en core/calc.js) — mostrar acá el
-      // insumo.cantidad de siempre (que nadie toca, queda en 1) hacía ver
-      // "Costo x prenda" como si saliera de la nada. El usuario lo notó:
-      // "la cantidad en este caso debería ser la misma que el consumo de
-      // tela". Se deshabilita igual que "fijo_pedido" (tampoco tiene una
-      // cantidad propia: la determina cantidadPedida de la referencia).
-      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' +
-      (i.tipo === "tela" ? esc(ref.consumoAprox) : esc(i.cantidad)) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' +
-      (i.tipo === "fijo_pedido" || i.tipo === "tela" ? "disabled" : "") +
-      (i.tipo === "tela" ? ' title="La cantidad la da el campo \'Consumo tela (MT)\' de la referencia, arriba"' : "") + " />" +
+      // Para "tela", la cantidad ES el consumo (metros) de ESTA tela — ya
+      // no la comparte con la referencia (ver calcCostoPrenda en
+      // core/calc.js): dos sublimados distintos en la misma referencia
+      // pueden consumir cantidades distintas. "Fijo por pedido" sigue
+      // deshabilitado — no tiene cantidad propia, la determina
+      // cantidadPedida de la referencia.
+      '<span class="mobile-th">Cant.</span><input type="number" class="mini-input" style="width:100%" value="' + esc(i.cantidad) + '" data-action-change="set-ins-campo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-ins="' + i.id + '" data-campo="cantidad" ' +
+      (i.tipo === "fijo_pedido" ? "disabled" : "") +
+      (i.tipo === "tela" ? ' title="Metros de ESTA tela que consume una prenda. Si hay más de una tela en la referencia (ej. dos sublimados distintos), cada una lleva su propio consumo."' : "") + " />" +
       '<span class="mobile-th">Costo x prenda</span><span class="amount">' + fmt(calcCostoPrenda(i, ref)) + "</span>" +
       '<button class="btn danger small" data-action="remove-insumo" data-cot="' + cotId + '" data-ref="' + ref.id + '" data-insumo="' + i.id + '">✕</button>' +
       "</div>";
@@ -1617,11 +1628,16 @@ export var actions = {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
     var ids = state.insumoPickerSeleccion || [];
     if (!ids.length) return;
+    // La referencia actual, solo para heredarle su consumo de tela como
+    // valor de arranque a cualquier insumo nuevo tipo "tela" (ver
+    // nuevoInsumo más arriba) — no se muta nada acá.
+    var cotActual = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+    var refActual = cotActual && (cotActual.referencias || []).filter(function (r) { return r.id === refId; })[0];
     // Se agregan en el orden del catálogo (no en el orden en que se fueron
     // marcando), que es el mismo que se ve en la lista de la izquierda.
     var nuevos = (state.catalogoInsumos || [])
       .filter(function (i) { return ids.indexOf(i.id) !== -1; })
-      .map(function (i) { return nuevoInsumo(i); });
+      .map(function (i) { return nuevoInsumo(i, refActual); });
     state.insumoPickerAbierto = "";
     state.insumoPickerCotId = ""; state.insumoPickerRefId = "";
     state.insumoPickerSeleccion = [];
@@ -1723,8 +1739,12 @@ export var actions = {
         // insumoCambioDeCatalogo en core/calc.js). Reportado en producción
         // 2026-09-21: sin esto, TODO insumo agregado vía "Aplicar
         // plantilla" perdía el vínculo, sin importar que la plantilla sí lo
-        // tuviera.
-        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "" };
+        // tuviera. `consumoPropio: true` también viaja con la tela: este
+        // consumo YA es el propio de la plantilla, no el genérico de la
+        // referencia — sin esto, la reparación retroactiva
+        // (repararConsumoTelaPorInsumo en core/store.js) lo pisaría con
+        // consumoAprox de la referencia en el próximo loadAll().
+        return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela" };
       });
       var patch = { insumos: (r.insumos || []).concat(nuevosInsumos) };
       if (!r.nombre) patch.nombre = pla.nombre;
@@ -1770,9 +1790,9 @@ export var actions = {
         patch.insumos = (r.insumos || []).concat((prod.insumos || []).map(function (ins) {
           // esServicio ya viene resuelto desde el producto (ver
           // confirmar-insumo-picker-producto en modules/productos.js).
-          // `origenCatalogoId` se hereda igual — ver el mismo comentario en
-          // "aplicar-plantilla" más arriba.
-          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "" };
+          // `origenCatalogoId`/`consumoPropio` se heredan igual — ver el
+          // mismo comentario en "aplicar-plantilla" más arriba.
+          return { id: uid(), nombre: ins.nombre, unidad: ins.unidad, costo: num(ins.costo), tipo: ins.tipo, cantidad: num(ins.cantidad) || 1, esServicio: !!ins.esServicio, origenCatalogoId: ins.origenCatalogoId || "", consumoPropio: ins.tipo === "tela" };
         }));
         if (prod.consumoSugerido && (!r.consumoAprox || Number(r.consumoAprox) === 1)) patch.consumoAprox = num(prod.consumoSugerido);
       }

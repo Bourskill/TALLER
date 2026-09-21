@@ -699,6 +699,46 @@ export function repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, produc
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, insumos tipo "tela" que todavía no tienen su
+// PROPIO consumo (ver calcCostoPrenda en core/calc.js): antes CUALQUIER
+// tela de una referencia/plantilla/producto usaba el mismo
+// consumoAprox/consumoSugerido de su dueño, así que 2 telas distintas en la
+// misma referencia (ej. dos sublimados con diseños distintos) "consumían"
+// la misma cantidad aunque en la vida real fueran cantidades distintas.
+// Reportado en producción 2026-09-21: "cuando hay más de 1 tela sublimada,
+// la cotización está hecha para 1 tela".
+//
+// Esto NO cambia ningún número de lo ya cotizado: copia exactamente el
+// mismo consumoAprox/consumoSugerido que ya venía usando esa tela (el
+// único que existía hasta ahora), solo que ahora queda guardado en el
+// insumo mismo, editable por separado si de verdad hay más de una tela.
+//
+// `consumoPropio` marca cada insumo ya reparado (o ya nacido con su propio
+// valor, ver nuevoInsumo en modules/cotizaciones.js y las acciones
+// equivalentes en plantillas.js/productos.js) para que esta reparación
+// nunca lo vuelva a tocar — sin esa marca, cada loadAll() pisaría con
+// consumoAprox cualquier consumo que el usuario ya hubiera personalizado a
+// propósito después de este fix.
+function repararConsumoTelaDeLista(insumos, consumoDefault) {
+  var hubo = false;
+  (insumos || []).forEach(function (ins) {
+    if (ins.tipo !== "tela" || ins.consumoPropio) return;
+    ins.cantidad = num(consumoDefault) || 0;
+    ins.consumoPropio = true;
+    hubo = true;
+  });
+  return hubo;
+}
+export function repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones) {
+  var huboReparacion = false;
+  (plantillas || []).forEach(function (p) { if (repararConsumoTelaDeLista(p.insumos, p.consumoSugerido)) huboReparacion = true; });
+  (productos || []).forEach(function (p) { if (repararConsumoTelaDeLista(p.insumos, p.consumoSugerido)) huboReparacion = true; });
+  (cotizaciones || []).forEach(function (c) {
+    (c.referencias || []).forEach(function (r) { if (repararConsumoTelaDeLista(r.insumos, r.consumoAprox)) huboReparacion = true; });
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -994,6 +1034,14 @@ export async function loadAll() {
     // están corregidos, esto solo reconstruye lo ya guardado). Mismo
     // criterio de "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararOrigenCatalogoInsumos(state.catalogoInsumos, state.plantillasPrendas, state.productos, state.cotizaciones)) {
+      persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
+    }
+
+    // Auto-reparación: consumo de tela (metros) que aún vivía en la
+    // referencia/plantilla/producto en vez de en cada insumo tipo "tela"
+    // (ver repararConsumoTelaPorInsumo más arriba). Mismo criterio de
+    // "solo con red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararConsumoTelaPorInsumo(state.plantillasPrendas, state.productos, state.cotizaciones)) {
       persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
     }
 

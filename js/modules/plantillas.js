@@ -551,7 +551,18 @@ export var actions = {
         // desde el catálogo (y de ahí a cualquier cotización vía "Aplicar
         // plantilla") nunca quedaba vinculado, así que el aviso jamás podía
         // aparecer para ninguno de ellos. Reportado en producción 2026-09-21.
-        var nuevos = items.map(function (item) { return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: 1, esServicio: esInsumoServicio(item), origenCatalogoId: item.id }; });
+        //
+        // Para una tela, el consumo (metros) es PROPIO de ESTE insumo, no
+        // de la plantilla — arranca igual al que ya tenía la plantilla (o
+        // 1, si es la primera) para que agregar una sola tela siga sin
+        // pedir nada extra; una segunda tela distinta se edita aparte (ver
+        // el mismo criterio en nuevoInsumo, modules/cotizaciones.js).
+        // `consumoPropio` evita que la reparación retroactiva
+        // (repararConsumoTelaPorInsumo en core/store.js) la toque.
+        var nuevos = items.map(function (item) {
+          var esTela = item.tipo === "tela";
+          return { id: uid(), nombre: item.nombre, unidad: item.unidad, costo: num(item.costo), tipo: item.tipo, cantidad: esTela ? (num(p.consumoSugerido) || 1) : 1, consumoPropio: esTela, esServicio: esInsumoServicio(item), origenCatalogoId: item.id };
+        });
         return Object.assign({}, p, { insumos: (p.insumos || []).concat(nuevos) });
       });
     }

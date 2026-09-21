@@ -997,6 +997,44 @@ sobre un caso que nunca se confirmó, mientras la causa de mayor impacto
 —la que afecta el camino MÁS usado para construir una cotización—
 seguía sin tocarse.
 
+### 🟡 Hallazgo #28 — dos telas distintas en la misma referencia "consumían" la misma cantidad. ✅ CORREGIDO
+
+Reportado en producción 2026-09-21: "cuando hay más de 1 tela sublimada,
+la cotización está hecha para 1 tela". El campo "Consumo tela (MT)" vivía
+en la REFERENCIA, no en cada insumo — `calcCostoPrenda` (core/calc.js)
+usaba `ref.consumoAprox` para CUALQUIER insumo tipo "tela" de esa
+referencia. Con una sola tela (el caso de siempre) esto es invisible; con
+2+ telas distintas (ej. dos sublimados, cada uno con su propio diseño y
+costo por metro), las dos se calculaban como si consumieran el MISMO
+total completo (ej. 0.8m delantero + 0.4m mangas se calculaba como 1.2m +
+1.2m, no 0.8m + 0.4m) — inflando tanto el costo real de la referencia
+como la lista de compras.
+
+**Por qué el campo quedó así originalmente:** una auditoría anterior
+(memoria `ronda_seis_pedidos_2026-09`) ya había señalado la inconsistencia
+de que "Cant." mostrara `insumo.cantidad` (siempre 1, sin usar) mientras
+"Costo x prenda" ya usaba `consumoAprox` — el fix de ese momento fue
+DESHABILITAR "Cant." y mostrar ahí mismo el consumo de la referencia, sin
+prever el caso de una segunda tela distinta.
+
+**Fix:** el consumo (metros) pasa a ser del INSUMO, no de la referencia —
+`insumo.cantidad` ahora SÍ se usa para tipo "tela" (en `calcCostoPrenda` y
+en `agregarInsumosDeReferencias`, que alimenta `calcListaCompras`), igual
+que ya funcionaba para insumos "por prenda". El campo "Consumo tela (MT)"
+de la referencia pasa a ser solo el valor de ARRANQUE para cualquier tela
+nueva que se agregue (una sola tela sigue sin pedir nada extra); cada tela
+queda editable por separado en su propia fila.
+
+**Migración retroactiva (`repararConsumoTelaPorInsumo`, core/store.js):**
+copia, una sola vez, el `consumoAprox`/`consumoSugerido` que esa tela YA
+estaba usando hacia su propio campo — no cambia ni un peso de lo que ya
+se había cotizado, solo lo hace editable por separado de ahí en adelante.
+Marca cada insumo migrado (`consumoPropio: true`) para que la reparación
+nunca vuelva a pisar un consumo que el usuario ya personalizó a mano.
+Corre también sobre plantillas y productos del catálogo (mismo `bug`,
+mismo `calcCostoUnitarioRef` compartido — ver `costoPorPrenda` en
+plantillas.js y `calcTotalesProducto` en core/calc.js).
+
 ---
 
 ## Próximos pasos

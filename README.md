@@ -259,6 +259,26 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo séptima ronda: dos telas distintas en la misma referencia ya no "consumen" la misma cantidad)
+
+El usuario reportó: "cuando hay más de 1 tela sublimada, la cotización
+está hecha para 1 tela". El campo "Consumo tela (MT)" vivía en la
+REFERENCIA, no en cada insumo — con una sola tela es invisible; con 2+
+telas distintas (ej. dos sublimados con diseños/costos distintos), las
+dos se calculaban como si consumieran el mismo total completo.
+
+- **Fix:** el consumo (metros) pasa a ser del INSUMO tipo "tela", no de
+  la referencia (`calcCostoPrenda`/`agregarInsumosDeReferencias` en
+  core/calc.js) — igual que ya funcionaba para insumos "por prenda". El
+  campo de la referencia pasa a ser solo el valor de arranque para una
+  tela nueva; cada tela queda editable por separado.
+- **Migración retroactiva** (`repararConsumoTelaPorInsumo`,
+  core/store.js): copia una sola vez el consumo que cada tela YA estaba
+  usando — no cambia ni un peso de lo ya cotizado, solo lo hace editable
+  por separado de ahí en adelante. Corre también sobre plantillas y
+  productos del catálogo (mismo costeo compartido).
+- Ver CONTABILIDAD.md, "Hallazgo #28".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo sexta ronda: la causa REAL — "Aplicar plantilla"/"Aplicar producto" nunca copiaban el vínculo con el catálogo)
 
 La ronda anterior (#26) se presentó como si fuera el caso del usuario sin
