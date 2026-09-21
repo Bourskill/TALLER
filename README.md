@@ -259,6 +259,38 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (quincuagésimo séptima ronda: "Origen eliminado" falso en comisiones/nómina — dos corrimientos de columna más, nunca detectados, en 2026-09-10 y 2026-09-19)
+
+El usuario siguió reportando la insignia en pedidos reales — una
+COMISIÓN y un pago de NÓMINA, sin relación con compras/insumos (no era
+el mismo caso de la ronda anterior). El tooltip lo confirmó: una compra
+real decía "se generó desde la comisión de un vendedor"; un pago de
+nómina real decía "se generó desde un aporte nuevo al Colchón" — ninguno
+de los dos es posible por construcción.
+
+- **Causa:** reconstruyendo el historial completo de
+  `COLUMNAS_MOVIMIENTOS` (`git log -p`), el mismo error del Hallazgo #15
+  (columna insertada en medio) había pasado DOS VECES MÁS sin detectarse:
+  2026-09-10 (5 columnas nuevas insertadas antes de
+  `origenComisionCotId`/`origenComisionPedidoId`, entre otras) y
+  2026-09-19 (`origenColchonId` insertado antes de `esInsumo`, el mismo
+  día que se agregó "Colchón"). Solo el de hoy se había detectado porque
+  rompió la lectura completa (ronda de la pestaña sin columnas
+  suficientes). Los otros dos llevaban corrompiendo en silencio
+  movimientos viejos desde hace 10 y 1 día.
+- **Fix:** no se puede reconstruir el valor ORIGINAL perdido, pero SÍ se
+  puede detectar con certeza cuándo un campo de marca es IMPOSIBLE para
+  el `tipo` de ese movimiento (una comisión siempre nace con
+  `tipo: "comision"`, nunca "gasto"/"nomina"; un aporte al Colchón
+  siempre nace con `tipo: "ingreso"`). Nueva auto-reparación al cargar,
+  `repararMarcasOrigenInconsistentes` (core/store.js, mismo patrón que
+  las reparaciones ya existentes de tx huérfanos/vendedor perdido):
+  limpia cualquier campo de marca imposible para el tipo de su
+  movimiento — el movimiento no se borra ni se toca en nada más, solo
+  deja de mostrar la insignia falsa.
+- Ver CONTABILIDAD.md, "Hallazgo #19", para lo que este fix NO puede
+  detectar (una marca legítima para su tipo pero con el VALOR corrompido).
+
 ## Registro de cambios — septiembre 2026 (quincuagésimo sexta ronda: corregir el nombre de un insumo lo marcaba "Origen eliminado" sin haberse borrado)
 
 El usuario reportó un pedido real con 3 compras marcadas "ORIGEN

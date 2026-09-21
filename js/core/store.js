@@ -562,6 +562,65 @@ export function repararVendedorPerdido(pedidos, tx) {
   return huboReparacion;
 }
 
+// Qué campo de MARCAS_ORIGEN_SISTEMA (ver core/calc.js) es legítimo en QUÉ
+// tipo de tx — reconstruido leyendo cada sitio del código que los escribe
+// (add-tx/pagar-nomina en finanzas.js/pendientes.js, add-abono/pagar-comision
+// en pedidos.js, sincronizar-compras-finanzas/pagar-comision-cot en
+// cotizaciones.js, guardar-relleno-colchon en resumen.js): cada uno se crea
+// SIEMPRE con el mismo `tipo` de tx, nunca otro.
+var TIPOS_VALIDOS_POR_MARCA = {
+  origenAbonoId: ["ingreso"],
+  origenReembolsoId: ["gasto"],
+  origenVentaConsignacionId: ["ingreso"],
+  origenComisionConsignacionId: ["gasto"],
+  origenCompraClave: ["gasto"],
+  origenGastoFijoPeriodo: ["gasto"],
+  origenComisionCotId: ["comision"],
+  origenComisionPedidoId: ["comision"],
+  origenDeudaIngresoId: ["ingreso"],
+  origenColchonId: ["ingreso"],
+  deudaId: ["gasto"]
+};
+
+// Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que
+// alguno de sus campos de marca de origen sea real (ej. un gasto con
+// `origenComisionPedidoId` — ninguna comisión se crea como "gasto", solo
+// como "comision"). Devuelve true si reparó algo.
+//
+// Por qué existía el hueco: core/sheetsTabular.js lee cada fila de
+// "Movimientos" por POSICIÓN — insertar una columna nueva en medio del
+// arreglo de core/sheetsEsquemas.js (pasó TRES veces: 2026-09-10, agregando
+// 5 columnas antes de origenGastoFijoPeriodo/origenComisionCotId/
+// origenComisionPedidoId/origenGastoId; 2026-09-19, agregando origenColchonId
+// antes de esInsumo; y 2026-09-20 con empleadoId, ya corregida — ver el
+// aviso en sheetsEsquemas.js) corre TODO lo que sigue un puesto. Cualquier
+// movimiento que existiera ANTES de cada uno de esos cambios y no se haya
+// vuelto a reescribir desde entonces queda leyendo, en esos campos, lo que
+// antes era una columna VECINA (ej. `proveedorId` o `insumoNombre` de una
+// compra real, ahora leído como `origenComisionCotId`/`origenComisionPedidoId`)
+// — un valor no vacío que MARCAS_ORIGEN_SISTEMA toma como una marca real,
+// mostrando "origen eliminado" en un movimiento que nunca tuvo nada que ver
+// con una comisión o el Colchón. Detectado en producción: el usuario
+// reportó una compra de insumo y un pago de nómina con esa insignia sin
+// que nada se hubiera borrado. No se puede reconstruir el valor ORIGINAL
+// perdido (no hay forma de saber qué decía esa columna antes del corrimiento
+// sin la fila cruda de ese momento exacto), así que esto solo LIMPIA el
+// campo imposible — el movimiento vuelve a verse como lo que siempre fue: uno
+// sin origen del sistema, editable/borrable normal, sin la insignia
+// confusa. Auditoría financiera 2026-09-20, post-mortem.
+export function repararMarcasOrigenInconsistentes(tx) {
+  var huboReparacion = false;
+  (tx || []).forEach(function (t) {
+    Object.keys(TIPOS_VALIDOS_POR_MARCA).forEach(function (campo) {
+      if (!t[campo]) return;
+      if (TIPOS_VALIDOS_POR_MARCA[campo].indexOf(t.tipo) !== -1) return; // combinación posible, no se toca
+      t[campo] = "";
+      huboReparacion = true;
+    });
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -831,6 +890,15 @@ export async function loadAll() {
     // reparación de arriba.
     if (!huboFalloDeRed && repararVendedorPerdido(state.pedidos, state.tx)) {
       persist("pedidos");
+    }
+
+    // Auto-reparación: campos de marca de origen imposibles para el `tipo`
+    // de cada tx (ver repararMarcasOrigenInconsistentes más arriba — el
+    // corrimiento de columnas de "Movimientos" en 3 fechas distintas dejó
+    // datos de compras/insumos leídos como si fueran comisión o Colchón).
+    // Mismo criterio de "solo con red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararMarcasOrigenInconsistentes(state.tx)) {
+      persist("tx");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"

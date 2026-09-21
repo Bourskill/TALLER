@@ -638,6 +638,71 @@ insignia es solo de navegación (no se puede volver a la cotización desde
 ahí), no una señal de que la plata esté mal contada. No hace falta
 recrearlos.
 
+### 🔴 Hallazgo #19 — post-mortem 2026-09-20, la causa raíz de casi todos los "Origen eliminado" viejos: 3 corrimientos de columna en la historia de "Movimientos", no solo el de hoy. ✅ CORREGIDO (lo que se puede corregir)
+
+El usuario siguió reportando la insignia "Origen eliminado" en pedidos
+reales (OP-3902 y otros) — incluida una COMISIÓN y un pago de NÓMINA, que
+no tienen nada que ver con compras/insumos (Hallazgo #18). Pidió el
+tooltip exacto: una compra real decía *"se generó desde la comisión de un
+vendedor"*, un pago de nómina real decía *"se generó desde un aporte
+nuevo al Colchón"*. Ninguno de los dos es posible por construcción — ahí
+quedó claro que no era un caso más del Hallazgo #18, sino algo estructural.
+
+**Investigación:** se reconstruyó el historial COMPLETO de
+`COLUMNAS_MOVIMIENTOS` (`git log -p` sobre `core/sheetsEsquemas.js`) y
+apareció el patrón — el mismo error del Hallazgo #15 (columna insertada
+en medio, no al final) había pasado **dos veces más, sin detectarse**:
+- **2026-09-10** (commit `7f48362`): se insertaron 5 columnas nuevas
+  (`origenReembolsoId`, `origenVentaConsignacionId`,
+  `origenComisionConsignacionId`, `origenCompraClave`,
+  `origenDeudaIngresoId`) ANTES de columnas ya existentes
+  (`origenGastoFijoPeriodo`, `origenComisionCotId`,
+  `origenComisionPedidoId`, `origenGastoId`, `esInsumo`...). Todo
+  movimiento escrito antes de esa fecha y no vuelto a guardar desde
+  entonces quedó con sus columnas corridas — específicamente,
+  `proveedorId`/`insumoNombre` de una compra real terminaron leyéndose
+  como `origenComisionCotId`/`origenComisionPedidoId`.
+- **2026-09-19** (commit `db6e61d`, el mismo día que se agregó
+  "Colchón"): se insertó `origenColchonId` ANTES de `esInsumo` (columna
+  ya existente). Todo movimiento anterior a esa fecha quedó con SUS
+  columnas corridas una posición más.
+- **2026-09-20** (commit `443927e`, hoy): `empleadoId` insertado igual —
+  esta YA se había detectado y corregido (Hallazgo #15, commit `a8aead7`).
+
+Osea: **tres incidentes idénticos, en fechas distintas, cada uno
+corriendo las columnas para cualquier movimiento más viejo que él**. Solo
+el de hoy se había detectado porque fue el que rompió la lectura
+completa (Hallazgo #17). Los otros dos llevaban corrompiendo
+silenciosamente `origenComisionCotId`/`origenComisionPedidoId`/
+`origenColchonId` (entre otros) en movimientos viejos desde hace 10 y 1
+día respectivamente, sin que nada avisara — cada uno mostraba, al azar,
+una insignia "Origen eliminado" con un motivo que no tenía ningún sentido
+para ese movimiento.
+
+**Fix:** no es posible reconstruir el valor ORIGINAL perdido en esas
+columnas (no hay forma de saber qué decía una celda antes del corrimiento
+sin la fila cruda de ese momento exacto) — pero SÍ se puede detectar con
+certeza cuándo un campo de marca es IMPOSIBLE para el `tipo` de ese
+movimiento (una comisión SIEMPRE nace con `tipo: "comision"`, nunca
+`"gasto"`/`"nomina"`; un aporte al Colchón SIEMPRE nace con
+`tipo: "ingreso"` — ver cada punto del código donde se crean, uno por
+uno). Nueva reparación automática al cargar,
+`repararMarcasOrigenInconsistentes` (`core/store.js`, mismo patrón que
+`repararTxHuerfanosDeCotEscalada`/`repararVendedorPerdido`): limpia
+cualquier campo de marca que sea estructuralmente imposible para el tipo
+de su movimiento. El movimiento no se borra ni se toca en nada más — solo
+deja de mostrar una insignia falsa, y vuelve a ser un movimiento normal
+(editable/borrable como cualquiera sin origen del sistema).
+
+**Lo que este fix NO puede prometer:** si un movimiento tenía una marca
+de origen LEGÍTIMA para su tipo (ej. una comisión real con
+`origenComisionPedidoId`) pero el VALOR de esa columna específicamente se
+corrompió con el corrimiento (apuntando a un id que ya no existe), este
+fix no lo detecta — la combinación tipo/campo sigue siendo posible, solo
+el dato está mal. Si después de esta ronda sigue apareciendo "Origen
+eliminado" en una COMISIÓN real (no en una compra/gasto/nómina), es ese
+caso — avisar para investigar aparte, con el pedido/id específico.
+
 ### ✅ Confirmado que "quitar relleno" del Colchón SÍ es intencional
 
 Un hallazgo dudaba de que borrar un relleno "aporte" no pase por la

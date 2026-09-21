@@ -54,7 +54,7 @@ global.window.storage = {
 };
 
 const { render } = await import("../js/core/dom.js");
-const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido } = await import("../js/core/store.js");
+const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido, repararMarcasOrigenInconsistentes } = await import("../js/core/store.js");
 const auth = await import("../js/core/auth.js");
 function loginComo(rol, nombre, email) {
   sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
@@ -2333,6 +2333,35 @@ reparoVendedor = repararVendedorPerdido([pedConVendedorOk, pedSinComisionQueLoRe
 assert(reparoVendedor === false, "y si no hay nada reparable, lo dice");
 assert(pedConVendedorOk.vendedor.nombre === "Carlos" && pedConVendedorOk.vendedor.tipo === "porcentaje", "un pedido que ya tiene vendedor no se toca, aunque exista una comisión pagada de otro pedido");
 assert(pedSinComisionQueLoRespalde.vendedor === null, "un pedido sin vendedor pero sin ninguna comisión real que lo respalde se deja tal cual (no se inventa un vendedor)");
+
+// ---------------------------------------------------------------------------
+// Post-mortem en vivo 2026-09-20: sheetsTabular.js lee "Movimientos" por
+// POSICIÓN — el esquema (core/sheetsEsquemas.js) tuvo una columna insertada
+// en medio del arreglo TRES veces en su historia (2026-09-10, 2026-09-19,
+// 2026-09-20 — la última ya corregida). Cualquier movimiento anterior a cada
+// una de esas fechas terminó leyendo, en sus campos de marca de origen, el
+// dato de una columna vecina — el usuario reportó una compra de insumo real
+// con la insignia "origen eliminado" cuyo tooltip decía "se generó desde la
+// comisión de un vendedor", y un pago de nómina real cuyo tooltip decía "se
+// generó desde un aporte nuevo al Colchón". Ninguno de los dos es posible
+// por construcción: una comisión SIEMPRE nace con tipo "comision", nunca
+// "gasto"/"nomina"; un aporte al Colchón SIEMPRE nace con tipo "ingreso".
+// repararMarcasOrigenInconsistentes (store.js) limpia esos campos
+// imposibles — no puede recuperar el dato ORIGINAL que se perdió con el
+// corrimiento, pero al menos el movimiento deja de mostrar una insignia
+// confusa y falsa.
+// ---------------------------------------------------------------------------
+const txCompraConComisionFalsa = { id: "tx-compra-marca-falsa", tipo: "gasto", concepto: "Compra — Elastico — Uniformes de futbol", contraparte: "", monto: 8000, origenComisionPedidoId: "algo-que-nunca-fue-esto" };
+const txNominaConColchonFalso = { id: "tx-nomina-marca-falsa", tipo: "nomina", concepto: "Nómina 6-12 sept — Doña Janneh", contraparte: "Doña Janneh", monto: 50000, origenColchonId: "algo-que-nunca-fue-esto" };
+// Control: una comisión REAL con origenComisionPedidoId (combinación válida
+// para su tipo) no se toca.
+const txComisionRealIntacta = { id: "tx-comision-real-intacta", tipo: "comision", concepto: "Comisión — negra", contraparte: "negra", monto: 31500, origenComisionPedidoId: "ped-vendedor-perdido" };
+let reparoMarcas = repararMarcasOrigenInconsistentes([txCompraConComisionFalsa, txNominaConColchonFalso, txComisionRealIntacta]);
+assert(reparoMarcas === true, "repararMarcasOrigenInconsistentes avisa que sí reparó algo");
+assert(txCompraConComisionFalsa.origenComisionPedidoId === "", "una compra (tipo \"gasto\") con origenComisionPedidoId queda limpia — ninguna comisión nace como gasto");
+assert(txNominaConColchonFalso.origenColchonId === "", "un pago de nómina con origenColchonId queda limpio — ningún aporte al Colchón nace como nómina");
+assert(txComisionRealIntacta.origenComisionPedidoId === "ped-vendedor-perdido", "...pero una comisión real (tipo \"comision\") con esa misma marca NO se toca");
+assert(repararMarcasOrigenInconsistentes([txComisionRealIntacta]) === false, "y sobre datos ya limpios, no reporta ninguna reparación");
 
 // El fix de ORIGEN (no solo la reparación de datos viejos): "Aplicar a
 // pedido" sobre una cotización escalada, cuando esa cotización nunca tuvo
