@@ -1181,6 +1181,27 @@ obra suma correctamente al costo unitario/total de la referencia; la
 lista de compras trae las TRES líneas por separado — la compra al
 proveedor, el insumo y la mano de obra) antes de avisarle al usuario.
 
+**Seguimiento (mismo día):** al ver el fix en producción, el usuario
+reportó dos cosas más:
+1. El resumen "📦 Se compra hecha..." seguía diciendo literalmente "sin
+   insumos ni fases de producción" — texto desactualizado que se quedó
+   sin tocar al agregar la tabla de insumos justo debajo, contradiciendo
+   lo que el usuario veía en pantalla. Corregido.
+2. Dos campos redundantes en el formulario de una referencia de
+   proveedor: **"Entrega esperada"** por referencia duplicaba la "Fecha
+   de entrega" general de la cotización (`cot.fechaEntrega`, la que usa
+   Resumen para "próximas entregas" y el PDF) — se QUITÓ del todo (con
+   el usuario confirmando la contrapartida: se pierde poder tener fechas
+   distintas por proveedor si algún día se compra a varios a la vez, y
+   aceptó ese costo). Y **"Costo x prenda"** (el indicador de abajo)
+   podía leerse como si repitiera "Costo de compra x1" (el campo de
+   arriba) — no es que sean redundantes (uno es lo que escribes, el otro
+   es compra + insumos extra), sino que sin insumos extra SÍ son el
+   mismo número y no se explicaba la diferencia; ahora "Costo x prenda"
+   muestra un desglose ("$20.000 de la compra + $5.000 de insumos/mano
+   de obra extra sobre ella") cuando hay algo que sumar, en vez de lucir
+   como un duplicado sin contexto.
+
 ---
 
 ## Próximos pasos

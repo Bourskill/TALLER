@@ -5441,6 +5441,11 @@ assert(!!refCardProvInsTest.querySelector('[data-action="add-insumo-personalizad
 assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-plantilla"]'), "pero NO \"Aplicar plantilla\" — reemplazaría la receta completa de una prenda fabricada desde cero, que no aplica sobre algo ya comprado hecho");
 assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-producto"]'), "...ni \"Aplicar producto\", por la misma razón");
 assert(!refCardProvInsTest.querySelector('input[data-campo="consumoAprox"]'), "...ni el campo \"Consumo tela (MT)\" — no hay nada que cortar en una prenda ya comprada");
+// "Entrega esperada" por referencia se quitó 2026-09-21 — el usuario lo
+// notó redundante frente a la "Fecha de entrega" general de la cotización
+// (cot.fechaEntrega, ver renderFormCotizacion), que ya cubre cuándo se le
+// entrega el pedido al cliente.
+assert(!refCardProvInsTest.querySelector('input[data-campo="fechaEntregaProveedor"]'), "el campo \"Entrega esperada\" por referencia ya no existe — la cotización ya tiene su propia fecha de entrega general");
 assert(refCardProvInsTest.textContent.indexOf("Sin insumos aún") !== -1, "sin insumos agregados todavía, se ve el mismo mensaje vacío que en \"taller\"");
 // El texto de renderRefProveedorResumen decía "sin insumos ni fases de
 // producción" — quedó desactualizado el mismo día que se agregó la tabla
@@ -5477,6 +5482,14 @@ var lineaPlanchadaTest = listaProvInsTest.filter(function (l) { return l.nombre 
 assert(!!lineaCamisetaTest && lineaCamisetaTest.tipo === "producto_proveedor" && lineaCamisetaTest.costoTotal === 100000, "la lista de compras sigue trayendo la compra al proveedor como UNA línea (20.000 × 5 = 100.000)");
 assert(!!lineaDtfTest && lineaDtfTest.costoTotal === 15000, "...y APARTE, una línea propia para el DTF (3.000 × 5 = 15.000) — antes ni existía, se perdía silenciosamente");
 assert(!!lineaPlanchadaTest && lineaPlanchadaTest.costoTotal === 10000 && lineaPlanchadaTest.esServicio === true, "...y otra para la Planchada (2.000 × 5 = 10.000), reconocida como mano de obra propia (esServicio), igual que corte/confección en una referencia de taller");
+
+// "Costo x prenda" podía VERSE como si repitiera "Costo de compra x1" —
+// el usuario lo notó 2026-09-21 ("ya sale en los indicadores de abajo con
+// la ganancia etc"). Con insumos extra agregados, ahora explica la
+// diferencia (20.000 de compra + 5.000 de insumos/mano de obra) en vez de
+// dejarlo lucir como un número duplicado sin explicación.
+var refCardProvInsTestTrasInsumos = document.querySelector('[data-ref-id="ref-provins-test"]');
+assert(refCardProvInsTestTrasInsumos.textContent.indexOf("20.000 de la compra") !== -1 && refCardProvInsTestTrasInsumos.textContent.indexOf("5.000 de insumos/mano de obra extra") !== -1, "\"Costo x prenda\" ahora explica que es compra + insumos/mano de obra extra, no un simple duplicado de \"Costo de compra x1\"");
 
 state.pedidos = pedidosPreviosProvInsTest; state.cotizaciones = cotizacionesPreviasProvInsTest;
 state.plantillasPrendas = plantillasPreviasProvInsTest; state.productos = productosPreviosProvInsTest;

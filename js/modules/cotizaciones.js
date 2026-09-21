@@ -850,12 +850,20 @@ function renderRefProveedorResumen(ref, calc) {
   // desactualizado al agregar esa tabla, aunque el código ya funcionara.
   var html = '<div class="section-sub" style="margin:10px 0 0;">📦 Se compra hecha' +
     (proveedor ? " a <b>" + esc(proveedor.nombre) + "</b>" : "") +
-    (ref.fechaEntregaProveedor ? " · llega el " + esc(ref.fechaEntregaProveedor) : "") +
     " — sin fases de producción propias (el progreso se sigue como pendiente/recibido), pero sí puedes agregar abajo cualquier insumo o mano de obra extra sobre la compra (ej. un DTF, una planchada).</div>";
+  // "Costo x prenda" puede VERSE como si repitiera "Costo de compra x1" de
+  // arriba — el usuario lo notó 2026-09-21. Casi siempre SÍ son el mismo
+  // número (sin insumos extra, no hay nada más que sumar), pero en cuanto
+  // se agrega un DTF o una planchada dejan de serlo — acá se explica la
+  // diferencia en vez de dejarlo lucir como un duplicado sin explicación.
+  var costoInsumosExtra = calc.costoDirectoUnit - num(ref.costoCompra);
+  var partesCostoProveedor = [];
+  if (costoInsumosExtra > 0) partesCostoProveedor.push(fmt(num(ref.costoCompra)) + " de la compra más " + fmt(costoInsumosExtra) + " de insumos/mano de obra extra sobre ella");
+  if (calc.costoGlobalUnit) partesCostoProveedor.push(fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente)");
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda' +
-    (calc.costoGlobalUnit
-      ? renderHelp("Incluye " + fmt(calc.costoDirectoUnit) + " de los insumos de esta referencia, más " + fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente). Es el mismo costo con el que cuentan el total de la cotización y el reporte de productos vendidos.")
+    (partesCostoProveedor.length
+      ? renderHelp("Incluye " + partesCostoProveedor.join(", más ") + ". Es el mismo costo con el que cuentan el total de la cotización y el reporte de productos vendidos.")
       : "") +
     '</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +
@@ -1092,9 +1100,8 @@ function renderRefCard(cotId, ref) {
     '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
     '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
     (esProveedor
-      ? ('<span><label>Costo de compra x1' + renderHelp("Lo que te cobra el proveedor por cada unidad. Reemplaza a los insumos: de acá sale el costo y la ganancia de la referencia.") + '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.costoCompra || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="costoCompra" /></span>' +
-        renderSelectorProveedorRef(cotId, ref) +
-        '<span><label>Entrega esperada</label><input type="date" class="mini-input" style="flex:1;" value="' + esc(ref.fechaEntregaProveedor || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="fechaEntregaProveedor" /></span>')
+      ? ('<span><label>Costo de compra x1' + renderHelp("Lo que te cobra el proveedor por cada unidad. Es la base del costo de la referencia — si le agregas insumos o mano de obra extra abajo (ej. un DTF, una planchada), se SUMAN a este número, no lo reemplazan. Ver \"Costo x prenda\" más abajo para el total.") + '</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.costoCompra || "") + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="costoCompra" /></span>' +
+        renderSelectorProveedorRef(cotId, ref))
       : "") +
     '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia"' + attrs + ">Eliminar referencia</button>" +
     "</div>" +
@@ -1616,12 +1623,12 @@ export var actions = {
       if (origen === "proveedor") {
         return Object.assign({}, r, { origen: "proveedor", insumos: [], consumoAprox: 0, estadosDef: [], estado: "" });
       }
-      return Object.assign({}, r, { origen: "taller", costoCompra: 0, proveedorId: "", fechaEntregaProveedor: "", estadosDef: [], estado: "" });
+      return Object.assign({}, r, { origen: "taller", costoCompra: 0, proveedorId: "", estadosDef: [], estado: "" });
     });
   },
   "set-ref-campo": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), campo = el.getAttribute("data-campo");
-    var textual = campo === "nombre" || campo === "origen" || campo === "fechaEntregaProveedor" || campo === "proveedorId";
+    var textual = campo === "nombre" || campo === "origen" || campo === "proveedorId";
     var numerico = !textual;
     mapRef(cotId, refId, function (r) {
       var valor = numerico ? num(el.value) : el.value;

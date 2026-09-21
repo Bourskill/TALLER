@@ -259,6 +259,25 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésima ronda: seguimiento de la ronda anterior — texto desactualizado y dos campos redundantes en "Se compra a proveedor")
+
+El usuario, ya con la ronda anterior en vivo, reportó dos cosas: el
+resumen seguía diciendo "sin insumos ni fases de producción" (texto
+viejo, nunca actualizado al agregar la tabla de insumos justo debajo);
+y dos campos que le parecían redundantes — "Entrega esperada" por
+referencia (ya existe "Fecha de entrega" general en la cotización) y
+"Costo x prenda" pareciendo repetir "Costo de compra x1".
+
+- Corregido el texto del resumen.
+- **"Entrega esperada" se quitó** de la referencia (campo, resumen y
+  acciones relacionadas) — confirmado con el usuario, sabiendo que se
+  pierde poder tener fechas distintas por proveedor si algún día se
+  compra a varios a la vez.
+- **"Costo x prenda"** ahora explica el desglose (compra + insumos/mano
+  de obra extra) cuando hay algo que sumar, en vez de lucir como un
+  duplicado de "Costo de compra x1" sin contexto.
+- Ver CONTABILIDAD.md, seguimiento del "Hallazgo #30".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo novena ronda: una referencia comprada a proveedor ya puede llevar insumos y mano de obra adicionales — ej. un DTF o una planchada sobre la prenda comprada)
 
 El usuario planteó el caso: compra una camiseta hecha a un proveedor,
