@@ -7,13 +7,25 @@ import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe, fmt } from "./utils.js";
 import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
-// Flujo por defecto para una referencia "comprada a proveedor" (sin fases de
-// producción propias en el taller) — a diferencia de ESTADOS_DEFAULT (5
-// etapas de producción real), acá solo hay que saber si ya llegó o no.
+// Flujo por defecto para una referencia que solo trae prendas COMPRADAS ya
+// hechas (nada de tela ni mano de obra propia) — a diferencia de
+// ESTADOS_DEFAULT (5 etapas de producción real), acá solo hay que saber si
+// ya llegó o no. Hasta 2026-09-21 esto dependía de un interruptor
+// "origen: proveedor" a nivel de referencia; ahora que "prenda comprada" es
+// un insumo más (ver TIPOS_COSTO en core/constants.js — el usuario pidió
+// simplificar el formulario), se detecta solo: si TODOS los insumos de la
+// referencia son "producto_comprado", se usa este flujo corto. En cuanto se
+// agrega cualquier insumo de fabricación/mano de obra propia (ej. una
+// planchada), la referencia pasa sola al flujo normal de 5 etapas.
 var ESTADOS_PROVEEDOR_DEFAULT = [
   { id: "pendiente", label: "Pendiente proveedor" },
   { id: "recibido", label: "Recibido" }
 ];
+
+function esSoloPrendaComprada(entidad) {
+  var insumos = entidad && entidad.insumos;
+  return !!(insumos && insumos.length && insumos.every(function (i) { return i.tipo === "producto_comprado"; }));
+}
 
 // ---------- estados de producción: UNA sola resolución ----------
 //
@@ -33,7 +45,7 @@ var ESTADOS_PROVEEDOR_DEFAULT = [
 // necesite las etapas de algo entra por acá.
 export function etapasDe(entidad) {
   if (entidad && entidad.estadosDef && entidad.estadosDef.length) return entidad.estadosDef;
-  if (entidad && entidad.origen === "proveedor") return ESTADOS_PROVEEDOR_DEFAULT;
+  if (esSoloPrendaComprada(entidad)) return ESTADOS_PROVEEDOR_DEFAULT;
   return ESTADOS_DEFAULT;
 }
 // Alias históricos: se mantienen porque medio proyecto los importa, pero los
@@ -1991,16 +2003,18 @@ export function calcRefTotalesConGlobales(cot, ref) {
   };
 }
 
+// Una REFERENCIA de cotización siempre se costea sumando sus insumos —desde
+// 2026-09-21 una prenda comprada a proveedor es uno de esos insumos más
+// (tipo "producto_comprado"), no un campo aparte, así que `ref.origen` de
+// una referencia real nunca vale "proveedor" y esta rama nunca se activa
+// para ella. Sigue viva por el ÚNICO otro llamador: calcTotalesProducto,
+// que arma un "ref sintético" a partir de un PRODUCTO del catálogo —ese sí
+// conserva su propio origen (taller/proveedor, ver modules/productos.js,
+// un concepto aparte que no cambió) — para costear un producto proveedor
+// que además tenga insumos propios (ver TIPOS_COSTO), sin duplicar la
+// fórmula acá y allá.
 export function calcCostoUnitarioRef(ref) {
   var costoInsumos = (ref.insumos || []).reduce(function (a, i) { return a + calcCostoPrenda(i, ref); }, 0);
-  // Una referencia de proveedor llega hecha, así que su costo base es el
-  // precio de compra — pero puede tener insumos/mano de obra ADICIONALES
-  // por encima (ej. un DTF que se estampa después de comprada, una
-  // planchada en el taller), que se suman, nunca reemplazan. Antes de
-  // 2026-09-21 `ref.insumos` de una referencia de proveedor se ignoraba
-  // por completo acá — mismo criterio en agregarInsumosDeReferencias
-  // (más abajo, alimenta la lista de compras), no se puede sumar el
-  // costo en un lado y no aparecer para comprar en el otro.
   if (ref && ref.origen === "proveedor") return num(ref.costoCompra) + costoInsumos;
   return costoInsumos;
 }
@@ -2276,35 +2290,25 @@ function agregarInsumosDeReferencias(referencias) {
   var mapa = {};
   (referencias || []).forEach(function (ref) {
     var cantidadPedida = num(ref.cantidadPedida) || 0;
-    // Referencia comprada a proveedor: la prenda entera es UNA línea de
-    // compra —la referencia misma—, no insumos sueltos (no se corta ni se
-    // cose nada). Esa línea es también la que aparece como destino al
-    // registrar un costo real (ver renderTabProduccion en
-    // modules/cotizaciones.js), que es justo lo que se pidió: costo real
-    // por referencia, no por insumo individual. Pero la prenda comprada
-    // puede de todas formas necesitar insumos o mano de obra ADICIONALES
-    // por encima de la compra (ej. un DTF que se estampa después, una
-    // planchada en el taller, ver calcCostoUnitarioRef) — esos SÍ son
-    // insumos sueltos normales, así que no se corta la función acá: se
-    // sigue de largo hacia el mismo bucle de abajo que ya los procesa
-    // para "taller". 2026-09-21, pedido explícito del usuario.
-    if (ref.origen === "proveedor") {
-      var nombreRef = (ref.nombre || "Producto de proveedor").trim();
-      var keyRef = "producto|" + nombreRef.toLowerCase();
-      if (!mapa[keyRef]) mapa[keyRef] = { clave: keyRef, nombre: nombreRef, unidad: "UND", tipo: "producto_proveedor", esProducto: true, esServicio: false, proveedorId: ref.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
-      mapa[keyRef].cantidadFisica += cantidadPedida;
-      mapa[keyRef].costoTotal += num(ref.costoCompra) * cantidadPedida;
-      if (!mapa[keyRef].proveedorId && ref.proveedorId) mapa[keyRef].proveedorId = ref.proveedorId;
-    }
     (ref.insumos || []).forEach(function (ins) {
       var nombre = (ins.nombre || "Insumo").trim();
-      var key = nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
-      if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: ins.unidad, tipo: ins.tipo, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
+      // Una prenda comprada ya hecha a un proveedor (tipo "producto_comprado",
+      // ver TIPOS_COSTO en core/constants.js) se agrupa por NOMBRE sola, sin
+      // unidad/tipo en la clave — es la MISMA clave ("producto|"+nombre) que
+      // ya usaba la vieja "referencia de proveedor" antes de 2026-09-21 (ver
+      // repararReferenciasProveedorAInsumo en core/store.js), a propósito:
+      // así una compra YA registrada (cantidad/costo real, movimiento en
+      // Finanzas) sigue encontrando su línea después de migrar datos viejos,
+      // en vez de quedar huérfana.
+      var esProductoComprado = ins.tipo === "producto_comprado";
+      var key = esProductoComprado ? "producto|" + nombre.toLowerCase() : nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
+      if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: esProductoComprado ? "UND" : ins.unidad, tipo: ins.tipo, esProducto: esProductoComprado, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
       // Consumo PROPIO del insumo, no el de la referencia — ver
-      // calcCostoPrenda, mismo criterio.
+      // calcCostoPrenda, mismo criterio. Una prenda comprada se cuenta por
+      // unidad, igual que un insumo "por_prenda".
       if (ins.tipo === "tela") cantFisica = (num(ins.cantidad) || 0) * cantidadPedida;
-      else if (ins.tipo === "por_prenda") cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
+      else if (ins.tipo === "por_prenda" || esProductoComprado) cantFisica = (num(ins.cantidad) || 1) * cantidadPedida;
       mapa[key].cantidadFisica += cantFisica;
       mapa[key].costoTotal += calcCostoPrenda(ins, ref) * cantidadPedida;
       if (esInsumoServicio(ins)) mapa[key].esServicio = true;

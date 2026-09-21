@@ -1204,6 +1204,88 @@ reportó dos cosas más:
 
 ---
 
+### 🟡 Hallazgo #31 — se eliminó el interruptor "se fabrica en el taller / se compra a proveedor": una prenda comprada hecha ahora es un insumo más. ✅ IMPLEMENTADO (simplificación de fondo, sobre la base del Hallazgo #30)
+
+El mismo día del Hallazgo #30, el usuario fue un paso más allá: "creo que
+es mejor eliminar la pestaña 'se compra a proveedor' y dejar... la
+camiseta como insumo y ahí decidir si se le agregan más cosas o no
+(insumos o procesos), para simplificar el proceso — y quitar 'consumo de
+tela (mt)', dejarlo en el insumo así como ya se está haciendo". En vez de
+seguir tratando "prenda comprada a proveedor" como un modo entero de la
+referencia (con su propio formulario, su propio campo de costo, su propio
+selector de proveedor y su propio flujo de progreso), pasa a ser un TIPO
+de insumo más — "Prenda comprada a proveedor" — en la misma tabla que
+tela/por prenda/fijo por referencia.
+
+**Por qué esto es más que estética:** el interruptor `ref.origen` tocaba
+CINCO sistemas distintos por separado (el formulario, el costeo, la lista
+de compras, el flujo de progreso, y "Aplicar producto") — cada uno con su
+propia rama `if (origen === "proveedor")`. Cada rama nueva es un lugar
+más donde un caso se puede tratar distinto sin que nadie se dé cuenta
+(exactamente el patrón que ya causó los Hallazgos #20/#22 con
+`origenGastoFijoPeriodo`/`esInsumo`). Convertirlo en un insumo colapsa
+las cinco ramas en UNA sola pregunta ("¿qué insumos tiene esta
+referencia?"), resuelta por las fórmulas que YA existían para insumos.
+
+**Fix por sistema:**
+- **Formulario** (`renderRefCard`/`renderTablaInsumosRef`,
+  modules/cotizaciones.js): se quitó el segmented control taller/
+  proveedor, el campo "Costo de compra x1", el selector de proveedor a
+  nivel de referencia y el campo "Consumo tela (MT)" — este último por
+  pedido explícito del usuario ("dejarlo en el insumo así como ya se
+  está haciendo": cada tela ya guarda su propio consumo desde el
+  Hallazgo #28, el valor de arranque a nivel de referencia dejó de
+  tener trabajo que hacer). "Aplicar plantilla"/"Aplicar producto" pasan
+  a estar SIEMPRE disponibles (antes se ocultaban para "proveedor").
+- **Costeo** (`calcCostoUnitarioRef`, core/calc.js): sin cambios en su
+  cuerpo — sigue sumando insumos, y la rama que sumaba `costoCompra` se
+  deja intacta pero ya nunca se activa para una referencia real (sigue
+  viva SOLO por `calcTotalesProducto`, que costea un PRODUCTO del
+  catálogo con su propio origen — un concepto aparte que no cambió, ver
+  modules/productos.js).
+- **Lista de compras** (`agregarInsumosDeReferencias`, core/calc.js): ya
+  no tiene una rama aparte para "producto_proveedor" — un insumo tipo
+  "producto_comprado" entra por el MISMO bucle que cualquier otro,
+  agrupado por nombre con la clave `"producto|"+nombre` (la MISMA que ya
+  usaba la referencia de proveedor vieja, a propósito — ver más abajo).
+- **Flujo de progreso** (`etapasDe`, core/calc.js): decisión tomada con
+  el usuario (preguntada explícitamente, con ejemplo simple): si TODOS
+  los insumos de la referencia son "producto_comprado", usa el flujo
+  corto Pendiente/Recibido; en cuanto tiene cualquier otro insumo (ej.
+  una planchada), pasa sola al flujo normal de 5 etapas. Automático, sin
+  que el usuario tenga que elegir nada.
+- **"Aplicar producto"** (modules/cotizaciones.js): para un producto del
+  catálogo `origen: "proveedor"`, ya NO reescribe la referencia entera
+  (antes: `insumos: [], costoCompra, proveedorId, estadosDef: []`) —
+  inyecta UN insumo "producto_comprado" con ese costo/proveedor y lo
+  SUMA a los insumos que ya hubiera, igual que "Aplicar plantilla".
+
+**Migración retroactiva** (`repararReferenciasProveedorAInsumo`,
+core/store.js, en `loadAll()`): cada referencia que todavía tenga
+`origen: "proveedor"` gana un insumo "producto_comprado" con el mismo
+costo/proveedor que ya tenía, antepuesto a cualquier insumo que ya
+hubiera agregado (ej. el DTF del Hallazgo #30) — no pierde nada. La
+clave que genera esa línea en la lista de compras es DELIBERADAMENTE la
+misma que ya usaba (`"producto|"+nombre`, no la clave normal por
+nombre+unidad+tipo) para que una compra YA REGISTRADA (cantidad/costo
+real, movimiento en Finanzas vinculado) siga encontrando su línea
+después de migrar — sin esto, cualquier compra proveedor ya pagada en
+producción habría quedado con "Origen eliminado" el día del deploy, el
+mismo bug de fondo que el Hallazgo #22. Idempotente por construcción: la
+migración limpia `origen` al terminar, así que nunca se repite sobre una
+referencia ya convertida.
+
+Verificado end-to-end (formulario sin interruptor ni campos viejos;
+sumar camiseta comprada + DTF + mano de obra da el costo/total
+correctos; la lista de compras trae las tres líneas separadas con la
+clave correcta; el flujo de progreso cambia solo según los insumos;
+"Aplicar producto" de un producto de proveedor SUMA en vez de
+reemplazar; y — el caso más delicado — una compra YA PAGADA sobre una
+referencia de proveedor vieja sigue vinculada a su movimiento real en
+Finanzas después de migrar) antes de avisarle al usuario.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

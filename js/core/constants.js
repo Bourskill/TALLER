@@ -166,6 +166,18 @@ export const TIPOS_COSTO = {
     label: "Se cobra aparte al cliente",
     ayuda: "no se reparte entre las prendas: sale como su propia línea en la cotización, con su precio",
     soloCotizacion: true
+  },
+  // La prenda entera se compra ya hecha a un proveedor, en vez de fabricarse
+  // desde insumos sueltos — antes era un interruptor aparte a nivel de
+  // referencia ("Se compra a proveedor"), con su propio formulario. Desde
+  // 2026-09-21 es un insumo más, en la MISMA tabla: el usuario pidió
+  // simplificarlo así ("dejar la camiseta como insumo y ahí decidir si se
+  // le agregan más cosas o no"). No es `soloCotizacion`: también sirve en
+  // Catálogo/Plantillas/Productos para guardar un insumo reutilizable tipo
+  // "esta prenda la compro siempre hecha a tal proveedor".
+  producto_comprado: {
+    label: "Prenda comprada a proveedor",
+    ayuda: "costo = costo × cantidad (normalmente 1) — se compra ya hecha, no se fabrica"
   }
 };
 

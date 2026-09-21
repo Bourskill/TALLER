@@ -739,6 +739,47 @@ export function repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, una referencia que todavía usa el modelo
+// VIEJO de "origen: proveedor" (costoCompra/proveedorId a nivel de
+// referencia, sin insumos) — desde 2026-09-21 una prenda comprada hecha a
+// un proveedor es un insumo más, tipo "producto_comprado" (ver TIPOS_COSTO
+// en core/constants.js), en la MISMA tabla de insumos que cualquier otra.
+// El usuario lo pidió explícito para simplificar el formulario: "eliminar
+// la pestaña 'se compra a proveedor' y dejar... la camiseta como insumo".
+//
+// Convierte el costo de compra en un insumo (mismo nombre, costo y
+// proveedor que ya tenía la referencia) y lo antepone a los insumos que ya
+// hubiera (ej. un DTF agregado la semana anterior) — no pierde nada de lo
+// ya cotizado. La clave de compras que genera ese insumo en
+// calcListaCompras es a propósito la MISMA que ya usaba la referencia de
+// proveedor ("producto|"+nombre, ver agregarInsumosDeReferencias en
+// core/calc.js) — así una compra YA registrada (cantidad/costo real,
+// movimiento en Finanzas) sigue encontrando su línea después de migrar,
+// en vez de quedar huérfana.
+//
+// Idempotente por construcción: la migración limpia `origen` al terminar,
+// así que una referencia ya migrada nunca vuelve a calificar (no hace
+// falta una marca aparte, a diferencia de consumoPropio).
+export function repararReferenciasProveedorAInsumo(cotizaciones) {
+  var huboReparacion = false;
+  (cotizaciones || []).forEach(function (c) {
+    (c.referencias || []).forEach(function (r) {
+      if (r.origen !== "proveedor") return;
+      var insumoCompra = {
+        id: uid(), nombre: r.nombre || "Producto de proveedor", unidad: "UND",
+        costo: num(r.costoCompra) || 0, tipo: "producto_comprado", cantidad: 1,
+        esServicio: false, proveedorId: r.proveedorId || "", origenCatalogoId: ""
+      };
+      r.insumos = [insumoCompra].concat(r.insumos || []);
+      r.origen = "taller";
+      r.costoCompra = 0;
+      r.proveedorId = "";
+      huboReparacion = true;
+    });
+  });
+  return huboReparacion;
+}
+
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
 // de storage, así que un fallo puntual en una no bloquea a las demás.
 //
@@ -1043,6 +1084,15 @@ export async function loadAll() {
     // "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararConsumoTelaPorInsumo(state.plantillasPrendas, state.productos, state.cotizaciones)) {
       persist("plantillasPrendas"); persist("productos"); persist("cotizaciones");
+    }
+
+    // Auto-reparación: referencias que todavía usan el modelo viejo
+    // "origen: proveedor" (ver repararReferenciasProveedorAInsumo más
+    // arriba) — se convierten a un insumo "Prenda comprada a proveedor"
+    // sin perder el costo/proveedor que ya tenían. Mismo criterio de
+    // "solo con red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararReferenciasProveedorAInsumo(state.cotizaciones)) {
+      persist("cotizaciones");
     }
 
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"

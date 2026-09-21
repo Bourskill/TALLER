@@ -2226,8 +2226,12 @@ assert(calcMod.calcCotizacionTotales(cotDs).costoTotal === 280000, "pero su cost
 // estaba respondida en siete lugares distintos, y no todos conocían los
 // mismos casos. Estos checks fijan que ahora hay una sola puerta.
 // ---------------------------------------------------------------------------
-const refProveedor = { id: "r1", origen: "proveedor", estado: "pendiente", estadosDef: null };
-const refTaller = { id: "r2", origen: "taller", estado: "cortado", estadosDef: null };
+// Desde 2026-09-21 no hay más "origen: proveedor" — una referencia que solo
+// trae insumos tipo "producto_comprado" (prenda comprada hecha) usa el
+// flujo corto; en cuanto tiene CUALQUIER otro insumo (ej. una tela), usa el
+// flujo completo de taller. Ver esSoloPrendaComprada en core/calc.js.
+const refProveedor = { id: "r1", insumos: [{ id: "i1", nombre: "Camiseta", tipo: "producto_comprado", costo: 20000, cantidad: 1 }], estado: "pendiente", estadosDef: null };
+const refTaller = { id: "r2", insumos: [{ id: "i2", nombre: "Tela", tipo: "tela", costo: 5000, cantidad: 1 }], estado: "cortado", estadosDef: null };
 
 assert(calcMod.etapasDe(refProveedor).length === 2, "una referencia comprada a proveedor tiene su propio flujo de 2 etapas");
 assert(calcMod.etapasDe(refTaller).length === 5, "una que se fabrica en el taller usa el flujo de producción completo");
@@ -2660,8 +2664,8 @@ assert(document.getElementById("abono-monto-pb").value === "", "y NO aparece den
 // avanzada" que la del taller en Confección (2 de 5 = a la mitad), y el pedido
 // entero se daba por entregado con la prenda todavía en la máquina.
 const cotMixta = { referencias: [
-  { id: "rp", origen: "proveedor", estado: "recibido", estadosDef: null },
-  { id: "rt", origen: "taller", estado: "confeccion", estadosDef: null }
+  { id: "rp", insumos: [{ id: "irp", nombre: "Camiseta", tipo: "producto_comprado", costo: 20000, cantidad: 1 }], estado: "recibido", estadosDef: null },
+  { id: "rt", insumos: [{ id: "irt", nombre: "Tela", tipo: "tela", costo: 5000, cantidad: 1 }], estado: "confeccion", estadosDef: null }
 ] };
 const agrMixto = calcMod.estadoAgregadoDeCot(cotMixta);
 assert(agrMixto.estado === "confeccion", "el pedido sigue el ritmo de la pieza REALMENTE menos avanzada, comparando fracción de avance y no índices de flujos de distinto largo");
@@ -4584,13 +4588,17 @@ assert(document.getElementById("link-manifest").getAttribute("href") === "manife
 // --- core/dom.js: restaurar el foco tras un render NO puede saltar a un
 // botón vecino solo porque comparte data-cot+data-ref (el usuario reportó
 // "presiono click y me sube, me manda al inicio, en muchas áreas"). En la
-// tarjeta de una referencia, "🧵 Se fabrica en el taller" (set-ref-origen)
-// y "+ Insumo personalizado" (add-insumo-personalizado) NO tienen ningún
-// atributo propio de fila — los dos se identifican SOLO por data-cot+
-// data-ref, que comparten. selectorEstableParaFoco() debe notar que ese
-// selector es ambiguo (matchea a los dos) y NO restaurar por él, en vez de
-// devolver el primero que aparece en el documento (el de "taller", más
-// arriba en la tarjeta) como si fuera el que en verdad se clicó. ---
+// tarjeta de una referencia, "📂 Insumos predeterminados…"
+// (abrir-insumo-picker) y "+ Insumo personalizado" (add-insumo-
+// personalizado) NO tienen ningún atributo propio de fila — los dos se
+// identifican SOLO por data-cot+data-ref, que comparten. (Antes de
+// 2026-09-21 el par de ejemplo era "🧵 Se fabrica en el taller"
+// (set-ref-origen) vs "+ Insumo personalizado" — ese primer botón ya no
+// existe, la referencia perdió su interruptor de origen, pero el mismo
+// riesgo de ambigüedad sigue vivo entre estos otros dos.)
+// selectorEstableParaFoco() debe notar que ese selector es ambiguo
+// (matchea a los dos) y NO restaurar por él, en vez de devolver el primero
+// que aparece en el documento como si fuera el que en verdad se clicó. ---
 state.tab = "cotizaciones";
 state.cotizacionesVista = "nueva";
 state.cotizacionEditando = "";
@@ -4602,12 +4610,12 @@ const cotFocoId = state.cotizaciones[0].id;
 const refFocoId = state.cotizaciones[0].referencias[0].id;
 const selectorCompartido = 'button[data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]';
 assert(document.querySelectorAll(selectorCompartido).length > 1, "sanity: varios botones de la tarjeta comparten data-cot+data-ref sin nada más que los distinga");
-const botonOrigenTaller = document.querySelector('[data-action="set-ref-origen"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"][data-val="taller"]');
+const botonInsumoPicker = document.querySelector('[data-action="abrir-insumo-picker"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
 const botonInsumoPersonalizado = document.querySelector('[data-action="add-insumo-personalizado"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
-assert(!!botonOrigenTaller && !!botonInsumoPersonalizado && botonOrigenTaller !== botonInsumoPersonalizado, "sanity: son dos botones DISTINTOS, uno arriba (origen) y otro abajo (insumo) de la misma tarjeta");
+assert(!!botonInsumoPicker && !!botonInsumoPersonalizado && botonInsumoPicker !== botonInsumoPersonalizado, "sanity: son dos botones DISTINTOS que comparten data-cot+data-ref");
 botonInsumoPersonalizado.focus();
 click('[data-action="add-insumo-personalizado"][data-cot="' + cotFocoId + '"][data-ref="' + refFocoId + '"]');
-assert((document.activeElement && document.activeElement.getAttribute("data-action")) !== "set-ref-origen", "clicar 'Insumo personalizado' NO deja el foco saltando al botón de 'origen' de arriba, solo porque los dos comparten data-cot+data-ref");
+assert((document.activeElement && document.activeElement.getAttribute("data-action")) !== "abrir-insumo-picker", "clicar 'Insumo personalizado' NO deja el foco saltando al botón vecino, solo porque los dos comparten data-cot+data-ref");
 
 // --- Respaldo (core/backup.js): si falla, "Respaldar ahora" tiene que
 // avisar con el motivo real, no tragárselo en silencio. Antes de esto,
@@ -5406,16 +5414,18 @@ state.pedidos = pedidosPreviosConjExcTest; state.cotizaciones = cotizacionesPrev
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
-// --- Una referencia comprada a proveedor puede necesitar insumos o mano de
-// obra ADICIONALES sobre la compra — ej. una camiseta comprada hecha que de
-// todas formas necesita un DTF estampado (insumo) y una planchada en el
-// taller (mano de obra). El usuario lo pidió 2026-09-21: "si compro la
-// camiseta hecha a un proveedor... me gustaría la posibilidad de poder
-// agregarle [un insumo como el DTF]... también la mano de obra... el
-// formulario viene siendo casi igual al de 'se fabrica en taller' pero sin
-// el consumo de tela". Antes, una referencia de proveedor no tenía NINGUNA
-// tabla de insumos (agregarInsumosDeReferencias/calcCostoUnitarioRef
-// ignoraban ref.insumos por completo para origen "proveedor").
+// --- Sin interruptor "se fabrica en el taller / se compra a proveedor":
+// una prenda comprada hecha es, desde 2026-09-21, un insumo más ("Prenda
+// comprada a proveedor") en la MISMA tabla — el usuario lo pidió para
+// simplificar el formulario: "eliminar la pestaña 'se compra a
+// proveedor' y dejar... la camiseta como insumo y ahí decidir si se le
+// agregan más cosas o no (insumos o procesos)". "Consumo tela (MT)"
+// también se quitó del todo: "dejarlo en el insumo así como ya se está
+// haciendo". Se prueba el caso completo del usuario (camiseta comprada +
+// DTF + planchada, todo en la misma referencia), que la lista de compras
+// separa las tres líneas, que el flujo de progreso cambia solo según los
+// insumos, "Aplicar producto" para un producto de proveedor, y la
+// migración retroactiva de cotizaciones ya guardadas con el modelo viejo.
 const pedidosPreviosProvInsTest = state.pedidos, cotizacionesPreviasProvInsTest = state.cotizaciones,
   plantillasPreviasProvInsTest = state.plantillasPrendas, productosPreviosProvInsTest = state.productos;
 state.plantillasPrendas = [{ id: "pla-provins-test", nombre: "Plantilla Provins", consumoSugerido: 1, imagenUrl: "", flujoEstadosId: "", insumos: [] }];
@@ -5426,7 +5436,7 @@ state.cotizaciones = [{
   estado: "borrador", pedidoId: "", pedidoOrigenId: "",
   vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cprovins1",
   referencias: [{
-    id: "ref-provins-test", nombre: "Camiseta comprada", imagenUrl: "", consumoAprox: 0, cantidadPedida: 5, precioVenta: 35000, origen: "proveedor", costoCompra: 20000, proveedorId: "",
+    id: "ref-provins-test", nombre: "Camiseta comprada", imagenUrl: "", cantidadPedida: 5, precioVenta: 35000,
     insumos: [], detalle: [], estado: "", estadosDef: []
   }],
   costosGlobales: [], serviciosCobrados: [], compras: []
@@ -5436,22 +5446,25 @@ state.pedidos = [];
 state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
 click('[data-action="abrir-cotizacion-editor"][data-id="cot-provins-test"]');
 var refCardProvInsTest = document.querySelector('[data-ref-id="ref-provins-test"]');
-assert(!!refCardProvInsTest.querySelector('[data-action="abrir-insumo-picker"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "una referencia de proveedor ahora SÍ tiene la tabla de insumos (\"Insumos predeterminados…\")");
-assert(!!refCardProvInsTest.querySelector('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "...y \"+ Insumo personalizado\", igual que \"se fabrica en el taller\"");
-assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-plantilla"]'), "pero NO \"Aplicar plantilla\" — reemplazaría la receta completa de una prenda fabricada desde cero, que no aplica sobre algo ya comprado hecho");
-assert(!refCardProvInsTest.querySelector('[data-action-change="aplicar-producto"]'), "...ni \"Aplicar producto\", por la misma razón");
-assert(!refCardProvInsTest.querySelector('input[data-campo="consumoAprox"]'), "...ni el campo \"Consumo tela (MT)\" — no hay nada que cortar en una prenda ya comprada");
-// "Entrega esperada" por referencia se quitó 2026-09-21 — el usuario lo
-// notó redundante frente a la "Fecha de entrega" general de la cotización
-// (cot.fechaEntrega, ver renderFormCotizacion), que ya cubre cuándo se le
-// entrega el pedido al cliente.
-assert(!refCardProvInsTest.querySelector('input[data-campo="fechaEntregaProveedor"]'), "el campo \"Entrega esperada\" por referencia ya no existe — la cotización ya tiene su propia fecha de entrega general");
-assert(refCardProvInsTest.textContent.indexOf("Sin insumos aún") !== -1, "sin insumos agregados todavía, se ve el mismo mensaje vacío que en \"taller\"");
-// El texto de renderRefProveedorResumen decía "sin insumos ni fases de
-// producción" — quedó desactualizado el mismo día que se agregó la tabla
-// de insumos de arriba (el usuario lo notó en producción: "ya se aplicó?
-// es que me sale [ese texto]"). Guarda contra que vuelva a desactualizarse.
-assert(refCardProvInsTest.textContent.indexOf("sin insumos") === -1, "el resumen de \"Se compra hecha\" YA NO dice \"sin insumos\" — sería contradecir la tabla de insumos que aparece justo debajo");
+assert(!refCardProvInsTest.querySelector('[data-action="set-ref-origen"]'), "ya no existe el interruptor \"se fabrica en el taller / se compra a proveedor\"");
+assert(!!refCardProvInsTest.querySelector('[data-action="abrir-insumo-picker"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "toda referencia tiene la tabla de insumos (\"Insumos predeterminados…\")");
+assert(!!refCardProvInsTest.querySelector('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]'), "...y \"+ Insumo personalizado\"");
+assert(!!refCardProvInsTest.querySelector('[data-action-change="aplicar-plantilla"]'), "\"Aplicar plantilla\" ya está siempre disponible — una prenda comprada hecha es un insumo más, no un caso especial que lo excluya");
+assert(!!refCardProvInsTest.querySelector('[data-action-change="aplicar-producto"]'), "...y \"Aplicar producto\" también");
+assert(!refCardProvInsTest.querySelector('input[data-campo="consumoAprox"]'), "\"Consumo tela (MT)\" ya no existe en ninguna referencia — cada tela lleva su propio consumo en su fila");
+assert(refCardProvInsTest.textContent.indexOf("Sin insumos aún") !== -1, "sin insumos agregados todavía, se ve el mensaje vacío de siempre");
+
+// -- se agrega la camiseta (comprada), un DTF (insumo) y una planchada (mano de obra) --
+click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
+var refTrasCamisetaTest = state.cotizaciones[0].referencias[0];
+var camisetaIdTest = refTrasCamisetaTest.insumos[refTrasCamisetaTest.insumos.length - 1].id;
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + camisetaIdTest + '"][data-campo="nombre"]', "Camiseta comprada");
+setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + camisetaIdTest + '"][data-campo="costo"]', "20000");
+setChange('[data-ref-id="ref-provins-test"] select[data-ins="' + camisetaIdTest + '"][data-campo="tipo"]', "producto_comprado");
+
+const { etapasDe: etapasDeProvInsTest } = await import("../js/core/calc.js");
+var refSoloComprada = state.cotizaciones[0].referencias[0];
+assert(etapasDeProvInsTest(refSoloComprada).length === 2, "con SOLO la prenda comprada (nada del taller), el flujo de progreso es el corto Pendiente/Recibido, automático");
 
 click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
 var refTrasDtfTest = state.cotizaciones[0].referencias[0];
@@ -5459,6 +5472,9 @@ var dtfIdTest = refTrasDtfTest.insumos[refTrasDtfTest.insumos.length - 1].id;
 setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + dtfIdTest + '"][data-campo="nombre"]', "DTF");
 setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + dtfIdTest + '"][data-campo="costo"]', "3000");
 setChange('[data-ref-id="ref-provins-test"] select[data-ins="' + dtfIdTest + '"][data-campo="tipo"]', "por_prenda");
+
+var refConDtf = state.cotizaciones[0].referencias[0];
+assert(etapasDeProvInsTest(refConDtf).length === 5, "en cuanto se agrega CUALQUIER insumo que no sea \"prenda comprada\" (el DTF), el flujo pasa solo al normal de 5 etapas");
 
 click('[data-action="add-insumo-personalizado"][data-cot="cot-provins-test"][data-ref="ref-provins-test"]');
 var refTrasPlanchadaTest = state.cotizaciones[0].referencias[0];
@@ -5470,8 +5486,8 @@ setChange('[data-ref-id="ref-provins-test"] input[data-ins="' + planchadaIdTest 
 
 const { calcCostoUnitarioRef: calcCostoUnitRefProvInsTest, calcRefTotales: calcRefTotalesProvInsTest, calcListaCompras: calcListaComprasProvInsTest } = await import("../js/core/calc.js");
 var refFinalProvInsTest = state.cotizaciones[0].referencias[0];
-assert(refFinalProvInsTest.insumos.length === 2, "los dos insumos (DTF y Planchada) quedan agregados a la referencia de proveedor");
-assert(calcCostoUnitRefProvInsTest(refFinalProvInsTest) === 25000, "el costo unitario SUMA la compra y los insumos extra (20.000 + 3.000 + 2.000 = 25.000), no reemplaza uno por el otro");
+assert(refFinalProvInsTest.insumos.length === 3, "los tres insumos (camiseta comprada, DTF y planchada) quedan en la misma referencia, sin ningún caso especial");
+assert(calcCostoUnitRefProvInsTest(refFinalProvInsTest) === 25000, "el costo unitario es simplemente la suma de los tres insumos (20.000 + 3.000 + 2.000 = 25.000) — una sola fórmula, sin rama de \"origen\"");
 assert(calcRefTotalesProvInsTest(refFinalProvInsTest).costoTotal === 125000, "...y el costo total de la referencia lo refleja (25.000 × 5 = 125.000)");
 
 var cotProvInsTestObj = state.cotizaciones[0];
@@ -5479,21 +5495,86 @@ var listaProvInsTest = calcListaComprasProvInsTest(cotProvInsTestObj);
 var lineaCamisetaTest = listaProvInsTest.filter(function (l) { return l.nombre === "Camiseta comprada"; })[0];
 var lineaDtfTest = listaProvInsTest.filter(function (l) { return l.nombre === "DTF"; })[0];
 var lineaPlanchadaTest = listaProvInsTest.filter(function (l) { return l.nombre === "Planchada"; })[0];
-assert(!!lineaCamisetaTest && lineaCamisetaTest.tipo === "producto_proveedor" && lineaCamisetaTest.costoTotal === 100000, "la lista de compras sigue trayendo la compra al proveedor como UNA línea (20.000 × 5 = 100.000)");
-assert(!!lineaDtfTest && lineaDtfTest.costoTotal === 15000, "...y APARTE, una línea propia para el DTF (3.000 × 5 = 15.000) — antes ni existía, se perdía silenciosamente");
-assert(!!lineaPlanchadaTest && lineaPlanchadaTest.costoTotal === 10000 && lineaPlanchadaTest.esServicio === true, "...y otra para la Planchada (2.000 × 5 = 10.000), reconocida como mano de obra propia (esServicio), igual que corte/confección en una referencia de taller");
-
-// "Costo x prenda" podía VERSE como si repitiera "Costo de compra x1" —
-// el usuario lo notó 2026-09-21 ("ya sale en los indicadores de abajo con
-// la ganancia etc"). Con insumos extra agregados, ahora explica la
-// diferencia (20.000 de compra + 5.000 de insumos/mano de obra) en vez de
-// dejarlo lucir como un número duplicado sin explicación.
-var refCardProvInsTestTrasInsumos = document.querySelector('[data-ref-id="ref-provins-test"]');
-assert(refCardProvInsTestTrasInsumos.textContent.indexOf("20.000 de la compra") !== -1 && refCardProvInsTestTrasInsumos.textContent.indexOf("5.000 de insumos/mano de obra extra") !== -1, "\"Costo x prenda\" ahora explica que es compra + insumos/mano de obra extra, no un simple duplicado de \"Costo de compra x1\"");
+assert(!!lineaCamisetaTest && lineaCamisetaTest.tipo === "producto_comprado" && lineaCamisetaTest.esProducto === true && lineaCamisetaTest.clave === "producto|camiseta comprada" && lineaCamisetaTest.costoTotal === 100000, "la prenda comprada aparece como su propia línea en la lista de compras (📦, en unidades), con la MISMA clave \"producto|\"+nombre de siempre (20.000 × 5 = 100.000)");
+assert(!!lineaDtfTest && lineaDtfTest.costoTotal === 15000, "...y APARTE, una línea propia para el DTF (3.000 × 5 = 15.000)");
+assert(!!lineaPlanchadaTest && lineaPlanchadaTest.costoTotal === 10000 && lineaPlanchadaTest.esServicio === true, "...y otra para la Planchada (2.000 × 5 = 10.000), reconocida como mano de obra propia (esServicio)");
 
 state.pedidos = pedidosPreviosProvInsTest; state.cotizaciones = cotizacionesPreviasProvInsTest;
 state.plantillasPrendas = plantillasPreviasProvInsTest; state.productos = productosPreviosProvInsTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- "Aplicar producto" para un producto de catálogo origen "proveedor":
+// ya NO reescribe la referencia entera (origen/costoCompra/insumos=[]) —
+// inyecta UN insumo "producto_comprado" y se SUMA a lo que ya hubiera. --
+const pedidosPreviosAplProdProvTest = state.pedidos, cotizacionesPreviasAplProdProvTest = state.cotizaciones,
+  productosPreviosAplProdProvTest = state.productos;
+state.productos = [{ id: "pro-aplprodprov-test", nombre: "Gorra de proveedor", origen: "proveedor", precioVenta: 15000, costoCompra: 8000, proveedorId: "", imagenUrl: "", consumoSugerido: 0, flujoEstadosId: "", insumos: [], tallas: [] }];
+state.cotizaciones = [{
+  id: "cot-aplprodprov-test", clienteId: "", cliente: "Cliente Aplprodprov", descripcion: "Prueba aplicar producto proveedor", fecha: "2026-01-01",
+  estado: "borrador", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "caplprodprov1",
+  referencias: [{
+    id: "ref-aplprodprov-test", nombre: "", imagenUrl: "", cantidadPedida: 3, precioVenta: 0,
+    insumos: [{ id: "ins-previo-aplprodprov", nombre: "Bordado previo", unidad: "UND", costo: 1000, tipo: "por_prenda", cantidad: 1, esServicio: false }],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [], compras: []
+}];
+state.pedidos = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-aplprodprov-test"]');
+setChange('[data-action-change="aplicar-producto"][data-cot="cot-aplprodprov-test"][data-ref="ref-aplprodprov-test"]', "pro-aplprodprov-test");
+var refTrasAplProdProv = state.cotizaciones[0].referencias[0];
+assert(refTrasAplProdProv.insumos.length === 2, "\"Aplicar producto\" de un producto de proveedor SUMA un insumo — no borra el que ya había (\"Bordado previo\")");
+var insumoAplProdProv = refTrasAplProdProv.insumos.filter(function (i) { return i.tipo === "producto_comprado"; })[0];
+assert(!!insumoAplProdProv && insumoAplProdProv.costo === 8000 && insumoAplProdProv.nombre === "Gorra de proveedor", "...y ese insumo nuevo trae el nombre y costo de compra del producto del catálogo");
+assert(refTrasAplProdProv.productoId === "pro-aplprodprov-test", "la referencia queda vinculada al producto (para el descuento de stock al convertir en pedido), igual que con un producto de taller");
+
+state.pedidos = pedidosPreviosAplProdProvTest; state.cotizaciones = cotizacionesPreviasAplProdProvTest;
+state.productos = productosPreviosAplProdProvTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
+// -- Migración retroactiva: cotización vieja con el modelo "origen:
+// proveedor" (sin insumos, costo de compra a nivel de referencia) — y una
+// compra YA registrada (pagada, con su movimiento en Finanzas) sobre esa
+// referencia, para confirmar que la migración no la desconecta. --
+const cotizacionesPreviasMigProvTest = state.cotizaciones;
+const cotViejaProvTest = {
+  id: "cot-viejaprov-test", clienteId: "", cliente: "Cliente Vieja Prov", descripcion: "Prueba migración proveedor", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cviejaprov1",
+  referencias: [{
+    id: "ref-viejaprov-test", nombre: "Camiseta migrada", imagenUrl: "", consumoAprox: 0, cantidadPedida: 4, precioVenta: 30000,
+    origen: "proveedor", costoCompra: 18000, proveedorId: "prov-viejo-test",
+    insumos: [{ id: "ins-viejaprov-extra", nombre: "Bordado ya agregado", unidad: "UND", costo: 500, tipo: "por_prenda", cantidad: 1, esServicio: false }],
+    detalle: [], estado: "", estadosDef: []
+  }],
+  costosGlobales: [], serviciosCobrados: [],
+  // Compra YA registrada con la clave vieja "producto|"+nombre — tiene que
+  // seguir encontrando su línea después de migrar, o quedaría huérfana.
+  compras: [{ clave: "producto|camiseta migrada", estado: "si", costoReal: 72000, cantidadReal: 4, txId: "tx-viejaprov-test", observaciones: "" }]
+};
+state.cotizaciones = [cotViejaProvTest];
+const { repararReferenciasProveedorAInsumo: repararProvTest } = await import("../js/core/store.js");
+const huboMigracionProvTest = repararProvTest(state.cotizaciones);
+assert(huboMigracionProvTest === true, "la migración detecta la referencia vieja con origen \"proveedor\"");
+var refMigradaProvTest = state.cotizaciones[0].referencias[0];
+assert(refMigradaProvTest.origen !== "proveedor", "...y la deja sin el origen viejo (para no volver a migrarla en el próximo loadAll)");
+assert(refMigradaProvTest.insumos.length === 2, "gana un insumo \"prenda comprada\" nuevo, SIN perder el que ya tenía (\"Bordado ya agregado\")");
+var insumoMigradoProvTest = refMigradaProvTest.insumos.filter(function (i) { return i.tipo === "producto_comprado"; })[0];
+assert(!!insumoMigradoProvTest && insumoMigradoProvTest.costo === 18000 && insumoMigradoProvTest.proveedorId === "prov-viejo-test", "...con el MISMO costo de compra y proveedor que ya tenía la referencia — no cambia ni un peso de lo ya cotizado");
+
+const { calcListaCompras: calcListaComprasMigProvTest, compraDeLinea: compraDeLineaMigProvTest } = await import("../js/core/calc.js");
+var listaMigProvTest = calcListaComprasMigProvTest(state.cotizaciones[0]);
+var lineaMigProvTest = listaMigProvTest.filter(function (l) { return l.nombre === "Camiseta migrada"; })[0];
+assert(!!lineaMigProvTest && lineaMigProvTest.clave === "producto|camiseta migrada", "la línea migrada usa la MISMA clave que ya usaba (\"producto|\"+nombre) — no una nueva basada en unidad/tipo");
+var compraYaRegistradaTest = compraDeLineaMigProvTest(state.cotizaciones[0], "producto|camiseta migrada");
+assert(!!compraYaRegistradaTest && compraYaRegistradaTest.txId === "tx-viejaprov-test" && compraYaRegistradaTest.costoReal === 72000, "...así que la compra YA registrada (con su movimiento real en Finanzas) sigue encontrando su línea después de migrar, en vez de quedar huérfana");
+
+const huboSegundaMigracionProvTest = repararProvTest(state.cotizaciones);
+assert(huboSegundaMigracionProvTest === false, "correr la migración de nuevo sobre una referencia ya migrada no hace nada (es idempotente: origen ya no es \"proveedor\")");
+
+state.cotizaciones = cotizacionesPreviasMigProvTest;
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

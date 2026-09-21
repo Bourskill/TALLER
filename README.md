@@ -259,6 +259,38 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (septuagésimo primera ronda: se elimina el interruptor "se fabrica en el taller / se compra a proveedor" — una prenda comprada hecha es, desde ahora, un insumo más)
+
+El usuario fue un paso más allá de la ronda anterior: "creo que es mejor
+eliminar la pestaña 'se compra a proveedor' y dejar... la camiseta como
+insumo y ahí decidir si se le agregan más cosas o no... para simplificar
+el proceso — y quitar 'consumo de tela (mt)', dejarlo en el insumo así
+como ya se está haciendo". El interruptor taller/proveedor tocaba 5
+sistemas por separado (formulario, costeo, lista de compras, flujo de
+progreso, "Aplicar producto"), cada uno con su propia rama especial.
+
+- Nuevo tipo de insumo **"Prenda comprada a proveedor"**
+  (`producto_comprado`, ver TIPOS_COSTO en core/constants.js), disponible
+  en la MISMA tabla de insumos que tela/por prenda/fijo por referencia —
+  ya no hay interruptor ni formulario aparte.
+- Se quitó **"Consumo tela (MT)"** de toda referencia — cada tela ya
+  guarda su propio consumo (Hallazgo #28), el valor de arranque a nivel
+  de referencia dejó de tener trabajo que hacer.
+- `calcCostoUnitarioRef`/`agregarInsumosDeReferencias` (core/calc.js) ya
+  no tienen una rama especial para "proveedor": una prenda comprada suma
+  como cualquier otro insumo, y aparece como su propia línea en la lista
+  de compras (misma clave `"producto|"+nombre` de siempre).
+- El **flujo de progreso** (`etapasDe`) se decide solo, según los
+  insumos: si la referencia SOLO tiene prendas compradas, usa el flujo
+  corto Pendiente/Recibido; en cuanto tiene cualquier insumo del taller,
+  pasa sola al flujo normal de 5 etapas.
+- **Migración retroactiva** (`repararReferenciasProveedorAInsumo`,
+  core/store.js): cada referencia vieja con `origen: "proveedor"` gana
+  su insumo equivalente, sin perder nada — y con la MISMA clave de
+  compras que ya tenía, para que una compra ya pagada (con su movimiento
+  real en Finanzas) no quede huérfana al migrar.
+- Ver CONTABILIDAD.md, "Hallazgo #31".
+
 ## Registro de cambios — septiembre 2026 (septuagésima ronda: seguimiento de la ronda anterior — texto desactualizado y dos campos redundantes en "Se compra a proveedor")
 
 El usuario, ya con la ronda anterior en vivo, reportó dos cosas: el
