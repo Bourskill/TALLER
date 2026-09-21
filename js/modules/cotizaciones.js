@@ -589,7 +589,7 @@ var COMPRA_COLS = "minmax(130px,1.3fr) minmax(110px,1fr) 90px 105px 90px 105px 1
 function renderTablaCompras(c, compras, hayProveedor) {
   var resumen = calcResumenCompras(c);
   var html = '<div class="cot-col-title">Compras del pedido' +
-    renderHelp("Cada línea es algo que hay que comprar (o producir), con lo que se estimó al cotizar y lo que en verdad costó. Marca su estado: \"Sí\" si se pagó de verdad y aparte (el botón de abajo la lleva a Finanzas como gasto); \"Servicio\" si se hizo en el taller —corte, confección— y no hubo un pago instantáneo (se paga vía nómina, aparte): cuenta como costo real para que la ganancia no se infle, pero no genera ningún movimiento en Finanzas. La diferencia contra lo estimado se calcula sola y alimenta el resultado real de arriba." +
+    renderHelp("Cada línea es algo que hay que comprar (o producir), con lo que se estimó al cotizar y lo que en verdad costó. Marca su estado: \"Sí\" si se pagó de verdad y aparte (el botón de abajo la lleva a Finanzas como gasto); \"Servicio\" si se hizo en el taller —corte, confección— y no hubo un pago instantáneo (se paga vía nómina, aparte): cuenta como costo real para que la ganancia no se infle, pero no genera ningún movimiento en Finanzas; \"Ahorro\" si decidiste NO comprarlo/hacerlo y no hizo falta — cuenta como el ahorro completo frente al estimado, sin pedirte escribir cantidad ni costo (por definición es $0) y sin generar movimiento en Finanzas. La diferencia contra lo estimado se calcula sola y alimenta el resultado real de arriba." +
       (hayProveedor ? " Las referencias que se compran hechas aparecen como una sola línea, en unidades, no desglosadas en insumos." : "")) +
     "</div>";
 
@@ -604,19 +604,21 @@ function renderTablaCompras(c, compras, hayProveedor) {
     html += renderFilaCompra(c, linea);
   });
 
-  // "Resuelto" cuenta lo pagado Y lo de servicio: las dos son un costo real ya
-  // sabido, solo que una salió de caja y la otra todavía no (se paga vía
-  // nómina, aparte). Comparar el estimado contra ese total combinado es lo
-  // que deja ver el sobrecosto/ahorro real del pedido aunque nunca se marque
-  // "Sí" en corte/confección hechos en el taller.
-  var resuelto = resumen.compradas + resumen.servicio;
+  // "Resuelto" cuenta lo pagado, lo de servicio Y lo ahorrado: las tres son
+  // un costo real ya sabido (aunque el de ahorro sea $0), solo que cada una
+  // llegó ahí por un camino distinto. Comparar el estimado contra ese total
+  // combinado es lo que deja ver el sobrecosto/ahorro real del pedido aunque
+  // nunca se marque "Sí" en corte/confección hechos en el taller, ni se
+  // escriba nada en una línea que de verdad no hizo falta.
+  var resuelto = resumen.compradas + resumen.servicio + resumen.ahorro;
   var realCombinado = resumen.real + resumen.realServicio;
   var diferencia = realCombinado - resumen.estimado;
   html += '<div class="section-sub" style="margin:10px 0 0;">' +
-    resumen.compradas + " pagado(s) · " + resumen.servicio + " en servicio · " + resumen.pendientes + " pendiente(s)" +
+    resumen.compradas + " pagado(s) · " + resumen.servicio + " en servicio · " + resumen.ahorro + " ahorrado(s) · " + resumen.pendientes + " pendiente(s)" +
     " · estimado <b>" + fmt(resumen.estimado) + "</b>" +
     (resumen.compradas ? " · pagado <b>" + fmt(resumen.real) + "</b>" : "") +
     (resumen.servicio ? " · para apartar (nómina) <b>" + fmt(resumen.realServicio) + "</b>" : "") +
+    (resumen.ahorro ? " · ahorrado <b>" + fmt(resumen.ahorrado) + "</b>" : "") +
     "</div>";
   if (resuelto && diferencia !== 0 && resuelto === resumen.total) {
     html += '<div class="section-sub" style="margin:2px 0 0;color:' + (diferencia > 0 ? "var(--danger-ink)" : "var(--success-ink)") + ';">' +
@@ -673,6 +675,12 @@ function renderFilaCompra(c, linea) {
     tagCompartida = ' <span class="tag" title="Comprada junto con ' + esc(otras.join(", ") || "otro pedido") + " el " + esc(compra.compartida.fecha || "") + '">🔗 compartida</span>';
   }
 
+  // "Ahorro" no pide cantidad ni costo: por definición es $0, así que
+  // pedirlos sería como pedir "escribe 0 a mano" — justo la rareza que el
+  // usuario señaló (elegir "Sí" y escribir "0" para decir, en el fondo,
+  // "no lo compré"). Ver set-cot-compra: al elegir "Ahorro" los deja en 0
+  // explícito solo (no hace falta que el usuario los toque).
+  var esAhorro = estado === "ahorro";
   var html = '<div class="tx-row" style="grid-template-columns:' + COMPRA_COLS + ';">' +
     '<span class="mobile-th">Qué comprar</span><span>' + (linea.esGlobal ? "🌐 " : (linea.esProducto ? "📦 " : "")) + esc(linea.nombre) +
     (linea.esServicio ? ' <span class="tag">servicio</span>' : "") + tagCompartida + "</span>" +
@@ -680,15 +688,19 @@ function renderFilaCompra(c, linea) {
     '<span class="mobile-th">Cant. est.</span><span class="amount">' + estimadoCant + "</span>" +
     '<span class="mobile-th">Costo est.</span><span class="amount">' + fmt(linea.costoTotal) + "</span>" +
     '<span class="mobile-th">Cant. real</span>' +
-    (linea.esServicio
+    (linea.esServicio || esAhorro
       ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
       : '<input type="number" class="mini-input" style="width:100%" placeholder="' + (linea.esProducto ? linea.cantidadFisica : num(linea.cantidadFisica).toFixed(2)) + '" value="' + esc(compra.cantidadReal !== undefined ? compra.cantidadReal : "") + '"' + attrs + ' data-campo="cantidadReal" />') +
-    '<span class="mobile-th">Costo real</span><input type="number" class="mini-input" style="width:100%" placeholder="' + Math.round(num(linea.costoTotal)) + '" value="' + esc(compra.costoReal !== undefined ? compra.costoReal : "") + '"' + attrs + ' data-campo="costoReal" />' +
+    '<span class="mobile-th">Costo real</span>' +
+    (esAhorro
+      ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
+      : '<input type="number" class="mini-input" style="width:100%" placeholder="' + Math.round(num(linea.costoTotal)) + '" value="' + esc(compra.costoReal !== undefined ? compra.costoReal : "") + '"' + attrs + ' data-campo="costoReal" />') +
     '<span class="mobile-th">Estado</span><span style="display:flex;gap:6px;align-items:center;">' +
-    '<select class="mini-input" style="width:auto;"' + attrs + ' data-campo="estado" title="No: nada registrado todavía. Sí: se pagó de verdad y aparte (crea un movimiento en Finanzas). Servicio: mano de obra propia (corte, confección…) — cuenta como costo real para que la ganancia no se infle, pero no crea movimiento en Finanzas porque no hubo un pago instantáneo, se paga vía nómina aparte.">' +
-    '<option value="no"' + (estado === "no" ? " selected" : "") + ">No</option>" +
+    '<select class="mini-input" style="width:auto;"' + attrs + ' data-campo="estado" title="Aún no: nada registrado todavía. Sí: se pagó de verdad y aparte (crea un movimiento en Finanzas). Servicio: mano de obra propia (corte, confección…) — cuenta como costo real para que la ganancia no se infle, pero no crea movimiento en Finanzas porque no hubo un pago instantáneo, se paga vía nómina aparte. Ahorro: se decidió NO comprarlo/hacerlo y no hizo falta — cuenta como el ahorro completo frente al estimado, tampoco crea movimiento en Finanzas.">' +
+    '<option value="no"' + (estado === "no" ? " selected" : "") + ">Aún no</option>" +
     '<option value="si"' + (estado === "si" ? " selected" : "") + ">Sí</option>" +
     '<option value="servicio"' + (estado === "servicio" ? " selected" : "") + ">Servicio</option>" +
+    '<option value="ahorro"' + (estado === "ahorro" ? " selected" : "") + ">Ahorro</option>" +
     "</select>" +
     '<button class="btn ghost small" data-action="toggle-compra-detalle" data-cot="' + c.id + '" data-clave="' + esc(linea.clave) + '" title="Proveedor y observaciones de esta compra">' + (abierta ? "▾" : "▸") + "</button>" +
     "</span></div>";
@@ -1755,12 +1767,22 @@ export var actions = {
         observaciones: "", estado: estadoInicial, txId: "", fecha: ""
       };
       var patch = {}; patch[campo] = valor;
-      // Elegir "Sí" o "Servicio" sin haber escrito el costo real toma el
-      // estimado como el valor: es el caso corriente (se produjo/compró por
-      // lo que se había presupuestado) y evita tener que teclear el mismo
-      // número.
       if (campo === "estado" && valor !== "no") {
-        if (!num(base.costoReal) && linea) patch.costoReal = num(linea.costoTotal);
+        if (valor === "ahorro") {
+          // Por definición no costó nada: se fija en 0 EXPLÍCITO (no un
+          // campo vacío — ver calcCotGastosReales en core/calc.js, un 0
+          // escrito a propósito sí cuenta como ahorro real, uno nunca
+          // escrito no cuenta como nada) en vez de heredar cualquier
+          // cantidad/costo que hubiera quedado de un estado anterior.
+          patch.costoReal = 0;
+          patch.cantidadReal = 0;
+        } else if (!num(base.costoReal) && linea) {
+          // Elegir "Sí" o "Servicio" sin haber escrito el costo real toma
+          // el estimado como el valor: es el caso corriente (se
+          // produjo/compró por lo que se había presupuestado) y evita
+          // tener que teclear el mismo número.
+          patch.costoReal = num(linea.costoTotal);
+        }
         if (!base.fecha) patch.fecha = todayStr();
       }
       var actualizada = Object.assign({}, base, patch);

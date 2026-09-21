@@ -259,6 +259,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (sexagésimo cuarta ronda: nuevo estado "Ahorro" en Compras del pedido — decidir a propósito no comprar/hacer algo, sin "Sí" + "0")
+
+El usuario notó la incomodidad que quedaba tras el Hallazgo #23: para
+decir "esto no se compró y fue un ahorro" había que elegir "Sí" (que
+suena a "sí se compró") y escribir "0" a mano — una contradicción.
+Propuso que "No" representara eso directamente.
+
+- **Por qué no se le cambió el significado a "No":** es el estado por
+  defecto de TODA línea sin tocar todavía ("no sé", no "decidí no
+  comprarlo"). Repurpuesto así, cualquier cotización con compras aún sin
+  resolver mostraría ahorro ya confirmado, sin que nadie lo hubiera
+  decidido — infla la Ganancia real de pedidos a medio producir. Se le
+  preguntó al usuario con una pregunta explícita y confirmó: opción nueva,
+  no repurposear "No".
+- **Fix (decisión del usuario):** la etiqueta de "No" cambia a **"Aún no"**
+  (mismo valor interno, cero migración). Nueva opción **"Ahorro"**: fija
+  costo/cantidad real en 0 explícito solo (no hay que escribir nada), la
+  fila deja de pedir esos campos, y `calcCotGastosReales` la trata aparte
+  — resta el estimado completo sin depender de ningún dato guardado.
+- `calcResumenCompras` suma un bucket nuevo (`ahorro`/`ahorrado`), y ya no
+  cuenta como pendiente. No genera movimiento en Finanzas (como
+  "Servicio") — no hubo plata de por medio.
+- Ver CONTABILIDAD.md, "Hallazgo #25".
+
 ## Registro de cambios — septiembre 2026 (sexagésimo tercera ronda: el reporte de Pedidos usa costo/ganancia REALES, no el estimado congelado al convertir)
 
 El usuario preguntó si casos como el Hallazgo #23 afectaban los KPI de

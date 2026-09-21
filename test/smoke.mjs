@@ -4960,6 +4960,64 @@ const cotSinEscribirTest = {
 };
 assert(calcCeroRealTest(cotSinEscribirTest) === 0, "una compra vieja marcada comprada pero SIN costoReal (nunca se escribió) sigue sin contar como ahorro de $0 — se ignora, como antes de este fix");
 
+// --- Estado "Ahorro" en Compras del pedido: decidir a propósito NO
+// comprar/hacer algo, sin la rareza de elegir "Sí" y escribir "0" a mano
+// (que fue justo lo que llevó al Hallazgo #23). Pedido explícito del
+// usuario 2026-09-21: "el 'NO' debería ser equivalente a no haber hecho el
+// gasto... algo así como que 'no se compró' para reflejar que fue un
+// ahorro" — con la aclaración de que "No" (default de TODA línea sin
+// tocar) no puede pasar a significar eso sin inflar la ganancia de
+// cualquier pedido a medio producir, así que quedó como una CUARTA opción
+// separada; "No" solo cambió de etiqueta visible a "Aún no".
+const pedidosPreviosAhorroTest = state.pedidos, cotizacionesPreviasAhorroTest = state.cotizaciones, txPreviosAhorroTest = state.tx;
+const cotAhorroTest = {
+  id: "cot-ahorro-test", clienteId: "", cliente: "Cliente Ahorro", descripcion: "Prueba ahorro", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-ahorro-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cahorro1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-ahorro-test", nombre: "Domicilio", costo: 10000, cantidad: 1, proveedorId: "", esServicio: false }],
+  compras: []
+};
+state.pedidos = [{
+  id: "ped-ahorro-test", numeroOp: "OP-AHORRO", cliente: "Cliente Ahorro", descripcion: "Prueba",
+  cantidad: "1", total: 50000, costo: 10000, abono: 50000, estado: "entregado", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-ahorro-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotAhorroTest];
+state.tx = [];
+
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-ahorro-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-ahorro-test"][data-val="produccion"]');
+
+const selectorEstadoAhorro = '[data-action-change="set-cot-compra"][data-cot="cot-ahorro-test"][data-clave="global|cg-ahorro-test"][data-campo="estado"]';
+assert(!!document.querySelector(selectorEstadoAhorro), "la fila de Domicilio tiene su selector de estado");
+const opcionesAhorroTest = Array.prototype.map.call(document.querySelectorAll(selectorEstadoAhorro + " option"), function (o) { return o.textContent; });
+assert(opcionesAhorroTest.indexOf("Aún no") !== -1, "el estado por defecto ahora se llama \"Aún no\" (antes \"No\") para no confundirlo con \"no se compró\"");
+assert(opcionesAhorroTest.indexOf("Ahorro") !== -1, "hay una opción nueva \"Ahorro\"");
+
+setChange(selectorEstadoAhorro, "ahorro");
+var cotAhorroTrasElegir = state.cotizaciones.filter(function (c) { return c.id === "cot-ahorro-test"; })[0];
+var compraAhorroTest = cotAhorroTrasElegir.compras.filter(function (c) { return c.clave === "global|cg-ahorro-test"; })[0];
+assert(compraAhorroTest.estado === "ahorro", "elegir \"Ahorro\" guarda ese estado");
+assert(compraAhorroTest.costoReal === 0 && compraAhorroTest.cantidadReal === 0, "...y fija cantidad/costo en 0 EXPLÍCITO solo, sin que el usuario tenga que escribir nada");
+
+var filaAhorroHtml = document.querySelector(selectorEstadoAhorro).closest(".tx-row");
+assert(!filaAhorroHtml.querySelector('[data-campo="cantidadReal"]') && !filaAhorroHtml.querySelector('[data-campo="costoReal"]'), "con \"Ahorro\" elegido, la fila deja de pedir cantidad/costo real (se ve \"—\", no un campo vacío por llenar) — ya no hace falta escribir \"0\" a mano");
+
+const { calcCotGastosReales: calcAhorroTest, calcResumenCompras: resumenAhorroTest } = await import("../js/core/calc.js");
+assert(calcAhorroTest(cotAhorroTrasElegir) === -10000, "\"Ahorro\" cuenta como el ahorro completo frente al estimado (-10.000), sin haber escrito ningún número a mano");
+var resumenTrasAhorro = resumenAhorroTest(cotAhorroTrasElegir);
+assert(resumenTrasAhorro.ahorro === 1 && resumenTrasAhorro.ahorrado === 10000, "el resumen de la tabla cuenta 1 línea ahorrada, por $10.000");
+assert(resumenTrasAhorro.pendientes === 0, "y ya NO cuenta como pendiente (se resolvió — resuelta como \"no hizo falta\")");
+
+click('[data-action="sincronizar-compras-finanzas"][data-id="cot-ahorro-test"]');
+assert(state.tx.length === 0, "\"Ahorro\" no crea ningún movimiento en Finanzas — no hubo plata que registrar");
+
+state.pedidos = pedidosPreviosAhorroTest; state.cotizaciones = cotizacionesPreviasAhorroTest; state.tx = txPreviosAhorroTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

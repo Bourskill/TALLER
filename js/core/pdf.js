@@ -976,10 +976,14 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // costoRealTxt, que sí exige un número real porque ESE sí crea un
           // movimiento — ver sincronizar-compras-finanzas). Sin etiqueta
           // "(estimado)": el usuario la pidió sin ese paréntesis.
-          var hayCantReal = compra.cantidadReal !== undefined && compra.cantidadReal !== "" && compra.cantidadReal !== null;
-          var cantReal = c.esServicio ? "—" :
-            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst);
           var estado = estadoLineaCompra(cot, c);
+          var hayCantReal = compra.cantidadReal !== undefined && compra.cantidadReal !== "" && compra.cantidadReal !== null;
+          // "Ahorro" no pide cantidad ni costo (por definición es $0, ver
+          // renderFilaCompra en modules/cotizaciones.js) — se muestra "—"
+          // igual que un servicio, no "0 MT" (que se leería como un dato
+          // real escrito, no como "no hizo falta").
+          var cantReal = (c.esServicio || estado === "ahorro") ? "—" :
+            (hayCantReal ? numFmt(compra.cantidadReal) + (c.unidad ? " " + c.unidad : "") : cantEst);
           // Una línea de servicio SIN costoReal escrito (nadie la tocó
           // todavía) igual cuenta como costo real en el resumen en pantalla
           // (ver calcResumenCompras) — acá se muestra igual, con el
@@ -991,6 +995,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           } else if (estado === "servicio") {
             var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
             costoRealTxt = money(hayCostoReal ? compra.costoReal : c.costoTotal) + (hayCostoReal ? " (servicio)" : " (servicio, estimado)");
+          } else if (estado === "ahorro") {
+            costoRealTxt = "$0 (ahorro)";
           }
           return [
             (c.esGlobal ? "[Pedido] " : "") + c.nombre,

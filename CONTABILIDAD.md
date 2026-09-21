@@ -869,6 +869,46 @@ separado) no tiene "estimado vs. real" que comparar — se queda con su
 vendedor) ya suman por el campo `costo`/`ganancia` de estas mismas filas,
 así que heredan el cambio sin tocarlos.
 
+### 🟡 Hallazgo #25 — nuevo estado "Ahorro" en Compras del pedido: decidir a propósito no comprar/hacer algo, sin la rareza de "Sí" + "0". ✅ IMPLEMENTADO (mejora de UX, sobre la base ya correcta del Hallazgo #23)
+
+Al arreglar el Hallazgo #23 (un `costoReal: 0` escrito a propósito ya
+cuenta como ahorro completo), el usuario notó la incomodidad que quedaba
+en el camino: para registrar "esto no se compró y fue un ahorro" había
+que elegir el estado **"Sí"** (que suena a "sí se compró") y escribir
+**"0"** a mano en el costo real — una combinación que se lee como una
+contradicción. Propuso que "No" representara directamente "no se compró,
+fue un ahorro".
+
+**Por qué NO se le cambió el significado a "No":** "No" es el estado por
+DEFECTO de toda línea, desde el momento en que se crea la cotización,
+antes de que nadie decida nada — significa "todavía no sé", no "decidí no
+comprarlo". Si "No" pasara a significar "ahorro confirmado", **cualquier
+cotización con compras aún sin resolver empezaría a mostrar esas líneas
+como ahorro ya confirmado**, inflando la Ganancia real de pedidos a medio
+producir — exactamente lo opuesto al rigor que pide el usuario. Se le
+preguntó explícitamente con `AskUserQuestion` y confirmó: agregar una
+opción NUEVA, dejando "No" con su significado de siempre.
+
+**Fix (decisión final del usuario: "cambia 'no' a 'aún no' (como
+predeterminado) y a la nueva opcion 'ahorro'"):**
+- La etiqueta visible de "No" cambia a **"Aún no"** (mismo valor interno
+  `estado: "no"`, cero migración de datos — solo texto).
+- Nueva opción **"Ahorro"** (`estado: "ahorro"`): al elegirla,
+  `set-cot-compra` (modules/cotizaciones.js) fija `costoReal`/`cantidadReal`
+  en **0 explícito** de una vez — no hace falta que el usuario escriba
+  nada. La fila deja de pedir esos dos campos (se ve "—", igual que ya
+  hacía "Servicio" con la cantidad).
+- `calcCotGastosReales` (core/calc.js) trata "ahorro" como un caso
+  aparte, ANTES del chequeo de "¿se escribió costoReal?": resta el
+  estimado completo de la línea sin depender de ningún valor guardado —
+  así es imposible que quede corto por cómo esté guardado `costoReal`.
+- `calcResumenCompras` suma un bucket `ahorro`/`ahorrado` nuevo, separado
+  de `pendientes` (una línea en "Ahorro" ya está resuelta, no pendiente).
+- `sincronizarComprasFinanzasDe` no necesitó ningún cambio: ya ignoraba
+  cualquier estado distinto de "si" al crear movimientos, así que "Ahorro"
+  (como "Servicio") nunca genera un gasto en Finanzas — correcto, no hubo
+  plata de por medio.
+
 ---
 
 ## Próximos pasos

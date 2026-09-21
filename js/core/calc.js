@@ -2112,7 +2112,22 @@ export function calcCotGastosReales(cot) {
     // entra a la variación igual que "si" — la única diferencia entre los dos
     // es si además genera un movimiento en Finanzas (ver sincronizar-compras-
     // finanzas en modules/cotizaciones.js), no si cuenta como costo.
-    if (estadoCompra(c) === "no") return a;
+    var estado = estadoCompra(c);
+    if (estado === "no") return a;
+    var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
+    // Sin `linea` (el insumo/referencia/costo global que la originó ya se
+    // borró de la cotización), esta compra quedó huérfana — no es un
+    // sobrecosto real de nada que exista hoy, es una entrada vieja
+    // esperando que "Actualizar movimientos financieros" la limpie (ver
+    // sincronizar-compras-finanzas). Contarla acá inflaba "costo real" para
+    // siempre por algo que ya no está en la cotización. Auditoría 2026-09-20.
+    if (!linea) return a;
+    // "Ahorro": se decidió a propósito NO comprarlo/hacerlo — por
+    // definición cuenta como el ahorro completo frente al estimado, sin
+    // depender de `costoReal` (la fila ni lo pide, ver renderFilaCompra en
+    // modules/cotizaciones.js). Se resuelve ANTES del chequeo de abajo a
+    // propósito: no necesita que nadie haya escrito nada para contar.
+    if (estado === "ahorro") return a - linea.costoTotal;
     // Ojo con "!num(...)": 0 es falsy, así que trataba IGUAL un costo real
     // escrito A PROPÓSITO en $0 (de verdad no costó nada — ej. un domicilio
     // que resultó gratis) que uno que NUNCA se escribió (dato viejo, de
@@ -2122,17 +2137,11 @@ export function calcCotGastosReales(cot) {
     // Con la comparación falsy, el primer caso quedaba invisible: la
     // ganancia real se quedaba corta exactamente en lo que esa línea sí
     // ahorró. Mismo patrón ya corregido en calcResumenCompras (más abajo).
-    // Reportado en producción 2026-09-21.
+    // Reportado en producción 2026-09-21 — la razón por la que hoy existe
+    // el estado "Ahorro" (antes había que elegir "Sí" y escribir "0" a
+    // mano, una forma confusa de decir "no lo compré").
     var costoEscrito = c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
     if (!costoEscrito) return a;
-    var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
-    // Sin `linea` (el insumo/referencia/costo global que la originó ya se
-    // borró de la cotización), esta compra quedó huérfana — no es un
-    // sobrecosto real de nada que exista hoy, es una entrada vieja
-    // esperando que "Actualizar movimientos financieros" la limpie (ver
-    // sincronizar-compras-finanzas). Contarla acá inflaba "costo real" para
-    // siempre por algo que ya no está en la cotización. Auditoría 2026-09-20.
-    if (!linea) return a;
     return a + (num(c.costoReal) - linea.costoTotal);
   }, 0);
   var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
@@ -2141,12 +2150,13 @@ export function calcCotGastosReales(cot) {
 
 // Resumen de avance de compras: cuántas líneas ya se compraron (con plata que
 // de verdad salió), cuántas son servicio propio (mano de obra que hay que
-// apartar para nómina, sin que haya salido nada de caja todavía) y cuántas
+// apartar para nómina, sin que haya salido nada de caja todavía), cuántas se
+// decidieron a propósito NO comprar (ahorro completo, sin costo) y cuántas
 // siguen sin ningún estado — separados porque cada uno significa algo
 // distinto para la caja del taller.
 export function calcResumenCompras(cot) {
   var lineas = calcListaCompras(cot);
-  var acc = { total: lineas.length, compradas: 0, servicio: 0, estimado: 0, real: 0, realServicio: 0 };
+  var acc = { total: lineas.length, compradas: 0, servicio: 0, ahorro: 0, estimado: 0, real: 0, realServicio: 0, ahorrado: 0 };
   lineas.forEach(function (l) {
     acc.estimado += num(l.costoTotal);
     var c = compraDeLinea(cot, l.clave);
@@ -2159,9 +2169,14 @@ export function calcResumenCompras(cot) {
       // se compara contra "sin escribir nada" explícitamente, no con falsy.
       var hayCostoReal = c && c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
       acc.realServicio += hayCostoReal ? num(c.costoReal) : num(l.costoTotal);
+    } else if (estado === "ahorro") {
+      // Por definición cuesta $0 — el ahorro es el estimado completo de
+      // esta línea, sin depender de costoReal (ver calcCotGastosReales).
+      acc.ahorro++;
+      acc.ahorrado += num(l.costoTotal);
     }
   });
-  acc.pendientes = acc.total - acc.compradas - acc.servicio;
+  acc.pendientes = acc.total - acc.compradas - acc.servicio - acc.ahorro;
   return acc;
 }
 
