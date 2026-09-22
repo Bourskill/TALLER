@@ -2084,6 +2084,111 @@ cantidad Y el excedente de cada pedido son números ENTEROS
 (`Number.isInteger`) que suman exacto el total comprado — el costo en
 pesos, que ya funcionaba bien, se verificó sin cambios.
 
+### 🟢 Hallazgo #44 — el excedente de una compra conjunta pasa a ser una reserva compartida, no un costo del pedido. ✅ IMPLEMENTADO
+
+Reportado con una captura real (2026-09-21): el movimiento "Compra de
+insumo (excedente)" aparecía agrupado bajo el pedido OP-5958, como si
+fuera un gasto de ese pedido — "los excedentes no son parte del
+pedido, son un movimiento suelto que no tienen que ver con el
+pedido". Al pedir la corrección, el usuario explicó un flujo más rico
+que "no lo agrupes": compra 15m de tela para 2 pedidos (5m+10m) pero
+aprovecha para comprar 5m más "por si llega a necesitar
+reposiciones" — ese excedente es una reserva de la que cualquiera de
+esos 2 pedidos puede tomar después, si necesita más de lo estimado
+(ej. una tela que vino mala), sin tener que comprar de nuevo.
+
+Antes de implementar se confirmó con el usuario (AskUserQuestion,
+plan aprobado explícitamente) dos decisiones de diseño: (1) la
+reserva queda ligada SOLO a los pedidos que participaron en esa
+compra puntual — nunca un inventario general de insumos, ver
+[[modelo_negocio_sin_inventario]], ya rechazado antes — y (2) se toma
+de la reserva automáticamente al subir la cantidad real de un pedido
+en "Compras del pedido", sin un paso manual aparte.
+
+**Nota importante — esto NO reabre una decisión anterior.** Hallazgo
+#29 ya había fijado que el excedente se reparte y se registra
+vinculado a los pedidos participantes (el usuario mismo lo pidió así:
+"tienes que vincularlo a los 2 pedidos... no cambia nada"). Esa parte
+sigue exactamente igual. Lo único que cambia es (a) que el movimiento
+de Finanzas resultante ya no lleva `pedidoId` — cae solo en
+"Movimientos sueltos (sin pedido)", una sección que YA EXISTÍA en
+`renderHistorial` (`modules/finanzas.js`), no hizo falta inventar
+ninguna vista nueva — y (b) que ese excedente pasa a ser tomable
+después por cualquiera de esos mismos pedidos.
+
+**Implementación, en 3 partes:**
+
+**A — sin pedidoId.** `sincronizarComprasFinanzasDe`
+(`modules/cotizaciones.js`) cambia `pedidoId: pedidoIdDeCotParaTx(cot)`
+por `pedidoId: ""` en el tx de excedente (el tx de la compra NORMAL no
+se toca). `cotizacionId`/`origenCompraExcedenteClave` siguen intactos
+— son los que usan "Ver origen" y la protección de borrado
+(`movimientosGeneradosPorCotizacion`), ninguno de los dos depende de
+`pedidoId`. Confirmado que `calcResumenMovimientos` (el reporte "Gasto
+en insumos") tampoco depende de `pedidoId` — filtra por
+`esInsumo`/`tipo`/fecha. Aplica tanto a una compra individual como a
+una conjunta (mismo código compartido).
+
+**B — reserva compartida + descuento automático.** Dos piezas nuevas:
+- `calcReservaCompraConjunta(grupoId, clave)` (`core/calc.js`): suma
+  cuánta reserva queda disponible para un grupo de compra conjunta +
+  insumo, recorriendo TODAS las cotizaciones que compartan el mismo
+  `compartida.grupoId` — sin importar en cuál de los pedidos
+  participantes quedó registrada al repartir (`repartirProporcional`
+  puede haberla dejado repartida en más de uno).
+- `tomarDeReservaCompraConjunta(grupoId, clave, cantidadNecesaria)`
+  (`modules/cotizaciones.js`): descuenta de quien tenga la reserva
+  (puede ser el MISMO pedido que la necesita, o uno DISTINTO de los
+  que compraron juntos) y vuelve a correr `sincronizarComprasFinanzasDe`
+  sobre cada cotización tocada — si la reserva de alguien llega a 0, su
+  tx de excedente se borra solo (mecanismo que ya existía).
+- `"set-cot-compra"` (`modules/cotizaciones.js`): al subir
+  `cantidadReal` de una compra con `compartida.grupoId`, calcula el
+  incremento y llama a `tomarDeReservaCompraConjunta` — a diferencia
+  del resto de ese manejador (que solo marca "sucio" y espera a
+  "Actualizar movimientos financieros"), esto persiste de inmediato:
+  tomar de la reserva puede tocar el movimiento de OTRA cotización, y
+  dejarlo a medias la habría mostrado desactualizada.
+
+**Límite conocido, documentado a propósito (no resuelto):** solo se
+ajusta `cantidadExcedente` del tenedor de la reserva, nunca su
+`costoReal`. Como `costoRealPedido = costoReal − costoExcedenteCompra`,
+al bajarle la reserva a alguien su PROPIO costo atribuido sube un poco
+(la misma plata de la factura original, reclasificada de "reserva" a
+"costo de ese pedido") — si quien tomó la reserva fue OTRO pedido
+distinto, ese aumento de costo queda en el tenedor, no en quien de
+verdad usó el material. La plata TOTAL en Finanzas nunca cambia (nadie
+gasta de más), solo puede quedar atribuida al pedido equivocado entre
+los participantes de la MISMA compra — no se resolvió con un
+"traspaso" de costo entre compras porque no se pidió y hubiera sumado
+bastante más riesgo por poco beneficio práctico.
+
+**C — cantidad de cada pedido, editable a mano.** Pedido en el mismo
+mensaje: "no todos los insumos se pueden dividir así... un campo para
+definir que cantidad va en cada pedido, no lo hago individual porque
+muchas veces las cosas se compran al por mayor, entonces para evitar
+dividir pues que lo haga la app". La columna "Cantidad" de "Se reparte
+así" pasa de texto de solo lectura a un campo editable por fila
+(`renderFilaGrupoCompraConjunta`, `modules/finanzas.js`), con el valor
+proporcional de siempre como punto de partida — si no se toca, el
+comportamiento es 100% el de antes. Un indicador "Repartido: X / Y" (
+mismo estilo que "Cubierto por servicios" de `renderAsignarServicios`)
+avisa en rojo si lo escrito no cuadra, y `registrar-compra-conjunta`
+bloquea el registro (mismo criterio de "cero descuadre" que
+`validarServiciosAsignados`) si la suma de lo repartido no coincide
+exacto con el total comprado.
+
+**Pruebas:** además de los casos ya descritos arriba, se agregó un
+escenario de reposición completo — un pedido participante sube su
+cantidad real y la reserva PROPIA se agota sola (mismo movimiento
+actualizado, no uno nuevo); un caso CRUZADO donde la reserva propia ya
+está en 0 y la reposición sale de la reserva de OTRO pedido que
+compró junto; verificación de que la plata TOTAL en Finanzas no
+cambia en ningún caso (solo se reclasifica); y el campo manual de
+cantidad, tanto un reparto que no cuadra (bloqueado, con aviso, sin
+tocar nada) como uno que sí (se guarda exacto lo escrito a mano, no
+lo proporcional).
+
 ---
 
 ## Próximos pasos

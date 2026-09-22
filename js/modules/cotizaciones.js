@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, cantidadEfectivaInsumo, categoriasUsadasPorInsumos } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -1907,6 +1907,14 @@ export var actions = {
     var cotId = el.getAttribute("data-cot"), clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
     var esNumerico = campo === "cantidadReal" || campo === "costoReal" || campo === "cantidadExcedente";
     var valor = esNumerico ? num(el.value) : el.value;
+    // Si esto sube la cantidad real de una compra que vino de "Compras
+    // conjuntas" (tiene compartida.grupoId), puede haber reserva compartida
+    // de la que tomar — ver tomarDeReservaCompraConjunta más abajo. Se
+    // captura ACÁ (dentro del .map de abajo, sobre la cotización que
+    // cambia) porque es donde se conoce el valor ANTERIOR de cantidadReal;
+    // la toma de la reserva en sí pasa DESPUÉS, una vez que este .map ya
+    // dejó la cotización editada al día.
+    var incrementoParaReserva = 0, grupoIdParaReserva = null, unidadParaReserva = "";
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       var compras = (c.compras || []).slice();
@@ -1954,12 +1962,35 @@ export var actions = {
           var sugerido = valor - num(linea.cantidadFisica);
           if (sugerido > 0) patch.cantidadExcedente = sugerido;
         }
+        // Reposición sobre un insumo de compra conjunta: si sube por encima
+        // de lo que ya tenía, esa diferencia es lo que se intenta cubrir con
+        // la reserva compartida (ver el comentario grande más abajo, junto a
+        // tomarDeReservaCompraConjunta) — reportado por el usuario
+        // 2026-09-21: "si aumento el consumo de tela de pedido1,
+        // automáticamente se resta del excedente".
+        if (base.compartida && base.compartida.grupoId) {
+          var incremento = valor - num(base.cantidadReal);
+          if (incremento > 0) { incrementoParaReserva = incremento; grupoIdParaReserva = base.compartida.grupoId; unidadParaReserva = linea.unidad || ""; }
+        }
       }
       var actualizada = Object.assign({}, base, patch);
       if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
       return Object.assign({}, c, { compras: compras });
     });
     marcarSucia(cotId);
+    if (incrementoParaReserva > 0) {
+      var tomado = tomarDeReservaCompraConjunta(grupoIdParaReserva, clave, incrementoParaReserva);
+      if (tomado > 0) {
+        // A diferencia del resto de este manejador (que solo deja el
+        // cambio marcado como "sucio" y espera a "Actualizar movimientos
+        // financieros"), acá sí se guarda de inmediato: tomar de la reserva
+        // puede tocar el movimiento de OTRA cotización, y dejarlo a medias
+        // hasta un guardado manual dejaría esa otra cotización con un
+        // excedente desactualizado frente a lo que ya se ve en pantalla.
+        persist("cotizaciones"); persist("tx"); notify();
+        mostrarToast("✓ Se tomaron " + num(tomado).toFixed(2) + " " + unidadParaReserva + " de la reserva compartida — no hizo falta comprar de nuevo.");
+      }
+    }
   },
   "toggle-compra-detalle": function (el) {
     var k = el.getAttribute("data-cot") + "|" + el.getAttribute("data-clave");
@@ -2741,6 +2772,18 @@ export function sincronizarComprasFinanzasDe(cot) {
     // compra por cantidad). Se evalúa aparte del bloque de arriba a
     // propósito: si TODO lo comprado resultó excedente (monto del pedido
     // en 0), igual hay que registrar el excedente completo.
+    //
+    // SIN pedidoId a propósito (2026-09-21): el excedente no es "de este
+    // pedido" — es una reserva que puede terminar usando OTRO pedido más
+    // adelante (ver calcReservaCompraConjunta/tomarDeReservaCompraConjunta
+    // en core/calc.js), así que no tiene sentido mostrarlo agrupado bajo
+    // ninguno en particular. Sin pedidoId, cae solo en "Movimientos sueltos
+    // (sin pedido)" (ver renderHistorial, modules/finanzas.js) — sección que
+    // YA existía, no hizo falta crear una vista nueva. cotizacionId/
+    // origenCompraExcedenteClave siguen intactos: son los que usan "Ver
+    // origen" y la protección de borrado (movimientosGeneradosPorCotizacion,
+    // core/calc.js), y ningún reporte agregado de "Gasto en insumos"
+    // depende de pedidoId (filtran por esInsumo/tipo/fecha, no por pedido).
     var costoExc = (esCompraSi && !linea.esServicio) ? costoExcedenteCompra(compra) : 0;
     if (costoExc > 0) {
       var datosExc = {
@@ -2749,7 +2792,7 @@ export function sincronizarComprasFinanzasDe(cot) {
         monto: costoExc,
         contraparte: proveedor ? proveedor.nombre : "",
         fecha: compra.fecha || todayStr(),
-        pedidoId: pedidoIdDeCotParaTx(cot),
+        pedidoId: "",
         cotizacionId: cot.id,
         esInsumo: "1",
         proveedorId: compra.proveedorId || "",
@@ -2778,6 +2821,50 @@ export function sincronizarComprasFinanzasDe(cot) {
   }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
 
   return { compras: compras, creados: creados, actualizados: actualizados, borrados: borrados, huerfanas: huerfanas };
+}
+
+// Toma `cantidadNecesaria` de la reserva compartida de excedente de una
+// compra conjunta (ver calcReservaCompraConjunta en core/calc.js) —
+// reportado por el usuario 2026-09-21: si un pedido participante necesita
+// más insumo del que se le calculó (ej. una reposición), en vez de comprarlo
+// otra vez se descuenta de lo que ya se compró de más. Puede tocar la compra
+// de OTRA cotización (quien terminó "quedándose" con la reserva al repartir
+// no tiene por qué ser quien la necesite después) — por eso recorre
+// `state.cotizaciones` entero, no solo la que llamó. Devuelve cuánto de
+// verdad se pudo tomar (puede ser menos de lo pedido si la reserva no
+// alcanza — el resto sigue el camino de siempre, sin caso especial).
+//
+// Límite conocido, a propósito no resuelto: solo se ajusta
+// `cantidadExcedente` del tenedor, no su `costoReal` — como
+// costoRealPedido = costoReal − costoExcedenteCompra(compra), al bajarle la
+// reserva a un tenedor su PROPIO costo atribuido sube un poco (matemática
+// pura del mismo cálculo, ver core/calc.js). La plata total en Finanzas NO
+// cambia (nadie gasta de más, el tx de excedente simplemente encoge) — solo
+// puede quedar atribuida al pedido que tenía la reserva en vez de al que la
+// usó, si son cotizaciones distintas. Documentado en CONTABILIDAD.md.
+function tomarDeReservaCompraConjunta(grupoId, clave, cantidadNecesaria) {
+  var reserva = calcReservaCompraConjunta(grupoId, clave);
+  var porTomar = Math.min(cantidadNecesaria, reserva.disponible);
+  if (porTomar <= 0) return 0;
+  var restante = porTomar;
+  var porCotizacion = {};
+  reserva.tenedores.forEach(function (t) {
+    if (restante <= 0) return;
+    var deEste = Math.min(restante, t.disponible);
+    restante -= deEste;
+    porCotizacion[t.cotId] = (porCotizacion[t.cotId] || 0) + deEste;
+  });
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (!porCotizacion[c.id]) return c;
+    var compras = (c.compras || []).map(function (compra) {
+      if (compra.clave !== clave || !compra.compartida || compra.compartida.grupoId !== grupoId) return compra;
+      var nuevoExcedente = Math.max(0, num(compra.cantidadExcedente) - porCotizacion[c.id]);
+      return Object.assign({}, compra, { cantidadExcedente: nuevoExcedente });
+    });
+    var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
+    return Object.assign({}, c, { compras: sinc.compras });
+  });
+  return porTomar;
 }
 
 // ---------- El pedido como espejo de su cotización ----------

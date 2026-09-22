@@ -2239,6 +2239,36 @@ export function cantidadRealPedido(compra) {
   return num(compra && compra.cantidadReal) - cantidadExcedenteCompra(compra);
 }
 
+// ---------- reserva de excedente compartida (Compras conjuntas) ----------
+// El excedente de una compra conjunta (ver compra.compartida, escrito en
+// "registrar-compra-conjunta", modules/finanzas.js) es una RESERVA para los
+// mismos pedidos que compraron juntos — reportado por el usuario 2026-09-21:
+// "compro 5 metros de más por si llegara a necesitar reposiciones... ese
+// excedente es como un mini inventario, si aumento el consumo de tela de
+// pedido1, automáticamente se resta del excedente". A propósito NO es
+// inventario general de insumos (eso ya se rechazó, ver
+// modelo_negocio_sin_inventario) — solo queda disponible para los pedidos
+// que participaron en ESA compra puntual, nunca para uno ajeno.
+//
+// El reparto proporcional (repartirProporcional) puede haber dejado la
+// reserva repartida en más de un pedido participante — esta función suma
+// TODOS los que compartan el mismo grupoId + insumo, sin importar en cuál
+// quedó cada porción, así que a quien va a "tomar" no le importa de dónde
+// sale.
+export function calcReservaCompraConjunta(grupoId, clave) {
+  var tenedores = [];
+  (state.cotizaciones || []).forEach(function (c) {
+    (c.compras || []).forEach(function (compra) {
+      if (compra.clave !== clave) return;
+      if (!compra.compartida || compra.compartida.grupoId !== grupoId) return;
+      var disponible = cantidadExcedenteCompra(compra);
+      if (disponible > 0) tenedores.push({ cotId: c.id, compra: compra, disponible: disponible });
+    });
+  });
+  var total = tenedores.reduce(function (a, t) { return a + t.disponible; }, 0);
+  return { disponible: total, tenedores: tenedores };
+}
+
 // Estado de una compra: "no" (nada registrado), "si" (se pagó de verdad y
 // aparte — genera movimiento en Finanzas) o "servicio" (mano de obra propia,
 // ej. corte/confección hechos en el taller: cuenta como costo real porque de

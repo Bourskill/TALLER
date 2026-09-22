@@ -5053,8 +5053,9 @@ assert(!document.querySelector('[data-action="registrar-compra-conjunta"]'), "si
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="cantidadTotal"]', "33");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="costoTotal"]', "99000");
 assert(!!document.querySelector('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]'), "con los dos números escritos, aparece 'Registrar esta compra'");
-const previewTextoTest = document.getElementById("app").textContent;
-assert(previewTextoTest.indexOf("11.00") !== -1 && previewTextoTest.indexOf("22.00") !== -1, "antes de confirmar, ya se ve el reparto exacto que se va a aplicar (11 y 22)");
+const inputCantATest = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoTelaTest.clave + '"][data-cot="' + cotConjA.id + '"]');
+const inputCantBTest = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoTelaTest.clave + '"][data-cot="' + cotConjB.id + '"]');
+assert(inputCantATest.value === "11.00" && inputCantBTest.value === "22.00", "antes de confirmar, ya se ve el reparto exacto que se va a aplicar (11 y 22) — editable, no solo de lectura");
 click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]');
 
 const cotATrasRegistroTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
@@ -5203,8 +5204,32 @@ render();
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadTotal"]', "4");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="costoTotal"]', "142900");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadExcedente"]', "1");
+const inputCantProdA = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]');
+const inputCantProdB = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdB.id + '"]');
+const inputCantProdC = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdC.id + '"]');
+assert(inputCantProdA.value.indexOf(".") === -1 && inputCantProdB.value.indexOf(".") === -1 && inputCantProdC.value.indexOf(".") === -1, "el campo de cantidad de cada pedido ya NO muestra fracciones de una prenda comprada entera");
 const previewTextoProdTest = document.getElementById("app").textContent;
-assert(previewTextoProdTest.indexOf("1.34") === -1 && previewTextoProdTest.indexOf("1.33") === -1 && previewTextoProdTest.indexOf("0.34") === -1 && previewTextoProdTest.indexOf("0.33") === -1, "el preview del reparto YA NO muestra fracciones de una prenda comprada entera");
+assert(previewTextoProdTest.indexOf("0.34") === -1 && previewTextoProdTest.indexOf("0.33") === -1, "...y el excedente (todavía de solo lectura) tampoco");
+
+// -- la cantidad de cada pedido se puede escribir a mano en vez de confiar
+// en el reparto automático — reportado por el usuario 2026-09-21: "un campo
+// para definir que cantidad va en cada pedido". Primero, un reparto que NO
+// cuadra: se bloquea, sin tocar nada.
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]', "3");
+var txAntesDelBloqueoCantTest = state.tx.length;
+var alertaOriginalCantTest = global.alert, alertaCapturadaCantTest = "";
+global.window.alert = global.alert = function (msg) { alertaCapturadaCantTest = msg; };
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoProdTest.clave + '"]');
+global.window.alert = global.alert = alertaOriginalCantTest;
+assert(state.tx.length === txAntesDelBloqueoCantTest, "si lo repartido a mano no suma el total comprado, NO se registra nada");
+assert(alertaCapturadaCantTest.indexOf("no coincide") !== -1, "...y avisa que el reparto no cuadra");
+
+// -- ahora un reparto manual que SÍ cuadra (2/1/1, deliberadamente distinto
+// del reparto proporcional que traía por defecto) — se respeta tal cual se
+// escribió, no lo que la app hubiera repartido sola.
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]', "2");
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdB.id + '"]', "1");
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdC.id + '"]', "1");
 click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoProdTest.clave + '"]');
 
 const cotProdATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodA-test"; })[0];
@@ -5215,6 +5240,7 @@ const compraProdB = cotProdBTrasReg.compras.filter(function (c) { return c.clave
 const compraProdC = cotProdCTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
 assert(Number.isInteger(compraProdA.cantidadReal) && Number.isInteger(compraProdB.cantidadReal) && Number.isInteger(compraProdC.cantidadReal), "cada pedido recibe un número ENTERO de camisetas, nunca una fracción (\"1.34 camisetas\" no existe)");
 assert(compraProdA.cantidadReal + compraProdB.cantidadReal + compraProdC.cantidadReal === 4, "...y entre los 3 suman exactamente las 4 compradas, sin perder ni sobrar ninguna");
+assert(compraProdA.cantidadReal === 2 && compraProdB.cantidadReal === 1 && compraProdC.cantidadReal === 1, "...y quedó EXACTAMENTE el reparto manual (2/1/1), no el proporcional que traía por defecto");
 assert(Number.isInteger(compraProdA.cantidadExcedente) && Number.isInteger(compraProdB.cantidadExcedente) && Number.isInteger(compraProdC.cantidadExcedente), "el excedente TAMBIÉN se reparte en enteros (mismo criterio)");
 assert(compraProdA.cantidadExcedente + compraProdB.cantidadExcedente + compraProdC.cantidadExcedente === 1, "...sumando exacto la 1 unidad de excedente");
 const costoProdSuma = compraProdA.costoReal + compraProdB.costoReal + compraProdC.costoReal;
@@ -5697,6 +5723,59 @@ var txExcConjB = state.tx.filter(function (t) { return t.id === compraConjExcB.e
 assert(txExcConjA.monto === 6000 && txExcConjB.monto === 12000, "cada movimiento de excedente tiene el monto que le tocó a SU pedido (6.000 y 12.000)");
 assert(txExcConjA.cotizacionId === "cot-conjexcA-test" && txExcConjB.cotizacionId === "cot-conjexcB-test", "...ligado cada uno a su propia cotización, igual que el movimiento principal");
 assert(txExcConjA.id !== compraConjExcA.txId && txExcConjB.id !== compraConjExcB.txId, "el movimiento de excedente es DISTINTO del movimiento del pedido en cada caso — dos movimientos, no uno mezclado");
+
+// -- el excedente ya NO es "del pedido": reportado por el usuario
+// 2026-09-21 con una captura real ("los excedentes no son parte del
+// pedido, son un movimiento suelto") — el tx de excedente no lleva
+// pedidoId, así que cae en "Movimientos sueltos (sin pedido)" en vez de
+// agruparse bajo el pedido, sección que YA existe (renderHistorial).
+assert(txExcConjA.pedidoId === "" && txExcConjB.pedidoId === "", "el movimiento de excedente NO lleva pedidoId — no se agrupa bajo ningún pedido en Finanzas");
+assert(!!compraConjExcA.txId && state.tx.filter(function (t) { return t.id === compraConjExcA.txId; })[0].pedidoId === "ped-conjexcA-test", "el movimiento NORMAL de cada pedido sí conserva su pedidoId — solo el de excedente cambió");
+
+// -- el excedente es una RESERVA COMPARTIDA: si un pedido participante
+// necesita más de lo estimado (reposición), se descuenta automáticamente
+// de ahí en vez de sumarle costo nuevo — reportado por el usuario
+// 2026-09-21 con el ejemplo de la tela: "si aumento el consumo de tela de
+// pedido1, automáticamente se resta del excedente, se actualiza el
+// movimiento en vez de crear uno nuevo".
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-conjexcA-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-conjexcA-test"][data-val="produccion"]');
+var totalDineroAntesTest = state.tx.reduce(function (a, t) { return a + (t.tipo === "gasto" ? t.monto : 0); }, 0);
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-conjexcA-test"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadReal"]', "14"); // pedía 12, ahora necesita 14 (2 más) — A tenía 2 de reserva PROPIA
+var cotATrasReposicionTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcA-test"; })[0];
+var compraATrasReposicionTest = cotATrasReposicionTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+assert(compraATrasReposicionTest.cantidadReal === 14, "la cantidad real del pedido sí sube a lo que de verdad se usó");
+assert(compraATrasReposicionTest.cantidadExcedente === 0, "...y la reserva PROPIA de ese mismo pedido (2) se agota sola para cubrirlo, sin pedir nada nuevo");
+assert(!compraATrasReposicionTest.excedenteTxId, "con la reserva en 0, su movimiento de excedente se borra solo (mismo mecanismo de siempre, ver sincronizarComprasFinanzasDe)");
+assert(!state.tx.some(function (t) { return t.id === txExcConjA.id; }), "...el movimiento de excedente de A de verdad desapareció de Finanzas, no quedó huérfano");
+var cotBSinTocarTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcB-test"; })[0];
+var compraBSinTocarTest = cotBSinTocarTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+assert(compraBSinTocarTest.cantidadExcedente === 4 && compraBSinTocarTest.excedenteTxId === txExcConjB.id, "la reserva de B, que ni participó, queda intacta — A cubrió la reposición con SU PROPIA reserva primero");
+var totalDineroDespuesTest = state.tx.reduce(function (a, t) { return a + (t.tipo === "gasto" ? t.monto : 0); }, 0);
+assert(totalDineroDespuesTest === totalDineroAntesTest, "cero plata nueva: lo que se descontó de la reserva de A es exactamente lo que le subió al movimiento propio de A (la misma factura de siempre, solo reclasificada)");
+
+// -- caso cruzado: si la reserva PROPIA de un pedido no alcanza (o ya está
+// en 0), toma de la reserva de OTRO pedido que compró junto con él —
+// confirmado con el usuario: "tienes que vincularlo a los 2 pedidos".
+var reservaCruzadaId = "res-cruzada-conj-test";
+cotATrasReposicionTest.compras = cotATrasReposicionTest.compras.map(function (c) {
+  return c.clave === grupoConjExcTest.clave ? Object.assign({}, c, { compartida: Object.assign({}, c.compartida, { grupoId: reservaCruzadaId }) }) : c;
+});
+cotBSinTocarTest.compras = cotBSinTocarTest.compras.map(function (c) {
+  return c.clave === grupoConjExcTest.clave ? Object.assign({}, c, { compartida: Object.assign({}, c.compartida, { grupoId: reservaCruzadaId }) }) : c;
+});
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  if (c.id === "cot-conjexcA-test") return cotATrasReposicionTest;
+  if (c.id === "cot-conjexcB-test") return cotBSinTocarTest;
+  return c;
+});
+render();
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-conjexcA-test"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadReal"]', "16"); // A ya no tiene reserva propia (quedó en 0) — esta reposición SOLO puede salir de la de B
+var compraACruzadaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcA-test"; })[0].compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+var compraBCruzadaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcB-test"; })[0].compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
+assert(compraACruzadaTest.cantidadReal === 16, "A sube a 16 sin problema");
+assert(compraBCruzadaTest.cantidadExcedente === 2, "...y como A ya no tenía reserva propia, los 2 que le faltaban salieron de la reserva de B (4 → 2), un pedido distinto");
 
 state.pedidos = pedidosPreviosConjExcTest; state.cotizaciones = cotizacionesPreviasConjExcTest; state.tx = txPreviosConjExcTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";

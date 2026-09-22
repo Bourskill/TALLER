@@ -121,7 +121,7 @@ function renderFilaGrupoCompraConjunta(g, d) {
     '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + num(g.totalCantidadEstimada).toFixed(decCant) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
     '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
     '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
-    renderHelp("Cuánto de lo comprado sobra para otro pedido (mínimo del proveedor, conviene comprar de más) — se reparte igual que el resto entre estos pedidos, pero cada parte se registra como una compra de insumo aparte, sin contar como costo ni sobrecosto de ninguno de ellos.") +
+    renderHelp("Cuánto de lo comprado sobra (mínimo del proveedor, conviene comprar de más) — queda como una RESERVA compartida entre estos mismos pedidos, no como costo ni sobrecosto de ninguno. Si más adelante uno de ellos necesita más de lo estimado (ej. una reposición), se descuenta solo de acá en vez de contar como una compra nueva.") +
     '</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
     '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
     "</div>";
@@ -132,6 +132,23 @@ function renderFilaGrupoCompraConjunta(g, d) {
     var costos = repartirProporcional(costoTotal, pesos, 0);
     var cantidadExcedente = num(d.cantidadExcedente);
     var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, decCant) : null;
+    // La cantidad de cada pedido se puede escribir a mano en vez de confiar
+    // solo en el reparto proporcional — reportado por el usuario
+    // 2026-09-21: "no todos los insumos se pueden dividir así... más bien
+    // un campo para definir que cantidad va en cada pedido, no lo hago
+    // individual porque muchas veces las cosas se compran al por mayor,
+    // entonces para evitar dividir pues que lo haga la app". Si no se
+    // toca, sigue siendo 100% automático (el valor por defecto es el
+    // proporcional de siempre) — esto es una posibilidad, no un paso
+    // obligatorio nuevo.
+    var overridesCantidad = d.cantidadesPorPedido || {};
+    var cantidadesFinal = g.participantes.map(function (p, i) {
+      var ov = overridesCantidad[p.cotId];
+      return (ov !== undefined && ov !== "") ? num(ov) : cantidades[i];
+    });
+    var repartidoTotal = cantidadesFinal.reduce(function (a, v) { return a + v; }, 0);
+    var toleranciaCantidad = g.esProducto ? 0.001 : 0.01;
+    var cuadra = Math.abs(repartidoTotal - cantidadTotal) <= toleranciaCantidad;
 
     // Igual que en "Registrar gasto/nómina": el costo de esta compra
     // compartida también se puede cubrir, total o parcialmente, con plata ya
@@ -142,19 +159,23 @@ function renderFilaGrupoCompraConjunta(g, d) {
     html += renderAsignarServicios({ formKey: "formCompraConjunta.porClave." + g.clave, filas: d.servicios || [], monto: costoTotal });
 
     html += '<div class="cc-reparto">';
-    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así</div>';
+    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así' +
+      renderHelp("La cantidad de cada pedido viene calculada a prorrata, pero se puede corregir a mano en cualquier fila — mientras la suma coincida con el total comprado, se guarda tal cual la dejes.") +
+      "</div>";
     var cols = excedentes ? "1fr 90px 100px 90px" : "1fr 90px 100px";
     html += '<div class="tx-row head" style="grid-template-columns:' + cols + ';">' +
       '<span>Pedido</span><span class="ins-th-num">Cantidad</span><span class="ins-th-num">Costo</span>' +
       (excedentes ? '<span class="ins-th-num">Excedente</span>' : "") + "</div>";
     g.participantes.forEach(function (p, i) {
+      var valorCantidad = overridesCantidad[p.cotId] !== undefined ? overridesCantidad[p.cotId] : cantidades[i].toFixed(decCant);
       html += '<div class="tx-row" style="grid-template-columns:' + cols + ';">' +
         '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
-        '<span class="mobile-th">Cantidad</span><span class="amount">' + cantidades[i].toFixed(decCant) + " " + esc(g.unidad || "") + "</span>" +
+        '<span class="mobile-th">Cantidad</span><span style="display:flex;align-items:center;gap:4px;justify-content:flex-end;"><input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(valorCantidad) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.clave) + '" data-cot="' + esc(p.cotId) + '" /><span class="section-sub" style="margin:0;white-space:nowrap;">' + esc(g.unidad || "") + "</span></span>" +
         '<span class="mobile-th">Costo</span><span class="amount">' + fmt(costos[i]) + "</span>" +
         (excedentes ? '<span class="mobile-th">Excedente</span><span class="amount">' + excedentes[i].toFixed(decCant) + " " + esc(g.unidad || "") + "</span>" : "") +
         "</div>";
     });
+    html += '<div class="section-sub" style="margin-top:6px;text-align:right;">Repartido: <b style="color:' + (cuadra ? "var(--ink)" : "var(--danger-ink)") + ';">' + repartidoTotal.toFixed(decCant) + "</b> / " + cantidadTotal.toFixed(decCant) + " " + esc(g.unidad || "") + "</div>";
     html += "</div>";
     html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
   }
@@ -701,6 +722,21 @@ export var actions = {
     state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
     notify();
   },
+  // Cantidad de UN pedido participante escrita a mano, en vez de dejar que
+  // el reparto proporcional decida sola — ver renderFilaGrupoCompraConjunta.
+  // No toca "registrar-compra-conjunta" cuando queda vacía: sin nada
+  // escrito, ese pedido sigue usando el valor proporcional de siempre.
+  "set-compra-conjunta-cantidad-pedido": function (el) {
+    var clave = el.getAttribute("data-clave"), cotId = el.getAttribute("data-cot");
+    var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
+    var fila = Object.assign({}, porClave[clave] || {});
+    var cantidadesPorPedido = Object.assign({}, fila.cantidadesPorPedido || {});
+    cantidadesPorPedido[cotId] = el.value;
+    fila.cantidadesPorPedido = cantidadesPorPedido;
+    porClave[clave] = fila;
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
+    notify();
+  },
   // El corazón de "Compras conjuntas": reparte lo comprado de verdad entre
   // los pedidos que compartían ese insumo (a prorrata de lo que cada uno
   // necesitaba, ver repartirProporcional en core/calc.js), deja cada compra
@@ -738,6 +774,23 @@ export var actions = {
     var decCant = grupo.esProducto ? 0 : 2;
     var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
     var costos = repartirProporcional(costoTotal, pesos, 0);
+    // La cantidad de cada pedido admite corrección manual (ver
+    // renderFilaGrupoCompraConjunta / "set-compra-conjunta-cantidad-pedido")
+    // — sin nada escrito, usa la proporcional de siempre. Mismo criterio de
+    // "cero descuadre" que ya exige validarServiciosAsignados: si lo escrito
+    // a mano no suma exacto el total comprado, se bloquea el registro
+    // ANTES de tocar nada (nunca se guarda una cantidad que no cuadre).
+    var overridesCantidad = draft.cantidadesPorPedido || {};
+    var cantidadesFinal = grupo.participantes.map(function (p, i) {
+      var ov = overridesCantidad[p.cotId];
+      return (ov !== undefined && ov !== "") ? num(ov) : cantidades[i];
+    });
+    var sumaCantidadesFinal = cantidadesFinal.reduce(function (a, v) { return a + v; }, 0);
+    var toleranciaCantidad = grupo.esProducto ? 0.001 : 0.01;
+    if (Math.abs(sumaCantidadesFinal - cantidadTotal) > toleranciaCantidad) {
+      window.alert("Lo repartido entre los pedidos (" + sumaCantidadesFinal.toFixed(decCant) + ") no coincide con el total comprado (" + cantidadTotal.toFixed(decCant) + "). Ajusta las cantidades para que sumen exacto.");
+      return;
+    }
     // Excedente (compra de insumo aparte): se reparte con el MISMO criterio
     // que el resto — a prorrata de lo que cada pedido necesitaba — pero cada
     // parte queda marcada aparte (cantidadExcedente) para que no cuente
@@ -762,7 +815,7 @@ export var actions = {
       var serviciosDescuento = repartosServicios
         .map(function (r) { return { nombre: r.nombre, monto: r.partes[i] }; })
         .filter(function (s) { return s.monto > 0; });
-      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0, serviciosDescuento: serviciosDescuento };
+      reparto[p.cotId] = { cantidadReal: cantidadesFinal[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0, serviciosDescuento: serviciosDescuento };
     });
 
     var afectadas = 0;

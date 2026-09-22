@@ -259,6 +259,31 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo sexta ronda: el excedente de una compra conjunta pasa a ser una reserva compartida, no un costo del pedido)
+
+Reportado con una captura real: el movimiento de excedente de una
+compra conjunta aparecía agrupado bajo el pedido, como si fuera un
+gasto suyo. Al pedir la corrección, se planteó un flujo más rico:
+comprar de más "por si llega a necesitar reposiciones" es una reserva
+compartida entre los pedidos que compraron juntos, no el gasto de
+ninguno en particular — y si más adelante uno de ellos necesita más
+de lo estimado, debería descontarse solo de esa reserva.
+
+- El movimiento de excedente ya NO se agrupa bajo ningún pedido en
+  Finanzas — cae en "Movimientos sueltos (sin pedido)", sección que
+  ya existía.
+- Si un pedido que participó en una compra conjunta necesita después
+  más insumo del estimado (ej. una reposición), subir su cantidad real
+  descuenta automáticamente de la reserva compartida — actualiza el
+  mismo movimiento, no crea uno nuevo ni le suma costo al pedido. La
+  reserva queda disponible solo para los pedidos que compraron juntos,
+  nunca para uno ajeno.
+- La cantidad de cada pedido en una compra conjunta ahora se puede
+  escribir a mano en vez de depender solo del reparto automático — si
+  no se toca, sigue siendo 100% automático como antes.
+- Ver CONTABILIDAD.md, Hallazgo #44 (incluye una limitación conocida y
+  documentada a propósito, no un bug).
+
 ## Registro de cambios — septiembre 2026 (octogésimo quinta ronda: Compras conjuntas ya no reparte una prenda comprada entera en fracciones)
 
 Reportado con un caso real: 3 pedidos necesitando 1 camiseta cada uno,
