@@ -2534,7 +2534,9 @@ export function repararComprasSinSeguimiento(tx, cotizaciones) {
 // aparecen acá aunque coincidan en nombre entre dos pedidos: su `clave`
 // incluye el id propio de la cotización (ver calcListaCompras), así que dos
 // "domicilio" de pedidos distintos nunca son la MISMA clave — no son el
-// mismo insumo físico solo por llamarse igual.
+// mismo insumo FÍSICO solo por llamarse igual (una tela sí necesita esa
+// distinción; un costo fijo por pedido, no — ver calcGruposCostoCompartido
+// más abajo, para ESE caso).
 export function calcGruposCompraCompartida(pedidoIds) {
   var mapa = {};
   (pedidoIds || []).forEach(function (pedidoId) {
@@ -2561,6 +2563,58 @@ export function calcGruposCompraCompartida(pedidoIds) {
     .filter(function (g) { return g.participantes.length > 1; })
     .map(function (g) {
       g.totalCantidadEstimada = g.participantes.reduce(function (a, p) { return a + p.cantidadEstimada; }, 0);
+      g.totalCostoEstimado = g.participantes.reduce(function (a, p) { return a + p.costoEstimado; }, 0);
+      return g;
+    })
+    .sort(function (a, b) { return b.totalCostoEstimado - a.totalCostoEstimado; });
+}
+
+// Lo mismo que calcGruposCompraCompartida, pero para un COSTO FIJO del
+// pedido (domicilio, diseño, un envío a sublimar — cot.costosGlobales[],
+// ver renderFilasGlobales en modules/cotizaciones.js), no un insumo físico.
+// Reportado por el usuario 2026-09-21: "no me sale domicilio y los pedidos
+// compartidos si lo tienen en comun" — hizo UN pago de domicilio que en
+// realidad cubrió varios pedidos a la vez, y quiere dividir ESE costo entre
+// ellos. A propósito agrupa por NOMBRE (no por `clave`, que es única por
+// cotización — ver el comentario de arriba): acá SÍ es correcto fusionar
+// "Domicilio" de pedidos distintos, es justo lo que se pide. Cada
+// participante guarda su propia `claveGlobal` para escribirle su parte
+// SOLO a su propia compra — nunca se fusionan dos registros en uno.
+//
+// El campo `esServicio` de un costoGlobal NO se revisa acá (a diferencia de
+// calcGruposCompraCompartida): nace en `true` desde que se crea
+// (add-costo-global, modules/cotizaciones.js) sin ningún control en la UI
+// para cambiarlo, y estadoLineaCompra ya lo neutraliza para costos
+// globales (`linea.esServicio && !linea.esGlobal`) — es un campo inerte
+// para este tipo de línea, filtrar por él aquí solo bloquearía todo sin
+// razón.
+export function calcGruposCostoCompartido(pedidoIds) {
+  var mapa = {};
+  (pedidoIds || []).forEach(function (pedidoId) {
+    var pedido = (state.pedidos || []).filter(function (p) { return p.id === pedidoId; })[0];
+    if (!pedido || !pedido.cotizacionId) return;
+    var cot = (state.cotizaciones || []).filter(function (c) { return c.id === pedido.cotizacionId; })[0];
+    if (!cot) return;
+    calcListaCompras(cot).forEach(function (linea) {
+      if (!linea.esGlobal) return;
+      if (estadoLineaCompra(cot, linea) !== "no") return;
+      var nombreKey = (linea.nombre || "").trim().toLowerCase();
+      if (!nombreKey) return;
+      var grupoKey = "costoglobal|" + nombreKey;
+      if (!mapa[grupoKey]) {
+        mapa[grupoKey] = { clave: grupoKey, nombre: linea.nombre, participantes: [] };
+      }
+      mapa[grupoKey].participantes.push({
+        pedidoId: pedido.id, cotId: cot.id, claveGlobal: linea.clave,
+        etiqueta: (pedido.numeroOp || "OP-????") + " · " + (pedido.cliente || "Sin cliente"),
+        costoEstimado: num(linea.costoTotal), proveedorId: linea.proveedorId || ""
+      });
+    });
+  });
+  return Object.keys(mapa).map(function (k) { return mapa[k]; })
+    // "compartido" = el mismo nombre de costo pendiente en 2 o más de los elegidos.
+    .filter(function (g) { return g.participantes.length > 1; })
+    .map(function (g) {
       g.totalCostoEstimado = g.participantes.reduce(function (a, p) { return a + p.costoEstimado; }, 0);
       return g;
     })

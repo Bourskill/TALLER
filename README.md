@@ -259,6 +259,23 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo octava ronda: "Compras conjuntas" ahora también reparte costos compartidos como domicilio, no solo insumos)
+
+Reportado: "no me sale 'domicilio' y los pedidos compartidos si lo tienen
+en comun". "Compras conjuntas" solo sabía repartir insumos físicos
+(tela, hilo); un solo pago de domicilio que cubrió varios pedidos a la
+vez no tenía dónde registrarse dividido entre ellos.
+
+- Nueva sección "Costos compartidos del pedido (domicilio, diseño...)"
+  en la pestaña Compras conjuntas, debajo de "Insumos que se repiten".
+- Escribe cuánto pagaste en total y se reparte entre los pedidos que
+  comparten ese mismo costo (editable a mano, cero descuadre) — cada uno
+  queda con su propio costo marcado "Sí" y su propio movimiento en
+  Finanzas.
+- Un pedido cuyo único pendiente sea un costo compartido (sin ningún
+  insumo físico) ahora sí aparece en la lista para elegir.
+- Ver CONTABILIDAD.md, Hallazgo #46.
+
 ## Registro de cambios — septiembre 2026 (octogésimo séptima ronda: el costo del excedente de una compra conjunta ya no se le cargaba entero a los pedidos)
 
 Reportado con dos capturas reales, sobre la misma compra conjunta de la

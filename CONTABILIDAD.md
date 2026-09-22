@@ -2274,6 +2274,87 @@ correcto solo por casualidad numérica en el caso de la tela).
 
 ---
 
+### 🟢 Hallazgo #46 — "Compras conjuntas" ganó costos compartidos (domicilio, diseño...), no solo insumos físicos. ✅ IMPLEMENTADO
+
+Reportado (2026-09-21): "no me sale 'domicilio' y los pedidos compartidos
+si lo tienen en comun" — al elegir varios pedidos en "Compras conjuntas",
+"Domicilio" nunca aparecía como algo para repartir. Confirmado con
+AskUserQuestion qué necesitaba exactamente: hizo **un solo pago de
+domicilio que en realidad cubrió varios pedidos a la vez**, y quería
+dividir ESE costo entre ellos — no simplemente ver agrupadas líneas que
+ya estaban separadas.
+
+**Por qué no aparecía — dos motivos, no uno.** "Domicilio" vive como
+`costoGlobal` (`cot.costosGlobales[]`), un costo FIJO por pedido, no una
+cantidad física comprada. `calcGruposCompraCompartida` (el motor
+existente de "Compras conjuntas", pensado para insumos físicos como la
+tela) nunca lo agrupaba entre pedidos distintos:
+1. Su `clave` es `"global|" + g.id` — el id es único por cotización, así
+   que dos "Domicilio" de pedidos distintos nunca comparten clave, aunque
+   se llamen igual. Correcto para un insumo físico (dos "Tela" de
+   pedidos distintos tampoco deben fusionarse solo por el nombre) — pero
+   un costo fijo como Domicilio, si le corresponde por diseño.
+2. Un costoGlobal nuevo nace con `esServicio: true`
+   (`add-costo-global`, `modules/cotizaciones.js`) **sin ningún control en
+   la UI para desmarcarlo** — el selector "Tipo de costo" de un costoGlobal
+   es un eje distinto (cómo se reparte el costo entre prendas, no si es
+   "servicio"). Ese campo ya era en la práctica MUERTO para costosGlobales:
+   `estadoLineaCompra` lo neutraliza explícito
+   (`linea.esServicio && !linea.esGlobal`) para que un costoGlobal NUNCA
+   arranque en estado "Servicio" — pero `calcGruposCompraCompartida`
+   filtraba por `linea.esServicio` sin ese mismo `!esGlobal`, así que ese
+   campo inerte igual bloqueaba cualquier costoGlobal. El mismo problema
+   existía en el filtro que arma la lista de pedidos elegibles de la
+   pestaña: un pedido cuyo ÚNICO pendiente fuera "Domicilio" nunca
+   aparecía siquiera para elegirlo.
+
+**Implementación — un segundo agrupador en paralelo, sin tocar el
+existente.** `calcGruposCompraCompartida` (insumos físicos) no se tocó:
+sigue exactamente igual.
+- `calcGruposCostoCompartido(pedidoIds)` (nuevo, `core/calc.js`): mismo
+  patrón, pero solo mira líneas `esGlobal` pendientes, agrupa por
+  **nombre normalizado** (a propósito, al revés que el otro agrupador —
+  acá SÍ es correcto fusionar "Domicilio" de pedidos distintos) y sin
+  filtrar por `esServicio` (inerte para un global). Cada participante
+  guarda su PROPIA `claveGlobal` — necesaria para escribirle su parte
+  solo a su propia compra, nunca fusionar registros de cotizaciones
+  distintas en uno. Peso de cada uno = su propio costo estimado (mismo
+  criterio que insumos con `cantidadEstimada`); si todos están en 0,
+  `repartirProporcional` ya reparte parejo solo (comportamiento
+  existente, sin nada nuevo que escribir para eso).
+- Segunda sección en la pestaña "Compras conjuntas"
+  (`modules/finanzas.js`): "Costos compartidos del pedido (domicilio,
+  diseño...)", debajo de "Insumos que se repiten". Card más simple (sin
+  cantidad ni excedente, que no aplican a un costo fijo): solo "Costo
+  total pagado" + tabla "Se reparte así" (Pedido | Costo, editable por
+  fila, mismo indicador "Repartido: X / Y" y mismo criterio de cero
+  descuadre). Reusa `.cc-grupo`/`.cc-chip`/`.tx-row` — sin CSS nuevo.
+- `registrar-costo-compartido` (nueva acción): espejo de
+  `registrar-compra-conjunta` sin cantidad/excedente — busca la compra de
+  CADA participante por su propia `claveGlobal` dentro de su propia
+  cotización, la marca `estado:"si"` con su costo repartido, y usa
+  `sincronizarComprasFinanzasDe` (la MISMA función que ya usan insumos
+  compartidos y compras individuales) para que cada pedido quede con su
+  propio movimiento en Finanzas. A diferencia del excedente de
+  Hallazgo #44/45, acá no hay ningún concepto de reserva: cada pedido de
+  verdad incurrió en su propio costo, así que su movimiento SÍ lleva su
+  propio `pedidoId`, como cualquier costoGlobal registrado a mano.
+
+**Fuera de alcance a propósito:** no se agregó "Asignar a servicio(s)"
+para esta sección (no se pidió, y el campo `esServicio` inerte de los
+costosGlobales ya demostró ser confuso — no hacía falta sumarle otro
+eje); tampoco se resolvió el caso raro de un pedido con DOS costosGlobales
+del mismo nombre (edge case no reportado).
+
+**Pruebas:** el escenario exacto reportado — 3 pedidos cuyo ÚNICO
+pendiente en común es "Domicilio" (sin ningún insumo físico, la prueba de
+fuego del fix del picker), confirmación de que la sección de insumos NO
+inventa nada, reparto proporcional por defecto, override manual
+bloqueado (no cuadra) y aceptado (cuadra), cada compra con su propia
+clave/tx/pedidoId, y que el grupo desaparece tras registrar.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcListaCompras, estadoLineaCompra, calcGruposCompraCompartida, repartirProporcional, pedidoCancelado } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcListaCompras, estadoLineaCompra, calcGruposCompraCompartida, calcGruposCostoCompartido, repartirProporcional, pedidoCancelado } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { sincronizarComprasFinanzasDe } from "./cotizaciones.js";
 
@@ -55,7 +55,11 @@ function renderComprasConjuntas() {
     if (pedidoCancelado(p) || !p.cotizacionId) return false;
     var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
     if (!cot) return false;
-    return calcListaCompras(cot).some(function (l) { return !l.esServicio && estadoLineaCompra(cot, l) === "no"; });
+    // Un costo global (domicilio, diseño) también cuenta, aunque su
+    // esServicio sea inerte en true (ver calcGruposCostoCompartido) — si
+    // no, un pedido cuyo único pendiente en común fuera "Domicilio" nunca
+    // aparecería para elegir.
+    return calcListaCompras(cot).some(function (l) { return (l.esGlobal || !l.esServicio) && estadoLineaCompra(cot, l) === "no"; });
   });
 
   var html = '<div class="card">';
@@ -81,6 +85,7 @@ function renderComprasConjuntas() {
 
   if (sel.length > 1) {
     html += renderGruposCompraConjunta(calcGruposCompraCompartida(sel));
+    html += renderGruposCostoCompartido(calcGruposCostoCompartido(sel));
   } else if (sel.length === 1) {
     html += '<div class="empty" style="margin-top:12px;">Elige al menos un segundo pedido para ver qué insumos comparten.</div>';
   }
@@ -96,6 +101,71 @@ function renderGruposCompraConjunta(grupos) {
     renderHelp('Cada fila es un insumo pendiente ("No") en 2 o más de los pedidos elegidos. Escribe cuánto compraste EN TOTAL y cuánto costó — se reparte solo entre esos pedidos a prorrata de lo que cada uno necesitaba, y deja cada compra marcada "Sí" (con su movimiento en Finanzas incluido, igual que "Actualizar movimientos financieros").') +
     "</div>";
   grupos.forEach(function (g) { html += renderFilaGrupoCompraConjunta(g, draft[g.clave] || {}); });
+  return html;
+}
+
+// Un costo FIJO del pedido (domicilio, diseño...) pagado de una sola vez
+// para varios pedidos a la vez — reportado por el usuario 2026-09-21: "no
+// me sale domicilio y los pedidos compartidos si lo tienen en comun".
+// Distinto de "Insumos que se repiten" (arriba): no hay cantidad que
+// repartir, solo un monto — ver calcGruposCostoCompartido en core/calc.js.
+function renderGruposCostoCompartido(grupos) {
+  if (!grupos.length) {
+    return '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen ningún costo (domicilio, diseño...) pendiente en común.</div>';
+  }
+  var draft = state.formCompraConjunta.porClave || {};
+  var html = '<div class="cot-col-title" style="margin-top:16px;">Costos compartidos del pedido (domicilio, diseño...)' +
+    renderHelp('Para cuando un solo pago (ej. un domicilio) en realidad cubrió varios pedidos a la vez. Cada fila es un costo del mismo nombre, pendiente ("No"), en 2 o más de los pedidos elegidos. Escribe cuánto pagaste EN TOTAL — se reparte entre esos pedidos y deja cada uno con su propio costo marcado "Sí".') +
+    "</div>";
+  grupos.forEach(function (g) { html += renderFilaGrupoCostoCompartido(g, draft[g.clave] || {}); });
+  return html;
+}
+
+function renderFilaGrupoCostoCompartido(g, d) {
+  var costoTotal = num(d.costoTotal);
+  var listo = costoTotal > 0;
+  var html = '<div class="card cc-grupo' + (listo ? " cc-grupo-listo" : "") + '">';
+  html += '<div class="cc-grupo-head">' +
+    '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + '</b><span class="tag">' + g.participantes.length + " pedidos</span></div>" +
+    '<span class="section-sub" style="margin:0;">Estimado ' + fmt(g.totalCostoEstimado) + "</span>" +
+    "</div>";
+  html += '<div class="cc-grupo-participantes">' +
+    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + fmt(p.costoEstimado) + "</span>"; }).join("") +
+    "</div>";
+
+  html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
+    '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
+    "</div>";
+
+  if (listo) {
+    var pesos = g.participantes.map(function (p) { return p.costoEstimado; });
+    var costos = repartirProporcional(costoTotal, pesos, 0);
+    var overridesCosto = d.costosPorPedido || {};
+    var costosFinal = g.participantes.map(function (p, i) {
+      var ov = overridesCosto[p.cotId];
+      return (ov !== undefined && ov !== "") ? num(ov) : costos[i];
+    });
+    var repartidoTotal = costosFinal.reduce(function (a, v) { return a + v; }, 0);
+    var cuadra = Math.abs(repartidoTotal - costoTotal) <= 1;
+
+    html += '<div class="cc-reparto">';
+    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así' +
+      renderHelp("El costo de cada pedido viene calculado a prorrata de su propio estimado (parejo si nadie tenía un estimado escrito), pero se puede corregir a mano en cualquier fila — mientras la suma coincida con el total pagado, se guarda tal cual la dejes.") +
+      "</div>";
+    html += '<div class="tx-row head" style="grid-template-columns:1fr 120px;">' +
+      '<span>Pedido</span><span class="ins-th-num">Costo</span></div>';
+    g.participantes.forEach(function (p, i) {
+      var valorCosto = overridesCosto[p.cotId] !== undefined ? overridesCosto[p.cotId] : Math.round(costos[i]);
+      html += '<div class="tx-row" style="grid-template-columns:1fr 120px;">' +
+        '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
+        '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="text-align:right;width:100%;" value="' + esc(valorCosto) + '" data-action-change="set-costo-compartido-monto" data-clave="' + esc(g.clave) + '" data-cot="' + esc(p.cotId) + '" />' +
+        "</div>";
+    });
+    html += '<div class="section-sub" style="margin-top:6px;text-align:right;">Repartido: <b style="color:' + (cuadra ? "var(--ink)" : "var(--danger-ink)") + ';">' + fmt(repartidoTotal) + "</b> / " + fmt(costoTotal) + "</div>";
+    html += "</div>";
+    html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-costo-compartido" data-clave="' + esc(g.clave) + '">Registrar este costo</button></div>';
+  }
+  html += "</div>";
   return html;
 }
 
@@ -759,6 +829,20 @@ export var actions = {
     state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
     notify();
   },
+  // Lo mismo que "set-compra-conjunta-cantidad-pedido" pero para un costo
+  // compartido (domicilio, diseño) — acá se corrige el MONTO de cada
+  // pedido, no una cantidad (un costo fijo no tiene unidad que repartir).
+  "set-costo-compartido-monto": function (el) {
+    var clave = el.getAttribute("data-clave"), cotId = el.getAttribute("data-cot");
+    var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
+    var fila = Object.assign({}, porClave[clave] || {});
+    var costosPorPedido = Object.assign({}, fila.costosPorPedido || {});
+    costosPorPedido[cotId] = el.value;
+    fila.costosPorPedido = costosPorPedido;
+    porClave[clave] = fila;
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
+    notify();
+  },
   // El corazón de "Compras conjuntas": reparte lo comprado de verdad entre
   // los pedidos que compartían ese insumo (a prorrata de lo que cada uno
   // necesitaba, ver repartirProporcional en core/calc.js), deja cada compra
@@ -909,5 +993,70 @@ export var actions = {
     state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClaveNuevo });
     persist("cotizaciones"); persist("tx"); notify();
     mostrarToast("✓ Compra compartida registrada entre " + afectadas + " pedidos.");
+  },
+  // Espejo de "registrar-compra-conjunta" pero para un costo FIJO del
+  // pedido (domicilio, diseño) — sin cantidad ni excedente, solo un monto
+  // que se reparte entre los pedidos. A diferencia de una compra
+  // compartida, cada participante ya tiene su PROPIA compra (su propio
+  // `claveGlobal`, "global|"+id) — nunca se fusionan registros de
+  // cotizaciones distintas en uno solo, cada uno se busca y actualiza por
+  // separado dentro de su propia cotización.
+  "registrar-costo-compartido": function (el) {
+    var clave = el.getAttribute("data-clave");
+    var sel = state.formCompraConjunta.seleccion || [];
+    var grupo = calcGruposCostoCompartido(sel).filter(function (g) { return g.clave === clave; })[0];
+    if (!grupo) return;
+    var draft = (state.formCompraConjunta.porClave || {})[clave] || {};
+    var costoTotal = num(draft.costoTotal);
+    if (costoTotal <= 0) {
+      window.alert("Escribe cuánto pagaste en total antes de registrar.");
+      return;
+    }
+    var pesos = grupo.participantes.map(function (p) { return p.costoEstimado; });
+    var costos = repartirProporcional(costoTotal, pesos, 0);
+    // El monto de cada pedido admite corrección manual (ver
+    // "set-costo-compartido-monto") — sin nada escrito, usa el
+    // proporcional de siempre. Mismo criterio de "cero descuadre" que
+    // "registrar-compra-conjunta": si lo escrito a mano no suma exacto el
+    // total pagado, se bloquea el registro ANTES de tocar nada.
+    var overridesCosto = draft.costosPorPedido || {};
+    var costosFinal = grupo.participantes.map(function (p, i) {
+      var ov = overridesCosto[p.cotId];
+      return (ov !== undefined && ov !== "") ? num(ov) : costos[i];
+    });
+    var sumaCostosFinal = costosFinal.reduce(function (a, v) { return a + v; }, 0);
+    if (Math.abs(sumaCostosFinal - costoTotal) > 1) {
+      window.alert("Lo repartido entre los pedidos (" + fmt(sumaCostosFinal) + ") no coincide con el total pagado (" + fmt(costoTotal) + "). Ajusta los montos para que sumen exacto.");
+      return;
+    }
+    var grupoId = uid(), fecha = todayStr();
+    var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
+    var montoPorCot = {};
+    grupo.participantes.forEach(function (p, i) { montoPorCot[p.cotId] = { monto: costosFinal[i], claveGlobal: p.claveGlobal }; });
+
+    var afectadas = 0;
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (!montoPorCot[c.id]) return c;
+      afectadas++;
+      var claveGlobal = montoPorCot[c.id].claveGlobal;
+      var compras = (c.compras || []).slice();
+      var idx = -1;
+      compras.forEach(function (x, j) { if (x.clave === claveGlobal) idx = j; });
+      var base = idx >= 0 ? compras[idx] : { clave: claveGlobal, observaciones: "", txId: "", excedenteTxId: "" };
+      var actualizada = Object.assign({}, base, {
+        clave: claveGlobal, estado: "si", costoReal: montoPorCot[c.id].monto,
+        fecha: base.fecha || fecha,
+        compartida: { grupoId: grupoId, fecha: fecha, etiquetas: etiquetas }
+      });
+      if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
+      var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
+      return Object.assign({}, c, { compras: sinc.compras });
+    });
+
+    var porClaveNuevo = Object.assign({}, state.formCompraConjunta.porClave || {});
+    delete porClaveNuevo[clave];
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClaveNuevo });
+    persist("cotizaciones"); persist("tx"); notify();
+    mostrarToast("✓ Costo compartido registrado entre " + afectadas + " pedidos.");
   }
 };

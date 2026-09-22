@@ -5328,6 +5328,109 @@ state.pedidos = pedidosPreviosH45Test; state.cotizaciones = cotizacionesPreviasH
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
+// -- Hallazgo #46: "Compras conjuntas" gana COSTOS compartidos (domicilio,
+// diseño...), no solo insumos físicos — reportado por el usuario
+// 2026-09-21: "no me sale domicilio y los pedidos compartidos si lo tienen
+// en comun". Confirmado con AskUserQuestion: hizo UN pago de domicilio que
+// cubrió varios pedidos a la vez y quiere dividirlo entre ellos. Antes
+// esto era imposible por partida doble: (1) la clave de un costoGlobal es
+// "global|"+id, única por cotización, nunca compartible por nombre, y (2)
+// un costoGlobal nace con esServicio:true sin ningún control en la UI
+// para cambiarlo, y calcGruposCompraCompartida lo filtraba por eso — un
+// campo inerte (estadoLineaCompra ya lo neutraliza para globales) bloqueando
+// una función que ni siquiera debería mirarlo.
+const { calcGruposCostoCompartido: calcGruposCostoTest } = await import("../js/core/calc.js");
+const pedidosPreviosDomTest = state.pedidos, cotizacionesPreviasDomTest = state.cotizaciones, txPreviosDomTest = state.tx;
+// A propósito SIN referencias/insumos: el ÚNICO pendiente de este pedido es
+// el costo global "Domicilio" — la prueba de fuego de que el picker de
+// "Compras conjuntas" ya no exige un insumo físico para dejar elegir un
+// pedido (antes del fix, un pedido así nunca aparecía en la lista).
+function cotSoloDomicilio(id, pedidoId, costoEstimado) {
+  return {
+    id: id, clienteId: "", cliente: "Cliente Domicilio", descripcion: "Pedido " + id, fecha: "2026-01-01",
+    estado: "convertida", pedidoId: pedidoId, pedidoOrigenId: "",
+    vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cdom" + id,
+    referencias: [],
+    costosGlobales: [{ id: "dom-" + id, nombre: "Domicilio", costo: costoEstimado, proveedorId: "", esServicio: true }],
+    serviciosCobrados: [], compras: []
+  };
+}
+const cotDomA = cotSoloDomicilio("cot-domA-test", "ped-domA-test", 8000);
+const cotDomB = cotSoloDomicilio("cot-domB-test", "ped-domB-test", 12000);
+const cotDomC = cotSoloDomicilio("cot-domC-test", "ped-domC-test", 5000);
+const pedDomA = pedidoConjuntaTest("ped-domA-test", "cot-domA-test", "OP-DOMA");
+const pedDomB = pedidoConjuntaTest("ped-domB-test", "cot-domB-test", "OP-DOMB");
+const pedDomC = pedidoConjuntaTest("ped-domC-test", "cot-domC-test", "OP-DOMC");
+state.pedidos = [pedDomA, pedDomB, pedDomC];
+state.cotizaciones = [cotDomA, cotDomB, cotDomC];
+state.tx = [];
+
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomA.id + '"]'), "un pedido cuyo ÚNICO pendiente es un costo global (Domicilio, sin ningún insumo físico) SÍ aparece para elegir — antes del fix nunca aparecía");
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomA.id + '"]');
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomB.id + '"]');
+click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomC.id + '"]');
+
+assert(calcGruposTest([pedDomA.id, pedDomB.id, pedDomC.id]).length === 0, "estos 3 pedidos no comparten ningún INSUMO físico — la sección de insumos no inventa nada");
+const grupoDomTest = calcGruposCostoTest([pedDomA.id, pedDomB.id, pedDomC.id])[0];
+assert(!!grupoDomTest && grupoDomTest.nombre === "Domicilio" && grupoDomTest.participantes.length === 3, "calcGruposCostoCompartido agrupa 'Domicilio' de los 3 pedidos por NOMBRE, aunque cada uno tenga su propia clave interna (\"global|\"+id, distinta en cada cotización)");
+var previewDomTexto = document.getElementById("app").textContent;
+assert(previewDomTexto.indexOf("Costos compartidos del pedido") !== -1, "la pestaña ya muestra la sección nueva, separada de \"Insumos que se repiten\"");
+
+var pClaveDomA = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domA-test"; })[0].claveGlobal;
+var pClaveDomB = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domB-test"; })[0].claveGlobal;
+var pClaveDomC = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domC-test"; })[0].claveGlobal;
+
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoDomTest.clave + '"][data-campo="costoTotal"]', "100000");
+
+// -- un reparto manual que NO cuadra se bloquea, sin tocar nada (mismo
+// criterio de cero descuadre que "registrar-compra-conjunta") --
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "40000");
+var txAntesBloqueoDomTest = state.tx.length;
+var alertaOriginalDomTest = global.alert, alertaCapturadaDomTest = "";
+global.window.alert = global.alert = function (msg) { alertaCapturadaDomTest = msg; };
+click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
+global.window.alert = global.alert = alertaOriginalDomTest;
+assert(state.tx.length === txAntesBloqueoDomTest, "si lo repartido a mano no suma el total pagado, NO se registra nada");
+assert(alertaCapturadaDomTest.indexOf("no coincide") !== -1, "...y avisa que el reparto no cuadra");
+
+// -- un reparto manual que SÍ cuadra (30.000/50.000/20.000, deliberadamente
+// distinto del proporcional por defecto 32.000/48.000/20.000) se respeta
+// tal cual se escribió --
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "30000");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domB-test"]', "50000");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domC-test"]', "20000");
+click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
+
+var cotDomATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domA-test"; })[0];
+var cotDomBTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domB-test"; })[0];
+var cotDomCTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domC-test"; })[0];
+var compraDomA = cotDomATrasReg.compras.filter(function (c) { return c.clave === pClaveDomA; })[0];
+var compraDomB = cotDomBTrasReg.compras.filter(function (c) { return c.clave === pClaveDomB; })[0];
+var compraDomC = cotDomCTrasReg.compras.filter(function (c) { return c.clave === pClaveDomC; })[0];
+assert(compraDomA.estado === "si" && compraDomB.estado === "si" && compraDomC.estado === "si", "las 3 quedan marcadas \"Sí\", cada una en su PROPIA compra (propia clave, nunca fusionadas)");
+assert(compraDomA.costoReal === 30000 && compraDomB.costoReal === 50000 && compraDomC.costoReal === 20000, "quedó EXACTAMENTE el reparto manual, no el proporcional que traía por defecto");
+assert(!!compraDomA.compartida && !!compraDomB.compartida && !!compraDomC.compartida && compraDomA.compartida.grupoId === compraDomB.compartida.grupoId && compraDomB.compartida.grupoId === compraDomC.compartida.grupoId, "las 3 quedan con el mismo rastro de \"compartida\" (mismo grupoId) — mismo mecanismo que el badge 🔗 de un insumo compartido, sin nada especial que escribir para eso");
+
+assert(!!compraDomA.txId && !!compraDomB.txId && !!compraDomC.txId, "cada una queda con su PROPIO movimiento en Finanzas");
+var txDomA = state.tx.filter(function (t) { return t.id === compraDomA.txId; })[0];
+var txDomB = state.tx.filter(function (t) { return t.id === compraDomB.txId; })[0];
+var txDomC = state.tx.filter(function (t) { return t.id === compraDomC.txId; })[0];
+assert(txDomA.monto === 30000 && txDomB.monto === 50000 && txDomC.monto === 20000, "cada movimiento tiene el monto que le tocó a SU pedido");
+// -- a diferencia del excedente de una compra conjunta (Hallazgo #44/45),
+// esto NO es una reserva: cada pedido de verdad incurrió en su propio
+// costo, así que su movimiento SÍ lleva su propio pedidoId, como
+// cualquier costoGlobal registrado a mano.
+assert(txDomA.pedidoId === "ped-domA-test" && txDomB.pedidoId === "ped-domB-test" && txDomC.pedidoId === "ped-domC-test", "cada movimiento SÍ lleva el pedidoId de su propio pedido (no es una reserva sin dueño)");
+
+var porClaveDomTrasReg = state.formCompraConjunta.porClave || {};
+assert(!porClaveDomTrasReg[grupoDomTest.clave], "tras registrar, el borrador de esa fila se limpia solo");
+assert(calcGruposCostoTest([pedDomA.id, pedDomB.id, pedDomC.id]).length === 0, "y el grupo desaparece de \"Costos compartidos\" — ya no queda nada pendiente en común");
+
+state.pedidos = pedidosPreviosDomTest; state.cotizaciones = cotizacionesPreviasDomTest; state.tx = txPreviosDomTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
 // --- calcCotGastosReales: un costo real escrito A PROPÓSITO en $0 debe
 // contar como el ahorro completo frente al estimado, no ignorarse igual que
 // "nunca se escribió" — mismo error de "0 es falsy" ya corregido en
