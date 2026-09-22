@@ -1847,6 +1847,102 @@ la primera seguía en curso terminan en solo 2 escrituras reales, la
 `persist()` sí resuelven (nadie que haga `await persist(...)` se queda
 esperando para siempre) — ver test/smoke.mjs.
 
+### 🟢 Hallazgo #41 — Compras conjuntas ganó "Asignar a servicio(s)" + rediseño visual. ✅ IMPLEMENTADO
+
+Pedido: "en finanzas/compras conjuntas tambien aplica la logica de
+descontar de los montos de servicios" + "mejora la estetica metele
+estilo, con prioridad de que sea facil de usar" (2026-09-21).
+
+**Descontar de un servicio, en Compras conjuntas.** Ya existía en
+"Registrar gasto/nómina" y en "Pagar nómina" (ver
+[[asignar_servicios_gasto_nomina_2026-09]]): cubrir, total o
+parcialmente, un pago con plata ya acumulada en un "servicio" (una
+línea marcada así en Compras del pedido), en vez de que salga entero
+de Ganancia. Compras conjuntas tenía un obstáculo estructural que los
+otros dos formularios no tienen: una compra compartida no genera UN
+movimiento, genera N (uno por cada pedido participante, vía
+`sincronizarComprasFinanzasDe` — ver Hallazgo de "Compras conjuntas"
+original), así que no hay "un solo monto" al que colgarle
+`serviciosDescuento`.
+
+**Solución — repartir el descuento con el MISMO criterio que ya reparte
+todo lo demás.** `renderAsignarServicios` (componente ya existente,
+`core/components.js`) se reutiliza sin cambios, validado con
+`validarServiciosAsignados` contra el costo total de la compra
+compartida; el resultado (`limpias`) se reparte entre los pedidos
+participantes con `repartirProporcional` — la MISMA función y los
+MISMOS pesos que ya reparten cantidad/costo/excedente — así que la
+suma de lo descontado en los N movimientos vuelve a dar exacto el
+monto asignado, sin perder ni ganar nada por el redondeo (criterio
+bancario, igual que el resto de "Compras conjuntas").
+
+`sincronizarComprasFinanzasDe` (la función compartida que crea los
+movimientos) NO se tocó: sigue sin saber nada de "servicio", porque
+otros caminos la usan (ej. "Actualizar movimientos financieros" de una
+compra individual) sin ese concepto. En vez de eso,
+`registrar-compra-conjunta` cuelga `serviciosDescuento` directo sobre
+cada `tx` recién creado/actualizado, una vez resuelto su `txId` — el
+descuento vive en el `tx`, igual que en gasto/nómina, no en la
+sincronización.
+
+**Único obstáculo técnico real: el borrador de esta pestaña vive
+indexado por insumo** (`state.formCompraConjunta.porClave[clave]`), no
+es un objeto plano como `formTx`/`formNominaPago` — y las 4 acciones
+genéricas de "Asignar a servicio(s)" (`core/dom.js`) solo sabían leer
+`state[formKey]` de un nivel. Se generalizó `resolverFormDestino`
+(antes, acceso directo) para aceptar también un path punteado
+("formCompraConjunta.porClave.<clave>"), sin cambiar nada para
+`formTx`/`formNominaPago` (una sola clave sigue comportándose
+idéntico) — una sola implementación sirve para los 3 formularios, no
+una copia por cada uno.
+
+**Limitación conocida, documentada a propósito:** si después de
+registrar una compra conjunta con servicio asignado alguien edita el
+`costoReal` de esa línea desde Cotizaciones → Producción → Compras del
+pedido (posible hoy, sin relación con este cambio), el monto del `tx`
+se actualiza pero `serviciosDescuento` (fijado una sola vez, al
+registrar) NO se reajusta solo — mismo tipo de riesgo por el que un
+gasto/nómina YA asignado a servicio no deja editar su Monto (ver
+[[asignar_servicios_gasto_nomina_2026-09]]). No se extendió ese mismo
+bloqueo a la edición de una compra (toca un camino de edición
+compartido por TODAS las compras, no solo las conjuntas, y no fue lo
+que se pidió) — queda anotado acá por si se reporta como un
+descuadre real en el futuro.
+
+**Rediseño visual de "Compras conjuntas".** Era la pestaña con menos
+estética dedicada de toda la app (0 clases propias, solo genéricas +
+estilos inline sueltos — confirmado por búsqueda). Nuevo
+`css/finanzas.css`, reutilizando el lenguaje visual ya probado (no uno
+nuevo, ver [[reutilizar-antes-de-crear]]):
+- Los participantes de cada insumo compartido, antes una frase
+  corrida ("OP-X (10.00 m) · OP-Y (20.00 m)"), ahora son pastillas
+  sueltas (`.cc-chip`) — se leen de un vistazo cuántos y cuáles son.
+- "Se reparte: OP-X → 11.00 m · $33.000 (2.00 m excedente) · OP-Y →
+  ..." (una sola oración corrida, difícil de comparar) pasa a ser una
+  mini-tabla (reutiliza `.tx-row`, misma grilla/hover/responsive-móvil
+  que el resto de la app) con las cifras alineadas a la derecha —
+  mismo criterio de la tabla de insumos rediseñada (Hallazgo #39).
+- Cada tarjeta de insumo muestra cuántos pedidos participan
+  (`<span class="tag">N pedidos</span>`) y gana un acento de borde
+  (`.cc-grupo-listo`) en cuanto ya tiene cantidad y costo escritos —
+  "esta ya está lista para registrar" sin tener que leer el resto.
+- El picker de pedidos candidatos muestra cuántos van elegidos.
+
+**Pruebas:** flujo completo en test/smoke.mjs — un segundo insumo
+compartido con pesos 10/20 (mismo patrón que el insumo original), un
+servicio de prueba con 50.000 acumulados, un intento de asignar más de
+lo disponible (bloqueado, con el mismo aviso que gasto/nómina, sin
+tocar nada) y un monto que sí cabe (30.000): confirma que el costo se
+reparte 1/3-2/3 como siempre, que CADA movimiento generado lleva su
+propio `serviciosDescuento` con la parte que le tocó (10.000 y
+20.000, exacto el total asignado), y que `calcServiciosDisponibles()`
+refleja el descuento después. La verificación visual del rediseño
+(CSS puro) no se pudo completar en navegador esta ronda — la misma
+ventana emergente de inicio de sesión de Google de rondas anteriores
+seguía bloqueando la ejecución de JavaScript del panel; se revisó en
+su lugar reutilizando clases ya probadas visualmente en otras tablas
+de la app.
+
 ---
 
 ## Próximos pasos

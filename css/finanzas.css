@@ -1,0 +1,28 @@
+/* Compras conjuntas (ver modules/finanzas.js): varios pedidos que reparten a
+   prorrata la compra de un mismo insumo. Antes era la pestaña con menos
+   estética dedicada de toda la app (sin clases propias, todo con estilos
+   inline sueltos) — este archivo reutiliza el lenguaje visual YA probado en
+   el resto de la app (tarjetas, pastillas .tag, tabla .tx-row) en vez de
+   inventar uno nuevo, ver [[reutilizar-antes-de-crear]] / Hallazgo #39. */
+
+/* Acento sutil una vez que ya hay cantidad y costo escritos — "esta ya está
+   lista para registrar", sin necesidad de leer el resto de la tarjeta. */
+.cc-grupo{ transition: border-color .12s ease; }
+.cc-grupo-listo{ border-color: var(--accent); }
+
+.cc-grupo-head{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.cc-grupo-titulo{ display:flex; align-items:center; gap:8px; }
+
+/* Antes: una sola oración con TODOS los pedidos y sus cantidades corrida en
+   texto plano. Como pastillas sueltas se lee de un vistazo cuántos y cuáles
+   son, sin tener que parsear una frase larga. */
+.cc-grupo-participantes{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 0; }
+.cc-chip{ font-size:11.5px; color:var(--ink-soft); background:var(--surface-2); border:1px solid var(--border-soft); border-radius:20px; padding:3px 10px; }
+
+/* Antes: "Se reparte: OP-X → 11.00 m · $33.000 (2.00 m excedente) · OP-Y →
+   ..." — una sola frase corrida, difícil de comparar entre pedidos. Ahora es
+   una mini-tabla (reutiliza .tx-row, misma grilla/hover que el resto de la
+   app) con las cifras alineadas a la derecha para compararlas de un vistazo,
+   mismo criterio que la tabla de insumos rediseñada (ver Hallazgo #39). */
+.cc-reparto .tx-row.head span.ins-th-num,
+.cc-reparto .tx-row span.amount{ text-align:right; display:block; }

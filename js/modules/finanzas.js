@@ -61,6 +61,7 @@ function renderComprasConjuntas() {
   var html = '<div class="card">';
   html += '<div class="cot-col-title" style="margin-top:0;">Elige los pedidos que vas a comprar juntos' +
     renderHelp("Marca dos o más pedidos que compartan un mismo insumo (la misma tela, por ejemplo). Abajo se arma una fila por cada insumo que se repita entre los que elijas, para repartir la compra real entre ellos a prorrata de lo que cada uno necesitaba.") +
+    (sel.length ? ' <span class="tag">' + sel.length + " elegido" + (sel.length === 1 ? "" : "s") + "</span>" : "") +
     "</div>";
 
   if (!candidatos.length) {
@@ -99,16 +100,18 @@ function renderGruposCompraConjunta(grupos) {
 }
 
 function renderFilaGrupoCompraConjunta(g, d) {
-  var html = '<div class="card" style="margin-top:10px;">';
-  html += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">' +
-    "<b>" + esc(g.nombre) + "</b>" +
+  var cantidadTotal = num(d.cantidadTotal), costoTotal = num(d.costoTotal);
+  var listo = cantidadTotal > 0 && costoTotal > 0;
+  var html = '<div class="card cc-grupo' + (listo ? " cc-grupo-listo" : "") + '">';
+  html += '<div class="cc-grupo-head">' +
+    '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + '</b><span class="tag">' + g.participantes.length + " pedidos</span></div>" +
     '<span class="section-sub" style="margin:0;">Necesitan en total ' + num(g.totalCantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + " · estimado " + fmt(g.totalCostoEstimado) + "</span>" +
     "</div>";
-  html += '<div class="section-sub" style="margin:4px 0 8px;">' +
-    g.participantes.map(function (p) { return esc(p.etiqueta) + " (" + num(p.cantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + ")"; }).join(" · ") +
+  html += '<div class="cc-grupo-participantes">' +
+    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + num(p.cantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + "</span>"; }).join("") +
     "</div>";
 
-  html += '<div class="form-grid">' +
+  html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
     '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" placeholder="' + num(g.totalCantidadEstimada).toFixed(2) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
     '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
     '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
@@ -117,20 +120,37 @@ function renderFilaGrupoCompraConjunta(g, d) {
     '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
     "</div>";
 
-  var cantidadTotal = num(d.cantidadTotal), costoTotal = num(d.costoTotal);
-  if (cantidadTotal > 0 && costoTotal > 0) {
+  if (listo) {
     var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
     var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
     var costos = repartirProporcional(costoTotal, pesos, 0);
     var cantidadExcedente = num(d.cantidadExcedente);
     var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, 2) : null;
-    html += '<div class="section-sub" style="margin-top:8px;">Se reparte: ' +
-      g.participantes.map(function (p, i) {
-        return esc(p.etiqueta) + " → " + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + " · " + fmt(costos[i]) +
-          (excedentes ? " (" + excedentes[i].toFixed(2) + " " + esc(g.unidad || "") + " excedente)" : "");
-      }).join(" · ") +
-      "</div>";
-    html += '<div class="row-actions" style="margin-top:8px;"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
+
+    // Igual que en "Registrar gasto/nómina": el costo de esta compra
+    // compartida también se puede cubrir, total o parcialmente, con plata ya
+    // acumulada en un servicio — ver renderAsignarServicios y
+    // "registrar-compra-conjunta" (donde se valida y se reparte entre los
+    // pedidos participantes igual que cantidad/costo/excedente).
+    html += '<hr class="stitch" />';
+    html += renderAsignarServicios({ formKey: "formCompraConjunta.porClave." + g.clave, filas: d.servicios || [], monto: costoTotal });
+
+    html += '<div class="cc-reparto">';
+    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así</div>';
+    var cols = excedentes ? "1fr 90px 100px 90px" : "1fr 90px 100px";
+    html += '<div class="tx-row head" style="grid-template-columns:' + cols + ';">' +
+      '<span>Pedido</span><span class="ins-th-num">Cantidad</span><span class="ins-th-num">Costo</span>' +
+      (excedentes ? '<span class="ins-th-num">Excedente</span>' : "") + "</div>";
+    g.participantes.forEach(function (p, i) {
+      html += '<div class="tx-row" style="grid-template-columns:' + cols + ';">' +
+        '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
+        '<span class="mobile-th">Cantidad</span><span class="amount">' + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + "</span>" +
+        '<span class="mobile-th">Costo</span><span class="amount">' + fmt(costos[i]) + "</span>" +
+        (excedentes ? '<span class="mobile-th">Excedente</span><span class="amount">' + excedentes[i].toFixed(2) + " " + esc(g.unidad || "") + "</span>" : "") +
+        "</div>";
+    });
+    html += "</div>";
+    html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
   }
   html += "</div>";
   return html;
@@ -693,6 +713,14 @@ export var actions = {
       window.alert("Escribe cuánto se compró en total y cuánto costó antes de registrar.");
       return;
     }
+    // Igual que "Registrar gasto/nómina": cada servicio asignado se topa a lo
+    // disponible y a que la suma no pase del costo total de esta compra — ver
+    // validarServiciosAsignados en core/calc.js. Lo que no se cubra acá sale
+    // de Ganancia como siempre, sin bloquear nada.
+    var validacionServicios = validarServiciosAsignados(draft.servicios, costoTotal);
+    if (!validacionServicios.ok) { window.alert(validacionServicios.error); return; }
+    var serviciosLimpios = validacionServicios.limpias;
+
     var pesos = grupo.participantes.map(function (p) { return p.cantidadEstimada; });
     var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
     var costos = repartirProporcional(costoTotal, pesos, 0);
@@ -704,12 +732,23 @@ export var actions = {
     // por tratarse de varios pedidos a la vez.
     var cantidadExcedenteTotal = num(draft.cantidadExcedente);
     var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, 2) : null;
+    // Cada servicio asignado se reparte con el MISMO criterio que cantidad/
+    // costo/excedente — a prorrata — para que la suma de lo descontado en
+    // los movimientos de cada pedido participante siga cuadrando exacto
+    // contra lo que se asignó acá arriba (repartirProporcional ya garantiza
+    // cero descuadre por redondeo, ver core/calc.js).
+    var repartosServicios = serviciosLimpios.map(function (s) {
+      return { nombre: s.nombre, partes: repartirProporcional(s.monto, pesos, 0) };
+    });
     var grupoId = uid(), fecha = todayStr();
     var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
     var proveedorId = draft.proveedorId || "";
     var reparto = {};
     grupo.participantes.forEach(function (p, i) {
-      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0 };
+      var serviciosDescuento = repartosServicios
+        .map(function (r) { return { nombre: r.nombre, monto: r.partes[i] }; })
+        .filter(function (s) { return s.monto > 0; });
+      reparto[p.cotId] = { cantidadReal: cantidades[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0, serviciosDescuento: serviciosDescuento };
     });
 
     var afectadas = 0;
@@ -730,6 +769,16 @@ export var actions = {
       });
       if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
       var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
+      // El descuento de servicio no vive dentro de sincronizarComprasFinanzasDe
+      // (la usan otros caminos, ej. "Actualizar movimientos financieros" de
+      // una compra individual, que no conocen este concepto) — se cuelga acá,
+      // directo sobre el tx ya creado/actualizado para ESTE pedido, una vez
+      // resuelto su txId.
+      if (reparto[c.id].serviciosDescuento.length) {
+        var compraSinc = sinc.compras.filter(function (x) { return x.clave === clave; })[0];
+        var txServ = compraSinc && compraSinc.txId ? state.tx.filter(function (t) { return t.id === compraSinc.txId; })[0] : null;
+        if (txServ) txServ.serviciosDescuento = reparto[c.id].serviciosDescuento;
+      }
       return Object.assign({}, c, { compras: sinc.compras });
     });
 

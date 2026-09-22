@@ -259,6 +259,29 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo tercera ronda: Compras conjuntas gana "Asignar a servicio(s)" + rediseño visual)
+
+Pedido: "en finanzas/compras conjuntas tambien aplica la logica de
+descontar de los montos de servicios" + "mejora la estetica metele
+estilo, con prioridad de que sea facil de usar".
+
+- Registrar una compra compartida ahora también puede cubrirse, total
+  o parcialmente, con plata ya acumulada en un servicio — el mismo
+  mecanismo de "Registrar gasto/nómina" y "Pagar nómina". Como una
+  compra conjunta genera un movimiento POR CADA pedido participante
+  (no uno solo), lo asignado se reparte entre ellos con el mismo
+  `repartirProporcional` que ya reparte cantidad/costo/excedente: cero
+  descuadre por redondeo.
+- Rediseño de "Compras conjuntas" (antes la pestaña con menos estética
+  dedicada de la app, todo inline): los pedidos que comparten un
+  insumo pasan de una frase corrida a pastillas sueltas; "Se reparte:
+  ..." pasa de una oración larga a una mini-tabla con las cifras
+  alineadas (mismo estilo de la tabla de insumos ya rediseñada); cada
+  tarjeta muestra cuántos pedidos participan y se resalta cuando ya
+  está lista para registrar.
+- Ver CONTABILIDAD.md, Hallazgo #41 (incluye una limitación conocida y
+  documentada a propósito, no un bug).
+
 ## Registro de cambios — septiembre 2026 (octogésimo segunda ronda: cambiar de etapa de producción varias veces seguido ya no se siente pesado)
 
 Reporte: "cambiar los estados de produccion parece ser una funcion muy

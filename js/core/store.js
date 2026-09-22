@@ -267,7 +267,12 @@ export const state = {
   // eligieron para comprar juntos, y por cada insumo compartido (clave =
   // misma de calcListaCompras) lo que se lleva escrito antes de pulsar
   // "Registrar esta compra" — `porClave[clave]` = {cantidadTotal, costoTotal,
-  // proveedorId}.
+  // proveedorId, servicios}. `servicios`: [{nombre, monto}] — mismo shape y
+  // mismo componente compartido (renderAsignarServicios) que formTx/
+  // formNominaPago; como acá el borrador vive indexado por insumo (no es un
+  // solo objeto plano), las acciones genéricas de "Asignar a servicio(s)"
+  // (core/dom.js) lo direccionan con un `data-form-destino` de path punteado:
+  // "formCompraConjunta.porClave.<clave>" (ver resolverFormDestino).
   formCompraConjunta: { seleccion: [], porClave: {} },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",

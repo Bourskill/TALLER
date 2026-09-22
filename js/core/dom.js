@@ -126,6 +126,22 @@ function irAPestana(key) {
   notify();
 }
 
+// Resuelve `data-form-destino` contra `state`: una clave plana ("formTx",
+// "formNominaPago") o un path punteado ("formCompraConjunta.porClave.<clave>",
+// para Compras conjuntas — ver renderFilaGrupoCompraConjunta en
+// modules/finanzas.js) que apunta a un borrador anidado, indexado por
+// insumo. Con una sola clave se comporta exactamente igual que `state[key]`
+// de antes — nada cambia para "formTx"/"formNominaPago".
+function resolverFormDestino(formKey) {
+  var partes = String(formKey || "").split(".");
+  var obj = state;
+  for (var i = 0; i < partes.length; i++) {
+    if (!obj) return null;
+    obj = obj[partes[i]];
+  }
+  return obj || null;
+}
+
 var coreActions = {
   tab: function (el) {
     irAPestana(el.getAttribute("data-tab"));
@@ -300,38 +316,41 @@ var coreActions = {
     }
   },
   // Ver renderAsignarServicios en core/components.js. Genéricas (no viven en
-  // finanzas.js ni en pendientes.js) porque las usan los dos: `data-form-
-  // destino` dice sobre cuál borrador de `state` actuar (ej. "formTx",
-  // "formNominaPago"), así ninguno de los dos módulos necesita conocer al
-  // otro. El monto de cada fila NO se topa acá a lo disponible del servicio
-  // elegido — eso se revisa una sola vez, al guardar de verdad (ver
-  // validarServiciosAsignados en core/calc.js), para no pelear con el
-  // usuario mientras todavía está escribiendo.
+  // finanzas.js ni en pendientes.js) porque las usan varios lugares:
+  // `data-form-destino` dice sobre cuál borrador de `state` actuar (ej.
+  // "formTx", "formNominaPago", o un path anidado como
+  // "formCompraConjunta.porClave.<clave>" para Compras conjuntas, donde el
+  // borrador vive indexado por insumo — ver resolverFormDestino abajo), así
+  // ningún módulo necesita conocer los detalles de los otros. El monto de
+  // cada fila NO se topa acá a lo disponible del servicio elegido — eso se
+  // revisa una sola vez, al guardar de verdad (ver validarServiciosAsignados
+  // en core/calc.js), para no pelear con el usuario mientras todavía está
+  // escribiendo.
   "agregar-fila-servicio": function (el) {
-    var formKey = el.getAttribute("data-form-destino");
-    if (!state[formKey]) return;
-    state[formKey].servicios = (state[formKey].servicios || []).concat([{ nombre: "", monto: "" }]);
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
+    if (!destino) return;
+    destino.servicios = (destino.servicios || []).concat([{ nombre: "", monto: "" }]);
     notify();
   },
   "quitar-fila-servicio": function (el) {
-    var formKey = el.getAttribute("data-form-destino");
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
     var idx = Number(el.getAttribute("data-idx"));
-    if (!state[formKey] || !state[formKey].servicios) return;
-    state[formKey].servicios = state[formKey].servicios.filter(function (_, i) { return i !== idx; });
+    if (!destino || !destino.servicios) return;
+    destino.servicios = destino.servicios.filter(function (_, i) { return i !== idx; });
     notify();
   },
   "set-fila-servicio-nombre": function (el) {
-    var formKey = el.getAttribute("data-form-destino");
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
     var idx = Number(el.getAttribute("data-idx"));
-    var fila = state[formKey] && state[formKey].servicios && state[formKey].servicios[idx];
+    var fila = destino && destino.servicios && destino.servicios[idx];
     if (!fila) return;
     fila.nombre = el.value;
     notify();
   },
   "set-fila-servicio-monto": function (el) {
-    var formKey = el.getAttribute("data-form-destino");
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
     var idx = Number(el.getAttribute("data-idx"));
-    var fila = state[formKey] && state[formKey].servicios && state[formKey].servicios[idx];
+    var fila = destino && destino.servicios && destino.servicios[idx];
     if (!fila) return;
     fila.monto = el.value;
     notify();

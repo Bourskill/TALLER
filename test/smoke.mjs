@@ -5010,6 +5010,68 @@ assert(tagsCompartidaTest.length === 1, "la fila de Tela algodón en 'Compras de
 assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJB") !== -1, "...cuyo tooltip menciona el OTRO pedido (OP-CONJB)");
 assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJA") === -1, "...pero NO se menciona a sí misma (no tiene sentido decir que se compartió consigo misma)");
 
+// -- Compras conjuntas también puede descontar el costo de un servicio ya
+// acumulado (2026-09-21: "en finanzas/compras conjuntas tambien aplica la
+// logica de descontar de los montos de servicios") — mismo mecanismo EXACTO
+// que "Registrar gasto/nómina" (renderAsignarServicios/validarServiciosAsignados),
+// solo que el monto asignado se reparte entre los N movimientos que genera
+// una compra compartida, con el mismo repartirProporcional que ya reparte
+// cantidad/costo/excedente.
+const { calcServiciosDisponibles: calcServDispConjTest } = await import("../js/core/calc.js");
+var cotAFreshConjTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
+var cotBFreshConjTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
+// Un segundo insumo compartido (el de Tela ya quedó registrado arriba, ya no
+// aparece como pendiente) — mismos pesos 10/20 que antes, mismo criterio.
+// tipo "tela" a propósito (no "hilo"): es el tipo con estimado de cantidad
+// físico (consumo por prenda) que da pesos DISTINTOS de cero por pedido —
+// lo que hace falta acá para probar un reparto proporcional real, no parejo.
+cotAFreshConjTest.referencias[0].insumos.push({ id: "i2-conjA-test", nombre: "Hilo poliéster", unidad: "m", costo: 500, tipo: "tela", cantidad: 1, categoriaId: "", proveedorId: "" });
+cotBFreshConjTest.referencias[0].insumos.push({ id: "i2-conjB-test", nombre: "Hilo poliéster", unidad: "m", costo: 500, tipo: "tela", cantidad: 1, categoriaId: "", proveedorId: "" });
+// Acumula 50.000 en un servicio, igual que marcar una línea "Servicio" en
+// "Compras del pedido" — el nombre nace del `clave` cuando no hay ninguna
+// línea real con esa clave (ver listaEntradasServicio en core/calc.js).
+cotAFreshConjTest.compras = cotAFreshConjTest.compras.concat([{ clave: "servicio-test-conj", observaciones: "", estado: "servicio", costoReal: 50000, cantidadReal: "", cantidadExcedente: 0, txId: "", excedenteTxId: "" }]);
+assert(calcServDispConjTest().filter(function (s) { return s.nombre === "servicio-test-conj"; })[0].disponible === 50000, "queda acumulado 50.000 en el servicio de prueba");
+
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+assert(state.formCompraConjunta.seleccion.length === 2, "los dos pedidos siguen elegidos (\"registrar\" solo limpia el borrador de esa fila, no la selección)");
+const grupoHiloTest = calcGruposTest(state.formCompraConjunta.seleccion)[0];
+assert(grupoHiloTest.nombre === "Hilo poliéster", "el nuevo insumo compartido (Hilo poliéster) aparece como pendiente — la Tela ya no, quedó registrada");
+assert(!document.querySelector('[data-action-change="set-fila-servicio-nombre"]'), "sin costo total escrito todavía, no aparece \"Asignar a servicio(s)\"");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.clave + '"][data-campo="cantidadTotal"]', "30");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.clave + '"][data-campo="costoTotal"]', "60000");
+assert(!!document.querySelector('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"]'), "con el costo ya escrito, aparece \"Asignar a servicio(s)\" con su botón + Agregar servicio");
+
+// -- primero, un intento que pide más de lo disponible: se bloquea y no toca nada --
+click('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"]');
+assert(state.formCompraConjunta.porClave[grupoHiloTest.clave].servicios.length === 1, "agregar-fila-servicio funciona con el path anidado (formCompraConjunta.porClave.<clave>), igual que con formTx/formNominaPago");
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "servicio-test-conj");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "999999");
+var txAntesDelRechazoConjTest = state.tx.length;
+var alertaOriginalConjTest = global.alert;
+var alertaCapturadaConjTest = "";
+global.window.alert = global.alert = function (msg) { alertaCapturadaConjTest = msg; };
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoHiloTest.clave + '"]');
+global.window.alert = global.alert = alertaOriginalConjTest;
+assert(state.tx.length === txAntesDelRechazoConjTest, "pedir más de lo disponible en el servicio NO registra la compra conjunta");
+assert(alertaCapturadaConjTest.indexOf("servicio-test-conj") !== -1, "...y avisa cuál servicio no alcanza, igual que en Registrar gasto/nómina");
+
+// -- ahora, un monto que sí cabe: se reparte proporcional entre los movimientos --
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "30000");
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoHiloTest.clave + '"]');
+
+var cotATrasHiloTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
+var cotBTrasHiloTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
+var compraHiloATest = cotATrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.clave; })[0];
+var compraHiloBTest = cotBTrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.clave; })[0];
+var txHiloATest = state.tx.filter(function (t) { return t.id === compraHiloATest.txId; })[0];
+var txHiloBTest = state.tx.filter(function (t) { return t.id === compraHiloBTest.txId; })[0];
+assert(txHiloATest.monto === 20000 && txHiloBTest.monto === 40000, "el costo (60.000) se reparte 1/3-2/3 como siempre: 20.000 y 40.000");
+assert(!!txHiloATest.serviciosDescuento && txHiloATest.serviciosDescuento.length === 1 && txHiloATest.serviciosDescuento[0].nombre === "servicio-test-conj", "el movimiento de CADA pedido lleva su propio serviciosDescuento");
+assert(txHiloATest.serviciosDescuento[0].monto === 10000 && txHiloBTest.serviciosDescuento[0].monto === 20000, "los 30.000 asignados se reparten EN LA MISMA proporción 1/3-2/3 que cantidad/costo: 10.000 y 20.000");
+assert(txHiloATest.serviciosDescuento[0].monto + txHiloBTest.serviciosDescuento[0].monto === 30000, "...sin perder ni ganar nada por el redondeo: la suma vuelve a dar el total asignado exacto");
+assert(calcServDispConjTest().filter(function (s) { return s.nombre === "servicio-test-conj"; })[0].disponible === 20000, "el servicio queda con 20.000 disponibles (50.000 − 30.000)");
+
 state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPreviasConjuntaTest; state.tx = txPreviosConjuntaTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
