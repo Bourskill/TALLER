@@ -1915,6 +1915,7 @@ export var actions = {
     // la toma de la reserva en sí pasa DESPUÉS, una vez que este .map ya
     // dejó la cotización editada al día.
     var incrementoParaReserva = 0, grupoIdParaReserva = null, unidadParaReserva = "";
+    var tomadoReservaPropia = 0, unidadReservaPropia = "";
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       var compras = (c.compras || []).slice();
@@ -1961,6 +1962,27 @@ export var actions = {
         if (!excedenteYaEscrito) {
           var sugerido = valor - num(linea.cantidadFisica);
           if (sugerido > 0) patch.cantidadExcedente = sugerido;
+        } else if (!(base.compartida && base.compartida.grupoId)) {
+          // Reposición sobre la RESERVA PROPIA de esta misma compra, sin
+          // compartirla con nadie — mismo concepto que la reserva de
+          // "Compras conjuntas" (tomarDeReservaCompraConjunta, más abajo),
+          // pero sin ninguna otra cotización de por medio: se descuenta
+          // directo acá mismo, sin nada async. Reportado por el usuario
+          // 2026-09-22: "lo del excedente también debería funcionar...
+          // para pedidos individuales... compré de más pero solo es para
+          // 1 solo pedido, los demás no comparten el insumo" (caso real:
+          // medias). Antes, una vez escrito el excedente una vez, subir
+          // cantidadReal de nuevo no lo tocaba más — quedaba "congelado"
+          // en vez de consumirse solo, igual que el bug original que
+          // motivó tomarDeReservaCompraConjunta para el caso compartido.
+          var incrementoPropio = valor - num(base.cantidadReal);
+          var reservaPropia = num(base.cantidadExcedente);
+          if (incrementoPropio > 0 && reservaPropia > 0) {
+            var tomadoAhora = Math.min(incrementoPropio, reservaPropia);
+            patch.cantidadExcedente = reservaPropia - tomadoAhora;
+            tomadoReservaPropia = tomadoAhora;
+            unidadReservaPropia = linea.unidad || "";
+          }
         }
         // Reposición sobre un insumo de compra conjunta: si sube por encima
         // de lo que ya tenía, esa diferencia es lo que se intenta cubrir con
@@ -1978,6 +2000,14 @@ export var actions = {
       return Object.assign({}, c, { compras: compras });
     });
     marcarSucia(cotId);
+    if (tomadoReservaPropia > 0) {
+      // A diferencia de la reserva compartida, esto es 100% local a la
+      // MISMA cotización que ya se acaba de tocar arriba — no hace falta
+      // ningún persist() inmediato aparte, sigue el flujo normal de
+      // "guardado explícito" (marcarSucia) como cualquier otra edición de
+      // esta compra.
+      mostrarToast("✓ Se tomaron " + num(tomadoReservaPropia).toFixed(2) + " " + unidadReservaPropia + " de tu propia reserva — no hizo falta comprar de nuevo.");
+    }
     if (incrementoParaReserva > 0) {
       var tomado = tomarDeReservaCompraConjunta(grupoIdParaReserva, clave, incrementoParaReserva);
       if (tomado > 0) {

@@ -2422,6 +2422,56 @@ segundo handler colgado al resto del archivo.
 
 ---
 
+### 🟢 Hallazgo #48 — la reserva de excedente de un pedido INDIVIDUAL (sin compartir con nadie) no se consumía sola al pedir una reposición. ✅ IMPLEMENTADO
+
+Reportado (2026-09-22): "lo del excedente también debería funcionar no
+solo para pedidos compartidos sino también para pedidos individuales,
+caso puntual: 'medias', compré de más pero solo es para 1 solo pedido,
+los demás no comparten el insumo".
+
+**Contexto — esto NO era una funcionalidad faltante desde cero.** El
+excedente como "compra de insumo aparte, no costo del pedido" (Hallazgo
+#29) ya funciona para cualquier pedido individual desde antes de esta
+ronda: comprar de más sugiere el excedente solo, y queda editable en el
+detalle de la compra. Lo que SÍ faltaba era la mitad "viva" que el
+Hallazgo #44 le dio a la reserva COMPARTIDA (Compras conjuntas): que
+subir `cantidadReal` de nuevo (una reposición) descuente sola de la
+reserva ya existente, en vez de quedar el número congelado.
+
+**Causa raíz.** En `set-cot-compra` (`modules/cotizaciones.js`), la
+sugerencia automática de excedente (`cantidadReal − lo que necesitaba
+el pedido`) solo corre la PRIMERA vez que se escribe `cantidadReal`
+(`if (!excedenteYaEscrito)`) — a propósito, para no pisar un excedente
+que el usuario ya ajustó a mano (puede ser 0 aunque compró de más, ej.
+por daño). Pero para una compra que vino de "Compras conjuntas"
+(`compartida.grupoId`), SÍ había una segunda vía: la reposición
+disparaba `tomarDeReservaCompraConjunta`. Para una compra puramente
+individual (sin `compartida.grupoId`, la inmensa mayoría de los casos:
+cualquier compra normal de "Compras del pedido"), no existía ningún
+camino — una vez sugerido el excedente, quedaba fijo para siempre, sin
+importar cuántas veces subiera `cantidadReal` después.
+
+**Fix — mismo concepto que la reserva compartida, sin la complejidad
+cruzada entre cotizaciones (acá todo pasa en la MISMA compra, sin
+async).** En el mismo bloque de `set-cot-compra`: si el excedente YA
+estaba escrito y la compra NO tiene `compartida.grupoId`, un incremento
+de `cantidadReal` se descuenta directo de `cantidadExcedente` (topado a
+lo disponible) — sin tocar `costoReal` (esas unidades ya estaban
+pagadas, no hay plata nueva que agregar). Mismo toast informativo que
+ya usaba la reserva compartida ("✓ Se tomaron X de tu propia reserva").
+Si el incremento supera lo que queda en la reserva propia, el resto
+sigue el camino de siempre (el usuario ajusta `costoReal` a mano si de
+verdad gastó más) — mismo límite ya documentado para la reserva
+compartida, sin caso especial nuevo.
+
+**Pruebas:** el caso exacto reportado (medias) — comprar 12 necesitando
+10 sugiere excedente=2; pedir 2 pares más (cantidadReal 12→14) consume
+la reserva sola (excedente cae a 0, costoRealPedido sube de 100.000 a
+120.000 completos, cero plata nueva); pedir todavía más con la reserva
+ya en 0 no descuadra ni truena nada.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

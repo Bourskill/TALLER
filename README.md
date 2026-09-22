@@ -259,6 +259,24 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésima ronda: la reserva de excedente de un pedido individual también se consume sola)
+
+Reportado: "lo del excedente también debería funcionar no solo para
+pedidos compartidos sino también para pedidos individuales... compré
+de más pero solo es para 1 solo pedido, los demás no comparten el
+insumo" (caso real: medias). El excedente como "compra de insumo
+aparte" ya funcionaba para cualquier pedido — lo que faltaba era que,
+al pedir una reposición (subir la cantidad real de nuevo), la reserva
+ya existente se descontara sola, como ya pasaba para insumos de
+Compras conjuntas.
+
+- Subir la cantidad real de una compra individual con excedente ya
+  guardado ahora descuenta primero de esa reserva, sin sumar costo
+  nuevo (esas unidades ya estaban pagadas).
+- Si la reposición pide más de lo que queda en la reserva, el resto
+  sigue el camino de siempre (ajustar el costo a mano).
+- Ver CONTABILIDAD.md, Hallazgo #48.
+
 ## Registro de cambios — septiembre 2026 (octogésimo novena ronda: cerrar la pestaña con un guardado todavía en camino ya no se pierde en silencio)
 
 Reportado: "cada vez que entro hay riesgo de perder información o

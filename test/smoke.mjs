@@ -5898,6 +5898,66 @@ compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === c
 assert(!state.tx.some(function (t) { return t.id === txPedidoExcTest.id; }) && !state.tx.some(function (t) { return t.id === txExcedenteTest.id; }), "al desmarcar la compra, los DOS movimientos se retiran juntos de Finanzas");
 assert(!compraExcTest.txId && !compraExcTest.excedenteTxId, "...y la compra queda sin ninguno de los dos ids vinculados");
 
+// -- Hallazgo #48: la RESERVA PROPIA de un pedido individual (sin
+// compartir con nadie) también se consume sola al subir cantidadReal —
+// antes esto SOLO pasaba para insumos de "Compras conjuntas"
+// (tomarDeReservaCompraConjunta). Reportado por el usuario 2026-09-22:
+// "lo del excedente también debería funcionar... para pedidos
+// individuales... compré de más pero solo es para 1 solo pedido, los
+// demás no comparten el insumo" — caso real: medias.
+const cotExcPropiaTest = {
+  id: "cot-excpropia-test", clienteId: "", cliente: "Cliente Medias", descripcion: "Prueba reserva propia", fecha: "2026-01-01",
+  estado: "convertida", pedidoId: "ped-excpropia-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cexcpropia1",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-excpropia-test", nombre: "Medias", costo: 100000, cantidad: 10, unidad: "par", proveedorId: "", esServicio: false }],
+  compras: []
+};
+state.pedidos = [{
+  id: "ped-excpropia-test", numeroOp: "OP-MEDIAS", cliente: "Cliente Medias", descripcion: "Prueba",
+  cantidad: "1", total: 200000, costo: 100000, abono: 200000, estado: "entregado", estadosDef: null,
+  fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: "cot-excpropia-test",
+  abonos: [], lineas: [], stockConsumido: [], vendedor: null
+}];
+state.cotizaciones = [cotExcPropiaTest];
+state.tx = [];
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-excpropia-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-excpropia-test"][data-val="produccion"]');
+const claveExcPropiaTest = "global|cg-excpropia-test";
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-excpropia-test"][data-clave="' + claveExcPropiaTest + '"][data-campo="estado"]', "si");
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-excpropia-test"][data-clave="' + claveExcPropiaTest + '"][data-campo="cantidadReal"]', "12");
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-excpropia-test"][data-clave="' + claveExcPropiaTest + '"][data-campo="costoReal"]', "120000");
+
+var compraExcPropiaTest = state.cotizaciones.filter(function (c) { return c.id === "cot-excpropia-test"; })[0].compras.filter(function (c) { return c.clave === claveExcPropiaTest; })[0];
+assert(compraExcPropiaTest.cantidadExcedente === 2, "sanity: comprar 12 necesitando 10 sugiere el excedente (2) — igual que siempre, sin nada del Hallazgo #48 todavía");
+assert(cantidadRealPedidoTest(compraExcPropiaTest) === 10, "sanity: el pedido, por ahora, solo tiene atribuidas las 10 pares que necesitaba");
+
+// -- el pedido necesita 2 pares más (una reposición) — antes del fix, subir
+// cantidadReal de nuevo NO tocaba el excedente para nada (quedaba
+// "congelado" en 2 para siempre); ahora se consume solo, sin sumar costo
+// nuevo (esas 2 ya estaban pagadas) --
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-excpropia-test"][data-clave="' + claveExcPropiaTest + '"][data-campo="cantidadReal"]', "14");
+var cotExcPropiaTrasRepoTest = state.cotizaciones.filter(function (c) { return c.id === "cot-excpropia-test"; })[0];
+compraExcPropiaTest = cotExcPropiaTrasRepoTest.compras.filter(function (c) { return c.clave === claveExcPropiaTest; })[0];
+assert(compraExcPropiaTest.cantidadReal === 14, "la cantidad real del pedido sí sube a lo que de verdad se usó");
+assert(compraExcPropiaTest.cantidadExcedente === 0, "...y la reserva PROPIA (2) se agota sola para cubrirlo, sin pedir nada nuevo — mismo criterio que la reserva compartida, pero sin ninguna otra cotización de por medio");
+assert(cantidadRealPedidoTest(compraExcPropiaTest) === 14, "...con lo que ahora el pedido tiene atribuidas las 14 completas (ya no hay excedente que restarle)");
+assert(costoRealPedidoTest(compraExcPropiaTest) === 120000, "...y su costo neto sube junto (120.000 completos): la misma factura de siempre, solo reclasificada, cero plata nueva");
+assert(calcGastosExcTest(cotExcPropiaTrasRepoTest) === 20000, "sobrecosto real de 20.000 (120.000 − 100.000 estimado) — coherente con haber usado 14 de un insumo estimado en 10");
+
+var htmlTrasRepoPropia = document.getElementById("app").innerHTML;
+assert(htmlTrasRepoPropia.indexOf("tu propia reserva") !== -1, "avisa con un toast que se tomó de la reserva propia, mismo criterio que el de la reserva compartida");
+
+// -- si la reposición pide MÁS de lo que quedaba en la reserva propia (acá
+// ya en 0), no truena ni descuadra nada — sigue el camino normal de
+// siempre (el usuario ajusta costoReal a mano si de verdad gastó más),
+// mismo límite ya documentado para la reserva compartida --
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-excpropia-test"][data-clave="' + claveExcPropiaTest + '"][data-campo="cantidadReal"]', "17");
+var cotExcPropiaTrasSegundaRepoTest = state.cotizaciones.filter(function (c) { return c.id === "cot-excpropia-test"; })[0];
+compraExcPropiaTest = cotExcPropiaTrasSegundaRepoTest.compras.filter(function (c) { return c.clave === claveExcPropiaTest; })[0];
+assert(compraExcPropiaTest.cantidadReal === 17 && compraExcPropiaTest.cantidadExcedente === 0, "con la reserva ya en 0, subir cantidadReal de nuevo no descuadra nada — el excedente se queda en 0, no se vuelve negativo ni se toca solo");
+
 state.pedidos = pedidosPreviosExcTest; state.cotizaciones = cotizacionesPreviasExcTest; state.tx = txPreviosExcTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 
