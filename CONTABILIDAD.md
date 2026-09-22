@@ -2494,6 +2494,50 @@ cambiar ningún comportamiento ya probado).
 
 ---
 
+### 🟢 Hallazgo #49 — un tx de excedente creado ANTES del Hallazgo #44 se quedaba con pedidoId para siempre, agrupado bajo el pedido en Finanzas. ✅ IMPLEMENTADO
+
+Reportado (2026-09-22) con dos capturas reales: en "Compras del pedido" la
+línea "Montreal" (de una compra conjunta) mostraba las insignias
+"🔗 compartida" y "📦 excedente" a la vez; en Finanzas, el movimiento
+"Compra de insumo (excedente) — Montreal — Camiseta Deportiva" aparecía
+DENTRO del card del pedido OP-5958 BREINER, compartiendo su mismo "Neto"
+con el resto de sus movimientos. "Ya habíamos quedado en no meter el
+excedente directamente en el movimiento del pedido, corrígelo."
+
+**No era una regresión del código actual — era una reparación retroactiva
+que faltaba.** El Hallazgo #44 (`67e83d9`, primer commit del día) ya
+corrigió `sincronizarComprasFinanzasDe` para que el tx de excedente
+nazca con `pedidoId: ""` (antes: `pedidoIdDeCotParaTx(cot)`) — confirmado
+releyendo el código actual Y el test que lo cubre (`grupoConjExcTest`,
+sigue en verde). El problema es que ese fix solo escribe el campo
+correcto la PRÓXIMA vez que esa compra se sincroniza — un tx de excedente
+que ya existía ANTES de ese commit, y que no se volvió a tocar desde
+entonces, se quedó con el `pedidoId` viejo para siempre, sin que nada lo
+corrigiera solo. Mismo patrón exacto que otras reparaciones ya existentes
+en esta lista (`repararComprasSinSeguimiento`, `repararVendedorPerdido`,
+`repararMarcasOrigenInconsistentes`): un fix de origen que solo protege
+hacia ADELANTE necesita, aparte, una reparación retroactiva para lo que
+ya quedó mal escrito antes de que existiera.
+
+**Fix — `repararPedidoIdExcedente(tx)` (`core/store.js`), mismo patrón
+que las reparaciones vecinas:** recorre `state.tx`, y cualquier
+movimiento con `origenCompraExcedenteClave` (marca EXCLUSIVA del tx de
+excedente — el tx normal de la misma compra nunca la lleva, así que no
+hay forma de confundirlos) que todavía tenga `pedidoId` puesto, lo deja
+vacío. Llamada desde `loadAll()` junto a las demás reparaciones "solo con
+red real" (mismo criterio: mejor esperar a la próxima carga con conexión
+real que reparar sobre un espejo local que podría estar viejo frente a
+otro dispositivo).
+
+**Pruebas:** el caso exacto reportado (un excedente viejo con pedidoId
+puesto se limpia; el tx NORMAL de la misma compra, sin esa marca, no se
+toca — sigue siendo el costo real del pedido); datos ya limpios no
+reportan ninguna reparación; un excedente que YA nació correcto (sin
+pedidoId, el caso normal desde el Hallazgo #44) tampoco se marca como
+reparado.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

@@ -259,6 +259,21 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo primera ronda: un excedente viejo que se había quedado agrupado bajo su pedido en Finanzas ya se repara solo)
+
+Reportado con captura real: un movimiento "Compra de insumo (excedente)"
+aparecía dentro del card de un pedido en Finanzas, compartiendo su Neto
+— justo lo que se había corregido horas antes (el excedente no debe
+agruparse bajo ningún pedido). El código actual ya estaba bien: el fix
+de esa misma ronda solo corrige el dato la PRÓXIMA vez que esa compra
+se sincroniza, así que un excedente que ya existía antes del fix se
+quedó con el dato viejo para siempre.
+
+- Reparación automática al abrir la app: cualquier movimiento de
+  excedente que todavía tenga el pedido puesto se corrige solo, sin
+  tocar el movimiento normal de la misma compra.
+- Ver CONTABILIDAD.md, Hallazgo #49.
+
 ## Registro de cambios — septiembre 2026 (nonagésima ronda: la reserva de excedente de un pedido individual también se consume sola)
 
 Reportado: "lo del excedente también debería funcionar no solo para

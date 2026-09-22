@@ -54,7 +54,7 @@ global.window.storage = {
 };
 
 const { render } = await import("../js/core/dom.js");
-const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido, repararMarcasOrigenInconsistentes } = await import("../js/core/store.js");
+const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido, repararMarcasOrigenInconsistentes, repararPedidoIdExcedente } = await import("../js/core/store.js");
 const auth = await import("../js/core/auth.js");
 function loginComo(rol, nombre, email) {
   sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
@@ -2446,6 +2446,34 @@ assert(reparoGastoFijoFalso === true, "repararMarcasOrigenInconsistentes tambié
 assert(txCompraConGastoFijoFalso.origenGastoFijoPeriodo === "", "origenGastoFijoPeriodo sin \"|\" (el \"1\" de esInsumo, leído en la posición equivocada) queda limpio, aunque \"gasto\" sea un tipo válido para ese campo");
 assert(txCompraConGastoFijoFalso.origenCompraClave === "global|cg-ojales-real", "...y NO toca origenCompraClave — la marca real de esta compra sigue intacta, así que ahora SÍ puede respaldarla si la línea existe");
 assert(txGastoFijoRealIntacto.origenGastoFijoPeriodo === "gf-arriendo|2026-09", "un origenGastoFijoPeriodo real (con \"<id>|<periodo>\") no se toca");
+
+// ---------------------------------------------------------------------------
+// Hallazgo #44 corrigió que el tx de excedente de una compra conjunta
+// llevara pedidoId (ver sincronizarComprasFinanzasDe, modules/
+// cotizaciones.js) — pero ese fix solo actúa la PRÓXIMA vez que la compra se
+// vuelve a sincronizar. Un excedente creado ANTES de ese fix, nunca vuelto a
+// tocar, se quedaba con el pedidoId viejo para siempre, agrupado bajo el
+// card de su pedido en Finanzas como si fuera SU gasto — justo lo que el
+// Hallazgo #44 dijo que ya no debía pasar. Reportado por el usuario
+// 2026-09-22 con captura real: "Compra de insumo (excedente) — Montreal"
+// adentro del card de OP-5958, compartiendo su Neto — "ya habíamos quedado
+// en no meter el excedente directamente en el movimiento del pedido".
+// repararPedidoIdExcedente (store.js) limpia eso retroactivamente.
+// ---------------------------------------------------------------------------
+const txExcedenteViejo = { id: "tx-exc-viejo", tipo: "gasto", concepto: "Compra de insumo (excedente) — Montreal — Camiseta Deportiva", contraparte: "", monto: 2280, pedidoId: "ped-5958", cotizacionId: "cot-breiner", origenCompraExcedenteClave: "montreal|mt|tela" };
+// Control: el tx NORMAL de la misma compra (sin origenCompraExcedenteClave)
+// SÍ debe conservar su pedidoId — es un costo real de ese pedido, no una
+// reserva.
+const txCompraNormalIntacta = { id: "tx-compra-normal-intacta", tipo: "gasto", concepto: "Compra — Montreal — Camiseta Deportiva", contraparte: "", monto: 10505, pedidoId: "ped-5958", cotizacionId: "cot-breiner", origenCompraClave: "montreal|mt|tela" };
+let reparoExcViejo = repararPedidoIdExcedente([txExcedenteViejo, txCompraNormalIntacta]);
+assert(reparoExcViejo === true, "repararPedidoIdExcedente avisa que sí reparó algo");
+assert(txExcedenteViejo.pedidoId === "", "el excedente viejo (origenCompraExcedenteClave presente) queda sin pedidoId — cae en \"Movimientos sueltos\", como manda el Hallazgo #44");
+assert(txCompraNormalIntacta.pedidoId === "ped-5958", "...pero el movimiento NORMAL de la misma compra (sin esa marca) NO se toca — sigue siendo el costo real de su pedido");
+assert(repararPedidoIdExcedente([txCompraNormalIntacta]) === false, "y sobre datos ya limpios (o que nunca aplicaban), no reporta ninguna reparación");
+// Control adicional: un excedente que YA está bien (pedidoId vacío, el caso
+// normal desde el Hallazgo #44) tampoco se marca como reparado.
+const txExcedenteYaBien = { id: "tx-exc-bien", tipo: "gasto", concepto: "Compra de insumo (excedente) — Tela", contraparte: "", monto: 5000, pedidoId: "", cotizacionId: "cot-x", origenCompraExcedenteClave: "tela|mt|tela" };
+assert(repararPedidoIdExcedente([txExcedenteYaBien]) === false, "un excedente que ya nació correcto (sin pedidoId) no se marca como reparado");
 
 // ---------------------------------------------------------------------------
 // Reporte en producción, mismo día: el usuario notó que "Origen eliminado"

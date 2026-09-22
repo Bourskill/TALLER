@@ -665,6 +665,32 @@ export function repararMarcasOrigenInconsistentes(tx) {
   return huboReparacion;
 }
 
+// Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44
+// (2026-09-21, ver sincronizarComprasFinanzasDe en modules/cotizaciones.js)
+// podía quedar con `pedidoId` puesto, agrupado bajo el card de un pedido en
+// Finanzas como si fuera SU gasto — justo lo que ese Hallazgo corrigió. El
+// fix de origen solo deja el campo vacío la PRÓXIMA vez que esa compra se
+// vuelve a sincronizar; un excedente que no se volvió a tocar desde antes
+// del fix se quedaba con el pedidoId viejo para siempre, sin que nada lo
+// corrigiera solo. Reportado por el usuario 2026-09-22 con captura real:
+// "Compra de insumo (excedente) — Montreal" apareciendo adentro del card
+// de un pedido, con el mismo Neto que el resto de sus movimientos —
+// "ya habíamos quedado en no meter el excedente directamente en el
+// movimiento del pedido, corrígelo".
+//
+// Se identifica por `origenCompraExcedenteClave`: esa marca es EXCLUSIVA
+// del tx de excedente (ver sincronizarComprasFinanzasDe) — el tx normal de
+// la misma compra nunca la lleva, así que no hay forma de confundirlos.
+export function repararPedidoIdExcedente(tx) {
+  var huboReparacion = false;
+  (tx || []).forEach(function (t) {
+    if (!t.origenCompraExcedenteClave || !t.pedidoId) return;
+    t.pedidoId = "";
+    huboReparacion = true;
+  });
+  return huboReparacion;
+}
+
 // Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`)
 // que un insumo pudo perder al copiarse a una plantilla, a un producto del
 // catálogo nuevo, o de cualquiera de esos dos a la referencia de una
@@ -1136,6 +1162,13 @@ export async function loadAll() {
     // datos de compras/insumos leídos como si fueran comisión o Colchón).
     // Mismo criterio de "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararMarcasOrigenInconsistentes(state.tx)) {
+      persist("tx");
+    }
+
+    // Auto-reparación: un tx de excedente creado antes del Hallazgo #44 que
+    // quedó con pedidoId puesto (ver repararPedidoIdExcedente más arriba).
+    // Mismo criterio de "solo con red real" que las reparaciones de arriba.
+    if (!huboFalloDeRed && repararPedidoIdExcedente(state.tx)) {
       persist("tx");
     }
 
