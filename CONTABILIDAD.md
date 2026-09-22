@@ -1943,6 +1943,107 @@ seguía bloqueando la ejecución de JavaScript del panel; se revisó en
 su lugar reutilizando clases ya probadas visualmente en otras tablas
 de la app.
 
+### 🔴 Hallazgo #42 — "cotizaciones" tocó el límite de 50.000 caracteres por celda de Google Sheets: TODO guardado de cotizaciones dejó de funcionar. ✅ IMPLEMENTADO
+
+Reportado por el usuario 2026-09-21 con una captura del aviso real de
+la app: *"No se pudieron guardar 1 cambio en la hoja de datos... Google
+Sheets API 400: Tu entrada supera el número máximo de 50000 caracteres
+en una misma celda."* Nada se perdió (la red de seguridad de
+[[incidente_perdida_borrador_2026-08]] ya cubre esto: quedó copiado en
+el espejo local y reintentándose solo) pero NINGÚN guardado de
+cotizaciones podía completarse — ni crear una, ni avanzar una etapa, ni
+registrar una compra — porque el tamaño que cuenta para Sheets es el
+del blob COMPLETO, no el de lo que de verdad cambió.
+
+**Causa raíz:** `state.cotizaciones` (TODAS las cotizaciones del
+taller) se guardaba como UN SOLO blob JSON en UNA celda de la pestaña
+"kv" — tras meses de uso real, ese blob superó el límite duro de
+Google Sheets. Primera sospecha (comprobantes de pago adjuntos como
+imagen incrustada en `pedidos`) descartada al confirmar con el usuario,
+vía la consola del navegador, que la clave que fallaba era
+"cotizaciones", no "pedidos" — ver
+[[no-presentar-suposiciones-como-confirmadas]]: la sospecha inicial
+tenía sentido en abstracto pero no era el caso real.
+
+**La solución YA existía para este MISMO problema, a medias:**
+`tx`/`clientes` habían pasado por exactamente esta migración antes
+(ver [[auditoria_financiera_estricta_2026-09-20]]) — de un blob único a
+una fila real por registro, en su propia pestaña, con columnas propias
+(`core/sheetsTabular.js`/`sheetsEsquemas.js`, `TABLAS_SHEET` en
+`core/store.js`). "cotizaciones" se sumó al mismo mecanismo: nuevo
+`COLUMNAS_COTIZACIONES` (19 columnas — escalares como `id`/`cliente`/
+`estado` como columnas planas, y lo anidado —`referencias`,
+`costosGlobales`, `serviciosCobrados`, `gastosReales`, `compras`,
+`iva`, `vendedor`— como columnas `{json:true}`) y `cotizaciones:
+tablaCotizaciones` en `TABLAS_SHEET`. Con esto, cada cotización tiene
+su PROPIO presupuesto de 50.000 caracteres, no uno compartido entre
+todas — el problema confirmado (el agregado de todas) queda resuelto;
+sigue existiendo la posibilidad remota de que UNA cotización sola
+(cientos de tallas importadas de Excel) toque el límite ella sola, pero
+eso es un caso mucho más raro que el ya ocurrido.
+
+**El esquema de columnas se armó con una investigación exhaustiva
+aparte** (un subagente dedicado a enumerar CADA campo que una
+cotización puede llevar, cruzando factories de creación, sitios de
+`Object.assign({}, cot, {...})`, y lecturas en calc.js/pdf.js) —
+justificado porque un campo olvidado en el esquema se pierde EN
+SILENCIO en cada guardado desde ese momento, el peor tipo de bug para
+esta app. Confirmó, entre otras cosas, que `compras` vive en la
+COTIZACIÓN (no en la referencia) y que `compra.compartida` (rastro de
+"Compras conjuntas") es un campo anidado un nivel más adentro, dentro
+de `compras[]` — no hace falta una columna propia para eso, ya viaja
+dentro del JSON de `compras`.
+
+Como el mecanismo de migración de `TABLAS_SHEET` YA es genérico
+(`loadAll()` copia una sola vez lo que había en el blob viejo de "kv"
+hacia la pestaña nueva, la primera vez que la encuentra vacía), sumar
+"cotizaciones" no necesitó ningún código de migración a mano —
+funcionó con el mismo mecanismo que ya movió tx/clientes.
+
+**Dos bugs REALES (no solo de prueba) que esta migración destapó en el
+mecanismo compartido, y que YA afectaban a tx/clientes en silencio
+desde que se migraron (nadie los había ejercitado todavía):**
+
+1. **El blob viejo de "kv" seguía "espejando" (sobrescribiendo la copia
+   local) con datos CONGELADOS desde el momento de la migración.**
+   `loadAll()` sigue leyendo el blob viejo de "kv" para cada clave de
+   `TABLAS_SHEET` (como respaldo de fábrica si la pestaña propia nunca
+   tuvo nada) — pero antes de este fix, también copiaba ese valor VIEJO
+   al espejo local (`core/guardado.js`) en cada carga, así hubiera
+   pasado tiempo desde la migración. Si la lectura de la pestaña PROPIA
+   fallaba esa vez (sin red — algo que ya pasa normalmente, con
+   reintento automático), el mecanismo de respaldo restauraba esa copia
+   CONGELADA en vez de la más reciente de verdad — silenciosamente
+   mostrando datos de antes de la migración. Fix: una clave que ya vive
+   en `TABLAS_SHEET` deja de espejarse desde el blob de "kv" (`if (n
+   !== "configNombreLegacy" && !TABLAS_SHEET[n]) espejar(...)`) — el
+   espejo de esas claves lo mantiene SOLO su propio camino (lectura
+   exitosa de su pestaña, o cualquier `persist()` exitoso o fallido).
+
+2. **La migración de "detalle de tallas" (pedido → referencia) solo
+   miraba la señal VIEJA de staleness.** El chequeo que evita migrar
+   sobre una copia potencialmente vieja (`!clavesDeEspejo.cotizaciones`)
+   seguía existiendo pero ya no reflejaba la fuente real de
+   "cotizaciones" (que ahora es su propia pestaña, no el blob de "kv").
+   Fix: se sumó `&& !tablaFallo.cotizaciones` a la condición — la señal
+   de si la pestaña PROPIA de cotizaciones falló esta carga.
+
+**Pruebas:** además de extender el esquema de columnas (con su propia
+protección de orden, mismo patrón que `COLUMNAS_MOVIMIENTOS` — ver el
+incidente de la columna insertada en medio, 2026-09-20), se escribió un
+mock puntual y mínimo de la API de Sheets SOLO para la pestaña
+"Cotizaciones" (el resto de la suite deliberadamente no mockea `fetch`
+— las pruebas con sesión simulada fallan solas contra la red real, y
+eso ya alcanza para probar los caminos de respaldo) para poder simular,
+de verdad, "la Sheet real tiene esto guardado" en vez de depender del
+blob de "kv" — necesario porque las pruebas existentes de recuperación
+de borradores ("¿qué había guardado de verdad?") dejaron de poder
+simularse con el truco viejo apenas cotizaciones se volvió tabular.
+Ese mismo trabajo destapó los dos bugs de arriba: las pruebas de
+recuperación entre dispositivos empezaron a fallar de formas que no
+tenían que ver con lo que decían probar, hasta rastrear la causa hasta
+el espejo clobbereado y la señal de staleness vieja.
+
 ---
 
 ## Próximos pasos

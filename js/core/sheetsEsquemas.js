@@ -1,6 +1,6 @@
 // Esquemas de columnas para las entidades ya migradas a hojas propias con
-// columnas reales (ver core/sheetsTabular.js) — hoy: Movimientos (tx) y
-// Clientes. El resto de `state` (pedidos, cotizaciones, config, deudas...)
+// columnas reales (ver core/sheetsTabular.js) — hoy: Movimientos (tx),
+// Clientes y Cotizaciones. El resto de `state` (pedidos, config, deudas...)
 // sigue viviendo en la pestaña "kv" (ver core/sheetsStorage.js) hasta que se
 // migre con el mismo patrón: agregar su esquema acá y sumarlo en store.js
 // (TABLAS_SHEET + la migración de loadAll()).
@@ -130,3 +130,53 @@ export var tablaClientes = crearTablaSheet("Clientes", [
     return out;
   }
 });
+
+// INCIDENTE 2026-09-21: "cotizaciones" vivía como UN SOLO blob JSON con TODAS
+// las cotizaciones adentro, en una sola celda de la pestaña "kv" — tras meses
+// de uso real, ese blob superó el límite duro de Google Sheets de 50.000
+// caracteres por celda ("Tu entrada supera el número máximo de 50000
+// caracteres en una misma celda"), y CADA guardado de cotizaciones (crear,
+// editar, avanzar una etapa, registrar una compra...) empezó a fallar por
+// igual, sin importar qué tan chico fuera el cambio real — el tamaño del
+// blob completo es lo que cuenta para Sheets, no el de lo que cambió. Mismo
+// remedio que ya se usó para "tx"/"clientes" (ver el INCIDENTE de arriba):
+// una fila real por cotización, con sus propias columnas — un presupuesto de
+// 50.000 caracteres POR COTIZACIÓN, no repartido entre todas. Sigue existiendo
+// la posibilidad remota de que UNA sola cotización enorme (cientos de tallas
+// importadas de Excel, por ejemplo) vuelva a tocar el límite ella sola — eso
+// esta migración no lo resuelve del todo, pero lo hace muchísimo menos
+// probable, y el problema confirmado (el agregado de TODAS) queda resuelto.
+//
+// Todo lo anidado (referencias, costosGlobales, serviciosCobrados,
+// gastosReales, compras, iva, vendedor) queda en su propia columna JSON —
+// ver el comentario grande al principio de este archivo sobre { json: true }.
+// Ninguno de esos objetos por sí solo (a diferencia del blob de siempre) se
+// acerca al límite de una celda.
+export var COLUMNAS_COTIZACIONES = [
+  { key: "id", header: "id" },
+  { key: "clienteId", header: "cliente_id" },
+  { key: "cliente", header: "cliente" },
+  { key: "descripcion", header: "descripcion" },
+  { key: "fecha", header: "fecha" },
+  { key: "fechaEntrega", header: "fecha_entrega" },
+  { key: "marca", header: "marca" },
+  { key: "estado", header: "estado" },
+  { key: "pedidoId", header: "pedido_id" },
+  { key: "pedidoOrigenId", header: "pedido_origen_id" },
+  { key: "codigoPublico", header: "codigo_publico" },
+  // Id del movimiento en Finanzas de "Registrar estimado" (ver
+  // "add-cot-estimado-movimiento", modules/cotizaciones.js) — no todas las
+  // cotizaciones lo tienen, solo las que llegaron a registrar un estimado.
+  { key: "estimadoTxId", header: "estimado_tx_id" },
+  { key: "iva", header: "iva_json", json: true, jsonDefault: function () { return { activo: false, porcentaje: 19 }; } },
+  { key: "vendedor", header: "vendedor_json", json: true, jsonDefault: function () { return null; } },
+  { key: "referencias", header: "referencias_json", json: true, jsonDefault: function () { return []; } },
+  { key: "costosGlobales", header: "costos_globales_json", json: true, jsonDefault: function () { return []; } },
+  { key: "serviciosCobrados", header: "servicios_cobrados_json", json: true, jsonDefault: function () { return []; } },
+  // Legado: ya no se agregan desde la UI (ver cotizaciones.js:579-586), pero
+  // una cotización vieja puede seguir trayéndolos — se preservan tal cual
+  // para no perder el histórico de una que ya los tenía.
+  { key: "gastosReales", header: "gastos_reales_json", json: true, jsonDefault: function () { return []; } },
+  { key: "compras", header: "compras_json", json: true, jsonDefault: function () { return []; } }
+];
+export var tablaCotizaciones = crearTablaSheet("Cotizaciones", COLUMNAS_COTIZACIONES);

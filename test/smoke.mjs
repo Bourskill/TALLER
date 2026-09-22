@@ -3386,20 +3386,35 @@ assert(!cotM.referencias[0].detalle || !cotM.referencias[0].detalle.length, "y l
 assert(guardadoMod.estadoGuardado().cantidad === pendientesAntes, "y no se intenta persistir nada nuevo a la Sheet (la migración saltada no dispara ningún guardado)");
 window.storage.get = getOriginal;
 
-// Contraprueba: si pedidos/cotizaciones SÍ se pudieron leer de la red (no
-// vinieron del espejo), la migración sigue funcionando exactamente igual que
-// antes — el fix de arriba es específico a la copia local, no rompe el
-// camino normal.
+// Contraprueba original: "si pedidos/cotizaciones SÍ se pudieron leer de la
+// red, la migración sigue funcionando". Desde que "cotizaciones" vive en su
+// propia pestaña (ver TABLAS_SHEET en core/store.js, 2026-09-21), su "se
+// leyó de la red" real ya no lo decide window.storage.get(KEYS.cotizaciones)
+// — decide si SU PROPIA pestaña se pudo leer, algo que esta suite no simula
+// para ningún TABLAS_SHEET (ni tx ni clientes tienen ese camino feliz
+// probado tampoco — haría falta mockear la API de Sheets entera, cosa que
+// esta suite deliberadamente evita salvo casos puntuales más abajo).
+//
+// Lo que SÍ vale la pena probar acá es el caso MIXTO que motivó el fix de
+// arriba (el `&& !tablaFallo.cotizaciones` agregado a la condición): pedidos
+// se lee fresco de la red, pero cotizaciones cae a SU espejo (su pestaña
+// propia falla, como siempre en este entorno de prueba). Antes de ese fix,
+// la migración solo miraba `clavesDeEspejo` (la señal VIEJA, del blob de
+// "kv", que ya no es la fuente real de cotizaciones) y hubiera dejado
+// pasar la migración igual — escribiendo el detalle migrado ENCIMA de una
+// copia de cotizaciones que pudo estar vieja frente a la Sheet real.
+window.localStorage.setItem("taller_espejo_v1:cotizaciones", JSON.stringify([
+  { id: "cot-red-migra", referencias: [{ id: "ref-1", detalle: [] }] }
+]));
 window.storage.get = async function (key, arg2) {
   if (key === constantsMod.KEYS.pedidos) return { value: JSON.stringify([{ id: "ped-red-migra", numeroOp: "OP-R", cotizacionId: "cot-red-migra", detalle: ["L", "XL"] }]) };
-  if (key === constantsMod.KEYS.cotizaciones) return { value: JSON.stringify([{ id: "cot-red-migra", referencias: [{ id: "ref-1", detalle: [] }] }]) };
   return getOriginal(key, arg2);
 };
 await loadAll();
 const pedR = state.pedidos.find(p => p.id === "ped-red-migra");
 const cotR = state.cotizaciones.find(c => c.id === "cot-red-migra");
-assert(!pedR.detalle, "si pedidos/cotizaciones SÍ se leyeron de la red, la migración de tallas sigue corriendo normal: se borra el detalle del pedido...");
-assert(cotR.referencias[0].detalle && cotR.referencias[0].detalle.length === 2, "...y se traslada a la referencia de la cotización, como siempre");
+assert(!!pedR.detalle, "pedidos se leyó fresco de la red, pero cotizaciones cayó a SU espejo (su propia pestaña falló) — la migración NO corre: no basta con que solo UNO de los dos esté fresco");
+assert(!cotR.referencias[0].detalle || !cotR.referencias[0].detalle.length, "...cotizaciones tampoco recibe el detalle migrado en este caso mixto");
 window.storage.get = getOriginal;
 
 // ---------------------------------------------------------------------------
@@ -3747,6 +3762,52 @@ assert(colReal.textContent.indexOf("comisión del vendedor") !== -1, "'Real' tam
 // ---------------------------------------------------------------------------
 const storeMod2 = await import("../js/core/store.js");
 
+// Mock mínimo y puntual de la API de Sheets, SOLO para "Cotizaciones" — desde
+// que esa clave vive en su propia pestaña (ver TABLAS_SHEET en core/store.js,
+// 2026-09-21), simular "esto es lo que la Sheet real tiene guardado" para
+// cotizaciones ya no alcanza con mockear window.storage.get(KEYS.cotizaciones)
+// (esa lectura era la fuente real ANTES de la migración; ahora sigue
+// existiendo solo como respaldo de fábrica). El resto de esta suite
+// deliberadamente NO mockea fetch (las pruebas con sesión simulada golpean
+// la red real y fallan solas con un 401, ver el comentario más abajo junto a
+// "respaldar-ahora") — esto es la excepción puntual que hace falta para
+// poder simular, de verdad, que la lectura de ESTA pestaña tuvo éxito.
+const { COLUMNAS_COTIZACIONES: COLS_COT_MOCK } = await import("../js/core/sheetsEsquemas.js");
+const { _resetCacheParaPruebas } = await import("../js/core/sheetsTabular.js");
+function filaCotizacionMock(cot) {
+  return COLS_COT_MOCK.map(function (col) {
+    var v = cot[col.key];
+    if (col.json) return v === undefined || v === null ? "" : JSON.stringify(v);
+    return v === undefined || v === null ? "" : String(v);
+  });
+}
+function mockearCotizacionesEnLaSheet(cotizacionesEnLaSheet) {
+  var original = global.fetch;
+  global.fetch = async function (url, options) {
+    var u = String(url);
+    if (u.indexOf("fields=sheets.properties") !== -1) {
+      return {
+        ok: true, status: 200,
+        json: async function () { return { sheets: [{ properties: { sheetId: 88001, title: "Cotizaciones", gridProperties: { columnCount: COLS_COT_MOCK.length + 5 } } }] }; }
+      };
+    }
+    if (u.indexOf("/values/Cotizaciones") !== -1) {
+      return {
+        ok: true, status: 200,
+        json: async function () { return { values: cotizacionesEnLaSheet.map(filaCotizacionMock) }; }
+      };
+    }
+    return original(url, options);
+  };
+  return function restaurarFetchCotizaciones() {
+    global.fetch = original;
+    // Sin esto, el caché de sheetsTabular.js queda "congelado" con SOLO
+    // "Cotizaciones" adentro para el resto de la suite — ver el comentario
+    // junto a _resetCacheParaPruebas.
+    _resetCacheParaPruebas();
+  };
+}
+
 // (1) beforeunload: antes solo miraba si había un guardado FALLIDO
 // (hayPendientes) — una edición que nunca se INTENTÓ guardar no pasaba por
 // ahí y se podía cerrar sin ningún aviso.
@@ -3777,21 +3838,24 @@ assert(!!espejoTrasEspera && espejoTrasEspera.indexOf("Editado justo antes de qu
 // (3) al "reabrir la app" (loadAll de nuevo) con el borrador todavía
 // marcado, se ofrece recuperarlo — simulando que la Sheet real SIGUE con la
 // versión de antes (nadie guardó todavía) mientras el espejo de este
-// navegador ya tiene el cambio.
+// navegador ya tiene el cambio. Desde que "cotizaciones" vive en su propia
+// pestaña, esa simulación es a través de mockearCotizacionesEnLaSheet (ver
+// arriba), no de window.storage.get — esa lectura ya no es la fuente real.
 const cotizacionesComoEnLaSheet = state.cotizaciones.map(c => c.id === cotCom.id ? Object.assign({}, c, { descripcion: descripcionOriginalCotCom }) : c);
-const getOriginalRecup = window.storage.get;
-window.storage.get = async function (key, arg2) {
-  if (key === constantsMod.KEYS.cotizaciones) return { value: JSON.stringify(cotizacionesComoEnLaSheet) };
-  return getOriginalRecup(key, arg2);
-};
+const restaurarFetchRecup = mockearCotizacionesEnLaSheet(cotizacionesComoEnLaSheet);
 state.recuperacion = null;
 await loadAll();
-window.storage.get = getOriginalRecup;
+restaurarFetchRecup();
 assert(!!state.recuperacion, "al 'reabrir la app' con un borrador de cotización todavía marcado, se ofrece recuperarlo — antes esto NUNCA pasaba para una edición que nunca se intentó guardar");
 assert(state.recuperacion.claves.indexOf("cotizaciones") !== -1, "...específicamente señalando la clave 'cotizaciones'");
 assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === descripcionOriginalCotCom, "sanity: justo después del 'reinicio', la pantalla muestra la versión SIN el cambio (la que ya estaba guardada)");
 
 await storeMod2.recuperarDelEspejo();
+// recuperarDelEspejo() termina en persist("cotizaciones"), que en este
+// entorno de prueba sin red real falla sola (ver el comentario grande más
+// abajo, junto a claveNubeCot) — se limpia la marca de pendiente para que
+// no arrastre a las pruebas de recuperación que siguen.
+guardadoMod.olvidarPendientesDeSesionAnterior();
 assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === "Editado justo antes de que se cerrara sola", "restaurar el borrador SÍ trae de vuelta la edición que nunca se guardó");
 assert(state.recuperacion === null, "y cierra el aviso de recuperación");
 state.cotSucia = "";
@@ -3923,6 +3987,17 @@ assert(state.recuperacion.nube && Array.isArray(state.recuperacion.nube.cotizaci
 await storeMod2.recuperarDelEspejo();
 assert(state.cotizaciones.find(c => c.id === cotCom.id).descripcion === "Cambio hecho desde el celular, nunca guardado", "restaurar desde la nube trae de vuelta ese cambio, aunque ESTE navegador nunca lo haya visto");
 assert(state.cotizaciones.length === cantidadCotizacionesAntes, "...fusionando solo esa cotización por id, sin pisar ni perder ninguna otra del arreglo completo");
+// recuperarDelEspejo() termina en persist("cotizaciones") — desde que
+// "cotizaciones" vive en su propia pestaña (ver TABLAS_SHEET en store.js),
+// ese guardado golpea la red real igual que tx/clientes y falla solo con un
+// 401 en este entorno de prueba sin sesión real (mismo comentario de "las
+// demás pruebas... fallan solas", más abajo en este archivo) — lo que deja
+// "cotizaciones" marcada como pendiente de sesión anterior. En producción
+// eso se resolvería solo (reintento automático); acá se limpia a mano para
+// que las pruebas de abajo arranquen de una base limpia, sin que ese
+// guardado que no pudo completarse por falta de red interfiera con lo que
+// SÍ se está probando (la lógica de basadaEn).
+guardadoMod.olvidarPendientesDeSesionAnterior();
 
 // (3) un borrador VIEJO en la nube — su `basadaEn` ya NO coincide con lo que
 // hay guardado de verdad (como si esta edición ya se hubiera guardado por
@@ -3951,9 +4026,11 @@ const cotEditadaB = Object.assign({}, cotBaseB, { descripcion: "Editada en la pe
 await window.storage.set("borrador:cotizaciones:admin@taller.test:" + cotYaGuardadaDeVerdad.id, JSON.stringify({ cotizacionId: cotYaGuardadaDeVerdad.id, cotizacion: cotEditadaA, basadaEn: cotYaGuardadaDeVerdad }), false);
 await window.storage.set("borrador:cotizaciones:admin@taller.test:" + cotBaseB.id, JSON.stringify({ cotizacionId: cotBaseB.id, cotizacion: cotEditadaB, basadaEn: cotBaseB }), false);
 state.recuperacion = null;
+guardadoMod.olvidarPendientesDeSesionAnterior(); // ver el comentario grande en (2) — mismo motivo
 await loadAll();
 assert(!!state.recuperacion && state.recuperacion.nube && state.recuperacion.nube.cotizaciones.length === 2, "dos pestañas/dispositivos editando cotizaciones DISTINTAS a la vez ya no se pisan el borrador en la nube: las dos se ofrecen juntas");
 await storeMod2.recuperarDelEspejo();
+guardadoMod.olvidarPendientesDeSesionAnterior(); // idem: este recuperarDelEspejo() también termina en un persist("cotizaciones") que falla sin red
 assert(state.cotizaciones.find(c => c.id === cotYaGuardadaDeVerdad.id).descripcion === "Editada en la pestaña 1", "...y restaurar trae de vuelta la primera...");
 assert(state.cotizaciones.find(c => c.id === cotBaseB.id).descripcion === "Editada en la pestaña 2", "...y también la segunda, sin que ninguna se perdiera por compartir la misma fila de la nube");
 

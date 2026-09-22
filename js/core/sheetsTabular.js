@@ -148,3 +148,19 @@ export function crearTablaSheet(nombrePestana, columnas, opts) {
     }
   };
 }
+
+// SOLO para pruebas (test/smoke.mjs): `sheetsInfoCache`/`headersVerificados`
+// son caché de SESIÓN a propósito (evitan una consulta de red extra por
+// pestaña en cada guardado normal — ver el comentario junto a su
+// declaración) — nunca se limpian solas, ni siquiera entre pestañas
+// distintas. Un test que simula un fetch exitoso para UNA pestaña puntual
+// (ej. "Cotizaciones") deja `sheetsInfoCache` con SOLO esa pestaña adentro;
+// sin resetearlo, cualquier prueba posterior que dependa de "descubrir" otra
+// pestaña por primera vez (ej. probar que una recién creada se agranda)
+// falla, porque el caché ya no está vacío y nunca vuelve a consultar la red
+// real para ella. No se usa en la app real, donde este comportamiento SÍ es
+// el correcto.
+export function _resetCacheParaPruebas() {
+  sheetsInfoCache = null;
+  headersVerificados = {};
+}

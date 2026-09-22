@@ -259,6 +259,31 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo cuarta ronda: "cotizaciones" superó el límite de 50.000 caracteres por celda — TODO guardado de cotizaciones había dejado de funcionar)
+
+Reportado con el error real de la app: "No se pudieron guardar 1
+cambio... Tu entrada supera el número máximo de 50000 caracteres en
+una misma celda". Nada se había perdido (la red de seguridad ya
+existente lo tenía a salvo en el espejo local), pero ningún guardado
+de cotizaciones podía completarse.
+
+- Causa: todas las cotizaciones del taller se guardaban como un solo
+  blob JSON en una sola celda de la pestaña "kv" — tras meses de uso,
+  ese blob superó el límite duro de Google Sheets. Mismo problema que
+  ya se resolvió antes para "Movimientos"/"Clientes": se migró
+  "cotizaciones" al mismo esquema de una fila real por registro, en su
+  propia pestaña — cada cotización tiene ahora su propio presupuesto de
+  50.000 caracteres, no uno compartido entre todas.
+- De paso, se corrigieron dos bugs reales (no solo de prueba) en el
+  mecanismo compartido de esa migración, que ya afectaban en silencio
+  a Movimientos/Clientes desde que se migraron: el blob viejo de "kv"
+  seguía sobrescribiendo la copia de respaldo local con datos
+  congelados desde el momento de la migración, y la migración de
+  "detalle de tallas" ya no revisaba correctamente si cotizaciones
+  venía de una copia potencialmente vieja.
+- Ver CONTABILIDAD.md, Hallazgo #42, para el detalle completo (incluye
+  por qué "pedidos" fue la primera sospecha y se descartó).
+
 ## Registro de cambios — septiembre 2026 (octogésimo tercera ronda: Compras conjuntas gana "Asignar a servicio(s)" + rediseño visual)
 
 Pedido: "en finanzas/compras conjuntas tambien aplica la logica de

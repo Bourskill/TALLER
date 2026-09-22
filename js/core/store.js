@@ -11,7 +11,7 @@ import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./cons
 import { todayStr, uid, num, norm } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
-import { tablaMovimientos, tablaClientes } from "./sheetsEsquemas.js";
+import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsquemas.js";
 // calc.js importa `state` DE ESTE archivo — importar de vuelta acá cierra
 // un ciclo, pero es seguro: loadAll() (más abajo) solo invoca esta función
 // en tiempo de ejecución, mucho después de que los dos módulos ya
@@ -22,9 +22,13 @@ import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesi
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
 // pestaña con columnas reales (ver core/sheetsTabular.js) — Fase 1 de la
-// reorganización de la Sheet. El resto de las claves (pedidos, cotizaciones,
-// config...) sigue viviendo en "kv" hasta que se migren con el mismo patrón.
-var TABLAS_SHEET = { tx: tablaMovimientos, clientes: tablaClientes };
+// reorganización de la Sheet. "cotizaciones" se sumó 2026-09-21 tras tocar el
+// límite de 50.000 caracteres por celda con el blob único (ver el comentario
+// grande junto a COLUMNAS_COTIZACIONES en sheetsEsquemas.js). El resto de las
+// claves (pedidos, config...) sigue viviendo en "kv" hasta que se migren con
+// el mismo patrón — "pedidos" es la siguiente candidata más probable si algún
+// día le toca el mismo límite.
+var TABLAS_SHEET = { tx: tablaMovimientos, clientes: tablaClientes, cotizaciones: tablaCotizaciones };
 
 export const STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
 
@@ -907,7 +911,23 @@ export async function loadAll() {
           // abajo). "configNombreLegacy" no es una clave real de `state` (es
           // solo un campo viejo que se lee una vez para migrar el nombre del
           // taller), así que no tiene sentido guardarle copia.
-          if (n !== "configNombreLegacy") espejar(n, r.value.value);
+          //
+          // Una clave de TABLAS_SHEET (tx, clientes, cotizaciones) TAMBIÉN
+          // se sigue leyendo acá de "kv" (ver el comentario grande junto a
+          // `claves`, arriba) — pero solo como RESPALDO de fábrica si su
+          // propia pestaña nunca tuvo nada; ese blob de "kv" deja de
+          // actualizarse en el momento en que la clave migra (persist() ya
+          // no le escribe nada), así que queda CONGELADO desde entonces.
+          // Espejarlo acá lo trataría como "lo último bueno que se leyó" y
+          // pisaría el espejo real (el que sí se mantiene al día vía la
+          // lectura/escritura de la propia pestaña, más abajo) con ese dato
+          // viejo — exactamente lo que pasaba antes de este fix: una falla
+          // de red puntual en la pestaña propia hacía que el respaldo
+          // resucitara una copia de ANTES de la migración, no la más
+          // reciente. INCIDENTE 2026-09-21, detectado al migrar
+          // "cotizaciones" (mismo riesgo ya latente para tx/clientes desde
+          // que se migraron, solo que ninguna prueba lo había ejercitado).
+          if (n !== "configNombreLegacy" && !TABLAS_SHEET[n]) espejar(n, r.value.value);
         } else {
           // La Sheet SÍ respondió (no es un fallo de red) pero esta clave no
           // tiene fila todavía — es un "no hay nada guardado aún" legítimo,
@@ -1057,7 +1077,14 @@ export async function loadAll() {
     // pudo quedar viejo frente a otro dispositivo). Se salta la migración por
     // completo en ese caso: se repite sola, sin problema, la próxima vez que
     // este dispositivo cargue con conexión real.
-    if (state.pedidos.length && state.cotizaciones.length && !clavesDeEspejo.pedidos && !clavesDeEspejo.cotizaciones) {
+    //
+    // "cotizaciones" tiene DOS señales de "¿vino del espejo?", no una sola:
+    // `clavesDeEspejo` (la lectura VIEJA del blob de "kv", que ya no es la
+    // fuente real desde que se migró a su propia pestaña — ver TABLAS_SHEET)
+    // y `tablaFallo` (si su propia pestaña, la fuente real hoy, falló y cayó
+    // al espejo). Mirar solo la primera dejaría pasar la migración aunque la
+    // cotización de verdad viniera de una copia vieja.
+    if (state.pedidos.length && state.cotizaciones.length && !clavesDeEspejo.pedidos && !clavesDeEspejo.cotizaciones && !tablaFallo.cotizaciones) {
       var huboMigracion = false;
       state.pedidos.forEach(function (p) {
         if (!p.detalle || !p.detalle.length || !p.cotizacionId) return;
