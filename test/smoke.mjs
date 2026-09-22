@@ -5439,6 +5439,20 @@ global.window.alert = global.alert = alertaOriginalDomTest;
 assert(state.tx.length === txAntesBloqueoDomTest, "si lo repartido a mano no suma el total pagado, NO se registra nada");
 assert(alertaCapturadaDomTest.indexOf("no coincide") !== -1, "...y avisa que el reparto no cuadra");
 
+// -- tolerancia CERO, ni siquiera 1 peso de diferencia: a diferencia de una
+// cantidad física (metros), un monto acá es SIEMPRE un peso entero exacto,
+// sin ningún redondeo legítimo que perdonar.
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "30001");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domB-test"]', "50000");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domC-test"]', "20000");
+var txAntesUnPesoDomTest = state.tx.length;
+var alertaCapturadaUnPesoDomTest = "";
+global.window.alert = global.alert = function (msg) { alertaCapturadaUnPesoDomTest = msg; };
+click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
+global.window.alert = global.alert = alertaOriginalDomTest;
+assert(state.tx.length === txAntesUnPesoDomTest, "ni siquiera 1 peso de descuadre (30.001 + 50.000 + 20.000 = 100.001) se deja pasar en silencio");
+assert(alertaCapturadaUnPesoDomTest.indexOf("no coincide") !== -1, "...avisa igual que cualquier otro descuadre, por chico que sea");
+
 // -- un reparto manual que SÍ cuadra (30.000/50.000/20.000, deliberadamente
 // distinto del proporcional por defecto 32.000/48.000/20.000) se respeta
 // tal cual se escribió --

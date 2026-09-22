@@ -1962,7 +1962,7 @@ export var actions = {
         if (!excedenteYaEscrito) {
           var sugerido = valor - num(linea.cantidadFisica);
           if (sugerido > 0) patch.cantidadExcedente = sugerido;
-        } else if (!(base.compartida && base.compartida.grupoId)) {
+        } else if (!(base.compartida && base.compartida.grupoId) && base.cantidadReal !== "" && base.cantidadReal !== undefined && base.cantidadReal !== null) {
           // Reposición sobre la RESERVA PROPIA de esta misma compra, sin
           // compartirla con nadie — mismo concepto que la reserva de
           // "Compras conjuntas" (tomarDeReservaCompraConjunta, más abajo),
@@ -1975,6 +1975,14 @@ export var actions = {
           // cantidadReal de nuevo no lo tocaba más — quedaba "congelado"
           // en vez de consumirse solo, igual que el bug original que
           // motivó tomarDeReservaCompraConjunta para el caso compartido.
+          //
+          // El chequeo extra de "cantidadReal ya escrita" (raro, pero
+          // posible: el detalle de la compra deja tocar el excedente sin
+          // haber tocado cantidadReal todavía) evita tratar la PRIMERA
+          // escritura de cantidadReal como un "incremento" contra 0 — ese
+          // caso ya lo cubre la rama de arriba (!excedenteYaEscrito) o,
+          // si el excedente se escribió a mano primero, simplemente no
+          // hay ninguna reposición de la que hablar todavía.
           var incrementoPropio = valor - num(base.cantidadReal);
           var reservaPropia = num(base.cantidadExcedente);
           if (incrementoPropio > 0 && reservaPropia > 0) {

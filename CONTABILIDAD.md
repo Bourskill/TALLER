@@ -2353,6 +2353,16 @@ inventa nada, reparto proporcional por defecto, override manual
 bloqueado (no cuadra) y aceptado (cuadra), cada compra con su propia
 clave/tx/pedidoId, y que el grupo desaparece tras registrar.
 
+**Auto-revisión 2026-09-22 (antes de que nadie lo reportara):** al
+releer este Hallazgo con calma se encontró que la validación de "cero
+descuadre" de `registrar-costo-compartido` en realidad toleraba hasta
+$1 de diferencia (`> 1` en vez de `> 0`) — copiado sin pensar de un
+patrón pensado para CANTIDADES físicas (metros, que sí pueden arrastrar
+coma flotante), pero acá el monto siempre es un peso entero exacto, sin
+ningún redondeo legítimo que perdonar. Corregido a tolerancia CERO, con
+una prueba puntual (30.001 + 50.000 + 20.000 vs 100.000 — 1 peso de más
+— ahora sí se bloquea).
+
 ---
 
 ### 🟢 Hallazgo #47 — cerrar la pestaña mientras un guardado SEGUÍA en vuelo no avisaba nada; el cambio se perdía en silencio. ✅ IMPLEMENTADO
@@ -2469,6 +2479,18 @@ compartida, sin caso especial nuevo.
 la reserva sola (excedente cae a 0, costoRealPedido sube de 100.000 a
 120.000 completos, cero plata nueva); pedir todavía más con la reserva
 ya en 0 no descuadra ni truena nada.
+
+**Auto-revisión 2026-09-22 (antes de que nadie lo reportara):** al
+releer la condición con calma se le agregó un chequeo extra —
+`base.cantidadReal` también tiene que estar YA escrita, no solo el
+excedente — para un caso raro pero alcanzable por la UI: si alguien
+abre el detalle de una compra y escribe el excedente A MANO antes de
+haber escrito nunca `cantidadReal`, la primera escritura de
+`cantidadReal` no debe tratarse como un "incremento" contra 0 (se
+comería un excedente que en realidad nadie pidió reponer todavía). Sin
+prueba dedicada — no hay ningún camino REPORTADO que lo alcance, y el
+chequeo es puramente defensivo (la suite completa sigue en verde sin
+cambiar ningún comportamiento ya probado).
 
 ---
 

@@ -1025,7 +1025,13 @@ export var actions = {
       return (ov !== undefined && ov !== "") ? num(ov) : costos[i];
     });
     var sumaCostosFinal = costosFinal.reduce(function (a, v) { return a + v; }, 0);
-    if (Math.abs(sumaCostosFinal - costoTotal) > 1) {
+    // Tolerancia CERO, no de "un peso" — a diferencia de una cantidad física
+    // (metros, que pueden arrastrar coma flotante), un monto acá siempre es
+    // un peso entero exacto (repartirProporcional con decimales:0), así que
+    // no hay ningún redondeo legítimo que perdonar. Un peso de descuadre
+    // silencioso rompería el mismo criterio bancario que el resto de la app
+    // exige en todos lados — ver rigor_matematico_dinero.
+    if (Math.abs(sumaCostosFinal - costoTotal) > 0) {
       window.alert("Lo repartido entre los pedidos (" + fmt(sumaCostosFinal) + ") no coincide con el total pagado (" + fmt(costoTotal) + "). Ajusta los montos para que sumen exacto.");
       return;
     }
