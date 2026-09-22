@@ -5153,6 +5153,77 @@ state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPre
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
+// -- Compras conjuntas: una prenda comprada ENTERA no se puede repartir en
+// fracciones — reportado por el usuario con un caso real (2026-09-21):
+// "1 camiseta no se puede dividir en decimales" — 3 pedidos necesitando 1
+// camiseta cada uno, comprar 4 en total, repartía 1.34/1.33/1.33 (fracciones
+// de prenda) en vez de números enteros. `esProducto` (calcGruposCompraCompartida,
+// insumo tipo "producto_comprado") es la señal para reparto en enteros.
+const pedidosPreviosProdTest = state.pedidos, cotizacionesPreviasProdTest = state.cotizaciones, txPreviosProdTest = state.tx;
+function cotConProductoComprado(id, pedidoId) {
+  return {
+    id: id, clienteId: "", cliente: "Cliente Prenda", descripcion: "Pedido " + id, fecha: "2026-01-01",
+    estado: "convertida", pedidoId: pedidoId, pedidoOrigenId: "",
+    vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cprenda" + id,
+    referencias: [{
+      id: "r-" + id, nombre: "Camiseta Oversize", imagenUrl: "", consumoAprox: 1, cantidadPedida: 1, precioVenta: 50000, origen: "taller", costoCompra: 0, proveedorId: "",
+      insumos: [{ id: "i-" + id, nombre: "Camiseta Oversize 200gr", unidad: "UND", costo: 30000, tipo: "producto_comprado", cantidad: 1, categoriaId: "", proveedorId: "" }],
+      detalle: [], estado: "nuevo", estadosDef: null
+    }],
+    costosGlobales: [], serviciosCobrados: [], compras: []
+  };
+}
+function pedidoProdTest(id, cotId, numeroOp) {
+  return {
+    id: id, numeroOp: numeroOp, cliente: "Cliente Prenda", descripcion: "Pedido de prueba",
+    cantidad: "1", total: 500000, costo: 30000, abono: 0, estado: "nuevo", estadosDef: null,
+    fechaCreacion: "2026-01-01", fechaEntrega: "", tipoCliente: "propio", cotizacionId: cotId,
+    abonos: [], lineas: [], stockConsumido: [], vendedor: null
+  };
+}
+const cotProdA = cotConProductoComprado("cot-prodA-test", "ped-prodA-test");
+const cotProdB = cotConProductoComprado("cot-prodB-test", "ped-prodB-test");
+const cotProdC = cotConProductoComprado("cot-prodC-test", "ped-prodC-test");
+const pedProdA = pedidoProdTest("ped-prodA-test", "cot-prodA-test", "OP-7204");
+const pedProdB = pedidoProdTest("ped-prodB-test", "cot-prodB-test", "OP-2085");
+const pedProdC = pedidoProdTest("ped-prodC-test", "cot-prodC-test", "OP-5958");
+state.pedidos = [pedProdA, pedProdB, pedProdC];
+state.cotizaciones = [cotProdA, cotProdB, cotProdC];
+state.tx = [];
+
+const gruposProdTest = calcGruposTest([pedProdA.id, pedProdB.id, pedProdC.id]);
+assert(gruposProdTest.length === 1, "detecta la Camiseta Oversize comprada como insumo pendiente compartido entre los 3 pedidos");
+const grupoProdTest = gruposProdTest[0];
+assert(grupoProdTest.esProducto === true, "el grupo queda marcado como producto comprado entero (insumo tipo producto_comprado)");
+assert(grupoProdTest.unidad === "UND", "...con unidad UND, como cualquier producto comprado");
+
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: [pedProdA.id, pedProdB.id, pedProdC.id], porClave: {} };
+render();
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadTotal"]', "4");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="costoTotal"]', "142900");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadExcedente"]', "1");
+const previewTextoProdTest = document.getElementById("app").textContent;
+assert(previewTextoProdTest.indexOf("1.34") === -1 && previewTextoProdTest.indexOf("1.33") === -1 && previewTextoProdTest.indexOf("0.34") === -1 && previewTextoProdTest.indexOf("0.33") === -1, "el preview del reparto YA NO muestra fracciones de una prenda comprada entera");
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoProdTest.clave + '"]');
+
+const cotProdATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodA-test"; })[0];
+const cotProdBTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodB-test"; })[0];
+const cotProdCTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodC-test"; })[0];
+const compraProdA = cotProdATrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
+const compraProdB = cotProdBTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
+const compraProdC = cotProdCTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
+assert(Number.isInteger(compraProdA.cantidadReal) && Number.isInteger(compraProdB.cantidadReal) && Number.isInteger(compraProdC.cantidadReal), "cada pedido recibe un número ENTERO de camisetas, nunca una fracción (\"1.34 camisetas\" no existe)");
+assert(compraProdA.cantidadReal + compraProdB.cantidadReal + compraProdC.cantidadReal === 4, "...y entre los 3 suman exactamente las 4 compradas, sin perder ni sobrar ninguna");
+assert(Number.isInteger(compraProdA.cantidadExcedente) && Number.isInteger(compraProdB.cantidadExcedente) && Number.isInteger(compraProdC.cantidadExcedente), "el excedente TAMBIÉN se reparte en enteros (mismo criterio)");
+assert(compraProdA.cantidadExcedente + compraProdB.cantidadExcedente + compraProdC.cantidadExcedente === 1, "...sumando exacto la 1 unidad de excedente");
+const costoProdSuma = compraProdA.costoReal + compraProdB.costoReal + compraProdC.costoReal;
+assert(costoProdSuma === 142900, "el costo sigue repartiéndose exacto en pesos, sin cambios (esto ya funcionaba)");
+
+state.pedidos = pedidosPreviosProdTest; state.cotizaciones = cotizacionesPreviasProdTest; state.tx = txPreviosProdTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
 // --- calcCotGastosReales: un costo real escrito A PROPÓSITO en $0 debe
 // contar como el ahorro completo frente al estimado, no ignorarse igual que
 // "nunca se escribió" — mismo error de "0 es falsy" ya corregido en

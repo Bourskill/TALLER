@@ -259,6 +259,19 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo quinta ronda: Compras conjuntas ya no reparte una prenda comprada entera en fracciones)
+
+Reportado con un caso real: 3 pedidos necesitando 1 camiseta cada uno,
+comprar 4 en total — el reparto daba 1.34/1.33/1.33 camisetas por
+pedido. "1 camiseta no se puede dividir en decimales, corrige eso".
+
+- Una prenda comprada entera (insumo tipo "producto_comprado", unidad
+  "UND") ahora se reparte SIEMPRE en números enteros — el mismo
+  reparto proporcional sin descuadre de antes, solo sin decimales. El
+  resto de insumos (tela por metro, hilo, etc.) sigue repartiéndose
+  con 2 decimales, sin cambios.
+- Ver CONTABILIDAD.md, Hallazgo #43.
+
 ## Registro de cambios — septiembre 2026 (octogésimo cuarta ronda: "cotizaciones" superó el límite de 50.000 caracteres por celda — TODO guardado de cotizaciones había dejado de funcionar)
 
 Reportado con el error real de la app: "No se pudieron guardar 1

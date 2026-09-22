@@ -2044,6 +2044,46 @@ recuperación entre dispositivos empezaron a fallar de formas que no
 tenían que ver con lo que decían probar, hasta rastrear la causa hasta
 el espejo clobbereado y la señal de staleness vieja.
 
+### 🟢 Hallazgo #43 — Compras conjuntas repartía una prenda comprada entera en fracciones ("1.34 camisetas"). ✅ IMPLEMENTADO
+
+Reportado con un caso real (2026-09-21, screenshot): 3 pedidos
+necesitando 1 "Camiseta Oversize 200gr" cada uno, comprar 4 en total —
+el reparto daba 1.34 / 1.33 / 1.33 unidades por pedido. "1 camiseta no
+se puede dividir en decimales, corrige eso".
+
+**Causa:** `repartirProporcional` (método del mayor residuo, cero
+descuadre) recibía siempre `decimales: 2` para la cantidad, sin
+importar el tipo de insumo — correcto para cantidades CONTINUAS (metros
+de tela, kilos de hilo) pero sin sentido para una prenda comprada
+ENTERA (`insumo.tipo === "producto_comprado"`, siempre en unidad
+"UND" — ver [[referencia_sin_origen_2026-09]]), donde cada unidad es un
+objeto físico indivisible.
+
+**Fix:** `calcGruposCompraCompartida` YA devuelve `esProducto` (booleano)
+en cada grupo — la señal exacta de "esto es una prenda entera, no una
+cantidad continua". `renderFilaGrupoCompraConjunta` y
+`registrar-compra-conjunta` (`modules/finanzas.js`) ahora calculan
+`decCant = g.esProducto ? 0 : 2` y lo usan tanto para
+`repartirProporcional` (cantidad Y excedente — el mismo problema
+aplica a las dos) como para el `.toFixed()` de la vista previa — el
+número que se ve en pantalla ANTES de registrar tiene que coincidir
+exacto con lo que termina guardado. Con `decimales: 0`,
+`repartirProporcional` ya reparte en ENTEROS por el mismo método de
+mayor residuo (sin perder ni sobrar ninguna unidad) — no hizo falta
+ninguna lógica nueva, solo dejar de forzar 2 decimales siempre.
+
+Los campos "Cantidad total comprada"/"...(excedente)" también ganan
+`step="1"` cuando el insumo es una prenda entera, como pista visual
+adicional.
+
+**Pruebas:** 3 pedidos con un insumo `producto_comprado` compartido
+(1 UND cada uno), comprar 4 + 1 de excedente: confirma que el grupo
+queda marcado `esProducto:true`, que la vista previa ya NO muestra
+fracciones ("1.34"/"1.33"/"0.34"/"0.33"), y que tras registrar, la
+cantidad Y el excedente de cada pedido son números ENTEROS
+(`Number.isInteger`) que suman exacto el total comprado — el costo en
+pesos, que ya funcionaba bien, se verificó sin cambios.
+
 ---
 
 ## Próximos pasos

@@ -102,30 +102,36 @@ function renderGruposCompraConjunta(grupos) {
 function renderFilaGrupoCompraConjunta(g, d) {
   var cantidadTotal = num(d.cantidadTotal), costoTotal = num(d.costoTotal);
   var listo = cantidadTotal > 0 && costoTotal > 0;
+  // Una prenda comprada entera (`esProducto`, ver calcGruposCompraCompartida
+  // en core/calc.js — insumo tipo "producto_comprado", siempre en "UND") no
+  // se puede repartir en fracciones: "1.34 camisetas" no existe. El resto de
+  // insumos (tela por metro, hilo, etc.) sí son cantidades continuas y
+  // siguen repartiéndose con 2 decimales, como siempre.
+  var decCant = g.esProducto ? 0 : 2;
   var html = '<div class="card cc-grupo' + (listo ? " cc-grupo-listo" : "") + '">';
   html += '<div class="cc-grupo-head">' +
     '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + '</b><span class="tag">' + g.participantes.length + " pedidos</span></div>" +
-    '<span class="section-sub" style="margin:0;">Necesitan en total ' + num(g.totalCantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + " · estimado " + fmt(g.totalCostoEstimado) + "</span>" +
+    '<span class="section-sub" style="margin:0;">Necesitan en total ' + num(g.totalCantidadEstimada).toFixed(decCant) + " " + esc(g.unidad || "") + " · estimado " + fmt(g.totalCostoEstimado) + "</span>" +
     "</div>";
   html += '<div class="cc-grupo-participantes">' +
-    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + num(p.cantidadEstimada).toFixed(2) + " " + esc(g.unidad || "") + "</span>"; }).join("") +
+    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + num(p.cantidadEstimada).toFixed(decCant) + " " + esc(g.unidad || "") + "</span>"; }).join("") +
     "</div>";
 
   html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
-    '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" placeholder="' + num(g.totalCantidadEstimada).toFixed(2) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
+    '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + num(g.totalCantidadEstimada).toFixed(decCant) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
     '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
     '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
     renderHelp("Cuánto de lo comprado sobra para otro pedido (mínimo del proveedor, conviene comprar de más) — se reparte igual que el resto entre estos pedidos, pero cada parte se registra como una compra de insumo aparte, sin contar como costo ni sobrecosto de ninguno de ellos.") +
-    '</label><input type="number" class="mini-input" placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
+    '</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
     '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
     "</div>";
 
   if (listo) {
     var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
-    var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
+    var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
     var costos = repartirProporcional(costoTotal, pesos, 0);
     var cantidadExcedente = num(d.cantidadExcedente);
-    var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, 2) : null;
+    var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, decCant) : null;
 
     // Igual que en "Registrar gasto/nómina": el costo de esta compra
     // compartida también se puede cubrir, total o parcialmente, con plata ya
@@ -144,9 +150,9 @@ function renderFilaGrupoCompraConjunta(g, d) {
     g.participantes.forEach(function (p, i) {
       html += '<div class="tx-row" style="grid-template-columns:' + cols + ';">' +
         '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
-        '<span class="mobile-th">Cantidad</span><span class="amount">' + cantidades[i].toFixed(2) + " " + esc(g.unidad || "") + "</span>" +
+        '<span class="mobile-th">Cantidad</span><span class="amount">' + cantidades[i].toFixed(decCant) + " " + esc(g.unidad || "") + "</span>" +
         '<span class="mobile-th">Costo</span><span class="amount">' + fmt(costos[i]) + "</span>" +
-        (excedentes ? '<span class="mobile-th">Excedente</span><span class="amount">' + excedentes[i].toFixed(2) + " " + esc(g.unidad || "") + "</span>" : "") +
+        (excedentes ? '<span class="mobile-th">Excedente</span><span class="amount">' + excedentes[i].toFixed(decCant) + " " + esc(g.unidad || "") + "</span>" : "") +
         "</div>";
     });
     html += "</div>";
@@ -722,7 +728,15 @@ export var actions = {
     var serviciosLimpios = validacionServicios.limpias;
 
     var pesos = grupo.participantes.map(function (p) { return p.cantidadEstimada; });
-    var cantidades = repartirProporcional(cantidadTotal, pesos, 2);
+    // Una prenda comprada entera (`esProducto`) no se puede repartir en
+    // fracciones — "1.34 camisetas" no existe — así que se reparte en
+    // enteros (mismo repartirProporcional, solo sin decimales). El resto de
+    // insumos (cantidades continuas: metros, kilos...) sigue con 2
+    // decimales, como siempre. Ver el mismo criterio en
+    // renderFilaGrupoCompraConjunta (el preview tiene que coincidir con lo
+    // que esto termina guardando).
+    var decCant = grupo.esProducto ? 0 : 2;
+    var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
     var costos = repartirProporcional(costoTotal, pesos, 0);
     // Excedente (compra de insumo aparte): se reparte con el MISMO criterio
     // que el resto — a prorrata de lo que cada pedido necesitaba — pero cada
@@ -731,7 +745,7 @@ export var actions = {
     // compra individual (ver sincronizarComprasFinanzasDe), nada especial
     // por tratarse de varios pedidos a la vez.
     var cantidadExcedenteTotal = num(draft.cantidadExcedente);
-    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, 2) : null;
+    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, decCant) : null;
     // Cada servicio asignado se reparte con el MISMO criterio que cantidad/
     // costo/excedente — a prorrata — para que la suma de lo descontado en
     // los movimientos de cada pedido participante siga cuadrando exacto
