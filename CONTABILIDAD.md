@@ -2191,6 +2191,89 @@ lo proporcional).
 
 ---
 
+### 🟢 Hallazgo #45 — el costo del excedente de una compra conjunta se le cargaba entero a los pedidos, en vez de repartirse aparte. ✅ IMPLEMENTADO
+
+Reportado con dos capturas reales (2026-09-21), sobre la MISMA tarjeta de
+"Camiseta Oversize 200gr" del Hallazgo #43 (3 pedidos, 1 UND cada uno):
+"-142900 se está diviendo en 3 y no en 4 (el excedente tambien cuenta
+para division del costo total pagado obviamente, no lo regalaron)".
+
+**Causa raíz — dos bugs enlazados, mismo origen.** El campo "Cantidad
+total comprada" en Compras conjuntas es SOLO lo que cubre a los pedidos
+(no un total que ya incluya el excedente) y "Cantidad para compra de
+insumo (excedente)" es una cantidad ADICIONAL, aparte — así lo usó el
+usuario acá (3 + 1 = 4 camisetas de verdad compradas) y así lo había
+descrito, en sus propias palabras, en el Hallazgo #44: "divido... la
+cantidad para cada pedido Y la cantidad sobrante" (dos montos separados,
+nunca uno incluido en el otro).
+
+Pero `costoExcedenteCompra`/`cantidadExcedenteCompra` (`core/calc.js`,
+Hallazgo #29) exigen la relación CONTRARIA para cualquier compra: que
+`cantidadExcedente` sea SIEMPRE una porción de la propia `cantidadReal`
+de esa compra (nunca algo aparte) — es el modelo correcto para una
+compra individual (`cantidadReal` = total físico comprado, con la
+sugerencia automática = `cantidadReal − lo que necesitaba`). El código de
+"Compras conjuntas" (`registrar-compra-conjunta`,
+`modules/finanzas.js`) guardaba `cantidadReal` = solo el reparto
+proporcional de "Cantidad total comprada" (sin sumarle la porción de
+excedente que le tocara a esa compra) — violando esa invariante:
+
+1. **El costo del excedente nunca se separaba.** `costos =
+   repartirProporcional(costoTotal, pesos, 0)` repartía TODO el dinero
+   pagado (incluido lo que costó el excedente) entre solo los pedidos,
+   usando sus pesos de necesidad — el excedente se llevaba una camiseta
+   entera sin que le tocara nada de plata.
+2. **...y eso rompía `costoRealPedido` para quien sostenía la reserva.**
+   Como su `cantidadReal` guardada (1) terminaba siendo EXACTAMENTE
+   igual a su `cantidadExcedente` (1) — nunca la incluía como una
+   porción MÁS GRANDE — `cantidadExcedenteCompra` (`Math.min(excedente,
+   cantidadReal)`) se comía TODA la cantidadReal, y
+   `costoRealPedido = costoReal − costoExcedenteCompra` caía a **$0**
+   para ese pedido. Con solo 3 pedidos y 1 excedente (a diferencia del
+   ejemplo de tela del Hallazgo #44, 10m/20m necesitados contra apenas
+   6m de excedente, donde `cantidadReal` de cada uno era mucho mayor
+   que su porción de excedente y el bug quedaba oculto) el caso quedó
+   al límite exacto donde el bug se nota.
+
+**Fix (`registrar-compra-conjunta` y su preview
+`renderFilaGrupoCompraConjunta`, `modules/finanzas.js`):**
+- El costo total pagado se reparte con el MISMO `repartirProporcional`,
+  agregando el excedente como un "participante" más, pesado por su
+  propia cantidad: `pesosCosto = pesos.concat([cantidadExcedenteTotal])`
+  → `repartirProporcional(costoTotal, pesosCosto, 0)`. Cero descuadre:
+  la suma de lo que le toca a los pedidos MÁS lo que le toca al
+  excedente vuelve a dar exacto el total pagado.
+- La porción de ESE costo de excedente que le toca a cada tenedor (el
+  método del mayor residuo puede dejarla entera en uno solo) se reparte
+  otra vez, a prorrata de cuánta CANTIDAD de excedente sostiene cada
+  uno — así el precio unitario implícito (costoReal ÷ cantidadReal)
+  queda uniforme para todos, tenedores de reserva incluidos.
+- `cantidadReal`/`costoReal` GUARDADOS en cada compra ahora SÍ incluyen
+  la porción de excedente que le tocó sostener a esa compra en
+  particular (`cantidadesFinal[i] + cantidadExcedentePedido`,
+  `costos[i] + costoExcedentePedido`) — cumpliendo la invariante que
+  `cantidadExcedenteCompra`/`costoExcedenteCompra` ya exigían desde el
+  Hallazgo #29, en vez de romperla silenciosamente.
+
+**Rediseño de paso, mismo mensaje del usuario.** La columna "Excedente"
+por fila hacía parecer que el excedente le "pertenecía" solo al pedido
+donde cayó el residuo del reparto: "en la columna de abajo 'excedente'
+no solo se está vinculando a 1 pedido cierto?... en vez de una columna,
+1 fila tal vez". Se quitó la columna y se agregó una sola línea fuera de
+la tabla ("↺ Reserva compartida: N UND · $X — disponible para
+cualquiera de estos M pedidos..."), dejando claro que es un recurso de
+TODOS los participantes, no de la fila donde aparece el número.
+
+**Pruebas:** el escenario exacto reportado (3 pedidos, 1 UND cada uno,
+compra 3+1 de excedente, $142.900) — el tenedor de la reserva termina
+con su costo propio en $35.725 (nunca $0), los otros 2 en $35.725 cada
+uno, cero descuadre contra el total pagado; más la corrección de
+números en las pruebas ya existentes de los Hallazgos #43/#44 (que
+usaban la relación de campos "al revés" y coincidían con el resultado
+correcto solo por casualidad numérica en el caso de la tela).
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

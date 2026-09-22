@@ -259,6 +259,27 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo séptima ronda: el costo del excedente de una compra conjunta ya no se le cargaba entero a los pedidos)
+
+Reportado con dos capturas reales, sobre la misma compra conjunta de la
+ronda anterior: "142900 se está diviendo en 3 y no en 4... el excedente
+también cuenta para división del costo total pagado, obviamente, no lo
+regalaron". El total pagado se repartía solo entre los pedidos, sin
+descontar antes la porción que le correspondía al excedente — y eso
+además hacía caer a $0 el costo propio del pedido que terminaba
+sosteniendo la reserva.
+
+- El costo total pagado ahora se reparte entre los pedidos Y el
+  excedente, a prorrata de cuánto pesa cada uno — cero descuadre, nadie
+  paga de más ni de menos.
+- El pedido que sostiene la reserva ya no ve su costo propio caer a $0
+  solo por sostener una unidad de más.
+- La columna "Excedente" por fila (que hacía parecer que la reserva era
+  de un solo pedido) se cambió por una sola línea fuera de la tabla,
+  dejando claro que es de todos los que compraron juntos — pedido
+  explícito del usuario en el mismo mensaje.
+- Ver CONTABILIDAD.md, Hallazgo #45.
+
 ## Registro de cambios — septiembre 2026 (octogésimo sexta ronda: el excedente de una compra conjunta pasa a ser una reserva compartida, no un costo del pedido)
 
 Reportado con una captura real: el movimiento de excedente de una

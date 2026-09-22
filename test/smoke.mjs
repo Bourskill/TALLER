@@ -5239,14 +5239,92 @@ const compraProdA = cotProdATrasReg.compras.filter(function (c) { return c.clave
 const compraProdB = cotProdBTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
 const compraProdC = cotProdCTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
 assert(Number.isInteger(compraProdA.cantidadReal) && Number.isInteger(compraProdB.cantidadReal) && Number.isInteger(compraProdC.cantidadReal), "cada pedido recibe un número ENTERO de camisetas, nunca una fracción (\"1.34 camisetas\" no existe)");
-assert(compraProdA.cantidadReal + compraProdB.cantidadReal + compraProdC.cantidadReal === 4, "...y entre los 3 suman exactamente las 4 compradas, sin perder ni sobrar ninguna");
-assert(compraProdA.cantidadReal === 2 && compraProdB.cantidadReal === 1 && compraProdC.cantidadReal === 1, "...y quedó EXACTAMENTE el reparto manual (2/1/1), no el proporcional que traía por defecto");
+// Desde el Hallazgo #45, cantidadReal guardada ya no es SOLO el reparto
+// manual (2/1/1) — también incluye la porción de excedente que le tocó a
+// esa compra (A sostiene la 1 unidad de reserva: 2+1=3). Es la MISMA
+// invariante que cantidadExcedenteCompra/costoExcedenteCompra (core/calc.js)
+// ya exigían desde el Hallazgo #29: el excedente es SIEMPRE una porción de
+// la propia cantidadReal, nunca algo aparte.
+assert(compraProdA.cantidadReal === 3 && compraProdB.cantidadReal === 1 && compraProdC.cantidadReal === 1, "el reparto manual (2/1/1) queda intacto, más la unidad de excedente sumada a quien la sostiene (A: 2+1=3)");
+assert(compraProdA.cantidadReal + compraProdB.cantidadReal + compraProdC.cantidadReal === 5, "...y entre los 3 suman las 4 que cubrían los pedidos MÁS la 1 de excedente (5), nunca menos");
 assert(Number.isInteger(compraProdA.cantidadExcedente) && Number.isInteger(compraProdB.cantidadExcedente) && Number.isInteger(compraProdC.cantidadExcedente), "el excedente TAMBIÉN se reparte en enteros (mismo criterio)");
 assert(compraProdA.cantidadExcedente + compraProdB.cantidadExcedente + compraProdC.cantidadExcedente === 1, "...sumando exacto la 1 unidad de excedente");
 const costoProdSuma = compraProdA.costoReal + compraProdB.costoReal + compraProdC.costoReal;
-assert(costoProdSuma === 142900, "el costo sigue repartiéndose exacto en pesos, sin cambios (esto ya funcionaba)");
+assert(costoProdSuma === 142900, "el costo sigue repartiéndose exacto en pesos, sin perder ni un peso entre los 3 (esto ya funcionaba)");
 
 state.pedidos = pedidosPreviosProdTest; state.cotizaciones = cotizacionesPreviasProdTest; state.tx = txPreviosProdTest;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
+// -- Hallazgo #45: el costo del excedente también tiene que descontarse del
+// total pagado ANTES de repartir entre los pedidos — reportado por el
+// usuario 2026-09-21 con captura real: 3 pedidos necesitando 1 camiseta
+// cada uno, compra 3 (para los pedidos) + 1 de excedente, paga $142.900 en
+// total. "142900 se está diviendo en 3 y no en 4... el excedente tambien
+// cuenta para division del costo total pagado, obviamente, no lo
+// regalaron". Antes, quien se quedaba con la reserva terminaba con
+// costoRealPedido en $0: su cantidadReal guardada NUNCA incluía su propia
+// porción de excedente, así que cantidadExcedenteCompra (core/calc.js) se
+// tragaba TODA su cantidadReal (cantidadExcedente === cantidadReal).
+const { costoRealPedido: costoRealPedidoProdTest, cantidadRealPedido: cantidadRealPedidoProdTest } = await import("../js/core/calc.js");
+const pedidosPreviosH45Test = state.pedidos, cotizacionesPreviasH45Test = state.cotizaciones, txPreviosH45Test = state.tx;
+const cotH45A = cotConProductoComprado("cot-h45A-test", "ped-h45A-test");
+const cotH45B = cotConProductoComprado("cot-h45B-test", "ped-h45B-test");
+const cotH45C = cotConProductoComprado("cot-h45C-test", "ped-h45C-test");
+const pedH45A = pedidoProdTest("ped-h45A-test", "cot-h45A-test", "OP-7204");
+const pedH45B = pedidoProdTest("ped-h45B-test", "cot-h45B-test", "OP-2085");
+const pedH45C = pedidoProdTest("ped-h45C-test", "cot-h45C-test", "OP-5958");
+state.pedidos = [pedH45A, pedH45B, pedH45C];
+state.cotizaciones = [cotH45A, cotH45B, cotH45C];
+state.tx = [];
+
+const grupoH45Test = calcGruposTest([pedH45A.id, pedH45B.id, pedH45C.id])[0];
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: [pedH45A.id, pedH45B.id, pedH45C.id], porClave: {} };
+render();
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="cantidadTotal"]', "3");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="costoTotal"]', "142900");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="cantidadExcedente"]', "1");
+
+// -- reportado por el usuario en el mismo mensaje: la columna "Excedente"
+// por fila hacía parecer que el excedente le pertenecía SOLO al pedido
+// donde cayó el residuo del reparto — "no solo se está vinculando a 1
+// pedido, cierto?... en vez de una columna, 1 fila tal vez". Ahora es una
+// sola línea fuera de la tabla, no una columna más de una fila puntual.
+var previewH45Texto = document.getElementById("app").textContent;
+assert(previewH45Texto.indexOf("Reserva compartida") !== -1, "el preview ya explica el excedente como una reserva compartida de los 3, no como una columna más de la fila de un pedido puntual");
+assert(previewH45Texto.indexOf("35.725") !== -1 || previewH45Texto.indexOf("35725") !== -1, "...con su propio costo ya calculado (142.900 / 4), no en $0");
+
+click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoH45Test.clave + '"]');
+
+const cotH45ATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45A-test"; })[0];
+const cotH45BTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45B-test"; })[0];
+const cotH45CTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45C-test"; })[0];
+const compraH45A = cotH45ATrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
+const compraH45B = cotH45BTrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
+const compraH45C = cotH45CTrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
+
+// El método del mayor residuo deja la 1 unidad de excedente completa en UN
+// solo tenedor — mismo comportamiento de siempre (repartirProporcional), no
+// se asume cuál de los 3 es para que la prueba no dependa de eso.
+var candidatosH45 = [compraH45A, compraH45B, compraH45C];
+var tenedorH45 = candidatosH45.filter(function (c) { return c.cantidadExcedente === 1; })[0];
+var restoH45 = candidatosH45.filter(function (c) { return c !== tenedorH45; });
+assert(!!tenedorH45 && restoH45.length === 2, "la 1 unidad de excedente quedó completa en un solo tenedor, como siempre");
+
+var costoH45Suma = compraH45A.costoReal + compraH45B.costoReal + compraH45C.costoReal;
+assert(costoH45Suma === 142900, "el total pagado (142.900) queda repartido exacto entre las 3 compras, cero descuadre");
+assert(tenedorH45.costoReal === 71450, "el tenedor de la reserva absorbe SU propio costo (35.725) MÁS el costo de la unidad de excedente que sostiene (35.725) — 142.900 / 4 unidades reales, no / 3");
+assert(restoH45[0].costoReal === 35725 && restoH45[1].costoReal === 35725, "los otros 2 pedidos pagan solo su propia unidad, a 35.725 — mismo precio unitario para los 3 y para el excedente, sin que nadie subsidie al otro");
+
+// La prueba de fuego del bug reportado: el costo REAL atribuible al pedido
+// que sostiene la reserva (descontado el excedente) no puede caer a $0 solo
+// por sostener 1 unidad de más.
+assert(costoRealPedidoProdTest(tenedorH45) === 35725, "el pedido que sostiene la reserva sigue viendo SU costo real de 35.725 — no $0, no el costo del excedente completo");
+assert(cantidadRealPedidoProdTest(tenedorH45) === 1, "...y su cantidad real neta sigue siendo la 1 camiseta que de verdad necesitaba, no 0");
+assert(costoRealPedidoProdTest(restoH45[0]) === 35725 && costoRealPedidoProdTest(restoH45[1]) === 35725, "a los otros 2, que no tocaron la reserva, no les cambia nada");
+
+state.pedidos = pedidosPreviosH45Test; state.cotizaciones = cotizacionesPreviasH45Test; state.tx = txPreviosH45Test;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
@@ -5697,13 +5775,17 @@ const grupoConjExcTest = calcGruposTest([pedConjExcA.id, pedConjExcB.id])[0];
 state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcA.id + '"]');
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcB.id + '"]');
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadTotal"]', "36");
+// cantidadTotal es SOLO lo que cubre a los 2 pedidos (10+20=30) — el
+// excedente (6) es ADICIONAL, no una porción de esos 30 (ver Hallazgo #45:
+// el usuario compra "la cantidad para cada pedido Y la cantidad sobrante"
+// como dos montos separados, nunca uno incluido en el otro).
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadTotal"]', "30");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="costoTotal"]', "108000");
 var campoExcedenteConjTest = document.querySelector('input[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]');
 assert(!!campoExcedenteConjTest, "el formulario de Compras conjuntas también tiene el campo de excedente");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]', "6");
 var previewExcConjTest = document.getElementById("app").textContent;
-assert(previewExcConjTest.indexOf("excedente") !== -1, "el reparto en pantalla ya muestra cuánto excedente le toca a cada pedido antes de confirmar");
+assert(previewExcConjTest.indexOf("Reserva compartida") !== -1, "el reparto en pantalla ya muestra la reserva de excedente como una línea propia, no como una columna más de la fila de un pedido puntual");
 click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoConjExcTest.clave + '"]');
 
 var cotConjExcATrasTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcA-test"; })[0];
@@ -5711,7 +5793,7 @@ var cotConjExcBTrasTest = state.cotizaciones.filter(function (c) { return c.id =
 var compraConjExcA = cotConjExcATrasTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
 var compraConjExcB = cotConjExcBTrasTest.compras.filter(function (c) { return c.clave === grupoConjExcTest.clave; })[0];
 
-assert(compraConjExcA.cantidadReal === 12 && compraConjExcB.cantidadReal === 24, "el total comprado (36) se reparte a prorrata igual que siempre: 12 y 24");
+assert(compraConjExcA.cantidadReal === 12 && compraConjExcB.cantidadReal === 24, "el total para los pedidos (30) se reparte a prorrata igual que siempre (10 y 20), MÁS la porción de excedente que le tocó sostener a cada uno (2 y 4) — 12 y 24");
 assert(compraConjExcA.cantidadExcedente === 2 && compraConjExcB.cantidadExcedente === 4, "el excedente (6) se reparte con el MISMO criterio, cada uno a su propia compra — no uno solo sin dueño");
 assert(cantidadRealPedidoTest(compraConjExcA) === 10 && cantidadRealPedidoTest(compraConjExcB) === 20, "descontado el excedente, a cada pedido le queda justo lo que necesitaba (10 y 20)");
 assert(costoRealPedidoTest(compraConjExcA) === 30000 && costoRealPedidoTest(compraConjExcB) === 60000, "...con su costo neto correspondiente, sin variación de precio (30.000 y 60.000, igual al estimado de cada uno)");

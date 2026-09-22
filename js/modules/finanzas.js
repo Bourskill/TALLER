@@ -121,7 +121,7 @@ function renderFilaGrupoCompraConjunta(g, d) {
     '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + num(g.totalCantidadEstimada).toFixed(decCant) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
     '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
     '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
-    renderHelp("Cuánto de lo comprado sobra (mínimo del proveedor, conviene comprar de más) — queda como una RESERVA compartida entre estos mismos pedidos, no como costo ni sobrecosto de ninguno. Si más adelante uno de ellos necesita más de lo estimado (ej. una reposición), se descuenta solo de acá en vez de contar como una compra nueva.") +
+    renderHelp("Cuánto de lo comprado sobra (mínimo del proveedor, conviene comprar de más) — queda como una RESERVA compartida entre estos mismos pedidos, no como costo ni sobrecosto de ninguno. Su parte del costo también se separa del total pagado (no se reparte entre los pedidos, no lo regalaron). Si más adelante uno de ellos necesita más de lo estimado (ej. una reposición), se descuenta solo de acá en vez de contar como una compra nueva.") +
     '</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
     '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
     "</div>";
@@ -129,9 +129,19 @@ function renderFilaGrupoCompraConjunta(g, d) {
   if (listo) {
     var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
     var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
-    var costos = repartirProporcional(costoTotal, pesos, 0);
-    var cantidadExcedente = num(d.cantidadExcedente);
-    var excedentes = cantidadExcedente > 0 ? repartirProporcional(cantidadExcedente, pesos, decCant) : null;
+    var cantidadExcedenteTotal = num(d.cantidadExcedente);
+    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, decCant) : null;
+    // El costo total pagado cubre TANTO lo que necesitaban los pedidos COMO
+    // el excedente que se llevó de más — si no se descuenta su porción antes
+    // de repartir, los pedidos terminan pagando ellos solos una compra que
+    // no fue solo suya (reportado por el usuario 2026-09-21, ver Hallazgo
+    // #45). Se reparte con el MISMO método, agregando el excedente como un
+    // participante más (pesado por su propia cantidad) — la suma sigue
+    // dando exacto el total pagado, cero descuadre.
+    var pesosCosto = cantidadExcedenteTotal > 0 ? pesos.concat([cantidadExcedenteTotal]) : pesos;
+    var costosConExcedente = repartirProporcional(costoTotal, pesosCosto, 0);
+    var costos = costosConExcedente.slice(0, pesos.length);
+    var costoExcedenteTotal = cantidadExcedenteTotal > 0 ? costosConExcedente[pesos.length] : 0;
     // La cantidad de cada pedido se puede escribir a mano en vez de confiar
     // solo en el reparto proporcional — reportado por el usuario
     // 2026-09-21: "no todos los insumos se pueden dividir así... más bien
@@ -162,20 +172,32 @@ function renderFilaGrupoCompraConjunta(g, d) {
     html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así' +
       renderHelp("La cantidad de cada pedido viene calculada a prorrata, pero se puede corregir a mano en cualquier fila — mientras la suma coincida con el total comprado, se guarda tal cual la dejes.") +
       "</div>";
-    var cols = excedentes ? "1fr 90px 100px 90px" : "1fr 90px 100px";
-    html += '<div class="tx-row head" style="grid-template-columns:' + cols + ';">' +
-      '<span>Pedido</span><span class="ins-th-num">Cantidad</span><span class="ins-th-num">Costo</span>' +
-      (excedentes ? '<span class="ins-th-num">Excedente</span>' : "") + "</div>";
+    html += '<div class="tx-row head" style="grid-template-columns:1fr 90px 100px;">' +
+      '<span>Pedido</span><span class="ins-th-num">Cantidad</span><span class="ins-th-num">Costo</span></div>';
     g.participantes.forEach(function (p, i) {
       var valorCantidad = overridesCantidad[p.cotId] !== undefined ? overridesCantidad[p.cotId] : cantidades[i].toFixed(decCant);
-      html += '<div class="tx-row" style="grid-template-columns:' + cols + ';">' +
+      html += '<div class="tx-row" style="grid-template-columns:1fr 90px 100px;">' +
         '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
         '<span class="mobile-th">Cantidad</span><span style="display:flex;align-items:center;gap:4px;justify-content:flex-end;"><input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(valorCantidad) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.clave) + '" data-cot="' + esc(p.cotId) + '" /><span class="section-sub" style="margin:0;white-space:nowrap;">' + esc(g.unidad || "") + "</span></span>" +
         '<span class="mobile-th">Costo</span><span class="amount">' + fmt(costos[i]) + "</span>" +
-        (excedentes ? '<span class="mobile-th">Excedente</span><span class="amount">' + excedentes[i].toFixed(decCant) + " " + esc(g.unidad || "") + "</span>" : "") +
         "</div>";
     });
     html += '<div class="section-sub" style="margin-top:6px;text-align:right;">Repartido: <b style="color:' + (cuadra ? "var(--ink)" : "var(--danger-ink)") + ';">' + repartidoTotal.toFixed(decCant) + "</b> / " + cantidadTotal.toFixed(decCant) + " " + esc(g.unidad || "") + "</div>";
+    // Antes esto era una columna más por fila ("Excedente"), lo que hacía
+    // parecer que el excedente le pertenecía SOLO a la fila donde cayó el
+    // residuo del reparto (el método del mayor residuo lo deja entero en un
+    // único pedido, ver repartirProporcional) — confuso, porque en realidad
+    // es una reserva de LOS 3, no de ese pedido puntual. Reportado por el
+    // usuario 2026-09-21 ("no solo se está vinculando a 1 pedido, cierto?...
+    // en vez de una columna, 1 fila tal vez"). Ahora es una sola línea
+    // debajo de la tabla, fuera de cualquier fila de pedido.
+    if (excedentes) {
+      html += '<div class="section-sub" style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+        '<span class="tag">↺ Reserva compartida</span>' +
+        "<span>" + cantidadExcedenteTotal.toFixed(decCant) + " " + esc(g.unidad || "") + " · " + fmt(costoExcedenteTotal) +
+        " — disponible para cualquiera de estos " + g.participantes.length + " pedidos si más adelante necesitan más de lo estimado.</span>" +
+        "</div>";
+    }
     html += "</div>";
     html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
   }
@@ -773,7 +795,6 @@ export var actions = {
     // que esto termina guardando).
     var decCant = grupo.esProducto ? 0 : 2;
     var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
-    var costos = repartirProporcional(costoTotal, pesos, 0);
     // La cantidad de cada pedido admite corrección manual (ver
     // renderFilaGrupoCompraConjunta / "set-compra-conjunta-cantidad-pedido")
     // — sin nada escrito, usa la proporcional de siempre. Mismo criterio de
@@ -799,6 +820,24 @@ export var actions = {
     // por tratarse de varios pedidos a la vez.
     var cantidadExcedenteTotal = num(draft.cantidadExcedente);
     var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, decCant) : null;
+    // El costo total pagado cubre TANTO lo que necesitaban los pedidos COMO
+    // el excedente que se llevó de más — si no se descuenta su porción antes
+    // de repartir, los pedidos terminan pagando ellos solos una compra que
+    // no fue solo suya (reportado por el usuario 2026-09-21, ver Hallazgo
+    // #45). Se reparte con el MISMO método, agregando el excedente como un
+    // participante más (pesado por su propia cantidad) — la suma sigue
+    // dando exacto el total pagado, cero descuadre. El preview
+    // (renderFilaGrupoCompraConjunta) tiene que coincidir con esto.
+    var pesosCosto = cantidadExcedenteTotal > 0 ? pesos.concat([cantidadExcedenteTotal]) : pesos;
+    var costosConExcedente = repartirProporcional(costoTotal, pesosCosto, 0);
+    var costos = costosConExcedente.slice(0, pesos.length);
+    var costoExcedenteTotal = cantidadExcedenteTotal > 0 ? costosConExcedente[pesos.length] : 0;
+    // La porción de ese costo de excedente que le toca a CADA tenedor (puede
+    // caer entera en uno solo, por el método del mayor residuo) se reparte a
+    // prorrata de cuánta cantidad de excedente le tocó — así costoReal/
+    // cantidadReal de esa compra sigue siendo un precio unitario uniforme,
+    // sin importar cómo haya caído el reparto de cantidad.
+    var costosExcedente = excedentes ? repartirProporcional(costoExcedenteTotal, excedentes, 0) : null;
     // Cada servicio asignado se reparte con el MISMO criterio que cantidad/
     // costo/excedente — a prorrata — para que la suma de lo descontado en
     // los movimientos de cada pedido participante siga cuadrando exacto
@@ -815,7 +854,23 @@ export var actions = {
       var serviciosDescuento = repartosServicios
         .map(function (r) { return { nombre: r.nombre, monto: r.partes[i] }; })
         .filter(function (s) { return s.monto > 0; });
-      reparto[p.cotId] = { cantidadReal: cantidadesFinal[i], costoReal: costos[i], cantidadExcedente: excedentes ? excedentes[i] : 0, serviciosDescuento: serviciosDescuento };
+      // cantidadExcedenteCompra/costoExcedenteCompra (core/calc.js) asumen
+      // que el excedente de una compra es SIEMPRE una porción de su propia
+      // cantidadReal/costoReal (nunca algo aparte) — así que cantidadReal y
+      // costoReal de cada compra tienen que incluir lo que le tocó de
+      // excedente a ESE tenedor, no solo lo que ese pedido necesitaba. Si no,
+      // costoRealPedido/cantidadRealPedido (la única puerta de lectura, ver
+      // Hallazgo #29) restan el excedente completo de una cantidadReal que
+      // nunca lo incluyó, dejando en $0 el costo propio de quien tiene la
+      // reserva.
+      var cantidadExcedentePedido = excedentes ? excedentes[i] : 0;
+      var costoExcedentePedido = costosExcedente ? costosExcedente[i] : 0;
+      reparto[p.cotId] = {
+        cantidadReal: cantidadesFinal[i] + cantidadExcedentePedido,
+        costoReal: costos[i] + costoExcedentePedido,
+        cantidadExcedente: cantidadExcedentePedido,
+        serviciosDescuento: serviciosDescuento
+      };
     });
 
     var afectadas = 0;
