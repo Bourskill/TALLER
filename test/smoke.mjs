@@ -3808,6 +3808,51 @@ function mockearCotizacionesEnLaSheet(cotizacionesEnLaSheet) {
   };
 }
 
+// (0) beforeunload también tiene que advertir mientras una escritura está EN
+// VUELO (ni falló — hayPendientes() — ni es un borrador sin intentar —
+// hayBorradores()), no solo después de que algo ya falló visiblemente.
+// Reportado por el usuario 2026-09-22: el aviso de "recuperar" le salía muy
+// seguido sin haber visto ninguna advertencia al cerrar, y "Descartar" le
+// revivió un pedido que ya había eliminado — el borrado nunca llegó a
+// guardarse porque cerró la pestaña justo mientras esa escritura viajaba por
+// la red, y nadie se lo advirtió.
+//
+// Necesita una instancia AISLADA de core/guardado.js (import con query de
+// cache-busting): el resto de esta suite ya dejó un guardado fallido real
+// colgado más abajo (sesión de Google vencida a propósito, ver la nota
+// siguiente) — sobre el módulo COMPARTIDO, hayPendientes() ya sería true de
+// por sí, y no se podría distinguir si la advertencia sale por ESO o por
+// enVuelo. Tampoco se registra el listener en el `window` real (se captura
+// la función a mano) para no dejarle a la pestaña compartida un segundo
+// handler colgado para el resto del archivo.
+const guardadoAisladoMod = await import("../js/core/guardado.js?envuelo-test");
+var handlerCapturado = null;
+var addEventListenerOriginal = window.addEventListener;
+window.addEventListener = function (tipo, fn) {
+  if (tipo === "beforeunload") { handlerCapturado = fn; return; }
+  return addEventListenerOriginal.call(window, tipo, fn);
+};
+var resolverEscrituraLenta;
+var escrituraLenta = new Promise(function (resolve) { resolverEscrituraLenta = resolve; });
+guardadoAisladoMod.configurarGuardado({ escribir: function () { return escrituraLenta; }, alCambiar: function () {} });
+window.addEventListener = addEventListenerOriginal;
+assert(typeof handlerCapturado === "function", "sanity: se pudo capturar el handler de beforeunload sin registrarlo en la pestaña compartida");
+
+function eventoBeforeunloadFalso() {
+  return { defaultPrevented: false, preventDefault: function () { this.defaultPrevented = true; } };
+}
+var evtSinNada = eventoBeforeunloadFalso();
+handlerCapturado(evtSinNada);
+assert(!evtSinNada.defaultPrevented, "sanity: sin nada pendiente, en borrador, ni en vuelo, cerrar NO advierte");
+
+guardadoAisladoMod.guardarClave("clave-envuelo-test", "{}"); // no se espera a propósito: la escritura queda EN VUELO
+var evtEnVuelo = eventoBeforeunloadFalso();
+handlerCapturado(evtEnVuelo);
+assert(evtEnVuelo.defaultPrevented, "una escritura EN VUELO (ni falló todavía, ni es un borrador sin intentar) SÍ dispara la advertencia al cerrar — antes de este fix, cerrar en esa ventana no avisaba nada y el cambio se perdía en silencio");
+
+resolverEscrituraLenta(); // deja que la escritura simulada termine, para no dejar timers colgando
+await new Promise(function (resolve) { setTimeout(resolve, 0); });
+
 // (1) beforeunload: antes solo miraba si había un guardado FALLIDO
 // (hayPendientes) — una edición que nunca se INTENTÓ guardar no pasaba por
 // ahí y se podía cerrar sin ningún aviso.

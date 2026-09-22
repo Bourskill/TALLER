@@ -259,6 +259,23 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (octogésimo novena ronda: cerrar la pestaña con un guardado todavía en camino ya no se pierde en silencio)
+
+Reportado: "cada vez que entro hay riesgo de perder información o
+trocarla... esa notificación no debería aparecer tan seguido" — y que
+"Descartar" a veces revivía un pedido ya eliminado. La advertencia de
+"tienes cambios sin guardar" al cerrar la pestaña miraba dos de tres
+estados posibles: un guardado que ya falló, y una edición nunca
+intentada — pero no una escritura que en ESE momento seguía viajando
+por la red (típicamente medio segundo). Cerrar justo ahí mataba la
+petición sin ningún aviso; recién se notaba al volver a abrir, con el
+aviso de "recuperar" — y "Descartar" ahí podía deshacer una acción real
+(como borrar un pedido) que nunca llegó a guardarse de verdad.
+
+- La advertencia al cerrar ahora también cubre esa ventana — una línea,
+  en el guardián que ya existía.
+- Ver CONTABILIDAD.md, Hallazgo #47.
+
 ## Registro de cambios — septiembre 2026 (octogésimo octava ronda: "Compras conjuntas" ahora también reparte costos compartidos como domicilio, no solo insumos)
 
 Reportado: "no me sale 'domicilio' y los pedidos compartidos si lo tienen

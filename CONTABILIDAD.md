@@ -2355,6 +2355,73 @@ clave/tx/pedidoId, y que el grupo desaparece tras registrar.
 
 ---
 
+### 🟢 Hallazgo #47 — cerrar la pestaña mientras un guardado SEGUÍA en vuelo no avisaba nada; el cambio se perdía en silencio. ✅ IMPLEMENTADO
+
+Reportado (2026-09-22): "estoy teniendo problemas con el auto guardado,
+cada vez que entro hay riesgo de perder información o trocarla ya no sé
+si presionar 'restaurar' o 'descartar', esa notificación no debería de
+aparecer tan seguido". Investigado con preguntas de seguimiento
+(AskUserQuestion) para no repetir el error de 2026-09-04 ("el síntoma
+reportado casi seguro no era el bug real", ver
+`conflicto_multi_dispositivo_2026-09`): confirmó que a veces "Descartar"
+le **revivía un pedido que ya había eliminado**, y que la mayoría de la
+app "se guarda automático" (sin un botón explícito) — es decir, el
+aviso le salía sobre acciones que él NUNCA vivió como "sin guardar".
+
+**Causa raíz.** `core/guardado.js` tiene un `beforeunload` que impide
+cerrar la pestaña sin avisar si hay algo sin guardar — pero solo
+revisaba dos de TRES estados posibles:
+- `pendientes` (`hayPendientes()`): una escritura que YA FALLÓ visible.
+- `borradores` (`hayBorradores()`): una edición que NUNCA se intentó
+  guardar (cotización en modo explícito, pedido rápido a medio llenar).
+- **`enVuelo`** (contador de escrituras EN ESTE MOMENTO viajando por la
+  red — ni fallaron todavía ni son un borrador sin intentar): **nunca se
+  revisaba**. Cerrar la pestaña justo en esa ventana (típicamente medio
+  segundo, más con red lenta) mata la petición a mitad de camino sin
+  ningún aviso — el espejo local SÍ tiene el cambio (se escribe
+  sincrónico, antes de la red, ver `guardarClave`), pero la Sheet nunca
+  lo recibió. Recién se nota al volver a abrir la app, con el aviso de
+  "recuperar" — sin que el usuario haya visto NUNCA una advertencia al
+  cerrar que le diera pie a pensar que algo estaba en riesgo.
+
+Esto explica los dos síntomas reportados: (1) el aviso "sale muy
+seguido" — cualquier cierre de pestaña justo después del último clic (un
+hábito común: "ya terminé, cierro") tiene una probabilidad real de caer
+en esa ventana silenciosa, para CUALQUIER acción, no solo las que tienen
+un botón "Guardar" visible; y (2) "Descartar" revive un pedido eliminado
+— si el borrado de ese pedido fue justo la escritura que quedó a medio
+camino, la Sheet real NUNCA tuvo el borrado aplicado. "Restaurar" habría
+reintentado ese borrado de verdad; "Descartar" (quedarse con lo que hay
+en la Sheet, tirar la copia local) deja el pedido tal como estaba ANTES
+de borrarlo — parece que "revivió", pero nunca llegó a morir del todo.
+
+**Fix — una línea, en el guardián que ya existía:**
+```js
+if (!hayPendientes() && !hayBorradores() && !enVuelo) return;
+```
+(antes: `if (!hayPendientes() && !hayBorradores()) return;`). `enVuelo`
+ya era una variable de módulo en `core/guardado.js` (contador de
+escrituras activas, usado también por `marcarPosibleLentitud`) — no hizo
+falta ningún estado nuevo, solo revisarlo en el guardián que faltaba.
+
+**Por qué no se detectó antes:** los guardados normales tardan
+milisegundos — la ventana de riesgo es angosta y depende de la latencia
+de red real, algo que un entorno de pruebas sin red real no reproduce
+por sí solo. Se probó forzando el escenario a mano: un `escritor` mock
+que NUNCA resuelve, para observar `enVuelo > 0` de forma determinística
+en vez de depender de timing real.
+
+**Pruebas:** instancia AISLADA de `core/guardado.js` (import con query
+de cache-busting) para no heredar el guardado fallido real que el resto
+de la suite ya deja colgado a propósito más abajo (simula sesión de
+Google vencida) — sobre el módulo compartido, `hayPendientes()` ya
+sería `true` de por sí y no se podría aislar si la advertencia sale por
+ESO o por `enVuelo`. Tampoco se registra el listener en el `window`
+real de la suite (se captura la función a mano) para no dejarle un
+segundo handler colgado al resto del archivo.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

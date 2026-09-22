@@ -273,7 +273,22 @@ export function configurarGuardado(opts) {
       // pedido rápido a medio llenar, nunca pasan por ahí (nadie intentó
       // guardarlos todavía), así que se podían cerrar sin ningún aviso y
       // perderse enteros. Ver "borradores" más arriba.
-      if (!hayPendientes() && !hayBorradores()) return;
+      //
+      // Faltaba un tercer caso, más silencioso todavía: `enVuelo > 0` es una
+      // escritura que está EN ESTE MOMENTO viajando por la red — ni falló
+      // (no está en `pendientes`) ni es un borrador sin intentar (no está en
+      // `borradores`). Cerrar la pestaña en esa ventana (típicamente medio
+      // segundo, a veces más con la red lenta) mata la petición a mitad de
+      // camino sin ningún aviso — el cambio queda SOLO en el espejo local,
+      // nunca llegó a la Sheet, y recién se nota al volver a abrir con el
+      // aviso de "recuperar". Reportado por el usuario 2026-09-22: el aviso
+      // le salía muy seguido y sin haber visto ninguna advertencia al
+      // cerrar — y "Descartar" (quedarse con lo que hay en la Sheet, tirar
+      // la copia local) podía "revivir" un pedido que él ya había eliminado,
+      // porque ese borrado específico nunca había llegado a guardarse de
+      // verdad. Mismo hueco que el resto de este archivo existe para tapar,
+      // solo que en esta ventana particular nadie lo estaba mirando.
+      if (!hayPendientes() && !hayBorradores() && !enVuelo) return;
       // El texto lo decide el navegador (hace años que ignoran el nuestro);
       // lo que importa es que NO se pueda cerrar sin ver la advertencia.
       e.preventDefault();
