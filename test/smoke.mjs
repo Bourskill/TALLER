@@ -2371,6 +2371,19 @@ assert(txSinCot.pedidoId === "", "uno sin cotizacionId (huérfano de verdad, sin
 assert(txCotBorrada.pedidoId === "", "uno cuya cotización ya no existe tampoco se toca: no hay de dónde sacar el pedido");
 assert(txPedidoBorrado.pedidoId === "", "y si el pedido de destino también fue eliminado, no se resucita un pedidoId que apunta a la nada");
 
+// -- Hallazgo #50: el tx de excedente de una compra (cotizacionId sin
+// pedidoId, A PROPÓSITO desde el Hallazgo #44) coincidía con el patrón que
+// esta función SÍ repara — cotizacionId sin pedidoId, cuya cotización tiene
+// un pedido real — y le devolvía el pedidoId en CADA carga, deshaciendo el
+// Hallazgo #44 en silencio. Reportado 2026-09-23 con captura real: un
+// excedente recién creado (no un dato viejo) seguía agrupándose bajo su
+// pedido en Finanzas pese a la reparación retroactiva del Hallazgo #49 —
+// la reparación de abajo corregía el síntoma, pero esta función lo volvía
+// a romper en la SIGUIENTE carga.
+const txExcedenteConCot = { id: "tx-exc-con-cot", concepto: "Compra de insumo (excedente) — Montreal", cotizacionId: "cot-vieja-esc", pedidoId: "", origenCompraExcedenteClave: "montreal|mt|tela" };
+assert(repararTxHuerfanosDeCotEscalada([txExcedenteConCot], [cotViejaEscalada], [pedOrigenViejo]) === false, "un tx de excedente (origenCompraExcedenteClave presente) NO cuenta como reparación, aunque su cotización SÍ tenga a dónde apuntar");
+assert(txExcedenteConCot.pedidoId === "", "...se queda SIN pedidoId, tal como lo dejó sincronizarComprasFinanzasDe — nunca se agrupa bajo el pedido");
+
 // ---------------------------------------------------------------------------
 // El usuario reportó, con un reporte financiero real: un pedido con una
 // comisión de vendedor YA PAGADA ("Comisión — negra", $31.500 en Finanzas)

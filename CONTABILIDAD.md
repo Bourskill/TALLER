@@ -2538,6 +2538,61 @@ reparado.
 
 ---
 
+### 🟢 Hallazgo #50 — otra función de reparación deshacía el Hallazgo #44 en CADA carga; el Hallazgo #49 solo tapaba el síntoma. ✅ IMPLEMENTADO
+
+Reportado (2026-09-23) con captura real, en un pedido DISTINTO y con datos
+FRESCOS (no viejos): "no se hizo nada, ahí sigue '(excedente)' dentro de
+los movimientos de pedido en vez de ser un movimiento suelto". El
+Hallazgo #49 (reparación retroactiva `repararPedidoIdExcedente`) no
+alcanzaba — porque el diagnóstico de ESE hallazgo estaba incompleto: no
+era solo "datos viejos de antes del fix", era algo activo rompiéndolo de
+nuevo en cada carga.
+
+**Causa raíz real.** `repararTxHuerfanosDeCotEscalada` (`core/store.js`)
+es una reparación MÁS VIEJA, de un problema totalmente distinto (un tx de
+una cotización "escalada" desde un pedido rápido que se quedó sin
+`pedidoId` porque solo tenía `pedidoOrigenId` en el momento de crearse).
+Su criterio: "cualquier tx con `cotizacionId` pero SIN `pedidoId`, cuya
+cotización SÍ tiene a dónde apuntar (`pedidoId`/`pedidoOrigenId`), se le
+rellena el `pedidoId`". El problema: el tx de excedente de CUALQUIER
+compra encaja EXACTO en ese mismo patrón — tiene `cotizacionId`, no tiene
+`pedidoId` (a propósito, desde el Hallazgo #44), y su cotización casi
+siempre SÍ tiene un pedido real. Esta función, sin saber nada del
+Hallazgo #44 (que se escribió meses después), lo confundía con el caso
+que sí venía a reparar, y le devolvía el `pedidoId` en CADA carga de la
+app — deshaciendo el Hallazgo #44 silenciosamente, una y otra vez, para
+CUALQUIER excedente, nuevo o viejo. El Hallazgo #49 corría DESPUÉS en la
+misma `loadAll()` y lo corregía de vuelta en memoria — pero el ciclo
+completo (romper → reparar, dos reparaciones peleando por el mismo
+campo, dos `persist("tx")` en la misma carga) era frágil e innecesario:
+la reparación correcta es evitar que la función vieja lo rompa, no
+perseguirla con una segunda que lo arregle después.
+
+**Fix — una línea, en la función que rompía:** `repararTxHuerfanosDeCotEscalada`
+ahora ignora cualquier tx con `origenCompraExcedenteClave` presente (la
+marca EXCLUSIVA del tx de excedente — el tx normal de la misma compra
+nunca la lleva) ANTES de evaluar si "reparar" su `pedidoId`. El Hallazgo
+#49 (`repararPedidoIdExcedente`) se deja intacto como red de seguridad
+para cualquier dato que haya quedado mal escrito por este bug ANTES de
+este fix — ya no hace falta que corra en cada carga peleando contra la
+función vieja, pero sigue siendo válido para limpiar lo que ya quedó
+guardado mal en la Sheet.
+
+**Lección para la próxima reparación retroactiva que se escriba:** antes
+de dar por buena una reparación "hacia adelante" + una retroactiva,
+verificar que NINGUNA OTRA reparación existente (`loadAll()` tiene
+varias, todas corriendo en la misma carga) pueda estar generando el
+mismo patrón de datos que se está reparando — un patrón genérico
+("cotizacionId sin pedidoId") puede coincidir con más de un caso de uso
+sin que la función vieja tenga forma de saberlo.
+
+**Pruebas:** un tx de excedente con `cotizacionId` apuntando a una
+cotización con pedido real ya NO cuenta como reparación para
+`repararTxHuerfanosDeCotEscalada` — se queda sin `pedidoId`, exactamente
+como lo dejó `sincronizarComprasFinanzasDe`.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

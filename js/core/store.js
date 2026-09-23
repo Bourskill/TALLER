@@ -544,6 +544,20 @@ function safeParse(raw, fallback) {
 export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
   var huboReparacion = false;
   (tx || []).forEach(function (t) {
+    // El tx de excedente de una compra (ver sincronizarComprasFinanzasDe,
+    // modules/cotizaciones.js) SIEMPRE tiene cotizacionId pero SIN pedidoId
+    // A PROPÓSITO desde el Hallazgo #44 (2026-09-21) — no es "de este
+    // pedido", es una reserva compartida que no debe agruparse bajo
+    // ninguno. Sin este chequeo, esta función lo confundía con el caso que
+    // sí venía a reparar (un tx huérfano de una cotización escalada) y le
+    // ponía el pedidoId de vuelta en CADA carga de la app, deshaciendo ese
+    // fix silenciosamente — reportado por el usuario 2026-09-23 con
+    // captura real, un excedente recién creado (no un dato viejo) que
+    // seguía apareciendo agrupado bajo su pedido en Finanzas pese a la
+    // reparación retroactiva del Hallazgo #49 (repararPedidoIdExcedente,
+    // más abajo — esa reparación sigue viva como red de seguridad para lo
+    // que ya quedó mal escrito, pero el hueco real estaba ACÁ).
+    if (t.origenCompraExcedenteClave) return;
     if (t.pedidoId || !t.cotizacionId) return;
     var cot = (cotizaciones || []).filter(function (c) { return c.id === t.cotizacionId; })[0];
     var pedidoId = cot && (cot.pedidoId || cot.pedidoOrigenId);

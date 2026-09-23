@@ -259,6 +259,20 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo segunda ronda: la causa REAL de que el excedente siguiera agrupándose bajo el pedido)
+
+La reparación de la ronda anterior no alcanzaba: el reporte "ahí sigue
+'(excedente)' dentro de los movimientos de pedido" seguía pasando, esta
+vez con un pedido totalmente nuevo, no datos viejos. La causa real: una
+reparación MÁS VIEJA (`repararTxHuerfanosDeCotEscalada`, para un
+problema distinto — tx sin pedido de una cotización "escalada") le
+devolvía el pedido al movimiento de excedente en CADA carga de la app,
+sin saber que ese movimiento debía quedarse sin pedido a propósito.
+
+- La reparación vieja ahora reconoce y salta el movimiento de excedente
+  — ya no lo confunde con el caso que sí le corresponde reparar.
+- Ver CONTABILIDAD.md, Hallazgo #50.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo primera ronda: un excedente viejo que se había quedado agrupado bajo su pedido en Finanzas ya se repara solo)
 
 Reportado con captura real: un movimiento "Compra de insumo (excedente)"
