@@ -73,7 +73,16 @@ export var COLUMNAS_MOVIMIENTOS = [
   // nómina — ver "pagar-nomina" en modules/pendientes.js y
   // calcNominaPagadaEmpleado en core/calc.js. Auditoría 2026-09-20. AL
   // FINAL a propósito, ver el aviso arriba del todo de este arreglo.
-  { key: "empleadoId", header: "empleado_id" }
+  { key: "empleadoId", header: "empleado_id" },
+  // Marca EXCLUSIVA del movimiento de excedente de una compra (ver
+  // sincronizarComprasFinanzasDe en modules/cotizaciones.js). Faltaba acá
+  // desde que se creó (Hallazgo #29): se perdía en cada guardado/recarga,
+  // así que tras recargar el excedente quedaba sin protección de borrado y
+  // repararTxHuerfanosDeCotEscalada (core/store.js) le volvía a poner el
+  // pedidoId — el excedente reaparecía dentro del card de su pedido en
+  // Finanzas aunque los Hallazgos #44/#49/#50 lo hubieran sacado.
+  // Hallazgo #51, 2026-09-23. AL FINAL a propósito, ver el aviso arriba.
+  { key: "origenCompraExcedenteClave", header: "origen_compra_excedente_clave" }
 ];
 export var tablaMovimientos = crearTablaSheet("Movimientos", COLUMNAS_MOVIMIENTOS);
 

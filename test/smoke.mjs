@@ -54,7 +54,7 @@ global.window.storage = {
 };
 
 const { render } = await import("../js/core/dom.js");
-const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido, repararMarcasOrigenInconsistentes, repararPedidoIdExcedente } = await import("../js/core/store.js");
+const { loadAll, state, repararTxHuerfanosDeCotEscalada, repararVendedorPerdido, repararMarcasOrigenInconsistentes, repararPedidoIdExcedente, repararMarcaExcedentePerdida } = await import("../js/core/store.js");
 const auth = await import("../js/core/auth.js");
 function loginComo(rol, nombre, email) {
   sessionStorage.setItem("taller_sesion_v1", JSON.stringify({
@@ -5059,8 +5059,95 @@ assert(JSON.stringify(COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; })) 
   "gastoFijoId", "deudaId", "origenAbonoId", "origenReembolsoId", "origenVentaConsignacionId",
   "origenComisionConsignacionId", "origenCompraClave", "origenGastoFijoPeriodo", "origenComisionCotId",
   "origenComisionPedidoId", "origenGastoId", "origenDeudaIngresoId", "origenColchonId",
-  "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId"
+  "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId",
+  "origenCompraExcedenteClave"
 ]), "el orden de columnas de tablaMovimientos no cambió: una columna nueva se agregó al final, nunca insertada en medio (ver el incidente del 2026-09-20 arriba)");
+
+// --- Hallazgo #51 (2026-09-23): origenCompraExcedenteClave nunca fue
+// columna de "Movimientos", así que se perdía en cada guardado/recarga. Tras
+// recargar, el excedente quedaba con cotizacionId y SIN pedidoId ni marca —
+// exactamente lo que repararTxHuerfanosDeCotEscalada viene a "arreglar": le
+// volvía a poner el pedidoId en cada carga, y el excedente reaparecía dentro
+// del card de su pedido en Finanzas. Las pruebas de los Hallazgos #49/#50
+// (más arriba) usaban objetos en memoria que nunca pasaban por la Sheet, por
+// eso no lo vieron: estas pasan de verdad por tablaMovimientos.escribir()/
+// leer() contra una Sheet simulada.
+const { MARCAS_ORIGEN_SISTEMA: marcasOrigenColsTest } = await import("../js/core/calc.js");
+const clavesColsMovTest = COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; });
+const marcasSinColumnaTest = marcasOrigenColsTest.map(function (m) { return m.campo; }).filter(function (c) { return clavesColsMovTest.indexOf(c) === -1; });
+assert(marcasSinColumnaTest.length === 0, "toda marca de origen de MARCAS_ORIGEN_SISTEMA tiene su columna en la hoja Movimientos — sin columna se pierde en cada recarga (faltan: " + marcasSinColumnaTest.join(", ") + ")");
+
+loginComo("admin", "", "admin-roundtrip-test@taller.test");
+_resetCacheParaPruebas();
+const { tablaMovimientos: tablaMovRoundTrip } = await import("../js/core/sheetsEsquemas.js");
+var filasMovRoundTrip = [];
+const fetchOriginalRoundTrip = global.fetch;
+global.fetch = async function (url, options) {
+  var u = decodeURIComponent(String(url));
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("fields=sheets.properties") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { sheets: [{ properties: { sheetId: 77001, title: "Movimientos", gridProperties: { columnCount: COLUMNAS_MOVIMIENTOS.length + 5 } } }] }; } };
+  }
+  if (u.indexOf("/values/Movimientos") !== -1) {
+    var esEncabezado = u.indexOf("Movimientos!A1:") !== -1;
+    if (u.indexOf(":clear") !== -1) { if (!esEncabezado) filasMovRoundTrip = []; return { ok: true, status: 200, json: async function () { return {}; } }; }
+    if (metodo === "PUT") {
+      if (!esEncabezado) filasMovRoundTrip = JSON.parse(options.body).values;
+      return { ok: true, status: 200, json: async function () { return {}; } };
+    }
+    if (esEncabezado) return { ok: true, status: 200, json: async function () { return { values: [COLUMNAS_MOVIMIENTOS.map(function (c) { return c.header; })] }; } };
+    return { ok: true, status: 200, json: async function () { return { values: filasMovRoundTrip }; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+const cotsRoundTrip = [{ id: "cot-rt", pedidoId: "ped-rt", compras: [{ clave: "montreal|mt|tela", estado: "si", txId: "tx-rt-normal", excedenteTxId: "tx-rt-exc" }] }];
+const pedsRoundTrip = [{ id: "ped-rt" }];
+// (a) Excedente recién creado (con su marca), guardado y vuelto a leer.
+await tablaMovRoundTrip.escribir([
+  { id: "tx-rt-exc", tipo: "gasto", fecha: "2026-09-23", concepto: "Compra de insumo (excedente) — Montreal — Uniformes", monto: 34260, pedidoId: "", cotizacionId: "cot-rt", esInsumo: "1", origenCompraExcedenteClave: "montreal|mt|tela" },
+  { id: "tx-rt-normal", tipo: "gasto", fecha: "2026-09-23", concepto: "Compra — Montreal — Uniformes", monto: 95033, pedidoId: "ped-rt", cotizacionId: "cot-rt", esInsumo: "1", origenCompraClave: "montreal|mt|tela" }
+]);
+const leidosRoundTrip = await tablaMovRoundTrip.leer();
+const excRoundTrip = leidosRoundTrip.filter(function (t) { return t.id === "tx-rt-exc"; })[0];
+assert(excRoundTrip.origenCompraExcedenteClave === "montreal|mt|tela", "la marca del excedente sobrevive a escribir() + leer() de la hoja Movimientos (antes volvía vacía)");
+assert(repararMarcaExcedentePerdida(leidosRoundTrip, cotsRoundTrip) === false, "...así que, con la marca ya presente, no hay nada que reparar");
+assert(repararTxHuerfanosDeCotEscalada(leidosRoundTrip, cotsRoundTrip, pedsRoundTrip) === false && excRoundTrip.pedidoId === "", "...y tras la recarga repararTxHuerfanosDeCotEscalada ya no le pone el pedidoId: el excedente se queda en \"Movimientos sueltos\"");
+// (b) Excedente ya guardado en la Sheet real SIN su marca (todo lo anterior
+// al fix): primero tal cual lo dejó el bug (pedidoId vacío), después ya
+// "reparado" de más por la reparación vieja (pedidoId puesto). En los dos
+// casos, la secuencia de loadAll() tiene que terminar con el excedente
+// suelto y con su marca de vuelta.
+await tablaMovRoundTrip.escribir([
+  { id: "tx-rt-exc", tipo: "gasto", fecha: "2026-09-23", concepto: "Compra de insumo (excedente) — Montreal — Uniformes", monto: 34260, pedidoId: "", cotizacionId: "cot-rt", esInsumo: "1" },
+  { id: "tx-rt-exc-2", tipo: "gasto", fecha: "2026-09-22", concepto: "Compra de insumo (excedente) — Montreal — Camisetas", monto: 2280, pedidoId: "ped-rt2", cotizacionId: "cot-rt2", esInsumo: "1" },
+  { id: "tx-rt-normal", tipo: "gasto", fecha: "2026-09-23", concepto: "Compra — Montreal — Uniformes", monto: 95033, pedidoId: "ped-rt", cotizacionId: "cot-rt", esInsumo: "1", origenCompraClave: "montreal|mt|tela" },
+  // Control: un excedenteTxId de "cot-otra" apunta a este id, pero el tx es
+  // de OTRA cotización ("cot-ajena") — no es su excedente, no se toca (mismo
+  // chequeo de cotizacionId que usa sincronizarComprasFinanzasDe).
+  { id: "tx-rt-otro", tipo: "gasto", fecha: "2026-09-22", concepto: "Compra suelta", monto: 1000, pedidoId: "", cotizacionId: "cot-ajena", esInsumo: "1" }
+]);
+const leidosViejosRoundTrip = await tablaMovRoundTrip.leer();
+global.fetch = fetchOriginalRoundTrip;
+_resetCacheParaPruebas();
+const cotsViejasRoundTrip = cotsRoundTrip.concat([
+  { id: "cot-rt2", pedidoId: "ped-rt2", compras: [{ clave: "montreal|mt|tela", estado: "si", excedenteTxId: "tx-rt-exc-2" }] },
+  { id: "cot-otra", pedidoId: "ped-rt", compras: [{ clave: "tela|mt|tela", estado: "si", excedenteTxId: "tx-rt-otro" }] }
+]);
+const pedsViejosRoundTrip = pedsRoundTrip.concat([{ id: "ped-rt2" }]);
+const excViejo1 = leidosViejosRoundTrip.filter(function (t) { return t.id === "tx-rt-exc"; })[0];
+const excViejo2 = leidosViejosRoundTrip.filter(function (t) { return t.id === "tx-rt-exc-2"; })[0];
+const normalViejo = leidosViejosRoundTrip.filter(function (t) { return t.id === "tx-rt-normal"; })[0];
+const otroViejo = leidosViejosRoundTrip.filter(function (t) { return t.id === "tx-rt-otro"; })[0];
+assert(excViejo1.origenCompraExcedenteClave === "" && excViejo2.origenCompraExcedenteClave === "", "(control) una fila vieja, guardada sin la marca, se lee con la marca vacía");
+// Mismo orden que loadAll() (core/store.js).
+assert(repararMarcaExcedentePerdida(leidosViejosRoundTrip, cotsViejasRoundTrip) === true, "repararMarcaExcedentePerdida avisa que sí reparó algo");
+repararTxHuerfanosDeCotEscalada(leidosViejosRoundTrip, cotsViejasRoundTrip, pedsViejosRoundTrip);
+repararPedidoIdExcedente(leidosViejosRoundTrip);
+assert(excViejo1.origenCompraExcedenteClave === "montreal|mt|tela" && excViejo1.pedidoId === "", "un excedente viejo SIN marca recupera su marca (desde compra.excedenteTxId) y se queda sin pedidoId");
+assert(excViejo2.origenCompraExcedenteClave === "montreal|mt|tela" && excViejo2.pedidoId === "", "un excedente viejo al que la reparación vieja YA le había puesto pedidoId recupera su marca y vuelve a quedar suelto");
+assert(!normalViejo.origenCompraExcedenteClave && normalViejo.pedidoId === "ped-rt", "el movimiento NORMAL de la misma compra no recibe la marca de excedente y conserva su pedido");
+assert(!otroViejo.origenCompraExcedenteClave, "un tx de OTRA cotización no recibe la marca aunque su id coincida con un excedenteTxId (se exige el mismo cotizacionId)");
+assert(repararMarcaExcedentePerdida(leidosViejosRoundTrip, cotsViejasRoundTrip) === false, "y correrla de nuevo ya no hace nada (está al día)");
 
 // --- Compras conjuntas: varios pedidos que comparten un insumo (ver
 // modules/finanzas.js) — reportado por el usuario 2026-09-20: "hay pedidos

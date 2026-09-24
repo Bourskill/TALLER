@@ -340,7 +340,12 @@ export function origenDeTx(t) {
 // El bloqueo existe para impedir un DESCUADRE: borrar un lado mientras el otro
 // sigue afirmando que pasó. Si el otro lado ya no existe, no hay descuadre
 // posible — el movimiento quedó huérfano y tiene que poder borrarse.
-var MARCAS_ORIGEN_SISTEMA = [
+//
+// Exportado solo para que test/smoke.mjs compruebe que CADA `campo` de acá
+// tiene su columna en la hoja "Movimientos" (COLUMNAS_MOVIMIENTOS, core/
+// sheetsEsquemas.js) — una marca sin columna se pierde en cada recarga
+// (pasó con origenCompraExcedenteClave, Hallazgo #51).
+export var MARCAS_ORIGEN_SISTEMA = [
   {
     campo: "origenAbonoId", que: "un abono cobrado de un pedido",
     donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar",

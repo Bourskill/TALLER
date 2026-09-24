@@ -705,6 +705,42 @@ export function repararPedidoIdExcedente(tx) {
   return huboReparacion;
 }
 
+// Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un
+// tx de excedente que la perdió al pasar por la Sheet. Devuelve true si
+// reparó algo.
+//
+// Por qué existía el hueco: esa marca nunca fue columna de la hoja
+// "Movimientos" (COLUMNAS_MOVIMIENTOS en core/sheetsEsquemas.js, ya
+// corregido — Hallazgo #51) y core/sheetsTabular.js solo guarda/lee las
+// columnas del esquema. Cada excedente ya guardado quedó sin marca en la
+// Sheet real, y todo lo que depende de ella dejaba de verlo: la guarda del
+// Hallazgo #50 en repararTxHuerfanosDeCotEscalada (que entonces le volvía
+// a poner el pedidoId en cada carga), repararPedidoIdExcedente (Hallazgo
+// #49) y la protección de borrado (MARCAS_ORIGEN_SISTEMA, core/calc.js).
+//
+// Se reconstruye desde `compra.excedenteTxId` (vive en el JSON de compras
+// de la cotización, que SÍ se guarda completo): es el mismo vínculo que usa
+// sincronizarComprasFinanzasDe para encontrar ese tx, con el mismo chequeo
+// de cotizacionId. Tiene que correr ANTES que repararTxHuerfanosDeCotEscalada
+// en loadAll(): si corre después, esa otra ya le puso el pedidoId (lo
+// deshace repararPedidoIdExcedente, más abajo en la misma pasada, pero
+// mejor no depender del orden de dos arreglos para uno solo).
+export function repararMarcaExcedentePerdida(tx, cotizaciones) {
+  var huboReparacion = false;
+  var txPorId = {};
+  (tx || []).forEach(function (t) { txPorId[t.id] = t; });
+  (cotizaciones || []).forEach(function (cot) {
+    (cot.compras || []).forEach(function (compra) {
+      if (!compra.excedenteTxId) return;
+      var t = txPorId[compra.excedenteTxId];
+      if (!t || t.cotizacionId !== cot.id || t.origenCompraExcedenteClave) return;
+      t.origenCompraExcedenteClave = compra.clave;
+      huboReparacion = true;
+    });
+  });
+  return huboReparacion;
+}
+
 // Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`)
 // que un insumo pudo perder al copiarse a una plantilla, a un producto del
 // catálogo nuevo, o de cualquiera de esos dos a la referencia de una
@@ -1157,6 +1193,14 @@ export async function loadAll() {
     // de la migración de tallas: mejor saltarla y repetirla en la próxima
     // carga con conexión real que reparar sobre una copia que podría estar
     // vieja frente a otro dispositivo.
+    //
+    // ANTES que nada de eso: devolverle a cada excedente la marca que perdió
+    // al pasar por la Sheet (ver repararMarcaExcedentePerdida más arriba,
+    // Hallazgo #51) — sin ella, la reparación de justo abajo lo confunde
+    // con un tx huérfano y le pone el pedidoId.
+    if (!huboFalloDeRed && repararMarcaExcedentePerdida(state.tx, state.cotizaciones)) {
+      persist("tx");
+    }
     if (!huboFalloDeRed && repararTxHuerfanosDeCotEscalada(state.tx, state.cotizaciones, state.pedidos)) {
       persist("tx");
     }

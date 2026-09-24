@@ -2591,6 +2591,67 @@ cotización con pedido real ya NO cuenta como reparación para
 `repararTxHuerfanosDeCotEscalada` — se queda sin `pedidoId`, exactamente
 como lo dejó `sincronizarComprasFinanzasDe`.
 
+> **Corrección posterior (mismo día, Hallazgo #51):** este fix tampoco
+> alcanzaba en producción. La guarda depende de `origenCompraExcedenteClave`,
+> y esa marca nunca se guardaba en la Sheet — tras cualquier recarga ya no
+> estaba, y la guarda no tenía nada que ver.
+
+### 🟢 Hallazgo #51 — la marca del excedente nunca se guardaba en la Sheet: los Hallazgos #44/#49/#50 solo valían hasta la primera recarga. ✅ IMPLEMENTADO
+
+Encontrado (2026-09-23) revisando el código antes de diseñar el "Recibo"
+que propuso el usuario, no por un reporte nuevo — pero explica el mismo
+síntoma de los dos reportes anteriores ("ahí sigue '(excedente)' dentro
+de los movimientos de pedido").
+
+**Causa raíz.** `origenCompraExcedenteClave` (la marca que identifica al
+tx de excedente, Hallazgo #29) nunca fue columna de `COLUMNAS_MOVIMIENTOS`
+(`core/sheetsEsquemas.js`). `core/sheetsTabular.js` solo escribe y lee las
+columnas del esquema, así que la marca se perdía en cada guardado y el
+tx volvía de la Sheet con `cotizacionId`, sin `pedidoId` y SIN marca:
+- `repararTxHuerfanosDeCotEscalada` ya no lo reconocía (la guarda del #50
+  mira justo esa marca) y le volvía a poner el `pedidoId` → el excedente
+  reaparecía dentro del card de su pedido en cada carga;
+- `repararPedidoIdExcedente` (#49) tampoco lo reconocía, por la misma
+  razón;
+- perdía la protección de borrado y "Ver origen" (`MARCAS_ORIGEN_SISTEMA`,
+  `core/calc.js`) — se podía borrar a mano desde Finanzas, y la próxima
+  sincronización creaba otro.
+
+Mismo tipo de hueco que ya había pasado con otras cuatro marcas (ver el
+comentario "Estas cuatro faltaban en este esquema" en
+`sheetsEsquemas.js`). Las pruebas del #49/#50 no lo vieron porque usaban
+objetos en memoria, que nunca pasaban por la Sheet.
+
+**Fix, en dos partes:**
+1. `origenCompraExcedenteClave` se agregó como columna **al final** de
+   `COLUMNAS_MOVIMIENTOS` (nunca en medio — ver el incidente del
+   2026-09-20). `asegurarPestana` agranda la grilla y completa el
+   encabezado solo; las filas viejas leen la columna nueva como "".
+2. `repararMarcaExcedentePerdida` (`core/store.js`), nueva, en `loadAll()`
+   ANTES de `repararTxHuerfanosDeCotEscalada`: le devuelve la marca a cada
+   excedente ya guardado sin ella, usando `compra.excedenteTxId` (vive en
+   el JSON de compras de la cotización, que sí se guarda completo) con el
+   mismo chequeo de `cotizacionId` que usa `sincronizarComprasFinanzasDe`.
+   Con la marca de vuelta, el #50 lo deja en paz y el #49 le quita el
+   `pedidoId` que la reparación vieja ya le había puesto.
+
+**Pruebas (`test/smoke.mjs`), esta vez pasando de verdad por la Sheet
+simulada (`tablaMovimientos.escribir()` → `leer()`):**
+- toda marca de `MARCAS_ORIGEN_SISTEMA` tiene su columna en la hoja
+  Movimientos — cubre también cualquier marca futura (ej. la de un Recibo);
+- un excedente guardado y vuelto a leer conserva su marca, y
+  `repararTxHuerfanosDeCotEscalada` ya no le pone el pedido;
+- un excedente viejo guardado sin marca (con y sin el `pedidoId` que le
+  puso la reparación vieja) termina, tras la secuencia de `loadAll()`, con
+  su marca de vuelta y suelto; el tx normal de la misma compra no se toca;
+  un tx de otra cotización no recibe la marca.
+Sin la columna nueva falla la ida y vuelta; sin la reparación nueva falla
+la reparación de los datos viejos.
+
+**Lección:** una prueba de algo que depende de un dato guardado tiene que
+pasar por la capa que lo guarda. Probar la lógica con objetos en memoria
+no detecta que el dato nunca llega a la Sheet.
+
 ---
 
 ## Próximos pasos

@@ -259,6 +259,23 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo tercera ronda: la marca del excedente ahora sí se guarda en la Sheet)
+
+El arreglo de la ronda anterior solo duraba hasta la primera recarga. La
+marca que identifica un movimiento de excedente nunca se guardaba en la
+hoja "Movimientos", así que al volver a entrar el excedente llegaba sin
+ella, la reparación vieja le volvía a poner el pedido, y además quedaba
+sin protección contra borrado.
+
+- La marca ahora es una columna más de la hoja Movimientos, al final. La
+  hoja se amplía sola, no hay que tocar nada en Google Sheets.
+- Reparación automática al abrir la app: los excedentes ya guardados sin
+  marca la recuperan (desde la compra de su cotización) y vuelven a
+  "Movimientos sueltos".
+- Una prueba nueva falla si alguna marca de origen no tiene su columna en
+  la hoja.
+- Ver CONTABILIDAD.md, Hallazgo #51.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo segunda ronda: la causa REAL de que el excedente siguiera agrupándose bajo el pedido)
 
 La reparación de la ronda anterior no alcanzaba: el reporte "ahí sigue
