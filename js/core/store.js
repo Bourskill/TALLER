@@ -277,7 +277,12 @@ export const state = {
   // solo objeto plano), las acciones genéricas de "Asignar a servicio(s)"
   // (core/dom.js) lo direccionan con un `data-form-destino` de path punteado:
   // "formCompraConjunta.porClave.<clave>" (ver resolverFormDestino).
-  formCompraConjunta: { seleccion: [], porClave: {} },
+  // Desde el Recibo de compra (Hallazgo #52): `recibo` guarda los datos del
+  // papel (fecha, proveedor, N.º, servicios — el formKey de servicios es
+  // "formCompraConjunta.recibo") y `ajustar` qué líneas tienen abierta la
+  // tabla "Ajustar reparto". porClave[<línea>]: {cantidadComprada,
+  // costoPagado, cantidadesPorPedido, costosPorPedido}.
+  formCompraConjunta: { seleccion: [], porClave: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] }, ajustar: {} },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",
     vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
@@ -434,6 +439,9 @@ export const state = {
   // tienen desplegado su detalle (proveedor y observaciones). Estado de UI:
   // nunca se persiste.
   compraDetalleAbierto: {},
+  // Qué tarjetas de Recibo de compra están desplegadas en Finanzas →
+  // Historial ({<reciboId>: true}). Solo pantalla, no se guarda.
+  reciboExpandido: {},
   // { [insumoId]: true } — qué panel de "Enlace" (ver renderEnlacePanel en
   // core/components.js) está desplegado, y { [insumoId]: texto } lo que hay
   // escrito en su buscador de insumo específico. Estado de UI: nunca se
@@ -1342,7 +1350,7 @@ export var ETIQUETA_CLAVE = {
   formReembolso: "un reembolso a medio llenar",
   formAbono: "un abono a medio llenar",
   formPend: "una nota a medio llenar",
-  formCompraConjunta: "una compra conjunta a medio llenar"
+  formCompraConjunta: "un recibo de compra a medio llenar"
 };
 
 // Únicas claves que de verdad viven en la Sheet (ver KEYS en constants.js).
@@ -1634,7 +1642,8 @@ var FORMULARIOS_CON_BORRADOR = {
     var porClave = f.porClave || {};
     return Object.keys(porClave).some(function (k) {
       var d = porClave[k] || {};
-      return !!(String(d.cantidadTotal || "").trim() || String(d.costoTotal || "").trim());
+      return !!(String(d.cantidadComprada || "").trim() || String(d.costoPagado || "").trim() ||
+        String(d.cantidadTotal || "").trim() || String(d.costoTotal || "").trim());
     });
   }
   // formReporte queda afuera a propósito: es un filtro de fechas para

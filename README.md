@@ -259,6 +259,28 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo quinta ronda: Recibo de compra, fase 2 — registrar, usar la reserva, anular)
+
+La pestaña "Compras conjuntas" de Finanzas ahora es **🧾 Recibos de compra**:
+
+- **Registrar.** Eliges uno o varios pedidos y escribes lo que dice el papel
+  del proveedor por cada cosa: cuánto compraste y cuánto pagaste. Cada
+  pedido recibe lo que necesita y lo que sobra queda como reserva de esos
+  mismos pedidos. Un mismo recibo puede traer varios insumos y el domicilio.
+- **Finanzas.** Cada recibo es una tarjeta con el total pagado. Al abrirla
+  se ve cuánto le tocó a cada pedido y cuánto quedó en reserva. Cada pedido
+  sigue mostrando su parte, con un botón 🧾 que lleva al recibo.
+- **Usar la reserva.** En Producción, si un pedido necesita más, subes su
+  "Cant. real" y se toma de la reserva del recibo, con su costo. Si no
+  alcanza, lo que falta sale como reposición para un recibo nuevo.
+- **Anular.** Un recibo se anula completo. "Anular y corregir" lo deja listo
+  para registrarlo de nuevo.
+- **Eliminar.** Si eliminas un pedido o una cotización, su parte vuelve a la
+  reserva: esa plata ya se pagó y no desaparece de la caja.
+- Las compras conjuntas ya registradas siguen funcionando igual hasta la
+  próxima entrega, que las convierte en recibos.
+- Ver CONTABILIDAD.md, Hallazgo #52.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo cuarta ronda: Recibo de compra, fase 1 — la base, sin cambios visibles)
 
 Primera de cuatro entregas del "Recibo de compra": una compra real (un

@@ -284,6 +284,13 @@ export function origenDeTx(t) {
       state.pedidosPapelera.filter(function (x) { return x.id === t.pedidoId; })[0];
     if (p) return { tipo: "pedido", id: p.id, label: (p.numeroOp || "Pedido") + " — " + p.descripcion };
   }
+  // Una fila de un Recibo de compra sin un pedido vivo (la reserva, o la
+  // parte de un pedido que se borró) lleva a su recibo — es ahí donde se ve
+  // y se corrige. Va ANTES de cotizacionId a propósito: la parte de una
+  // cotización también lo lleva, pero su origen real es el papel.
+  if (esFilaRecibo(t)) {
+    return { tipo: "recibo", id: t.reciboCompraId, label: "Recibo de compra — " + (t.contraparte || "sin proveedor") + " · " + (t.fecha || "") };
+  }
   if (t.cotizacionId) {
     var c = state.cotizaciones.filter(function (x) { return x.id === t.cotizacionId; })[0];
     if (c) return { tipo: "cotizacion", id: c.id, label: "Cotización — " + c.descripcion };
@@ -3061,6 +3068,219 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   res.totales = { nombre: grupo.nombre, unidad: grupo.unidad || "", esProducto: !!grupo.esProducto, esGlobal: false, cantidadTotal: deUnidades(compradaU, dec), costoTotal: pagado };
   res.ok = !res.error;
   return res;
+}
+
+// Lo que se puede meter en un recibo nuevo para los pedidos elegidos, una
+// línea por cosa comprada:
+// - un insumo físico PENDIENTE ("Aún no") — lo que falta comprar;
+// - una REPOSICIÓN: lo que le faltó a un pedido que ya está en otro recibo
+//   cuando la reserva no alcanzó (`compra.faltante`, decisión del usuario
+//   2026-09-23: "otro recibo de compra");
+// - un costo fijo pendiente (domicilio, diseño), agrupado por NOMBRE entre
+//   pedidos (mismo criterio que calcGruposCostoCompartido).
+// Acepta UN solo pedido (el caso "medias": comprar de más para uno solo).
+// Primero las líneas que comparten más pedidos, después las más caras.
+export function calcLineasParaRecibo(pedidoIds) {
+  var mapa = {}, orden = [];
+  (pedidoIds || []).forEach(function (pedidoId) {
+    var pedido = (state.pedidos || []).filter(function (p) { return p.id === pedidoId; })[0];
+    if (!pedido || !pedido.cotizacionId) return;
+    var cot = (state.cotizaciones || []).filter(function (c) { return c.id === pedido.cotizacionId; })[0];
+    if (!cot) return;
+    var etiqueta = (pedido.numeroOp || "OP-????") + " · " + (pedido.cliente || "Sin cliente");
+    calcListaCompras(cot).forEach(function (linea) {
+      var compra = compraDeLinea(cot, linea.clave);
+      var estado = estadoLineaCompra(cot, linea);
+      var clave, necesita = 0, costoEstimado = num(linea.costoTotal), esReposicion = false;
+      if (linea.esGlobal) {
+        if (estado !== "no") return;
+        var nombreKey = (linea.nombre || "").trim().toLowerCase();
+        if (!nombreKey) return;
+        clave = "costoglobal|" + nombreKey;
+      } else {
+        if (linea.esServicio) return;
+        if (estado === "no") {
+          necesita = num(linea.cantidadFisica);
+        } else if (esMiembroRecibo(compra) && num(compra.faltante) > 0) {
+          necesita = num(compra.faltante);
+          esReposicion = true;
+          costoEstimado = num(linea.cantidadFisica) > 0 ? num(linea.costoTotal) / num(linea.cantidadFisica) * necesita : 0;
+        } else return;
+        clave = linea.clave;
+      }
+      if (!mapa[clave]) {
+        mapa[clave] = { linea: clave, nombre: linea.nombre, unidad: linea.esGlobal ? "" : (linea.unidad || ""), esProducto: !!linea.esProducto, esGlobal: !!linea.esGlobal, participantes: [] };
+        orden.push(clave);
+      }
+      mapa[clave].participantes.push({
+        cotId: cot.id, pedidoId: pedido.id, compraClave: linea.clave, etiqueta: etiqueta,
+        necesita: necesita, costoEstimado: costoEstimado, esReposicion: esReposicion,
+        proveedorId: (compra && compra.proveedorId) || linea.proveedorId || ""
+      });
+    });
+  });
+  return orden.map(function (k) {
+    var g = mapa[k];
+    g.totalNecesita = g.participantes.reduce(function (a, p) { return a + p.necesita; }, 0);
+    g.totalCostoEstimado = g.participantes.reduce(function (a, p) { return a + p.costoEstimado; }, 0);
+    return g;
+  }).sort(function (a, b) {
+    return (b.participantes.length - a.participantes.length) || (b.totalCostoEstimado - a.totalCostoEstimado);
+  });
+}
+
+// Cuánto hay libre en las reservas de los recibos donde participa UNA
+// compra (su misma línea) — lo que ese pedido puede tomar al subir su
+// "Cant. real". Del recibo más viejo al más nuevo: en ese orden se toma.
+export function reservasDeCompra(compra, cotizaciones, tx) {
+  var vistos = {}, res = [];
+  ((compra && compra.partesRecibo) || []).forEach(function (p) {
+    var k = p.reciboId + "|" + p.linea;
+    if (vistos[k]) return;
+    vistos[k] = true;
+    var r = calcRecibo(p.reciboId, cotizaciones, tx);
+    var L = r.lineas.filter(function (x) { return x.linea === p.linea; })[0];
+    if (!L) return;
+    res.push({ reciboId: p.reciboId, linea: p.linea, fecha: (r.cabecera && r.cabecera.fecha) || "", reserva: L.reserva, esProducto: L.esProducto, unidad: L.unidad });
+  });
+  return res.sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)) || (a.reciboId < b.reciboId ? -1 : 1); });
+}
+
+// "Cant. real" de una compra que está en uno o más recibos = cuánto usa de
+// verdad ese pedido (lo cubierto por sus partes + lo que le falta comprar).
+// Cambiarla mueve material Y costo entre su parte y la reserva del recibo
+// (decisión del usuario 2026-09-23: el costo pasa al pedido que usa el
+// material — antes se quedaba en el que tenía la reserva guardada):
+// - al subir, se toma de la reserva de sus recibos, del más viejo al más
+//   nuevo; lo que no alcance queda como `faltante` — va a OTRO recibo;
+// - al bajar, primero se cancela lo que faltaba; después se devuelve a la
+//   reserva, empezando por el recibo más nuevo.
+// La caja no cambia nunca: la plata ya se pagó, solo cambia a quién le toca.
+// Pura: devuelve la compra nueva y cuánto se movió.
+export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) {
+  var partes = (compra.partesRecibo || []).map(function (p) { return Object.assign({}, p); });
+  var dec = decimalesLineaRecibo(partes[0] && partes[0].totalesLinea);
+  var cubiertoU = partes.reduce(function (a, p) { return a + aUnidades(p.cantidad, dec); }, 0);
+  var faltanteU = Math.max(0, aUnidades(compra.faltante, dec));
+  var deltaU = Math.max(0, aUnidades(nuevaCantidad, dec)) - (cubiertoU + faltanteU);
+  var tomado = { cantidad: 0, costo: 0 }, devuelto = { cantidad: 0, costo: 0 };
+  var reservas = reservasDeCompra(compra, cotizaciones, tx);
+  function parteDe(r) {
+    return partes.filter(function (p) { return p.reciboId === r.reciboId && p.linea === r.linea; })[0];
+  }
+  if (deltaU > 0) {
+    var restanteU = deltaU;
+    reservas.forEach(function (r) {
+      if (restanteU <= 0) return;
+      var toma = calcTomaReserva(r.reserva, deUnidades(restanteU, dec), dec);
+      var tomaU = aUnidades(toma.cantidad, dec);
+      if (tomaU <= 0) return;
+      var p = parteDe(r);
+      p.cantidad = deUnidades(aUnidades(p.cantidad, dec) + tomaU, dec);
+      p.costo = Math.round(num(p.costo)) + toma.costo;
+      restanteU -= tomaU;
+      tomado.cantidad = deUnidades(aUnidades(tomado.cantidad, dec) + tomaU, dec);
+      tomado.costo += toma.costo;
+    });
+    faltanteU += restanteU;
+  } else if (deltaU < 0) {
+    var porBajarU = -deltaU;
+    var cancelaU = Math.min(faltanteU, porBajarU);
+    faltanteU -= cancelaU;
+    porBajarU -= cancelaU;
+    reservas.slice().reverse().forEach(function (r) {
+      if (porBajarU <= 0) return;
+      var p = parteDe(r);
+      var dev = calcDevolucionParte(p, deUnidades(porBajarU, dec), dec);
+      var devU = aUnidades(dev.cantidad, dec);
+      if (devU <= 0) return;
+      p.cantidad = deUnidades(aUnidades(p.cantidad, dec) - devU, dec);
+      p.costo = Math.round(num(p.costo)) - dev.costo;
+      porBajarU -= devU;
+      devuelto.cantidad = deUnidades(aUnidades(devuelto.cantidad, dec) + devU, dec);
+      devuelto.costo += dev.costo;
+    });
+  }
+  var nueva = totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, dec) }));
+  return { compra: nueva, tomado: tomado, devuelto: devuelto, faltante: deUnidades(faltanteU, dec), unidad: (reservas[0] && reservas[0].unidad) || "" };
+}
+
+// Un pedido que se ELIMINA (no debió existir) devuelve toda su parte de
+// cada recibo a la reserva: esa plata ya se pagó, no desaparece de la caja.
+// Queda anotado cuánto era (`devueltaPorEliminar`) para volver a tomarlo si
+// el pedido se restaura. Pura: devuelve la cotización nueva.
+export function devolverPartesPorEliminar(cot, pedidoId) {
+  return Object.assign({}, cot, {
+    compras: (cot.compras || []).map(function (compra) {
+      if (!esMiembroRecibo(compra)) return compra;
+      var partes = compra.partesRecibo.map(function (p) {
+        if (!(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
+        return Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) } });
+      });
+      return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: 0 }));
+    })
+  });
+}
+
+// Al restaurar ese pedido, vuelve a tomar lo que tenía — hasta donde la
+// reserva todavía alcance (otro pedido pudo haberlo usado mientras tanto).
+// Devuelve { cot, faltantes: [{nombre, cantidad, costo}] } para avisar.
+export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
+  var faltantes = [];
+  var nueva = Object.assign({}, cot, {
+    compras: (cot.compras || []).map(function (compra) {
+      if (!esMiembroRecibo(compra)) return compra;
+      // Lo que ya no alcanzó a volver queda como `faltante` — aparece como
+      // reposición pendiente en Recibos de compra, igual que al subir una
+      // Cant. real por encima de la reserva.
+      var faltanteU = aUnidades(compra.faltante, 2);
+      var partes = compra.partesRecibo.map(function (p) {
+        var prev = p.devueltaPorEliminar;
+        if (!prev || prev.pedidoId !== pedidoId) return p;
+        var r = calcRecibo(p.reciboId, cotizaciones, tx);
+        var L = r.lineas.filter(function (x) { return x.linea === p.linea; })[0];
+        var reserva = L ? L.reserva : { cantidad: 0, costo: 0 };
+        var toma;
+        if (L && L.esGlobal) {
+          toma = { cantidad: 0, costo: Math.max(0, Math.min(prev.costo, reserva.costo)) };
+          if (toma.costo < prev.costo) faltantes.push({ nombre: L.nombre, cantidad: 0, costo: prev.costo - toma.costo });
+        } else {
+          var dec = decimalesLineaRecibo(p.totalesLinea);
+          toma = calcTomaReserva(reserva, prev.cantidad, dec);
+          if (aUnidades(toma.cantidad, dec) < aUnidades(prev.cantidad, dec)) {
+            var faltaU = aUnidades(prev.cantidad, dec) - aUnidades(toma.cantidad, dec);
+            faltantes.push({ nombre: (L && L.nombre) || p.linea, cantidad: deUnidades(faltaU, dec), costo: 0 });
+            faltanteU += aUnidades(deUnidades(faltaU, dec), 2);
+          }
+        }
+        var sinMarca = Object.assign({}, p, { cantidad: toma.cantidad, costo: toma.costo });
+        delete sinMarca.devueltaPorEliminar;
+        return sinMarca;
+      });
+      return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, 2) }));
+    })
+  });
+  return { cot: nueva, faltantes: faltantes };
+}
+
+// Quita un recibo entero de las compras (Anular): cada compra pierde su
+// parte de ESE recibo; si ya no le queda ninguna, vuelve a "Aún no" como
+// si nunca se hubiera comprado. Pura: devuelve las cotizaciones nuevas.
+export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
+  return (cotizaciones || []).map(function (cot) {
+    var toca = (cot.compras || []).some(function (c) { return (c.partesRecibo || []).some(function (p) { return p.reciboId === reciboId; }); });
+    if (!toca) return cot;
+    return Object.assign({}, cot, {
+      compras: cot.compras.map(function (compra) {
+        var partes = (compra.partesRecibo || []).filter(function (p) { return p.reciboId !== reciboId; });
+        if (partes.length === (compra.partesRecibo || []).length) return compra;
+        if (partes.length) return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes }));
+        var limpia = Object.assign({}, compra, { estado: "no", cantidadReal: "", costoReal: "", cantidadExcedente: "", fecha: "", faltante: 0, txId: "", excedenteTxId: "" });
+        delete limpia.partesRecibo;
+        return limpia;
+      })
+    });
+  });
 }
 
 // Escribe un recibo nuevo en las compras de sus pedidos (sin tocar

@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -682,6 +682,8 @@ function renderFilaCompra(c, linea) {
       ? (proveedor ? '<span class="badge">📦 ' + esc(proveedor.nombre) + "</span>" : '<span class="muted">Proveedor sin definir</span>')
       : (linea.refs.length ? linea.refs.map(function (r) { return '<span class="badge">' + esc(r) + "</span>"; }).join("") : '<span class="muted">—</span>'));
 
+  if (esMiembroRecibo(compra)) return renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, paraQuien);
+
   // Rastro sutil de "Compras conjuntas" (ver modules/finanzas.js): un ícono +
   // tooltip, no un aviso que interrumpa — el usuario pidió explícitamente que
   // no rompiera la armonía de la tabla. El tooltip excluye la etiqueta de
@@ -739,6 +741,58 @@ function renderFilaCompra(c, linea) {
       '<div class="field" style="flex:1;"><label>Observaciones</label><input class="mini-input" style="width:100%" placeholder="Ej. quedó pendiente medio rollo, precio subió" value="' + esc(compra.observaciones || "") + '"' + attrs + ' data-campo="observaciones" /></div>' +
       (estado === "si" && !linea.esServicio ? renderCampoExcedenteCompra(compra, linea, attrs) : "") +
       "</div>";
+  }
+  return html;
+}
+
+// Fila de una compra que está en uno o más Recibos de compra (ver "Recibo de
+// compra" en core/calc.js). Estado y costo ya no se tocan acá — los manda
+// el recibo (el papel del proveedor); se corrigen anulándolo. Lo único
+// editable es "Cant. real" = cuánto usa de verdad este pedido: subirla toma
+// de la reserva del recibo (y el costo de eso pasa a este pedido), bajarla
+// devuelve a la reserva. Se aplica al Guardar, como el resto del editor.
+// Estado y costo se REEMPLAZAN por texto (no se deshabilitan): un control
+// deshabilitado hace que Tab lo salte y rompe el recorrido del teclado (ver
+// ronda_seis_pedidos en la memoria del proyecto).
+function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, paraQuien) {
+  var reservas = reservasDeCompra(compra, state.cotizaciones, state.tx);
+  var libres = reservas.reduce(function (a, r) { return a + Math.max(0, num(r.reserva.cantidad)); }, 0);
+  var dec = linea.esProducto ? 0 : 2;
+  var faltante = num(compra.faltante);
+  var usado = num(compra.cantidadReal) + faltante;
+  var recibosIds = [];
+  (compra.partesRecibo || []).forEach(function (p) { if (recibosIds.indexOf(p.reciboId) === -1) recibosIds.push(p.reciboId); });
+  var chipRecibo = ' <button class="tag" style="cursor:pointer;border:none;" data-action="ver-recibo" data-recibo-id="' + esc(recibosIds[0]) + '" title="Ver el recibo de compra en Finanzas">🧾 ' + (recibosIds.length > 1 ? recibosIds.length + " recibos" : "Recibo") + "</button>" +
+    (libres > 0 ? ' <span class="tag" title="Libres en la reserva de su recibo: si este pedido necesita más, sube Cant. real y se toma de ahí.">↺ ' + libres.toFixed(dec) + " libres</span>" : "") +
+    (faltante > 0 ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="La reserva no alcanzó: esto falta comprar — regístralo en un recibo nuevo (Finanzas → Recibos de compra).">faltan ' + faltante.toFixed(dec) + "</span>" : "");
+  var html = '<div class="tx-row" style="grid-template-columns:' + COMPRA_COLS + ';">' +
+    '<span class="mobile-th">Qué comprar</span><span>' + (linea.esGlobal ? "🌐 " : (linea.esProducto ? "📦 " : "")) + esc(linea.nombre) + chipRecibo + "</span>" +
+    '<span class="mobile-th">Para / a quién</span><span>' + paraQuien + "</span>" +
+    '<span class="mobile-th">Cant. est.</span><span class="amount">' + estimadoCant + "</span>" +
+    '<span class="mobile-th">Costo est.</span><span class="amount">' + fmt(linea.costoTotal) + "</span>" +
+    '<span class="mobile-th">Cant. real</span>' +
+    (linea.esGlobal || linea.esServicio
+      ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
+      : '<input type="number" class="mini-input" style="width:100%" ' + (linea.esProducto ? 'step="1" ' : "") + 'value="' + esc(usado) + '"' + attrs + ' data-campo="cantidadReal" title="Cuánto usa de verdad este pedido. Si sube, se toma de la reserva del recibo; si baja, vuelve a la reserva." />') +
+    '<span class="mobile-th">Costo real</span><span class="amount" title="Lo que le toca a este pedido del recibo de compra">' + fmt(compra.costoReal) + "</span>" +
+    '<span class="mobile-th">Estado</span><span style="display:flex;gap:6px;align-items:center;">' +
+    '<span class="tag" title="Comprado con un recibo de compra: se corrige desde el recibo (Finanzas → Recibos de compra).">Sí · 🧾</span>' +
+    '<button class="btn ghost small" data-action="toggle-compra-detalle" data-cot="' + c.id + '" data-clave="' + esc(linea.clave) + '" title="Recibos y observaciones de esta compra">' + (abierta ? "▾" : "▸") + "</button>" +
+    "</span></div>";
+  if (abierta) {
+    html += '<div class="compra-detalle">';
+    (compra.partesRecibo || []).forEach(function (p) {
+      var r = calcRecibo(p.reciboId, state.cotizaciones, state.tx);
+      var L = r.lineas.filter(function (x) { return x.linea === p.linea; })[0];
+      var cab = r.cabecera || {};
+      var prov = cab.proveedorId ? clienteById(cab.proveedorId) : null;
+      html += '<div class="section-sub" style="margin:0 0 6px;flex-basis:100%;">🧾 Recibo del ' + esc(cab.fecha || "") + (prov ? " · " + esc(prov.nombre) : "") +
+        " · su parte: " + (linea.esGlobal ? "" : num(p.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(p.costo) +
+        (L && (L.reserva.cantidad > 0 || L.reserva.costo > 0) ? " · reserva libre: " + (linea.esGlobal ? "" : num(L.reserva.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(L.reserva.costo) : "") +
+        ' <button class="btn ghost small" data-action="ver-recibo" data-recibo-id="' + esc(p.reciboId) + '">Ver recibo</button></div>';
+    });
+    html += '<div class="field" style="flex:1;"><label>Observaciones</label><input class="mini-input" style="width:100%" placeholder="Ej. quedó pendiente medio rollo" value="' + esc(compra.observaciones || "") + '"' + attrs + ' data-campo="observaciones" /></div>';
+    html += "</div>";
   }
   return html;
 }
@@ -1481,7 +1535,14 @@ export var actions = {
          (neto ? ", con un efecto neto de " + fmt(Math.abs(neto)) + " en la caja" : "") +
          ". Quedan en la papelera de movimientos por si alguno correspondía a un gasto que sí ocurrió.")
       : "";
-    if (!window.confirm('¿Eliminar la cotización "' + (cot.descripcion || cot.cliente) + '"?\n\nNo hay papelera de cotizaciones: esto no se puede deshacer.' + aviso)) return;
+    // Su parte de un Recibo de compra NO se va con ella: esa plata ya se le
+    // pagó al proveedor. Pasa a la reserva del recibo (ver
+    // reconciliarTxRecibo en core/calc.js) — la caja no cambia.
+    var recibosCot = idsRecibosDeCot(cot);
+    var avisoRecibos = recibosCot.length
+      ? "\n\nSu parte de " + recibosCot.length + " recibo(s) de compra vuelve a la reserva del recibo: esa plata ya se pagó y no sale de la caja."
+      : "";
+    if (!window.confirm('¿Eliminar la cotización "' + (cot.descripcion || cot.cliente) + '"?\n\nNo hay papelera de cotizaciones: esto no se puede deshacer.' + aviso + avisoRecibos)) return;
     state.cotizaciones = state.cotizaciones.filter(function (c) { return c.id !== id; });
     if (movimientos.length) {
       var ids = movimientos.map(function (t) { return t.id; });
@@ -1493,6 +1554,11 @@ export var actions = {
     }
     if (state.cotSucia === id) { state.cotSucia = ""; state.cotSnapshot = null; }
     if (state.cotizacionEditando === id) state.cotizacionEditando = "";
+    if (recibosCot.length) {
+      ejecutarAccionRecibo({ recibos: recibosCot, deltaCaja: 0, permitirCotSucia: true }, function () {
+        recibosCot.forEach(function (rid) { state.tx = reconciliarTxRecibo(state.tx, rid, state.cotizaciones).tx; });
+      });
+    }
     persist("cotizaciones"); notify();
   },
   "add-referencia": function (el) {
@@ -1905,6 +1971,34 @@ export var actions = {
   // insumos nuevos no le cambia el dueño a un dato ya registrado.
   "set-cot-compra": function (el) {
     var cotId = el.getAttribute("data-cot"), clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
+    // Compra que es parte de un Recibo de compra: estado, costo, proveedor
+    // y excedente los manda el recibo (se corrigen anulándolo). "Cant. real"
+    // sí se edita: mueve material y costo entre este pedido y la reserva del
+    // recibo (ajustarCantidadMiembro, core/calc.js). Todo queda "sin
+    // guardar" hasta Guardar, igual que cualquier otra edición — al guardar,
+    // guardarCotizaciones deja al día los movimientos del recibo.
+    var cotActual = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+    var compraActual = cotActual ? compraDeLinea(cotActual, clave) : null;
+    if (esMiembroRecibo(compraActual) && campo !== "observaciones") {
+      if (campo !== "cantidadReal") {
+        mostrarToast("Esta compra es parte de un recibo de compra: se corrige desde el recibo (Finanzas → Recibos de compra → Anular y corregir).");
+        notify();
+        return;
+      }
+      var ajuste = ajustarCantidadMiembro(compraActual, num(el.value), state.cotizaciones, state.tx);
+      state.cotizaciones = state.cotizaciones.map(function (c) {
+        if (c.id !== cotId) return c;
+        return Object.assign({}, c, { compras: c.compras.map(function (x) { return x.clave === clave ? ajuste.compra : x; }) });
+      });
+      marcarSucia(cotId);
+      var u = ajuste.unidad ? " " + ajuste.unidad : "";
+      var avisos = [];
+      if (ajuste.tomado.cantidad > 0) avisos.push("✓ Se tomaron " + ajuste.tomado.cantidad + u + " de la reserva del recibo (+" + fmt(ajuste.tomado.costo) + " a este pedido)");
+      if (ajuste.devuelto.cantidad > 0) avisos.push("↺ Volvieron " + ajuste.devuelto.cantidad + u + " a la reserva (−" + fmt(ajuste.devuelto.costo) + " de este pedido)");
+      if (ajuste.faltante > num(compraActual.faltante)) avisos.push("La reserva no alcanzó: faltan " + ajuste.faltante + u + " — regístralos en un recibo nuevo (Finanzas → Recibos de compra)");
+      if (avisos.length) mostrarToast(avisos.join(". ") + ". Se refleja en Finanzas al guardar.");
+      return;
+    }
     var esNumerico = campo === "cantidadReal" || campo === "costoReal" || campo === "cantidadExcedente";
     var valor = esNumerico ? num(el.value) : el.value;
     // Si esto sube la cantidad real de una compra que vino de "Compras
@@ -2884,11 +2978,13 @@ export function sincronizarComprasFinanzasDe(cot) {
 //         permitirCotSucia: true solo para "Guardar" de la propia cotización }
 // Devuelve true si guardó.
 export function ejecutarAccionRecibo(opts, fn) {
-  if (state.cotSucia && !opts.permitirCotSucia) {
-    var sucia = state.cotizaciones.filter(function (c) { return c.id === state.cotSucia; })[0];
+  var sucia = state.cotSucia ? state.cotizaciones.filter(function (c) { return c.id === state.cotSucia; })[0] : null;
+  if (sucia && !opts.permitirCotSucia) {
     // Guardar ahora arrastraría también sus cambios sin confirmar (se
-    // guarda la clave "cotizaciones" entera).
-    window.alert("Primero guarda o descarta los cambios de la cotización \"" + ((sucia && (sucia.descripcion || sucia.cliente)) || "abierta") + "\".");
+    // guarda la clave "cotizaciones" entera). Una marca "sin guardar" que
+    // apunta a una cotización que ya no existe no frena nada: no hay
+    // cambios de nadie que arrastrar.
+    window.alert("Primero guarda o descarta los cambios de la cotización \"" + (sucia.descripcion || sucia.cliente || "abierta") + "\".");
     return false;
   }
   var foto = {
@@ -2924,6 +3020,61 @@ export function ejecutarAccionRecibo(opts, fn) {
   persist("tx");
   if (JSON.stringify(state.txPapelera || []) !== foto.txPapelera) persist("txPapelera");
   return true;
+}
+
+// Los recibos en los que participa una cotización (sin repetir).
+export function idsRecibosDeCot(cot) {
+  var ids = [];
+  ((cot && cot.compras) || []).forEach(function (compra) {
+    (compra.partesRecibo || []).forEach(function (p) { if (ids.indexOf(p.reciboId) === -1) ids.push(p.reciboId); });
+  });
+  return ids;
+}
+
+function cotDePedido(pedido) {
+  if (!pedido) return null;
+  return state.cotizaciones.filter(function (c) { return c.id === pedido.cotizacionId; })[0] || null;
+}
+
+// Cuánto de sus recibos tiene un pedido (para avisar antes de eliminarlo).
+export function resumenRecibosDePedido(pedido) {
+  var cot = cotDePedido(pedido);
+  var ids = idsRecibosDeCot(cot);
+  var monto = 0;
+  ((cot && cot.compras) || []).forEach(function (compra) {
+    (compra.partesRecibo || []).forEach(function (p) { monto += Math.round(num(p.costo)); });
+  });
+  return { recibos: ids.length, monto: monto };
+}
+
+// Eliminar un pedido (no debió existir) devuelve su parte de cada recibo a
+// la reserva: esa plata ya se pagó al proveedor, no sale de la caja. Corre
+// ANTES de quitar el pedido: si no se puede (ej. hay una cotización con
+// cambios sin guardar), el pedido no se elimina. Devuelve true si siguió.
+export function devolverRecibosAlEliminarPedido(pedido) {
+  var cot = cotDePedido(pedido);
+  var ids = idsRecibosDeCot(cot);
+  if (!ids.length) return true;
+  return ejecutarAccionRecibo({ recibos: ids, deltaCaja: 0 }, function () {
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cot.id ? devolverPartesPorEliminar(c, pedido.id) : c; });
+    ids.forEach(function (rid) { state.tx = reconciliarTxRecibo(state.tx, rid, state.cotizaciones).tx; });
+  });
+}
+
+// Restaurar ese pedido vuelve a tomar su parte — hasta donde la reserva
+// todavía alcance. Devuelve { ok, faltantes } para avisar lo que faltó.
+export function retomarRecibosAlRestaurarPedido(pedido) {
+  var cot = cotDePedido(pedido);
+  var ids = idsRecibosDeCot(cot);
+  var faltantes = [];
+  if (!ids.length) return { ok: true, faltantes: faltantes };
+  var ok = ejecutarAccionRecibo({ recibos: ids, deltaCaja: 0 }, function () {
+    var res = retomarPartesPorRestaurar(cot, pedido.id, state.cotizaciones, state.tx);
+    faltantes = res.faltantes;
+    state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cot.id ? res.cot : c; });
+    ids.forEach(function (rid) { state.tx = reconciliarTxRecibo(state.tx, rid, state.cotizaciones).tx; });
+  });
+  return { ok: ok, faltantes: faltantes };
 }
 
 // Toma `cantidadNecesaria` de la reserva compartida de excedente de una
@@ -3111,6 +3262,20 @@ function tomarSnapshotCotizacion() {
 // una comisión no queda un aviso de "sin guardar" colgado por cambios que ya
 // se guardaron.
 function guardarCotizaciones() {
+  // Si la cotización abierta está en algún Recibo de compra, sus
+  // movimientos se dejan al día en el mismo acto (ej. tomó de la reserva:
+  // su parte sube, la reserva baja — la caja no cambia). Si algo no
+  // cuadrara al peso, ejecutarAccionRecibo no guarda NADA y avisa: la
+  // cotización sigue "sin guardar" para poder descartarla.
+  var idAbierta = state.cotizacionEditando;
+  var cotAbierta = idAbierta ? state.cotizaciones.filter(function (c) { return c.id === idAbierta; })[0] : null;
+  var recibosAbierta = idsRecibosDeCot(cotAbierta);
+  if (recibosAbierta.length) {
+    var okRecibos = ejecutarAccionRecibo({ recibos: recibosAbierta, deltaCaja: 0, permitirCotSucia: true }, function () {
+      recibosAbierta.forEach(function (rid) { state.tx = reconciliarTxRecibo(state.tx, rid, state.cotizaciones).tx; });
+    });
+    if (!okRecibos) return;
+  }
   persist("cotizaciones");
   state.cotSucia = "";
   tomarSnapshotCotizacion(); // el nuevo punto de retorno es lo recién guardado

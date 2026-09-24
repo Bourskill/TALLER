@@ -2652,7 +2652,7 @@ la reparación de los datos viejos.
 pasar por la capa que lo guarda. Probar la lógica con objetos en memoria
 no detecta que el dato nunca llega a la Sheet.
 
-### 🟡 Hallazgo #52 — "Recibo de compra": una compra real queda registrada como una sola cosa. EN CURSO (fase 1 de 4 hecha)
+### 🟡 Hallazgo #52 — "Recibo de compra": una compra real queda registrada como una sola cosa. EN CURSO (fases 1 y 2 de 4 hechas)
 
 **Por qué.** Hoy una compra real (un pago a un proveedor) no queda guardada
 en ningún lado como tal. Al registrar una compra conjunta, el total pagado,
@@ -2742,9 +2742,106 @@ Pruebas (`test/smoke.mjs`), con el ejemplo de $375.000:
 Cada resguardo tiene su prueba, y se comprobó que esa prueba falla si se
 quita el resguardo.
 
+**Fase 2 (hecha): recibos nuevos de punta a punta.**
+
+*Registrar.* La pestaña "Compras conjuntas" de Finanzas pasó a ser
+"🧾 Recibos de compra":
+- se eligen 1 o más pedidos (con uno solo alcanza: el caso "medias");
+- los datos del papel: fecha, proveedor y N.º (opcional);
+- la lista de lo pendiente sale sola (`calcLineasParaRecibo`): insumos en
+  "Aún no", reposiciones (`faltante`) y costos fijos agrupados por nombre;
+- por cada línea se escribe "Compré" y "Pagué". La vista previa y lo que se
+  guarda salen de la misma función (`calcRepartoLineaRecibo`);
+- "Ajustar reparto ▸" deja corregir la parte de cada pedido;
+- los servicios se asignan una vez, a todo el recibo.
+
+Antes de registrar se revisa:
+- si alguna compra todavía tiene un movimiento viejo propio en Finanzas.
+  Si lo tiene, se bloquea y se pide pulsar "Actualizar movimientos" primero;
+- el aviso de "estimado completo", que faltaba en este camino.
+
+Se retiraron `registrar-compra-conjunta` y `registrar-costo-compartido`.
+
+*Finanzas → Historial.*
+- Una tarjeta 🧾 por recibo con "Pagado" = la suma de todas sus filas.
+  Plegada muestra un resumen de una línea; desplegada, el detalle por línea
+  y "en pedidos + en reserva = pagado".
+- Cada pedido sigue viendo su parte en su tarjeta, con un chip "🧾 Recibo"
+  que lleva al recibo.
+- La reserva ya no cae en "Movimientos sueltos".
+- La búsqueda por OP, cliente o proveedor encuentra la tarjeta.
+- Si el recibo no cuadra, sale "⚠ descuadre" con el botón "Completar
+  movimientos". Al cargar la app nunca se reescribe nada.
+
+*Producción, fila de un miembro.* El estado y el costo salen como texto.
+Además lleva el chip 🧾, "↺ N libres" y "faltan N".
+- **"Cant. real" = cuánto usa de verdad el pedido** (`ajustarCantidadMiembro`):
+  - al subirla, toma material y costo de la reserva, del recibo más viejo al
+    más nuevo, y lo que no alcance queda en `faltante` (una reposición, que
+    va a otro recibo);
+  - al bajarla, primero cancela el faltante y después devuelve a la
+    reserva, empezando por el recibo más nuevo.
+- Se aplica al pulsar Guardar: `guardarCotizaciones` deja al día los
+  movimientos del recibo dentro de `ejecutarAccionRecibo`, con Δcaja 0.
+  "Descartar" lo deshace todo.
+- **Límite superado:** el costo de lo que se toma de la reserva ya pasa al
+  pedido que lo usa. Antes se quedaba en el pedido que tenía la reserva
+  guardada.
+
+*Anular / Anular y corregir.*
+- Cada compra pierde su parte de ese recibo. Si no le queda ninguna, vuelve
+  a "Aún no".
+- Sus filas van a la papelera con `eliminadoConRecibo`, y "Restaurar" las
+  rechaza porque contaría esa plata sin sus compras.
+- La caja sube exactamente lo que costó el recibo.
+- "Anular y corregir" además deja el formulario lleno con lo del papel,
+  sin copiar ningún id viejo.
+
+*Eliminar.*
+- **Cotización:** su parte pasa a la reserva del recibo. No va nada a la
+  papelera y la caja no cambia.
+- **Pedido:** su parte vuelve a la reserva (`devueltaPorEliminar`).
+  Restaurarlo la vuelve a tomar hasta donde alcance, y lo que falte queda
+  como `faltante` con un aviso.
+- **Pedido cancelado:** su parte se queda, y aparece el botón "↩ Devolver a
+  la reserva" en la tarjeta del recibo.
+
+*Guardia.* Ninguna acción de recibo corre si hay una cotización real con
+cambios sin guardar, porque esos cambios se guardarían junto con el recibo.
+Una marca "sin guardar" que apunta a una cotización que ya no existe no
+frena nada.
+
+*Datos viejos.* Las compras conjuntas y los excedentes ya registrados
+siguen con su mecanismo de siempre hasta la fase 3, que los convierte.
+
+**Pruebas (`test/smoke.mjs`).**
+- **Se reescribieron** las pruebas de Compras conjuntas como recibo (sin
+  perder lo que cada una protegía):
+  - el reparto con el total del papel;
+  - los servicios del recibo, repartidos por capacidad;
+  - las prendas en enteros;
+  - el caso de $142.900 en 4 unidades, donde ningún pedido queda en $0;
+  - el domicilio repartido a mano, con tolerancia cero.
+- **Las de los datos viejos de compra conjunta con excedente** ahora arman
+  esos datos directamente, y su mecanismo de reserva sigue probado.
+- **Pruebas nuevas:**
+  - ida y vuelta por las dos hojas (Cotizaciones y Movimientos), después
+    de la cual las reparaciones de `loadAll()` no tocan nada, dos veces
+    seguidas;
+  - tomar y descartar, tomar y guardar;
+  - faltante y reposición en un segundo recibo (el pedido queda con 2
+    partes);
+  - devolver al recibo más nuevo;
+  - búsqueda y "↗ Origen";
+  - borrar una cotización y eliminar/restaurar un pedido, sin que la caja
+    se mueva;
+  - anular, restauración rechazada, y "Anular y corregir".
+- **Revisado en el navegador (preview):** registrar, la tarjeta, la fila de
+  Producción, tomar de la reserva y guardar (la caja no se movió y no quedó
+  ningún descuadre), y el formulario en el celular (375 px, sin
+  desplazamiento horizontal).
+
 **Siguientes fases:**
-- **F2:** registrar, tarjeta en el Historial, usar y devolver reserva,
-  reposición, anular, eliminar.
 - **F3:** convertir compras conjuntas y excedentes viejos.
 - **F4:** agrupar en reportes y limpiar el mecanismo viejo.
 

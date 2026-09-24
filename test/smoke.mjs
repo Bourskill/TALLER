@@ -5388,113 +5388,110 @@ cotConjA.compras = [{ clave: grupoTelaTest.clave, estado: "si", costoReal: 30000
 assert(calcGruposTest([pedConjA.id, pedConjB.id]).length === 0, "si un pedido ya compró su parte por su cuenta (estado \"Sí\"), deja de contar como pendiente compartido — ya no queda nadie con quien repartir");
 cotConjA.compras = [];
 
-// -- flujo completo a través del DOM: elegir los 2 pedidos, escribir el
-// total comprado y pagado, registrar, y verificar el reparto exacto --
+const { calcLineasParaRecibo } = await import("../js/core/calc.js");
+// -- flujo completo a través del DOM, ahora como Recibo de compra (Hallazgo
+// #52, 2026-09-23 — la pestaña "Compras conjuntas" pasó a ser la de
+// recibos): elegir los 2 pedidos, escribir lo que dice el PAPEL del
+// proveedor (compré 33 m, pagué $99.000) y registrar. Con el total del
+// papel (decisión del usuario), cada pedido recibe lo que necesita (10 y 20)
+// y lo que sobra (3 m) queda como reserva de ESTOS pedidos — ya no se
+// reparte "de más" a prorrata (11/22) como en la versión vieja.
 state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
-assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjA.id + '"]'), "Compras conjuntas lista los pedidos con compras pendientes para elegir");
+assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjA.id + '"]'), "Recibos de compra lista los pedidos con compras pendientes para elegir");
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjA.id + '"]');
+assert(!!document.querySelector('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="costoPagado"]'), "con UN solo pedido elegido ya se puede armar un recibo (caso \"medias\": comprar de más para uno solo)");
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjB.id + '"]');
 assert(state.formCompraConjunta.seleccion.length === 2, "marca los dos pedidos elegidos");
-assert(!document.querySelector('[data-action="registrar-compra-conjunta"]'), "sin escribir cantidad/costo todavía, no aparece el botón de registrar (nada que registrar aún)");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="cantidadTotal"]', "33");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="costoTotal"]', "99000");
-assert(!!document.querySelector('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]'), "con los dos números escritos, aparece 'Registrar esta compra'");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="cantidadComprada"]', "33");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoTelaTest.clave + '"][data-campo="costoPagado"]', "99000");
+var previewReciboTest = document.getElementById("app").textContent;
+assert(previewReciboTest.indexOf("OP-CONJA 10.00 m") !== -1 && previewReciboTest.indexOf("OP-CONJB 20.00 m") !== -1 && previewReciboTest.indexOf("sobran 3.00 m") !== -1, "antes de registrar ya se ve el reparto: A 10 m, B 20 m y sobran 3 m de reserva");
+click('[data-action="toggle-ajustar-recibo"][data-clave="' + grupoTelaTest.clave + '"]');
 const inputCantATest = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoTelaTest.clave + '"][data-cot="' + cotConjA.id + '"]');
-const inputCantBTest = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoTelaTest.clave + '"][data-cot="' + cotConjB.id + '"]');
-assert(inputCantATest.value === "11.00" && inputCantBTest.value === "22.00", "antes de confirmar, ya se ve el reparto exacto que se va a aplicar (11 y 22) — editable, no solo de lectura");
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoTelaTest.clave + '"]');
+assert(!!inputCantATest && inputCantATest.value === "10.00", "\"Ajustar reparto\" abre la tabla editable con la cantidad de cada pedido");
+const cajaAntesReciboTest = state.tx.reduce(function (a, t) { return t.tipo === "ingreso" ? a + t.monto : a - t.monto; }, 0);
+click('[data-action="registrar-recibo-compra"]');
 
 const cotATrasRegistroTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
 const cotBTrasRegistroTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
 const compraATest = cotATrasRegistroTest.compras.filter(function (c) { return c.clave === grupoTelaTest.clave; })[0];
 const compraBTest = cotBTrasRegistroTest.compras.filter(function (c) { return c.clave === grupoTelaTest.clave; })[0];
-assert(compraATest.estado === "si" && compraBTest.estado === "si", "el registro deja las dos compras marcadas \"Sí\"");
-assert(compraATest.cantidadReal === 11 && compraBTest.cantidadReal === 22, "reparte los 33m: 11 para quien necesitaba 10, 22 para quien necesitaba 20 — EXACTO el ejemplo que dio el usuario");
-assert(compraATest.costoReal + compraBTest.costoReal === 99000, "el costo total pagado se reparte SIN perder ni un peso: la suma vuelve a dar el total exacto");
-assert(compraATest.costoReal === 33000 && compraBTest.costoReal === 66000, "el costo se reparte en la misma proporción (1/3 y 2/3): 33.000 y 66.000");
-assert(!!compraATest.compartida && !!compraBTest.compartida, "las dos quedan con el rastro de 'compra compartida'");
-assert(compraATest.compartida.grupoId === compraBTest.compartida.grupoId, "...con el MISMO id de grupo — es el mismo evento de compra visto desde los dos pedidos");
+assert(compraATest.estado === "si" && compraBTest.estado === "si", "el recibo deja las dos compras marcadas \"Sí\"");
+assert(compraATest.cantidadReal === 10 && compraBTest.cantidadReal === 20, "cada pedido queda con lo que necesitaba (10 y 20) — lo que sobró no es de ninguno");
+assert(compraATest.costoReal === 30000 && compraBTest.costoReal === 60000, "el costo sigue a la cantidad: $30.000 y $60.000 (a $3.000 el metro, igual para todos)");
+const reciboIdTest = compraATest.partesRecibo[0].reciboId;
+assert(compraBTest.partesRecibo[0].reciboId === reciboIdTest, "las dos compras quedan con el MISMO recibo — es el mismo papel visto desde los dos pedidos");
+const filasReciboTest = state.tx.filter(function (t) { return t.reciboCompraId === reciboIdTest; });
+const parteATest = filasReciboTest.filter(function (t) { return t.reciboCompraRol === "parte" && t.cotizacionId === "cot-conjA-test"; })[0];
+const reservaTest = filasReciboTest.filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(filasReciboTest.length === 3 && parteATest.monto === 30000 && parteATest.pedidoId === "ped-conjA-test", "en Finanzas: una fila por pedido (con su pedidoId, cuenta en su Neto) más la reserva");
+assert(reservaTest.monto === 9000 && reservaTest.cantidad === 3 && reservaTest.pedidoId === "", "la reserva (3 m, $9.000) va SIN pedido — no se mezcla con los movimientos de ninguno (Hallazgos #44-#51)");
+const cajaDespuesReciboTest = state.tx.reduce(function (a, t) { return t.tipo === "ingreso" ? a + t.monto : a - t.monto; }, 0);
+assert(cajaAntesReciboTest - cajaDespuesReciboTest === 99000, "la caja baja EXACTO lo pagado ($99.000), una sola vez");
+assert(!state.formCompraConjunta.porClave[grupoTelaTest.clave], "tras registrar, el borrador de esa línea se limpia solo");
+assert(state.finanzasVista === "historial" && !!document.querySelector('.cc-grupo[data-recibo-id="' + reciboIdTest + '"]'), "y lleva directo a Historial, con la tarjeta del recibo a la vista");
+var textoHistorialReciboTest = document.getElementById("app").textContent;
+assert(textoHistorialReciboTest.indexOf("Pagado: -$ 99.000") !== -1 || textoHistorialReciboTest.indexOf("Pagado: -$99.000") !== -1 || /Pagado: -\$\s?99\.000/.test(textoHistorialReciboTest), "la tarjeta del recibo muestra el total pagado ($99.000)");
+assert(textoHistorialReciboTest.indexOf("Movimientos sueltos") === -1, "la reserva ya no cae en \"Movimientos sueltos\": vive en la tarjeta de su recibo");
+assert(textoHistorialReciboTest.indexOf("en reserva") !== -1, "la tarjeta abierta explica \"en pedidos + en reserva = pagados\"");
 
-assert(!!compraATest.txId && !!compraBTest.txId, "cada pedido queda con su PROPIO movimiento en Finanzas (no uno solo repartido a mano)");
-const txATest = state.tx.filter(function (t) { return t.id === compraATest.txId; })[0];
-const txBTest = state.tx.filter(function (t) { return t.id === compraBTest.txId; })[0];
-assert(!!txATest && !!txBTest && txATest.id !== txBTest.id, "los dos movimientos existen y son DISTINTOS");
-assert(txATest.monto === 33000 && txBTest.monto === 66000, "cada movimiento tiene el monto que le tocó a SU pedido, no el total compartido");
-assert(txATest.cotizacionId === "cot-conjA-test" && txBTest.cotizacionId === "cot-conjB-test", "cada movimiento queda ligado a su propia cotización");
-
-assert(!state.formCompraConjunta.porClave[grupoTelaTest.clave], "tras registrar, el borrador de esa fila se limpia solo");
-assert(!document.querySelector('[data-action="registrar-compra-conjunta"]'), "y la fila ya comprada desaparece de \"Compras conjuntas\" (ya no está pendiente)");
-
-// -- el rastro se ve, sutil, en la lista de compras de CADA cotización --
+// -- el rastro se ve en la lista de compras de CADA cotización: un botón
+// 🧾 que lleva al recibo, y cuánto queda libre en la reserva --
 state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
 click('[data-action="abrir-cotizacion-editor"][data-id="cot-conjA-test"]');
 click('[data-action="set-cot-tab"][data-id="cot-conjA-test"][data-val="produccion"]');
-const tagsCompartidaTest = Array.prototype.filter.call(document.querySelectorAll(".tag"), function (t) { return t.textContent.indexOf("compartida") !== -1; });
-assert(tagsCompartidaTest.length === 1, "la fila de Tela algodón en 'Compras del pedido' de A muestra la insignia '🔗 compartida', sutil (un solo tag chico, no un aviso grande)");
-assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJB") !== -1, "...cuyo tooltip menciona el OTRO pedido (OP-CONJB)");
-assert(tagsCompartidaTest[0].getAttribute("title").indexOf("OP-CONJA") === -1, "...pero NO se menciona a sí misma (no tiene sentido decir que se compartió consigo misma)");
+assert(!!document.querySelector('[data-action="ver-recibo"][data-recibo-id="' + reciboIdTest + '"]'), "la fila de Tela algodón en \"Compras del pedido\" de A lleva el botón 🧾 Recibo");
+assert(document.getElementById("app").textContent.indexOf("3.00 libres") !== -1, "...y avisa cuánto hay libre en la reserva del recibo (3 m)");
+assert(!document.querySelector('select[data-action-change="set-cot-compra"][data-cot="cot-conjA-test"][data-clave="' + grupoTelaTest.clave + '"][data-campo="estado"]'), "el estado de esa compra ya no se cambia acá (lo manda el recibo): no hay selector");
+click('[data-action="cerrar-cotizacion-editor"]');
 
-// -- Compras conjuntas también puede descontar el costo de un servicio ya
-// acumulado (2026-09-21: "en finanzas/compras conjuntas tambien aplica la
-// logica de descontar de los montos de servicios") — mismo mecanismo EXACTO
-// que "Registrar gasto/nómina" (renderAsignarServicios/validarServiciosAsignados),
-// solo que el monto asignado se reparte entre los N movimientos que genera
-// una compra compartida, con el mismo repartirProporcional que ya reparte
-// cantidad/costo/excedente.
+// -- el recibo también puede descontarse de un servicio ya acumulado — UNA
+// sola asignación para todo el papel, repartida entre sus filas por
+// capacidad (ninguna fila descuenta más que su monto).
 const { calcServiciosDisponibles: calcServDispConjTest } = await import("../js/core/calc.js");
 var cotAFreshConjTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
 var cotBFreshConjTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
-// Un segundo insumo compartido (el de Tela ya quedó registrado arriba, ya no
-// aparece como pendiente) — mismos pesos 10/20 que antes, mismo criterio.
-// tipo "tela" a propósito (no "hilo"): es el tipo con estimado de cantidad
-// físico (consumo por prenda) que da pesos DISTINTOS de cero por pedido —
-// lo que hace falta acá para probar un reparto proporcional real, no parejo.
 cotAFreshConjTest.referencias[0].insumos.push({ id: "i2-conjA-test", nombre: "Hilo poliéster", unidad: "m", costo: 500, tipo: "tela", cantidad: 1, categoriaId: "", proveedorId: "" });
 cotBFreshConjTest.referencias[0].insumos.push({ id: "i2-conjB-test", nombre: "Hilo poliéster", unidad: "m", costo: 500, tipo: "tela", cantidad: 1, categoriaId: "", proveedorId: "" });
-// Acumula 50.000 en un servicio, igual que marcar una línea "Servicio" en
-// "Compras del pedido" — el nombre nace del `clave` cuando no hay ninguna
-// línea real con esa clave (ver listaEntradasServicio en core/calc.js).
 cotAFreshConjTest.compras = cotAFreshConjTest.compras.concat([{ clave: "servicio-test-conj", observaciones: "", estado: "servicio", costoReal: 50000, cantidadReal: "", cantidadExcedente: 0, txId: "", excedenteTxId: "" }]);
 assert(calcServDispConjTest().filter(function (s) { return s.nombre === "servicio-test-conj"; })[0].disponible === 50000, "queda acumulado 50.000 en el servicio de prueba");
 
 state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
-assert(state.formCompraConjunta.seleccion.length === 2, "los dos pedidos siguen elegidos (\"registrar\" solo limpia el borrador de esa fila, no la selección)");
-const grupoHiloTest = calcGruposTest(state.formCompraConjunta.seleccion)[0];
-assert(grupoHiloTest.nombre === "Hilo poliéster", "el nuevo insumo compartido (Hilo poliéster) aparece como pendiente — la Tela ya no, quedó registrada");
-assert(!document.querySelector('[data-action-change="set-fila-servicio-nombre"]'), "sin costo total escrito todavía, no aparece \"Asignar a servicio(s)\"");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.clave + '"][data-campo="cantidadTotal"]', "30");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.clave + '"][data-campo="costoTotal"]', "60000");
-assert(!!document.querySelector('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"]'), "con el costo ya escrito, aparece \"Asignar a servicio(s)\" con su botón + Agregar servicio");
+assert(state.formCompraConjunta.seleccion.length === 2, "los dos pedidos siguen elegidos (registrar solo limpia las líneas registradas, no la selección)");
+const grupoHiloTest = calcLineasParaRecibo(state.formCompraConjunta.seleccion).filter(function (g) { return g.nombre === "Hilo poliéster"; })[0];
+assert(!!grupoHiloTest && !calcLineasParaRecibo(state.formCompraConjunta.seleccion).some(function (g) { return g.linea === grupoTelaTest.clave; }), "el Hilo poliéster aparece pendiente; la Tela ya no (quedó en el recibo)");
+assert(!document.querySelector('[data-action-change="set-fila-servicio-nombre"]'), "sin nada pagado todavía, no aparece \"Asignar a servicio(s)\"");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.linea + '"][data-campo="cantidadComprada"]', "30");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.linea + '"][data-campo="costoPagado"]', "60000");
+assert(!!document.querySelector('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.recibo"]'), "con algo pagado, aparece \"Asignar a servicio(s)\" para TODO el recibo");
 
 // -- primero, un intento que pide más de lo disponible: se bloquea y no toca nada --
-click('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"]');
-assert(state.formCompraConjunta.porClave[grupoHiloTest.clave].servicios.length === 1, "agregar-fila-servicio funciona con el path anidado (formCompraConjunta.porClave.<clave>), igual que con formTx/formNominaPago");
-setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "servicio-test-conj");
-setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "999999");
+click('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.recibo"]');
+assert(state.formCompraConjunta.recibo.servicios.length === 1, "agregar-fila-servicio funciona con el path anidado formCompraConjunta.recibo");
+setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "servicio-test-conj");
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "999999");
 var txAntesDelRechazoConjTest = state.tx.length;
 var alertaOriginalConjTest = global.alert;
 var alertaCapturadaConjTest = "";
 global.window.alert = global.alert = function (msg) { alertaCapturadaConjTest = msg; };
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoHiloTest.clave + '"]');
+click('[data-action="registrar-recibo-compra"]');
 global.window.alert = global.alert = alertaOriginalConjTest;
-assert(state.tx.length === txAntesDelRechazoConjTest, "pedir más de lo disponible en el servicio NO registra la compra conjunta");
+assert(state.tx.length === txAntesDelRechazoConjTest, "pedir más de lo disponible en el servicio NO registra el recibo");
 assert(alertaCapturadaConjTest.indexOf("servicio-test-conj") !== -1, "...y avisa cuál servicio no alcanza, igual que en Registrar gasto/nómina");
 
-// -- ahora, un monto que sí cabe: se reparte proporcional entre los movimientos --
-setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.porClave.' + grupoHiloTest.clave + '"][data-idx="0"]', "30000");
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoHiloTest.clave + '"]');
-
+// -- ahora un monto que sí cabe --
+setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "30000");
+click('[data-action="registrar-recibo-compra"]');
 var cotATrasHiloTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
-var cotBTrasHiloTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjB-test"; })[0];
-var compraHiloATest = cotATrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.clave; })[0];
-var compraHiloBTest = cotBTrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.clave; })[0];
-var txHiloATest = state.tx.filter(function (t) { return t.id === compraHiloATest.txId; })[0];
-var txHiloBTest = state.tx.filter(function (t) { return t.id === compraHiloBTest.txId; })[0];
-assert(txHiloATest.monto === 20000 && txHiloBTest.monto === 40000, "el costo (60.000) se reparte 1/3-2/3 como siempre: 20.000 y 40.000");
-assert(!!txHiloATest.serviciosDescuento && txHiloATest.serviciosDescuento.length === 1 && txHiloATest.serviciosDescuento[0].nombre === "servicio-test-conj", "el movimiento de CADA pedido lleva su propio serviciosDescuento");
-assert(txHiloATest.serviciosDescuento[0].monto === 10000 && txHiloBTest.serviciosDescuento[0].monto === 20000, "los 30.000 asignados se reparten EN LA MISMA proporción 1/3-2/3 que cantidad/costo: 10.000 y 20.000");
-assert(txHiloATest.serviciosDescuento[0].monto + txHiloBTest.serviciosDescuento[0].monto === 30000, "...sin perder ni ganar nada por el redondeo: la suma vuelve a dar el total asignado exacto");
+var compraHiloATest = cotATrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.linea; })[0];
+var reciboHiloTest = compraHiloATest.partesRecibo[0].reciboId;
+var filasHiloTest = state.tx.filter(function (t) { return t.reciboCompraId === reciboHiloTest; });
+var txHiloATest = filasHiloTest.filter(function (t) { return t.cotizacionId === "cot-conjA-test"; })[0];
+var txHiloBTest = filasHiloTest.filter(function (t) { return t.cotizacionId === "cot-conjB-test"; })[0];
+assert(filasHiloTest.length === 2 && txHiloATest.monto === 20000 && txHiloBTest.monto === 40000, "el costo (60.000) se reparte 1/3-2/3: 20.000 y 40.000, sin reserva (se compró justo lo necesario)");
+assert(txHiloATest.serviciosDescuento[0].monto === 10000 && txHiloBTest.serviciosDescuento[0].monto === 20000, "los 30.000 del servicio se reparten por capacidad: 10.000 y 20.000");
 assert(calcServDispConjTest().filter(function (s) { return s.nombre === "servicio-test-conj"; })[0].disponible === 20000, "el servicio queda con 20.000 disponibles (50.000 − 30.000)");
+assert(state.formCompraConjunta.recibo.servicios.length === 0, "tras registrar, los datos del recibo (servicios incluidos) se limpian para el siguiente");
 
 state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPreviasConjuntaTest; state.tx = txPreviosConjuntaTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
@@ -5544,133 +5541,53 @@ const grupoProdTest = gruposProdTest[0];
 assert(grupoProdTest.esProducto === true, "el grupo queda marcado como producto comprado entero (insumo tipo producto_comprado)");
 assert(grupoProdTest.unidad === "UND", "...con unidad UND, como cualquier producto comprado");
 
+const { costoRealPedido: costoRealPedidoProdTest, cantidadRealPedido: cantidadRealPedidoProdTest } = await import("../js/core/calc.js");
+// -- Recibo con prendas compradas ENTERAS (Hallazgo #43) y el caso real del
+// Hallazgo #45 (3 pedidos necesitan 1 camiseta cada uno, se compran 4 por
+// $142.900 — "el excedente también cuenta para la división del costo total
+// pagado, obviamente, no lo regalaron"): con el recibo las 4 unidades se
+// pagan al mismo precio ($35.725 c/u), y la que sobra queda en la reserva
+// con SU costo — ningún pedido queda en $0 ni subsidia a otro.
 state.tab = "finanzas"; state.finanzasVista = "conjuntas";
 state.formCompraConjunta = { seleccion: [pedProdA.id, pedProdB.id, pedProdC.id], porClave: {} };
 render();
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadTotal"]', "4");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="costoTotal"]', "142900");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoProdTest.clave + '"][data-campo="cantidadExcedente"]', "1");
-const inputCantProdA = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]');
-const inputCantProdB = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdB.id + '"]');
-const inputCantProdC = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdC.id + '"]');
-assert(inputCantProdA.value.indexOf(".") === -1 && inputCantProdB.value.indexOf(".") === -1 && inputCantProdC.value.indexOf(".") === -1, "el campo de cantidad de cada pedido ya NO muestra fracciones de una prenda comprada entera");
-const previewTextoProdTest = document.getElementById("app").textContent;
-assert(previewTextoProdTest.indexOf("0.34") === -1 && previewTextoProdTest.indexOf("0.33") === -1, "...y el excedente (todavía de solo lectura) tampoco");
+const claveProdTest = grupoProdTest.clave;
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + claveProdTest + '"][data-campo="cantidadComprada"]', "4");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + claveProdTest + '"][data-campo="costoPagado"]', "142900");
+var previewProdTest = document.getElementById("app").textContent;
+assert(previewProdTest.indexOf("sobran 1 UND") !== -1, "el reparto en pantalla ya muestra la camiseta que sobra, en enteros");
+assert(previewProdTest.indexOf("35.725") !== -1, "...y su costo propio ya calculado (142.900 / 4 = 35.725), no en $0");
+click('[data-action="toggle-ajustar-recibo"][data-clave="' + claveProdTest + '"]');
+const inputCantProdA = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + claveProdTest + '"][data-cot="' + cotProdA.id + '"]');
+const inputCantProdB = document.querySelector('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + claveProdTest + '"][data-cot="' + cotProdB.id + '"]');
+assert(inputCantProdA.value.indexOf(".") === -1 && inputCantProdB.value.indexOf(".") === -1, "la cantidad de cada pedido NO muestra fracciones de una prenda comprada entera");
 
-// -- la cantidad de cada pedido se puede escribir a mano en vez de confiar
-// en el reparto automático — reportado por el usuario 2026-09-21: "un campo
-// para definir que cantidad va en cada pedido". Primero, un reparto que NO
-// cuadra: se bloquea, sin tocar nada.
-setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]', "3");
+// -- un reparto a mano que se pasa de lo comprado (3 + 1 + 1 = 5 > 4) se
+// bloquea, sin tocar nada --
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + claveProdTest + '"][data-cot="' + cotProdA.id + '"]', "3");
 var txAntesDelBloqueoCantTest = state.tx.length;
 var alertaOriginalCantTest = global.alert, alertaCapturadaCantTest = "";
 global.window.alert = global.alert = function (msg) { alertaCapturadaCantTest = msg; };
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoProdTest.clave + '"]');
+click('[data-action="registrar-recibo-compra"]');
 global.window.alert = global.alert = alertaOriginalCantTest;
-assert(state.tx.length === txAntesDelBloqueoCantTest, "si lo repartido a mano no suma el total comprado, NO se registra nada");
-assert(alertaCapturadaCantTest.indexOf("no coincide") !== -1, "...y avisa que el reparto no cuadra");
+assert(state.tx.length === txAntesDelBloqueoCantTest, "si lo repartido a mano pasa de lo comprado, NO se registra nada");
+assert(alertaCapturadaCantTest.indexOf("se compraron") !== -1, "...y avisa que se repartió más de lo que se compró");
 
-// -- ahora un reparto manual que SÍ cuadra (2/1/1, deliberadamente distinto
-// del reparto proporcional que traía por defecto) — se respeta tal cual se
-// escribió, no lo que la app hubiera repartido sola.
-setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdA.id + '"]', "2");
-setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdB.id + '"]', "1");
-setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + grupoProdTest.clave + '"][data-cot="' + cotProdC.id + '"]', "1");
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoProdTest.clave + '"]');
-
-const cotProdATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodA-test"; })[0];
-const cotProdBTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodB-test"; })[0];
-const cotProdCTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-prodC-test"; })[0];
-const compraProdA = cotProdATrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
-const compraProdB = cotProdBTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
-const compraProdC = cotProdCTrasReg.compras.filter(function (c) { return c.clave === grupoProdTest.clave; })[0];
-assert(Number.isInteger(compraProdA.cantidadReal) && Number.isInteger(compraProdB.cantidadReal) && Number.isInteger(compraProdC.cantidadReal), "cada pedido recibe un número ENTERO de camisetas, nunca una fracción (\"1.34 camisetas\" no existe)");
-// Desde el Hallazgo #45, cantidadReal guardada ya no es SOLO el reparto
-// manual (2/1/1) — también incluye la porción de excedente que le tocó a
-// esa compra (A sostiene la 1 unidad de reserva: 2+1=3). Es la MISMA
-// invariante que cantidadExcedenteCompra/costoExcedenteCompra (core/calc.js)
-// ya exigían desde el Hallazgo #29: el excedente es SIEMPRE una porción de
-// la propia cantidadReal, nunca algo aparte.
-assert(compraProdA.cantidadReal === 3 && compraProdB.cantidadReal === 1 && compraProdC.cantidadReal === 1, "el reparto manual (2/1/1) queda intacto, más la unidad de excedente sumada a quien la sostiene (A: 2+1=3)");
-assert(compraProdA.cantidadReal + compraProdB.cantidadReal + compraProdC.cantidadReal === 5, "...y entre los 3 suman las 4 que cubrían los pedidos MÁS la 1 de excedente (5), nunca menos");
-assert(Number.isInteger(compraProdA.cantidadExcedente) && Number.isInteger(compraProdB.cantidadExcedente) && Number.isInteger(compraProdC.cantidadExcedente), "el excedente TAMBIÉN se reparte en enteros (mismo criterio)");
-assert(compraProdA.cantidadExcedente + compraProdB.cantidadExcedente + compraProdC.cantidadExcedente === 1, "...sumando exacto la 1 unidad de excedente");
-const costoProdSuma = compraProdA.costoReal + compraProdB.costoReal + compraProdC.costoReal;
-assert(costoProdSuma === 142900, "el costo sigue repartiéndose exacto en pesos, sin perder ni un peso entre los 3 (esto ya funcionaba)");
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + claveProdTest + '"][data-cot="' + cotProdA.id + '"]', "1");
+click('[data-action="registrar-recibo-compra"]');
+const compraProdA = state.cotizaciones.filter(function (c) { return c.id === "cot-prodA-test"; })[0].compras.filter(function (c) { return c.clave === claveProdTest; })[0];
+const compraProdB = state.cotizaciones.filter(function (c) { return c.id === "cot-prodB-test"; })[0].compras.filter(function (c) { return c.clave === claveProdTest; })[0];
+const compraProdC = state.cotizaciones.filter(function (c) { return c.id === "cot-prodC-test"; })[0].compras.filter(function (c) { return c.clave === claveProdTest; })[0];
+assert(Number.isInteger(compraProdA.cantidadReal) && compraProdA.cantidadReal === 1 && compraProdB.cantidadReal === 1 && compraProdC.cantidadReal === 1, "cada pedido recibe 1 camiseta ENTERA (nunca una fracción)");
+assert(compraProdA.costoReal === 35725 && compraProdB.costoReal === 35725 && compraProdC.costoReal === 35725, "los 3 pedidos pagan su camiseta al mismo precio: 142.900 / 4 = 35.725 (Hallazgo #45: se divide en 4, no en 3)");
+assert(costoRealPedidoProdTest(compraProdA) === 35725 && cantidadRealPedidoProdTest(compraProdA) === 1, "el costo real de cada pedido NUNCA cae a $0 (el bug del Hallazgo #45)");
+const reciboProdTest = compraProdA.partesRecibo[0].reciboId;
+const filasProdTest = state.tx.filter(function (t) { return t.reciboCompraId === reciboProdTest; });
+const reservaProdTest = filasProdTest.filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(reservaProdTest.cantidad === 1 && reservaProdTest.monto === 35725, "la camiseta que sobra queda en la reserva del recibo con SU costo ($35.725)");
+assert(filasProdTest.reduce(function (a, t) { return a + t.monto; }, 0) === 142900, "el total pagado (142.900) queda completo en Finanzas, cero descuadre");
 
 state.pedidos = pedidosPreviosProdTest; state.cotizaciones = cotizacionesPreviasProdTest; state.tx = txPreviosProdTest;
-state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
-state.formCompraConjunta = { seleccion: [], porClave: {} };
-
-// -- Hallazgo #45: el costo del excedente también tiene que descontarse del
-// total pagado ANTES de repartir entre los pedidos — reportado por el
-// usuario 2026-09-21 con captura real: 3 pedidos necesitando 1 camiseta
-// cada uno, compra 3 (para los pedidos) + 1 de excedente, paga $142.900 en
-// total. "142900 se está diviendo en 3 y no en 4... el excedente tambien
-// cuenta para division del costo total pagado, obviamente, no lo
-// regalaron". Antes, quien se quedaba con la reserva terminaba con
-// costoRealPedido en $0: su cantidadReal guardada NUNCA incluía su propia
-// porción de excedente, así que cantidadExcedenteCompra (core/calc.js) se
-// tragaba TODA su cantidadReal (cantidadExcedente === cantidadReal).
-const { costoRealPedido: costoRealPedidoProdTest, cantidadRealPedido: cantidadRealPedidoProdTest } = await import("../js/core/calc.js");
-const pedidosPreviosH45Test = state.pedidos, cotizacionesPreviasH45Test = state.cotizaciones, txPreviosH45Test = state.tx;
-const cotH45A = cotConProductoComprado("cot-h45A-test", "ped-h45A-test");
-const cotH45B = cotConProductoComprado("cot-h45B-test", "ped-h45B-test");
-const cotH45C = cotConProductoComprado("cot-h45C-test", "ped-h45C-test");
-const pedH45A = pedidoProdTest("ped-h45A-test", "cot-h45A-test", "OP-7204");
-const pedH45B = pedidoProdTest("ped-h45B-test", "cot-h45B-test", "OP-2085");
-const pedH45C = pedidoProdTest("ped-h45C-test", "cot-h45C-test", "OP-5958");
-state.pedidos = [pedH45A, pedH45B, pedH45C];
-state.cotizaciones = [cotH45A, cotH45B, cotH45C];
-state.tx = [];
-
-const grupoH45Test = calcGruposTest([pedH45A.id, pedH45B.id, pedH45C.id])[0];
-state.tab = "finanzas"; state.finanzasVista = "conjuntas";
-state.formCompraConjunta = { seleccion: [pedH45A.id, pedH45B.id, pedH45C.id], porClave: {} };
-render();
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="cantidadTotal"]', "3");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="costoTotal"]', "142900");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoH45Test.clave + '"][data-campo="cantidadExcedente"]', "1");
-
-// -- reportado por el usuario en el mismo mensaje: la columna "Excedente"
-// por fila hacía parecer que el excedente le pertenecía SOLO al pedido
-// donde cayó el residuo del reparto — "no solo se está vinculando a 1
-// pedido, cierto?... en vez de una columna, 1 fila tal vez". Ahora es una
-// sola línea fuera de la tabla, no una columna más de una fila puntual.
-var previewH45Texto = document.getElementById("app").textContent;
-assert(previewH45Texto.indexOf("Reserva compartida") !== -1, "el preview ya explica el excedente como una reserva compartida de los 3, no como una columna más de la fila de un pedido puntual");
-assert(previewH45Texto.indexOf("35.725") !== -1 || previewH45Texto.indexOf("35725") !== -1, "...con su propio costo ya calculado (142.900 / 4), no en $0");
-
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoH45Test.clave + '"]');
-
-const cotH45ATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45A-test"; })[0];
-const cotH45BTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45B-test"; })[0];
-const cotH45CTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-h45C-test"; })[0];
-const compraH45A = cotH45ATrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
-const compraH45B = cotH45BTrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
-const compraH45C = cotH45CTrasReg.compras.filter(function (c) { return c.clave === grupoH45Test.clave; })[0];
-
-// El método del mayor residuo deja la 1 unidad de excedente completa en UN
-// solo tenedor — mismo comportamiento de siempre (repartirProporcional), no
-// se asume cuál de los 3 es para que la prueba no dependa de eso.
-var candidatosH45 = [compraH45A, compraH45B, compraH45C];
-var tenedorH45 = candidatosH45.filter(function (c) { return c.cantidadExcedente === 1; })[0];
-var restoH45 = candidatosH45.filter(function (c) { return c !== tenedorH45; });
-assert(!!tenedorH45 && restoH45.length === 2, "la 1 unidad de excedente quedó completa en un solo tenedor, como siempre");
-
-var costoH45Suma = compraH45A.costoReal + compraH45B.costoReal + compraH45C.costoReal;
-assert(costoH45Suma === 142900, "el total pagado (142.900) queda repartido exacto entre las 3 compras, cero descuadre");
-assert(tenedorH45.costoReal === 71450, "el tenedor de la reserva absorbe SU propio costo (35.725) MÁS el costo de la unidad de excedente que sostiene (35.725) — 142.900 / 4 unidades reales, no / 3");
-assert(restoH45[0].costoReal === 35725 && restoH45[1].costoReal === 35725, "los otros 2 pedidos pagan solo su propia unidad, a 35.725 — mismo precio unitario para los 3 y para el excedente, sin que nadie subsidie al otro");
-
-// La prueba de fuego del bug reportado: el costo REAL atribuible al pedido
-// que sostiene la reserva (descontado el excedente) no puede caer a $0 solo
-// por sostener 1 unidad de más.
-assert(costoRealPedidoProdTest(tenedorH45) === 35725, "el pedido que sostiene la reserva sigue viendo SU costo real de 35.725 — no $0, no el costo del excedente completo");
-assert(cantidadRealPedidoProdTest(tenedorH45) === 1, "...y su cantidad real neta sigue siendo la 1 camiseta que de verdad necesitaba, no 0");
-assert(costoRealPedidoProdTest(restoH45[0]) === 35725 && costoRealPedidoProdTest(restoH45[1]) === 35725, "a los otros 2, que no tocaron la reserva, no les cambia nada");
-
-state.pedidos = pedidosPreviosH45Test; state.cotizaciones = cotizacionesPreviasH45Test; state.tx = txPreviosH45Test;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
@@ -5712,83 +5629,251 @@ state.cotizaciones = [cotDomA, cotDomB, cotDomC];
 state.tx = [];
 
 state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
-assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomA.id + '"]'), "un pedido cuyo ÚNICO pendiente es un costo global (Domicilio, sin ningún insumo físico) SÍ aparece para elegir — antes del fix nunca aparecía");
+assert(!!document.querySelector('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomA.id + '"]'), "un pedido cuyo ÚNICO pendiente es un costo global (Domicilio, sin ningún insumo físico) SÍ aparece para elegir");
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomA.id + '"]');
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomB.id + '"]');
 click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedDomC.id + '"]');
 
-assert(calcGruposTest([pedDomA.id, pedDomB.id, pedDomC.id]).length === 0, "estos 3 pedidos no comparten ningún INSUMO físico — la sección de insumos no inventa nada");
-const grupoDomTest = calcGruposCostoTest([pedDomA.id, pedDomB.id, pedDomC.id])[0];
-assert(!!grupoDomTest && grupoDomTest.nombre === "Domicilio" && grupoDomTest.participantes.length === 3, "calcGruposCostoCompartido agrupa 'Domicilio' de los 3 pedidos por NOMBRE, aunque cada uno tenga su propia clave interna (\"global|\"+id, distinta en cada cotización)");
-var previewDomTexto = document.getElementById("app").textContent;
-assert(previewDomTexto.indexOf("Costos compartidos del pedido") !== -1, "la pestaña ya muestra la sección nueva, separada de \"Insumos que se repiten\"");
+const grupoDomTest = calcLineasParaRecibo([pedDomA.id, pedDomB.id, pedDomC.id]).filter(function (g) { return g.esGlobal; })[0];
+assert(!!grupoDomTest && grupoDomTest.nombre === "Domicilio" && grupoDomTest.participantes.length === 3, "el recibo junta el \"Domicilio\" de los 3 pedidos por NOMBRE, aunque cada uno tenga su propia clave interna");
+assert(calcLineasParaRecibo([pedDomA.id, pedDomB.id, pedDomC.id]).length === 1, "y no inventa ningún insumo físico: esa es la única línea");
+var pClaveDomA = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domA-test"; })[0].compraClave;
+var pClaveDomB = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domB-test"; })[0].compraClave;
+var pClaveDomC = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domC-test"; })[0].compraClave;
 
-var pClaveDomA = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domA-test"; })[0].claveGlobal;
-var pClaveDomB = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domB-test"; })[0].claveGlobal;
-var pClaveDomC = grupoDomTest.participantes.filter(function (p) { return p.cotId === "cot-domC-test"; })[0].claveGlobal;
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoDomTest.linea + '"][data-campo="costoPagado"]', "100000");
+click('[data-action="toggle-ajustar-recibo"][data-clave="' + grupoDomTest.linea + '"]');
 
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoDomTest.clave + '"][data-campo="costoTotal"]', "100000");
-
-// -- un reparto manual que NO cuadra se bloquea, sin tocar nada (mismo
-// criterio de cero descuadre que "registrar-compra-conjunta") --
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "40000");
+// -- un reparto a mano que NO cuadra se bloquea, sin tocar nada --
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.linea + '"][data-cot="cot-domA-test"]', "40000");
 var txAntesBloqueoDomTest = state.tx.length;
 var alertaOriginalDomTest = global.alert, alertaCapturadaDomTest = "";
 global.window.alert = global.alert = function (msg) { alertaCapturadaDomTest = msg; };
-click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
+click('[data-action="registrar-recibo-compra"]');
 global.window.alert = global.alert = alertaOriginalDomTest;
 assert(state.tx.length === txAntesBloqueoDomTest, "si lo repartido a mano no suma el total pagado, NO se registra nada");
-assert(alertaCapturadaDomTest.indexOf("no coincide") !== -1, "...y avisa que el reparto no cuadra");
+assert(alertaCapturadaDomTest.indexOf("pero se pagó") !== -1, "...y avisa que el reparto no cuadra");
 
-// -- tolerancia CERO, ni siquiera 1 peso de diferencia: a diferencia de una
-// cantidad física (metros), un monto acá es SIEMPRE un peso entero exacto,
-// sin ningún redondeo legítimo que perdonar.
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "30001");
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domB-test"]', "50000");
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domC-test"]', "20000");
+// -- tolerancia CERO, ni siquiera 1 peso de diferencia --
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.linea + '"][data-cot="cot-domA-test"]', "30001");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.linea + '"][data-cot="cot-domB-test"]', "50000");
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.linea + '"][data-cot="cot-domC-test"]', "20000");
 var txAntesUnPesoDomTest = state.tx.length;
 var alertaCapturadaUnPesoDomTest = "";
 global.window.alert = global.alert = function (msg) { alertaCapturadaUnPesoDomTest = msg; };
-click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
+click('[data-action="registrar-recibo-compra"]');
 global.window.alert = global.alert = alertaOriginalDomTest;
 assert(state.tx.length === txAntesUnPesoDomTest, "ni siquiera 1 peso de descuadre (30.001 + 50.000 + 20.000 = 100.001) se deja pasar en silencio");
-assert(alertaCapturadaUnPesoDomTest.indexOf("no coincide") !== -1, "...avisa igual que cualquier otro descuadre, por chico que sea");
+assert(alertaCapturadaUnPesoDomTest.indexOf("pero se pagó") !== -1, "...avisa igual que cualquier otro descuadre, por chico que sea");
 
-// -- un reparto manual que SÍ cuadra (30.000/50.000/20.000, deliberadamente
-// distinto del proporcional por defecto 32.000/48.000/20.000) se respeta
-// tal cual se escribió --
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domA-test"]', "30000");
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domB-test"]', "50000");
-setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.clave + '"][data-cot="cot-domC-test"]', "20000");
-click('[data-action="registrar-costo-compartido"][data-clave="' + grupoDomTest.clave + '"]');
-
-var cotDomATrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domA-test"; })[0];
-var cotDomBTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domB-test"; })[0];
-var cotDomCTrasReg = state.cotizaciones.filter(function (c) { return c.id === "cot-domC-test"; })[0];
-var compraDomA = cotDomATrasReg.compras.filter(function (c) { return c.clave === pClaveDomA; })[0];
-var compraDomB = cotDomBTrasReg.compras.filter(function (c) { return c.clave === pClaveDomB; })[0];
-var compraDomC = cotDomCTrasReg.compras.filter(function (c) { return c.clave === pClaveDomC; })[0];
+// -- un reparto a mano que SÍ cuadra (30.000/50.000/20.000, distinto del
+// proporcional por defecto 32.000/48.000/20.000) se respeta tal cual --
+setChange('[data-action-change="set-costo-compartido-monto"][data-clave="' + grupoDomTest.linea + '"][data-cot="cot-domA-test"]', "30000");
+click('[data-action="registrar-recibo-compra"]');
+var compraDomA = state.cotizaciones.filter(function (c) { return c.id === "cot-domA-test"; })[0].compras.filter(function (c) { return c.clave === pClaveDomA; })[0];
+var compraDomB = state.cotizaciones.filter(function (c) { return c.id === "cot-domB-test"; })[0].compras.filter(function (c) { return c.clave === pClaveDomB; })[0];
+var compraDomC = state.cotizaciones.filter(function (c) { return c.id === "cot-domC-test"; })[0].compras.filter(function (c) { return c.clave === pClaveDomC; })[0];
 assert(compraDomA.estado === "si" && compraDomB.estado === "si" && compraDomC.estado === "si", "las 3 quedan marcadas \"Sí\", cada una en su PROPIA compra (propia clave, nunca fusionadas)");
-assert(compraDomA.costoReal === 30000 && compraDomB.costoReal === 50000 && compraDomC.costoReal === 20000, "quedó EXACTAMENTE el reparto manual, no el proporcional que traía por defecto");
-assert(!!compraDomA.compartida && !!compraDomB.compartida && !!compraDomC.compartida && compraDomA.compartida.grupoId === compraDomB.compartida.grupoId && compraDomB.compartida.grupoId === compraDomC.compartida.grupoId, "las 3 quedan con el mismo rastro de \"compartida\" (mismo grupoId) — mismo mecanismo que el badge 🔗 de un insumo compartido, sin nada especial que escribir para eso");
-
-assert(!!compraDomA.txId && !!compraDomB.txId && !!compraDomC.txId, "cada una queda con su PROPIO movimiento en Finanzas");
-var txDomA = state.tx.filter(function (t) { return t.id === compraDomA.txId; })[0];
-var txDomB = state.tx.filter(function (t) { return t.id === compraDomB.txId; })[0];
-var txDomC = state.tx.filter(function (t) { return t.id === compraDomC.txId; })[0];
-assert(txDomA.monto === 30000 && txDomB.monto === 50000 && txDomC.monto === 20000, "cada movimiento tiene el monto que le tocó a SU pedido");
-// -- a diferencia del excedente de una compra conjunta (Hallazgo #44/45),
-// esto NO es una reserva: cada pedido de verdad incurrió en su propio
-// costo, así que su movimiento SÍ lleva su propio pedidoId, como
-// cualquier costoGlobal registrado a mano.
-assert(txDomA.pedidoId === "ped-domA-test" && txDomB.pedidoId === "ped-domB-test" && txDomC.pedidoId === "ped-domC-test", "cada movimiento SÍ lleva el pedidoId de su propio pedido (no es una reserva sin dueño)");
-
-var porClaveDomTrasReg = state.formCompraConjunta.porClave || {};
-assert(!porClaveDomTrasReg[grupoDomTest.clave], "tras registrar, el borrador de esa fila se limpia solo");
-assert(calcGruposCostoTest([pedDomA.id, pedDomB.id, pedDomC.id]).length === 0, "y el grupo desaparece de \"Costos compartidos\" — ya no queda nada pendiente en común");
+assert(compraDomA.costoReal === 30000 && compraDomB.costoReal === 50000 && compraDomC.costoReal === 20000, "quedó EXACTAMENTE el reparto a mano, no el proporcional que traía por defecto");
+var reciboDomTest = compraDomA.partesRecibo[0].reciboId;
+assert(compraDomB.partesRecibo[0].reciboId === reciboDomTest && compraDomC.partesRecibo[0].reciboId === reciboDomTest, "las 3 quedan en el MISMO recibo");
+var filasDomTest = state.tx.filter(function (t) { return t.reciboCompraId === reciboDomTest; });
+var txDomA = filasDomTest.filter(function (t) { return t.cotizacionId === "cot-domA-test"; })[0];
+assert(filasDomTest.length === 3 && filasDomTest.every(function (t) { return t.reciboCompraRol === "parte"; }), "un costo fijo repartido completo no deja reserva: solo una fila por pedido");
+assert(txDomA.monto === 30000 && txDomA.pedidoId === "ped-domA-test", "cada fila lleva el monto y el pedido que le tocó (no es una reserva sin dueño)");
+assert(!(state.formCompraConjunta.porClave || {})[grupoDomTest.linea], "tras registrar, el borrador de esa línea se limpia solo");
+assert(calcLineasParaRecibo([pedDomA.id, pedDomB.id, pedDomC.id]).length === 0, "y ya no queda nada pendiente en esos pedidos");
 
 state.pedidos = pedidosPreviosDomTest; state.cotizaciones = cotizacionesPreviasDomTest; state.tx = txPreviosDomTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
+state.formCompraConjunta = { seleccion: [], porClave: {} };
+
+// ---------------------------------------------------------------------------
+// Recibo de compra — fase 2 (Hallazgo #52): usar y devolver la reserva
+// desde Producción, reposición como OTRO recibo, anular, y eliminar/
+// restaurar pedido o cotización. Decisiones del usuario 2026-09-23: el
+// costo de lo que se toma de la reserva pasa al pedido que lo usa; si la
+// reserva no alcanza, "otro recibo de compra"; la plata pagada nunca
+// desaparece de la caja al borrar algo.
+// ---------------------------------------------------------------------------
+const pedidosPreviosRcF2 = state.pedidos, cotizacionesPreviasRcF2 = state.cotizaciones, txPreviosRcF2 = state.tx, papeleraPreviaRcF2 = state.txPapelera, pedPapeleraPreviaRcF2 = state.pedidosPapelera;
+const cotRcA = cotConTela("cot-rcA-test", "ped-rcA-test", 10);
+const cotRcB = cotConTela("cot-rcB-test", "ped-rcB-test", 20);
+const pedRcA = pedidoConjuntaTest("ped-rcA-test", "cot-rcA-test", "OP-RCA");
+const pedRcB = pedidoConjuntaTest("ped-rcB-test", "cot-rcB-test", "OP-RCB");
+state.pedidos = [pedRcA, pedRcB];
+state.cotizaciones = [cotRcA, cotRcB];
+state.tx = []; state.txPapelera = []; state.pedidosPapelera = [];
+state.cotSucia = ""; state.cotSnapshot = null; state.cotizacionEditando = "";
+function cajaRcF2() { return state.tx.reduce(function (a, t) { return t.tipo === "ingreso" ? a + Number(t.monto) : a - Number(t.monto); }, 0); }
+function compraRcF2(cotId) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === cotId; })[0];
+  return cot ? cot.compras.filter(function (c) { return c.clave === "tela algodón|m|tela"; })[0] : null;
+}
+function filasDeReciboRcF2(rid) { return state.tx.filter(function (t) { return t.reciboCompraId === rid; }); }
+
+// Recibo 1: compré 33 m, pagué $99.000 → A 10, B 20, reserva 3 ($9.000).
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: [pedRcA.id, pedRcB.id], porClave: {} };
+render();
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="tela algodón|m|tela"][data-campo="cantidadComprada"]', "33");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="tela algodón|m|tela"][data-campo="costoPagado"]', "99000");
+click('[data-action="registrar-recibo-compra"]');
+const r1RcF2 = compraRcF2("cot-rcA-test").partesRecibo[0].reciboId;
+const cajaTrasR1RcF2 = cajaRcF2();
+assert(cajaTrasR1RcF2 === -99000, "(punto de partida) el recibo de $99.000 está en la caja");
+
+// Ida y vuelta REAL por las dos hojas (Cotizaciones y Movimientos) y
+// después toda la secuencia de reparaciones de loadAll(): nada que tocar.
+const { tablaCotizaciones: tablaCotRcF2, COLUMNAS_COTIZACIONES: COLS_COT_RCF2 } = await import("../js/core/sheetsEsquemas.js");
+_resetCacheParaPruebas();
+var hojasRcF2 = {};
+const fetchOriginalRcF2 = global.fetch;
+global.fetch = async function (url, options) {
+  var u = decodeURIComponent(String(url));
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("fields=sheets.properties") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { sheets: [
+      { properties: { sheetId: 77101, title: "Movimientos", gridProperties: { columnCount: 80 } } },
+      { properties: { sheetId: 77102, title: "Cotizaciones", gridProperties: { columnCount: 80 } } }
+    ] }; } };
+  }
+  var m = u.match(/\/values\/(Movimientos|Cotizaciones)!/);
+  if (m) {
+    var hoja = m[1];
+    var esEnc = u.indexOf(hoja + "!A1:") !== -1;
+    var cols = hoja === "Movimientos" ? COLUMNAS_MOVIMIENTOS : COLS_COT_RCF2;
+    if (u.indexOf(":clear") !== -1) { if (!esEnc) hojasRcF2[hoja] = []; return { ok: true, status: 200, json: async function () { return {}; } }; }
+    if (metodo === "PUT") { if (!esEnc) hojasRcF2[hoja] = JSON.parse(options.body).values; return { ok: true, status: 200, json: async function () { return {}; } }; }
+    if (esEnc) return { ok: true, status: 200, json: async function () { return { values: [cols.map(function (c) { return c.header; })] }; } };
+    return { ok: true, status: 200, json: async function () { return { values: hojasRcF2[hoja] || [] }; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+await tablaMovRoundTrip.escribir(state.tx);
+await tablaCotRcF2.escribir(state.cotizaciones);
+const txLeidosRcF2 = await tablaMovRoundTrip.leer();
+const cotsLeidasRcF2 = await tablaCotRcF2.leer();
+global.fetch = fetchOriginalRcF2;
+_resetCacheParaPruebas();
+assert(verificarRecibo(r1RcF2, cotsLeidasRcF2, txLeidosRcF2).length === 0, "recibo: después de guardar y volver a leer AMBAS hojas, el recibo sigue cuadrando al peso");
+const reparacionesRcF2 = function () {
+  return [
+    repararMarcaExcedentePerdida(txLeidosRcF2, cotsLeidasRcF2),
+    repararTxHuerfanosDeCotEscalada(txLeidosRcF2, cotsLeidasRcF2, state.pedidos),
+    repararMarcasOrigenInconsistentes(txLeidosRcF2),
+    repararPedidoIdExcedente(txLeidosRcF2),
+    repararSeguimientoReciboTest(txLeidosRcF2, cotsLeidasRcF2)
+  ];
+};
+assert(reparacionesRcF2().every(function (x) { return x === false; }) && reparacionesRcF2().every(function (x) { return x === false; }), "recibo: tras la ida y vuelta, ninguna reparación de loadAll() toca nada, dos veces seguidas");
+
+// -- Usar la reserva: A sube su Cant. real de 10 a 12 --
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-rcA-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-rcA-test"][data-val="produccion"]');
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-rcA-test"][data-clave="tela algodón|m|tela"][data-campo="cantidadReal"]', "12");
+assert(compraRcF2("cot-rcA-test").cantidadReal === 12 && compraRcF2("cot-rcA-test").costoReal === 36000, "recibo: al subir a 12, A toma 2 m de la reserva Y su costo (+$6.000): el costo pasa al pedido que usa el material");
+assert(state.cotSucia === "cot-rcA-test", "...queda \"sin guardar\", como cualquier otra edición de la cotización");
+assert(cajaRcF2() === cajaTrasR1RcF2, "...y la caja no cambia (la plata ya se había pagado)");
+// Descartar: vuelve todo como estaba.
+click('[data-action="descartar-cambios-cotizacion"]');
+assert(compraRcF2("cot-rcA-test").cantidadReal === 10 && compraRcF2("cot-rcA-test").costoReal === 30000, "recibo: \"Descartar\" deshace la toma completa");
+// Ahora sí, tomar y guardar.
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-rcA-test"][data-clave="tela algodón|m|tela"][data-campo="cantidadReal"]', "12");
+click('[data-action="guardar-cotizacion"][data-id="cot-rcA-test"]');
+const parteARcF2 = filasDeReciboRcF2(r1RcF2).filter(function (t) { return t.reciboCompraRol === "parte" && t.cotizacionId === "cot-rcA-test"; })[0];
+const reservaRcF2 = filasDeReciboRcF2(r1RcF2).filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(parteARcF2.monto === 36000 && reservaRcF2.monto === 3000 && reservaRcF2.cantidad === 1, "recibo: al guardar, Finanzas queda al día: la parte de A sube a $36.000 y la reserva baja a 1 m / $3.000");
+assert(cajaRcF2() === cajaTrasR1RcF2, "...y la caja sigue igual al peso");
+assert(state.cotSucia === "", "...y la cotización queda guardada");
+
+// -- La reserva no alcanza: A necesita 15 (le quedan 1 libre) --
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-rcA-test"][data-clave="tela algodón|m|tela"][data-campo="cantidadReal"]', "15");
+assert(compraRcF2("cot-rcA-test").cantidadReal === 13 && compraRcF2("cot-rcA-test").faltante === 2, "recibo: si la reserva no alcanza, toma lo que hay (1 m) y lo demás (2 m) queda como FALTANTE");
+click('[data-action="guardar-cotizacion"][data-id="cot-rcA-test"]');
+assert(!filasDeReciboRcF2(r1RcF2).some(function (t) { return t.reciboCompraRol === "reserva"; }), "recibo: con la reserva agotada, su fila desaparece de Finanzas (no queda una en $0)");
+const lineasReposRcF2 = calcLineasParaRecibo([pedRcA.id]);
+assert(lineasReposRcF2.length === 1 && lineasReposRcF2[0].participantes[0].esReposicion && lineasReposRcF2[0].participantes[0].necesita === 2, "recibo: lo que faltó aparece como REPOSICIÓN pendiente en Recibos de compra (2 m)");
+
+// Recibo 2 (reposición): compré 2 m, pagué $7.000 (subió el precio).
+click('[data-action="cerrar-cotizacion-editor"]');
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: [pedRcA.id], porClave: {} };
+render();
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="tela algodón|m|tela"][data-campo="cantidadComprada"]', "2");
+setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="tela algodón|m|tela"][data-campo="costoPagado"]', "7000");
+click('[data-action="registrar-recibo-compra"]');
+const compraAConDosRcF2 = compraRcF2("cot-rcA-test");
+assert(compraAConDosRcF2.partesRecibo.length === 2 && compraAConDosRcF2.faltante === 0, "recibo: la reposición es OTRO recibo — la compra de A queda con dos partes y sin faltante");
+assert(compraAConDosRcF2.cantidadReal === 15 && compraAConDosRcF2.costoReal === 46000, "recibo: su costo es la suma de sus dos partes ($39.000 del primero + $7.000 del segundo), 15 m en total");
+assert(cajaRcF2() === cajaTrasR1RcF2 - 7000, "recibo: la caja solo bajó lo del segundo papel ($7.000)");
+
+// -- Devolver: A baja a 14 → vuelve 1 m a la reserva del recibo más NUEVO --
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-rcA-test"]');
+click('[data-action="set-cot-tab"][data-id="cot-rcA-test"][data-val="produccion"]');
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-rcA-test"][data-clave="tela algodón|m|tela"][data-campo="cantidadReal"]', "14");
+click('[data-action="guardar-cotizacion"][data-id="cot-rcA-test"]');
+const r2RcF2 = compraRcF2("cot-rcA-test").partesRecibo[1].reciboId;
+const reservaR2RcF2 = filasDeReciboRcF2(r2RcF2).filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(!!reservaR2RcF2 && reservaR2RcF2.cantidad === 1 && reservaR2RcF2.monto === 3500, "recibo: bajar la cantidad devuelve el material a la reserva del recibo más nuevo, con su costo (1 m, $3.500)");
+assert(cajaRcF2() === cajaTrasR1RcF2 - 7000, "...sin mover la caja");
+click('[data-action="cerrar-cotizacion-editor"]');
+
+// -- Historial: buscar por el pedido encuentra la tarjeta del recibo --
+state.tab = "finanzas"; state.finanzasVista = "historial"; state.buscarTx = "OP-RCB"; state.filtroTx = "todos"; state.filtroTxPeriodo = "todos"; state.filtroTxVista = "activos";
+render();
+assert(!!document.querySelector('.cc-grupo[data-recibo-id="' + r1RcF2 + '"]'), "recibo: buscar \"OP-RCB\" encuentra la tarjeta del recibo donde está ese pedido");
+state.buscarTx = ""; render();
+const filaReservaR2 = filasDeReciboRcF2(r2RcF2).filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+const { actions: finanzasAccionesRcF2 } = await import("../js/modules/finanzas.js");
+finanzasAccionesRcF2["ver-origen-tx"]({ getAttribute: function () { return filaReservaR2.id; } });
+assert(state.tab === "finanzas" && state.finanzasVista === "historial" && state.reciboExpandido[r2RcF2] === true, "recibo: \"↗ Origen\" de la reserva lleva a su recibo, abierto");
+
+// -- Eliminar la COTIZACIÓN de B: su parte pasa a la reserva, la caja no cambia --
+const cajaAntesBorrarBRcF2 = cajaRcF2();
+const papeleraAntesRcF2 = state.txPapelera.length;
+cotAccionesRemoveTest["remove-cotizacion"]({ getAttribute: function () { return "cot-rcB-test"; } });
+assert(cajaRcF2() === cajaAntesBorrarBRcF2, "recibo: borrar la cotización B no mueve la caja (su parte ya se pagó al proveedor)");
+assert(state.txPapelera.length === papeleraAntesRcF2, "...y nada del recibo va a la papelera");
+const reservaTrasBorrarBRcF2 = filasDeReciboRcF2(r1RcF2).filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(reservaTrasBorrarBRcF2.cantidad === 20 && reservaTrasBorrarBRcF2.monto === 60000, "...su parte (20 m, $60.000) quedó como reserva del recibo");
+assert(verificarRecibo(r1RcF2, state.cotizaciones, state.tx).length === 0, "...y el recibo sigue cuadrando al peso");
+
+// -- Eliminar el PEDIDO A: su parte vuelve a la reserva; restaurarlo la retoma --
+const { actions: pedidosAccionesRcF2 } = await import("../js/modules/pedidos.js");
+const cajaAntesBorrarARcF2 = cajaRcF2();
+pedidosAccionesRcF2["remove-pedido"]({ getAttribute: function () { return pedRcA.id; } });
+assert(!state.pedidos.some(function (p) { return p.id === pedRcA.id; }), "(el pedido A se eliminó)");
+assert(compraRcF2("cot-rcA-test").costoReal === 0, "recibo: al eliminar el pedido A, su parte vuelve a la reserva (su compra queda en $0)");
+assert(cajaRcF2() === cajaAntesBorrarARcF2, "...sin mover la caja");
+pedidosAccionesRcF2["restaurar-pedido"]({ getAttribute: function () { return pedRcA.id; } });
+assert(compraRcF2("cot-rcA-test").cantidadReal === 14 && compraRcF2("cot-rcA-test").costoReal === 42500, "recibo: al restaurarlo, vuelve a tomar su parte completa (14 m, $42.500)");
+assert(cajaRcF2() === cajaAntesBorrarARcF2, "...y la caja sigue igual al peso");
+
+// -- Anular el recibo 2: todo vuelve atrás, la caja sube lo que costó --
+const cajaAntesAnularRcF2 = cajaRcF2();
+const montoR2RcF2 = filasDeReciboRcF2(r2RcF2).reduce(function (a, t) { return a + t.monto; }, 0);
+click('[data-action="anular-recibo"][data-recibo-id="' + r2RcF2 + '"]');
+assert(filasDeReciboRcF2(r2RcF2).length === 0 && cajaRcF2() === cajaAntesAnularRcF2 + montoR2RcF2, "recibo: anular saca sus filas de Finanzas y la caja sube exacto lo que costó");
+assert(compraRcF2("cot-rcA-test").partesRecibo.length === 1, "...la compra de A se queda solo con su parte del primer recibo");
+const filaEnPapeleraRcF2 = state.txPapelera.filter(function (t) { return t.eliminadoConRecibo === r2RcF2; })[0];
+assert(!!filaEnPapeleraRcF2, "...las filas quedan en la papelera, marcadas con su recibo");
+const txAntesRestaurarRcF2 = state.tx.length;
+click('[data-action="ver-papelera"]');
+click('[data-action="restaurar-tx"][data-id="' + filaEnPapeleraRcF2.id + '"]');
+assert(state.tx.length === txAntesRestaurarRcF2, "...y NO se pueden restaurar sueltas (contaría esa plata sin sus compras)");
+click('[data-action="ver-papelera"]');
+
+// -- Anular y corregir el recibo 1: el formulario queda lleno --
+click('[data-action="anular-corregir-recibo"][data-recibo-id="' + r1RcF2 + '"]');
+assert(compraRcF2("cot-rcA-test").estado === "no" && !compraRcF2("cot-rcA-test").partesRecibo, "recibo: \"Anular y corregir\" deja la compra de A pendiente otra vez");
+assert(state.finanzasVista === "conjuntas" && state.formCompraConjunta.porClave["tela algodón|m|tela"].costoPagado === "99000" && state.formCompraConjunta.porClave["tela algodón|m|tela"].cantidadComprada === "33", "...y el formulario queda lleno con lo del papel (33 m, $99.000) para registrarlo de nuevo");
+assert(cajaRcF2() === 0, "...y la caja vuelve a como estaba antes de cualquier recibo");
+
+state.pedidos = pedidosPreviosRcF2; state.cotizaciones = cotizacionesPreviasRcF2; state.tx = txPreviosRcF2; state.txPapelera = papeleraPreviaRcF2; state.pedidosPapelera = pedPapeleraPreviaRcF2;
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo"; state.cotSucia = ""; state.cotSnapshot = null;
 state.formCompraConjunta = { seleccion: [], porClave: {} };
 
 // --- calcCotGastosReales: un costo real escrito A PROPÓSITO en $0 debe
@@ -6295,21 +6380,22 @@ state.cotizaciones = [cotConjExcA, cotConjExcB];
 state.tx = [];
 
 const grupoConjExcTest = calcGruposTest([pedConjExcA.id, pedConjExcB.id])[0];
-state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
-click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcA.id + '"]');
-click('[data-action="toggle-compra-conjunta-pedido"][data-id="' + pedConjExcB.id + '"]');
-// cantidadTotal es SOLO lo que cubre a los 2 pedidos (10+20=30) — el
-// excedente (6) es ADICIONAL, no una porción de esos 30 (ver Hallazgo #45:
-// el usuario compra "la cantidad para cada pedido Y la cantidad sobrante"
-// como dos montos separados, nunca uno incluido en el otro).
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadTotal"]', "30");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="costoTotal"]', "108000");
-var campoExcedenteConjTest = document.querySelector('input[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]');
-assert(!!campoExcedenteConjTest, "el formulario de Compras conjuntas también tiene el campo de excedente");
-setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoConjExcTest.clave + '"][data-campo="cantidadExcedente"]', "6");
-var previewExcConjTest = document.getElementById("app").textContent;
-assert(previewExcConjTest.indexOf("Reserva compartida") !== -1, "el reparto en pantalla ya muestra la reserva de excedente como una línea propia, no como una columna más de la fila de un pedido puntual");
-click('[data-action="registrar-compra-conjunta"][data-clave="' + grupoConjExcTest.clave + '"]');
+// Datos VIEJOS, tal como los dejaba "Compras conjuntas" antes del Recibo de
+// compra (Hallazgo #52): siguen existiendo en la Sheet real hasta que se
+// conviertan, así que su mecanismo (la reserva compartida) tiene que seguir
+// funcionando igual. Se arman directo porque la pestaña ya no registra así:
+// 30 m para los pedidos + 6 m de excedente, $108.000 (a $3.000 el metro) —
+// cada compra con su porción de excedente (Hallazgo #45: 12 y 24 m).
+const { sincronizarComprasFinanzasDe: sincronizarComprasLegacyTest } = await import("../js/modules/cotizaciones.js");
+var etiquetasLegacyConjExc = ["OP-CONJEXCA · Cliente Conjunta", "OP-CONJEXCB · Cliente Conjunta"];
+[cotConjExcA, cotConjExcB].forEach(function (c, i) {
+  c.compras = [{
+    clave: grupoConjExcTest.clave, estado: "si", cantidadReal: i === 0 ? 12 : 24, costoReal: i === 0 ? 36000 : 72000,
+    cantidadExcedente: i === 0 ? 2 : 4, proveedorId: "", observaciones: "", fecha: "2026-09-21", txId: "", excedenteTxId: "",
+    compartida: { grupoId: "grupo-legacy-conjexc-test", fecha: "2026-09-21", etiquetas: etiquetasLegacyConjExc }
+  }];
+});
+state.cotizaciones = state.cotizaciones.map(function (c) { return Object.assign({}, c, { compras: sincronizarComprasLegacyTest(c).compras }); });
 
 var cotConjExcATrasTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcA-test"; })[0];
 var cotConjExcBTrasTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjexcB-test"; })[0];

@@ -1,8 +1,8 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcListaCompras, estadoLineaCompra, calcGruposCompraCompartida, calcGruposCostoCompartido, repartirProporcional, pedidoCancelado } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
-import { sincronizarComprasFinanzasDe } from "./cotizaciones.js";
+import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -23,7 +23,7 @@ export function render() {
   if (vista === "historial") {
     html += state.filtroTxVista === "papelera" ? renderPapelera() : renderHistorial();
   } else if (vista === "conjuntas") {
-    html += renderComprasConjuntas();
+    html += renderRecibosCompra();
   } else {
     html += renderFormMovimiento();
   }
@@ -35,256 +35,285 @@ function renderTabsFinanzas(vista) {
   return '<div class="gsheet-tabs">' +
     '<button class="gsheet-tab ' + (vista === "nuevo" ? "active" : "") + '" data-action="finanzas-vista" data-val="nuevo">+ Registrar movimiento</button>' +
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="finanzas-vista" data-val="historial">Historial' + (state.tx.length ? " (" + state.tx.length + ")" : "") + "</button>" +
-    '<button class="gsheet-tab ' + (vista === "conjuntas" ? "active" : "") + '" data-action="finanzas-vista" data-val="conjuntas">Compras conjuntas</button>' +
+    '<button class="gsheet-tab ' + (vista === "conjuntas" ? "active" : "") + '" data-action="finanzas-vista" data-val="conjuntas">🧾 Recibos de compra</button>' +
     "</div>";
 }
 
-// ---------- Compras conjuntas: varios pedidos que comparten insumo ----------
-// Cuando se produce varios pedidos a la vez y comparten un insumo (la misma
-// tela, por ejemplo), esto deja elegir cuáles y arma una fila por cada
-// insumo que se repita entre ellos — igual que las referencias de UNA
-// cotización ya se juntan solas en su lista de compras (ver
-// agregarInsumosDeReferencias en core/calc.js), pero a través de varios
-// pedidos. Lo comprado en total se reparte a PRORRATA de lo que cada uno
-// necesitaba (ver repartirProporcional): si se compra de más o de menos
-// frente a la suma de lo estimado, esa diferencia también se reparte
-// proporcional, no parejo entre todos. Reportado por el usuario 2026-09-20.
-function renderComprasConjuntas() {
+// ---------- Recibos de compra ----------
+// Una compra REAL (un papel del proveedor) que reparte insumos y plata
+// entre 1 o varios pedidos y guarda lo que sobra como reserva para esos
+// mismos pedidos — propuesto por el usuario 2026-09-23 ("recibo, porque
+// literal es una compra conjunta en la vida real de insumos para varios
+// pedidos, o insumos de más para aprovechar la ocasión"). Reemplaza a
+// "Compras conjuntas" (que registraba insumo por insumo y no guardaba el
+// papel en ningún lado). Modelo y cuentas: ver "Recibo de compra" en
+// core/calc.js y CONTABILIDAD.md, Hallazgo #52.
+function renderRecibosCompra() {
   var sel = state.formCompraConjunta.seleccion || [];
   var candidatos = state.pedidos.filter(function (p) {
     if (pedidoCancelado(p) || !p.cotizacionId) return false;
-    var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
-    if (!cot) return false;
-    // Un costo global (domicilio, diseño) también cuenta, aunque su
-    // esServicio sea inerte en true (ver calcGruposCostoCompartido) — si
-    // no, un pedido cuyo único pendiente en común fuera "Domicilio" nunca
-    // aparecería para elegir.
-    return calcListaCompras(cot).some(function (l) { return (l.esGlobal || !l.esServicio) && estadoLineaCompra(cot, l) === "no"; });
+    return calcLineasParaRecibo([p.id]).length > 0;
   });
 
   var html = '<div class="card">';
-  html += '<div class="cot-col-title" style="margin-top:0;">Elige los pedidos que vas a comprar juntos' +
-    renderHelp("Marca dos o más pedidos que compartan un mismo insumo (la misma tela, por ejemplo). Abajo se arma una fila por cada insumo que se repita entre los que elijas, para repartir la compra real entre ellos a prorrata de lo que cada uno necesitaba.") +
+  html += '<div class="cot-col-title" style="margin-top:0;">¿Para qué pedidos es esta compra?' +
+    renderHelp("Marca el pedido (o los pedidos) para los que compraste con este mismo papel del proveedor. Abajo sale sola la lista de lo que les falta comprar: escribe cuánto compraste y cuánto pagaste por cada cosa, y la app reparte entre los pedidos lo que cada uno necesita. Lo que sobre queda como reserva de ESTOS pedidos — si alguno necesita más después, se toma de ahí.") +
     (sel.length ? ' <span class="tag">' + sel.length + " elegido" + (sel.length === 1 ? "" : "s") + "</span>" : "") +
     "</div>";
-
   if (!candidatos.length) {
-    html += '<div class="empty">No hay pedidos con compras pendientes todavía — marca algún insumo en "No" en la pestaña Producción de una cotización.</div></div>';
-    return html;
+    html += '<div class="empty">No hay pedidos con compras pendientes — en Producción de una cotización, las líneas en "Aún no" son las que aparecen acá.</div>';
+  } else {
+    html += '<div class="picker-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:var(--radius-sm);">';
+    candidatos.forEach(function (p) {
+      var marcado = sel.indexOf(p.id) !== -1;
+      html += '<label class="picker-item ' + (marcado ? "sel" : "") + '" style="grid-template-columns:20px 1fr;">' +
+        '<input type="checkbox" data-action="toggle-compra-conjunta-pedido" data-id="' + p.id + '" ' + (marcado ? "checked" : "") + " />" +
+        '<span class="picker-item-info"><b>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente || "Sin cliente") + "</b><small>" + esc(p.descripcion || "") + "</small></span>" +
+        "</label>";
+    });
+    html += "</div>";
   }
+  html += "</div>";
 
-  html += '<div class="picker-list" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-soft);border-radius:var(--radius-sm);">';
-  candidatos.forEach(function (p) {
-    var marcado = sel.indexOf(p.id) !== -1;
-    html += '<label class="picker-item ' + (marcado ? "sel" : "") + '" style="grid-template-columns:20px 1fr;">' +
-      '<input type="checkbox" data-action="toggle-compra-conjunta-pedido" data-id="' + p.id + '" ' + (marcado ? "checked" : "") + " />" +
-      '<span class="picker-item-info"><b>' + esc(p.numeroOp || "OP-????") + " · " + esc(p.cliente || "Sin cliente") + "</b><small>" + esc(p.descripcion || "") + "</small></span>" +
-      "</label>";
+  if (sel.length) html += renderFormRecibo(calcLineasParaRecibo(sel));
+  html += renderUltimosRecibos();
+  return html;
+}
+
+function soloOp(etiqueta) { return String(etiqueta || "").split(" · ")[0]; }
+
+// El borrador puede venir de antes del recibo (un borrador guardado de
+// Compras conjuntas, o un reset con solo {seleccion, porClave}): sin
+// `recibo`, "Asignar a servicio(s)" no tendría dónde escribir (su
+// data-form-destino es "formCompraConjunta.recibo", ver
+// resolverFormDestino en core/dom.js).
+function formReciboCompleto() {
+  var f = state.formCompraConjunta || {};
+  return Object.assign({ seleccion: [], porClave: {}, ajustar: {} }, f, {
+    recibo: Object.assign({ fecha: "", proveedorId: "", numero: "", servicios: [] }, f.recibo || {})
   });
-  html += "</div></div>";
-
-  if (sel.length > 1) {
-    html += renderGruposCompraConjunta(calcGruposCompraCompartida(sel));
-    html += renderGruposCostoCompartido(calcGruposCostoCompartido(sel));
-  } else if (sel.length === 1) {
-    html += '<div class="empty" style="margin-top:12px;">Elige al menos un segundo pedido para ver qué insumos comparten.</div>';
-  }
-  return html;
 }
+function fmtCant(x, dec) { return num(x).toFixed(dec); }
 
-function renderGruposCompraConjunta(grupos) {
-  if (!grupos.length) {
-    return '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen ningún insumo pendiente en común.</div>';
-  }
-  var draft = state.formCompraConjunta.porClave || {};
-  var html = '<div class="cot-col-title" style="margin-top:16px;">Insumos que se repiten' +
-    renderHelp('Cada fila es un insumo pendiente ("No") en 2 o más de los pedidos elegidos. Escribe cuánto compraste EN TOTAL y cuánto costó — se reparte solo entre esos pedidos a prorrata de lo que cada uno necesitaba, y deja cada compra marcada "Sí" (con su movimiento en Finanzas incluido, igual que "Actualizar movimientos financieros").') +
-    "</div>";
-  grupos.forEach(function (g) { html += renderFilaGrupoCompraConjunta(g, draft[g.clave] || {}); });
-  return html;
-}
-
-// Un costo FIJO del pedido (domicilio, diseño...) pagado de una sola vez
-// para varios pedidos a la vez — reportado por el usuario 2026-09-21: "no
-// me sale domicilio y los pedidos compartidos si lo tienen en comun".
-// Distinto de "Insumos que se repiten" (arriba): no hay cantidad que
-// repartir, solo un monto — ver calcGruposCostoCompartido en core/calc.js.
-function renderGruposCostoCompartido(grupos) {
-  if (!grupos.length) {
-    return '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen ningún costo (domicilio, diseño...) pendiente en común.</div>';
-  }
-  var draft = state.formCompraConjunta.porClave || {};
-  var html = '<div class="cot-col-title" style="margin-top:16px;">Costos compartidos del pedido (domicilio, diseño...)' +
-    renderHelp('Para cuando un solo pago (ej. un domicilio) en realidad cubrió varios pedidos a la vez. Cada fila es un costo del mismo nombre, pendiente ("No"), en 2 o más de los pedidos elegidos. Escribe cuánto pagaste EN TOTAL — se reparte entre esos pedidos y deja cada uno con su propio costo marcado "Sí".') +
-    "</div>";
-  grupos.forEach(function (g) { html += renderFilaGrupoCostoCompartido(g, draft[g.clave] || {}); });
-  return html;
-}
-
-function renderFilaGrupoCostoCompartido(g, d) {
-  var costoTotal = num(d.costoTotal);
-  var listo = costoTotal > 0;
-  var html = '<div class="card cc-grupo' + (listo ? " cc-grupo-listo" : "") + '">';
-  html += '<div class="cc-grupo-head">' +
-    '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + '</b><span class="tag">' + g.participantes.length + " pedidos</span></div>" +
-    '<span class="section-sub" style="margin:0;">Estimado ' + fmt(g.totalCostoEstimado) + "</span>" +
-    "</div>";
-  html += '<div class="cc-grupo-participantes">' +
-    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + fmt(p.costoEstimado) + "</span>"; }).join("") +
-    "</div>";
-
-  html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
-    '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
-    "</div>";
-
-  if (listo) {
-    var pesos = g.participantes.map(function (p) { return p.costoEstimado; });
-    var costos = repartirProporcional(costoTotal, pesos, 0);
-    var overridesCosto = d.costosPorPedido || {};
-    var costosFinal = g.participantes.map(function (p, i) {
-      var ov = overridesCosto[p.cotId];
-      return (ov !== undefined && ov !== "") ? num(ov) : costos[i];
-    });
-    var repartidoTotal = costosFinal.reduce(function (a, v) { return a + v; }, 0);
-    var cuadra = Math.abs(repartidoTotal - costoTotal) <= 1;
-
-    html += '<div class="cc-reparto">';
-    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así' +
-      renderHelp("El costo de cada pedido viene calculado a prorrata de su propio estimado (parejo si nadie tenía un estimado escrito), pero se puede corregir a mano en cualquier fila — mientras la suma coincida con el total pagado, se guarda tal cual la dejes.") +
-      "</div>";
-    html += '<div class="tx-row head" style="grid-template-columns:1fr 120px;">' +
-      '<span>Pedido</span><span class="ins-th-num">Costo</span></div>';
-    g.participantes.forEach(function (p, i) {
-      var valorCosto = overridesCosto[p.cotId] !== undefined ? overridesCosto[p.cotId] : Math.round(costos[i]);
-      html += '<div class="tx-row" style="grid-template-columns:1fr 120px;">' +
-        '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
-        '<span class="mobile-th">Costo</span><input type="number" class="mini-input" style="text-align:right;width:100%;" value="' + esc(valorCosto) + '" data-action-change="set-costo-compartido-monto" data-clave="' + esc(g.clave) + '" data-cot="' + esc(p.cotId) + '" />' +
-        "</div>";
-    });
-    html += '<div class="section-sub" style="margin-top:6px;text-align:right;">Repartido: <b style="color:' + (cuadra ? "var(--ink)" : "var(--danger-ink)") + ';">' + fmt(repartidoTotal) + "</b> / " + fmt(costoTotal) + "</div>";
-    html += "</div>";
-    html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-costo-compartido" data-clave="' + esc(g.clave) + '">Registrar este costo</button></div>';
-  }
-  html += "</div>";
-  return html;
-}
-
-function renderFilaGrupoCompraConjunta(g, d) {
-  var cantidadTotal = num(d.cantidadTotal), costoTotal = num(d.costoTotal);
-  var listo = cantidadTotal > 0 && costoTotal > 0;
-  // Una prenda comprada entera (`esProducto`, ver calcGruposCompraCompartida
-  // en core/calc.js — insumo tipo "producto_comprado", siempre en "UND") no
-  // se puede repartir en fracciones: "1.34 camisetas" no existe. El resto de
-  // insumos (tela por metro, hilo, etc.) sí son cantidades continuas y
-  // siguen repartiéndose con 2 decimales, como siempre.
-  var decCant = g.esProducto ? 0 : 2;
-  var html = '<div class="card cc-grupo' + (listo ? " cc-grupo-listo" : "") + '">';
-  html += '<div class="cc-grupo-head">' +
-    '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + '</b><span class="tag">' + g.participantes.length + " pedidos</span></div>" +
-    '<span class="section-sub" style="margin:0;">Necesitan en total ' + num(g.totalCantidadEstimada).toFixed(decCant) + " " + esc(g.unidad || "") + " · estimado " + fmt(g.totalCostoEstimado) + "</span>" +
-    "</div>";
-  html += '<div class="cc-grupo-participantes">' +
-    g.participantes.map(function (p) { return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + num(p.cantidadEstimada).toFixed(decCant) + " " + esc(g.unidad || "") + "</span>"; }).join("") +
-    "</div>";
-
-  html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
-    '<div class="field"><label>Cantidad total comprada</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + num(g.totalCantidadEstimada).toFixed(decCant) + '" value="' + esc(d.cantidadTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadTotal" /></div>' +
-    '<div class="field"><label>Costo total pagado</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoTotal || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="costoTotal" /></div>' +
-    '<div class="field"><label>Cantidad para compra de insumo (excedente)' +
-    renderHelp("Cuánto de lo comprado sobra (mínimo del proveedor, conviene comprar de más) — queda como una RESERVA compartida entre estos mismos pedidos, no como costo ni sobrecosto de ninguno. Su parte del costo también se separa del total pagado (no se reparte entre los pedidos, no lo regalaron). Si más adelante uno de ellos necesita más de lo estimado (ej. una reposición), se descuenta solo de acá en vez de contar como una compra nueva.") +
-    '</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="0" value="' + esc(d.cantidadExcedente || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="cantidadExcedente" /></div>' +
-    '<div class="field">' + renderSelectProveedorConjunta(g, d) + "</div>" +
-    "</div>";
-
-  if (listo) {
-    var pesos = g.participantes.map(function (p) { return p.cantidadEstimada; });
-    var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
-    var cantidadExcedenteTotal = num(d.cantidadExcedente);
-    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, decCant) : null;
-    // El costo total pagado cubre TANTO lo que necesitaban los pedidos COMO
-    // el excedente que se llevó de más — si no se descuenta su porción antes
-    // de repartir, los pedidos terminan pagando ellos solos una compra que
-    // no fue solo suya (reportado por el usuario 2026-09-21, ver Hallazgo
-    // #45). Se reparte con el MISMO método, agregando el excedente como un
-    // participante más (pesado por su propia cantidad) — la suma sigue
-    // dando exacto el total pagado, cero descuadre.
-    var pesosCosto = cantidadExcedenteTotal > 0 ? pesos.concat([cantidadExcedenteTotal]) : pesos;
-    var costosConExcedente = repartirProporcional(costoTotal, pesosCosto, 0);
-    var costos = costosConExcedente.slice(0, pesos.length);
-    var costoExcedenteTotal = cantidadExcedenteTotal > 0 ? costosConExcedente[pesos.length] : 0;
-    // La cantidad de cada pedido se puede escribir a mano en vez de confiar
-    // solo en el reparto proporcional — reportado por el usuario
-    // 2026-09-21: "no todos los insumos se pueden dividir así... más bien
-    // un campo para definir que cantidad va en cada pedido, no lo hago
-    // individual porque muchas veces las cosas se compran al por mayor,
-    // entonces para evitar dividir pues que lo haga la app". Si no se
-    // toca, sigue siendo 100% automático (el valor por defecto es el
-    // proporcional de siempre) — esto es una posibilidad, no un paso
-    // obligatorio nuevo.
-    var overridesCantidad = d.cantidadesPorPedido || {};
-    var cantidadesFinal = g.participantes.map(function (p, i) {
-      var ov = overridesCantidad[p.cotId];
-      return (ov !== undefined && ov !== "") ? num(ov) : cantidades[i];
-    });
-    var repartidoTotal = cantidadesFinal.reduce(function (a, v) { return a + v; }, 0);
-    var toleranciaCantidad = g.esProducto ? 0.001 : 0.01;
-    var cuadra = Math.abs(repartidoTotal - cantidadTotal) <= toleranciaCantidad;
-
-    // Igual que en "Registrar gasto/nómina": el costo de esta compra
-    // compartida también se puede cubrir, total o parcialmente, con plata ya
-    // acumulada en un servicio — ver renderAsignarServicios y
-    // "registrar-compra-conjunta" (donde se valida y se reparte entre los
-    // pedidos participantes igual que cantidad/costo/excedente).
-    html += '<hr class="stitch" />';
-    html += renderAsignarServicios({ formKey: "formCompraConjunta.porClave." + g.clave, filas: d.servicios || [], monto: costoTotal });
-
-    html += '<div class="cc-reparto">';
-    html += '<div class="cot-col-title" style="margin-top:var(--sp-3);">Se reparte así' +
-      renderHelp("La cantidad de cada pedido viene calculada a prorrata, pero se puede corregir a mano en cualquier fila — mientras la suma coincida con el total comprado, se guarda tal cual la dejes.") +
-      "</div>";
-    html += '<div class="tx-row head" style="grid-template-columns:1fr 90px 100px;">' +
-      '<span>Pedido</span><span class="ins-th-num">Cantidad</span><span class="ins-th-num">Costo</span></div>';
-    g.participantes.forEach(function (p, i) {
-      var valorCantidad = overridesCantidad[p.cotId] !== undefined ? overridesCantidad[p.cotId] : cantidades[i].toFixed(decCant);
-      html += '<div class="tx-row" style="grid-template-columns:1fr 90px 100px;">' +
-        '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
-        '<span class="mobile-th">Cantidad</span><span style="display:flex;align-items:center;gap:4px;justify-content:flex-end;"><input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(valorCantidad) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.clave) + '" data-cot="' + esc(p.cotId) + '" /><span class="section-sub" style="margin:0;white-space:nowrap;">' + esc(g.unidad || "") + "</span></span>" +
-        '<span class="mobile-th">Costo</span><span class="amount">' + fmt(costos[i]) + "</span>" +
-        "</div>";
-    });
-    html += '<div class="section-sub" style="margin-top:6px;text-align:right;">Repartido: <b style="color:' + (cuadra ? "var(--ink)" : "var(--danger-ink)") + ';">' + repartidoTotal.toFixed(decCant) + "</b> / " + cantidadTotal.toFixed(decCant) + " " + esc(g.unidad || "") + "</div>";
-    // Antes esto era una columna más por fila ("Excedente"), lo que hacía
-    // parecer que el excedente le pertenecía SOLO a la fila donde cayó el
-    // residuo del reparto (el método del mayor residuo lo deja entero en un
-    // único pedido, ver repartirProporcional) — confuso, porque en realidad
-    // es una reserva de LOS 3, no de ese pedido puntual. Reportado por el
-    // usuario 2026-09-21 ("no solo se está vinculando a 1 pedido, cierto?...
-    // en vez de una columna, 1 fila tal vez"). Ahora es una sola línea
-    // debajo de la tabla, fuera de cualquier fila de pedido.
-    if (excedentes) {
-      html += '<div class="section-sub" style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
-        '<span class="tag">↺ Reserva compartida</span>' +
-        "<span>" + cantidadExcedenteTotal.toFixed(decCant) + " " + esc(g.unidad || "") + " · " + fmt(costoExcedenteTotal) +
-        " — disponible para cualquiera de estos " + g.participantes.length + " pedidos si más adelante necesitan más de lo estimado.</span>" +
-        "</div>";
-    }
-    html += "</div>";
-    html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-compra-conjunta" data-clave="' + esc(g.clave) + '">Registrar esta compra</button></div>';
-  }
-  html += "</div>";
-  return html;
-}
-
-function renderSelectProveedorConjunta(g, d) {
+function renderFormRecibo(lineas) {
+  var f = state.formCompraConjunta;
+  var rec = f.recibo || {};
+  var draft = f.porClave || {};
   var proveedores = proveedoresDeContactos();
-  if (!proveedores.length) {
-    return '<label>Proveedor</label><span class="section-sub" style="margin:0;">Sin proveedores en Contactos.</span>';
+  var html = '<div class="card" style="margin-top:12px;">';
+  html += '<div class="cot-col-title" style="margin-top:0;">Datos del recibo</div>';
+  html += '<div class="form-grid">' +
+    '<div class="field"><label>Fecha</label><input type="date" class="mini-input" value="' + esc(rec.fecha || todayStr()) + '" data-action-change="set-recibo-campo" data-campo="fecha" /></div>' +
+    '<div class="field"><label>Proveedor (opcional)</label>' +
+    (proveedores.length
+      ? '<select class="mini-input" data-action-change="set-recibo-campo" data-campo="proveedorId"><option value="">Sin especificar</option>' +
+        proveedores.map(function (p) { return '<option value="' + p.id + '" ' + (rec.proveedorId === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") + "</select>"
+      : '<span class="section-sub" style="margin:0;">Sin proveedores en Contactos.</span>') +
+    "</div>" +
+    '<div class="field"><label>N.º de factura (opcional)</label><input class="mini-input" value="' + esc(rec.numero || "") + '" placeholder="Ej. 4411" data-action-change="set-recibo-campo" data-campo="numero" /></div>' +
+    "</div></div>";
+
+  if (!lineas.length) {
+    return html + '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen nada pendiente por comprar.</div>';
   }
-  var actual = d.proveedorId || "";
-  return '<label>Proveedor (opcional)</label><select class="mini-input" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.clave) + '" data-campo="proveedorId">' +
-    '<option value="">Sin especificar</option>' +
-    proveedores.map(function (p) { return '<option value="' + p.id + '" ' + (actual === p.id ? "selected" : "") + ">" + esc(p.nombre) + "</option>"; }).join("") +
-    "</select>";
+  html += '<div class="cot-col-title" style="margin-top:16px;">¿Qué compraste?' +
+    renderHelp('Escribe lo que dice el papel del proveedor: cuánto compraste y cuánto pagaste. Solo entran al recibo las líneas con algo en "Pagué"; las demás se quedan pendientes. Cada pedido recibe lo que necesita y lo que sobre queda como reserva — con "Ajustar reparto" puedes cambiar cuánto le toca a cada uno.') +
+    "</div>";
+  var total = 0, enRecibo = 0;
+  lineas.forEach(function (g) {
+    var d = draft[g.linea] || {};
+    html += renderLineaRecibo(g, d);
+    if (num(d.costoPagado) > 0) { total += Math.round(num(d.costoPagado)); enRecibo++; }
+  });
+
+  html += '<div class="card cc-grupo" style="margin-top:12px;">';
+  html += '<div class="cc-grupo-head"><div class="cc-grupo-titulo"><b>Total del recibo</b>' +
+    (enRecibo ? '<span class="tag">' + enRecibo + " línea" + (enRecibo === 1 ? "" : "s") + "</span>" : "") + "</div>" +
+    '<span class="amount neg">' + fmt(total) + "</span></div>";
+  if (total > 0) {
+    html += renderAsignarServicios({ formKey: "formCompraConjunta.recibo", filas: rec.servicios || [], monto: total });
+  }
+  html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-recibo-compra">Registrar recibo' + (total > 0 ? " (" + fmt(total) + ")" : "") + "</button></div>";
+  html += "</div>";
+  return html;
+}
+
+function renderLineaRecibo(g, d) {
+  var dec = g.esProducto ? 0 : 2;
+  var r = num(d.costoPagado) > 0 ? calcRepartoLineaRecibo(g, d) : null;
+  var abierta = !!((state.formCompraConjunta.ajustar || {})[g.linea]);
+  var reposicion = g.participantes.some(function (p) { return p.esReposicion; });
+  var html = '<div class="card cc-grupo' + (r && r.ok ? " cc-grupo-listo" : "") + '">';
+  html += '<div class="cc-grupo-head">' +
+    '<div class="cc-grupo-titulo"><b>' + esc(g.nombre) + "</b>" +
+    '<span class="tag">' + g.participantes.length + " pedido" + (g.participantes.length === 1 ? "" : "s") + "</span>" +
+    (reposicion ? '<span class="tag" title="Un pedido que ya está en otro recibo necesita más de lo que quedaba en su reserva.">reposición</span>' : "") +
+    "</div>" +
+    '<span class="section-sub" style="margin:0;">' +
+    (g.esGlobal ? "Estimado " + fmt(g.totalCostoEstimado) : "Necesitan " + fmtCant(g.totalNecesita, dec) + " " + esc(g.unidad)) +
+    "</span></div>";
+  html += '<div class="cc-grupo-participantes">' +
+    g.participantes.map(function (p) {
+      return '<span class="cc-chip">' + esc(p.etiqueta) + " · " + (g.esGlobal ? fmt(p.costoEstimado) : fmtCant(p.necesita, dec) + " " + esc(g.unidad)) + "</span>";
+    }).join("") + "</div>";
+  html += '<div class="form-grid" style="margin-top:var(--sp-3);">' +
+    (g.esGlobal ? "" :
+      '<div class="field"><label>Compré (' + esc(g.unidad || "cantidad") + ')</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + fmtCant(g.totalNecesita, dec) + '" value="' + esc(d.cantidadComprada || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="cantidadComprada" /></div>') +
+    '<div class="field"><label>Pagué</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoPagado || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="costoPagado" /></div>' +
+    "</div>";
+
+  if (r) {
+    if (!r.ok) {
+      html += '<div class="section-sub" style="margin-top:8px;color:var(--danger-ink);">' + esc(r.error) + "</div>";
+    } else {
+      var partesTxt = r.partes.map(function (p, i) {
+        var op = soloOp(g.participantes[i].etiqueta);
+        return esc(op) + " " + (g.esGlobal ? "" : fmtCant(p.cantidad, dec) + " " + esc(g.unidad) + " ") + fmt(p.costo);
+      });
+      if (r.reserva.cantidad > 0 || r.reserva.costo > 0) {
+        partesTxt.push("↺ sobran " + fmtCant(r.reserva.cantidad, dec) + " " + esc(g.unidad) + " " + fmt(r.reserva.costo) + " (reserva)");
+      }
+      html += '<div class="section-sub" style="margin-top:8px;">' + partesTxt.join(" · ") + "</div>";
+    }
+    if (r.faltan > 0) {
+      html += '<div class="section-sub" style="margin-top:4px;color:var(--warning-ink);">Compraste menos de lo que necesitan: faltan ' + fmtCant(r.faltan, dec) + " " + esc(g.unidad) + ". Se reparte a prorrata.</div>";
+    }
+    html += '<button class="btn ghost small" style="margin-top:6px;" data-action="toggle-ajustar-recibo" data-clave="' + esc(g.linea) + '">' + (abierta ? "▾" : "▸") + " Ajustar reparto</button>";
+    if (abierta) html += renderAjusteRecibo(g, d, r, dec);
+  }
+  html += "</div>";
+  return html;
+}
+
+// Tabla "Se reparte así" editable — la misma idea de Compras conjuntas: el
+// reparto automático es el valor por defecto, cada fila se puede corregir.
+function renderAjusteRecibo(g, d, r, dec) {
+  var ovCant = d.cantidadesPorPedido || {}, ovCosto = d.costosPorPedido || {};
+  var html = '<div class="cc-reparto">';
+  html += '<div class="tx-row head" style="grid-template-columns:1fr 110px 110px;"><span>Pedido</span><span class="ins-th-num">' + (g.esGlobal ? "" : "Cantidad") + '</span><span class="ins-th-num">Costo</span></div>';
+  g.participantes.forEach(function (p, i) {
+    var parte = r.partes[i] || { cantidad: 0, costo: 0 };
+    html += '<div class="tx-row" style="grid-template-columns:1fr 110px 110px;">' +
+      '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
+      '<span class="mobile-th">Cantidad</span>' +
+      (g.esGlobal ? "<span></span>" :
+        '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(ovCant[p.cotId] !== undefined ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
+      '<span class="mobile-th">Costo</span>' +
+      (g.esGlobal
+        ? '<input type="number" class="mini-input" style="text-align:right;width:100%;" value="' + esc(ovCosto[p.cotId] !== undefined ? ovCosto[p.cotId] : parte.costo) + '" data-action-change="set-costo-compartido-monto" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />'
+        : '<span class="amount">' + fmt(parte.costo) + "</span>") +
+      "</div>";
+  });
+  html += "</div>";
+  return html;
+}
+
+function renderUltimosRecibos() {
+  var ids = calcIdsRecibos(state.cotizaciones, state.tx);
+  if (!ids.length) return "";
+  var recibos = ids.map(function (id) { return calcRecibo(id, state.cotizaciones, state.tx); })
+    .sort(function (a, b) { return String((b.cabecera || {}).fecha).localeCompare(String((a.cabecera || {}).fecha)); })
+    .slice(0, 5);
+  var html = '<div class="card" style="margin-top:12px;"><div class="cot-col-title" style="margin-top:0;">Últimos recibos</div>';
+  recibos.forEach(function (r) {
+    html += '<div class="tx-row" style="grid-template-columns:1fr auto auto;">' +
+      "<span>🧾 " + esc((r.cabecera && r.cabecera.fecha) || "") + " · " + esc(nombreProveedorRecibo(r)) + " · " + r.pedidoIds.length + " pedido" + (r.pedidoIds.length === 1 ? "" : "s") + "</span>" +
+      '<span class="amount neg">' + fmt(r.total) + "</span>" +
+      '<button class="btn ghost small" data-action="ver-recibo" data-recibo-id="' + esc(r.id) + '">Ver</button>' +
+      "</div>";
+  });
+  return html + "</div>";
+}
+
+function nombreProveedorRecibo(r) {
+  var cab = r.cabecera || {};
+  var prov = cab.proveedorId ? clienteById(cab.proveedorId) : null;
+  return prov ? prov.nombre : (cab.contraparte || "Sin proveedor");
+}
+
+function pedidoPorId(id) {
+  return state.pedidos.filter(function (p) { return p.id === id; })[0] ||
+    (state.pedidosPapelera || []).filter(function (p) { return p.id === id; })[0] || null;
+}
+
+// La tarjeta de un recibo en Finanzas → Historial (decisión del usuario
+// 2026-09-23): el total pagado, y al desplegarla la parte de cada pedido y
+// la reserva. "Pagado" (no "Neto") suma TODAS sus filas, no solo las que
+// pasen el filtro — es lo que dice el papel. Las partes de cada pedido se
+// muestran acá solo de referencia (ya cuentan en la tarjeta de su pedido):
+// ningún número de esta tarjeta vuelve a sumarse en ningún otro lado.
+function renderTarjetaRecibo(reciboId) {
+  var r = calcRecibo(reciboId, state.cotizaciones, state.tx);
+  var filas = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
+  var pagado = filas.reduce(function (a, t) { return a + num(t.monto); }, 0);
+  var problemas = verificarRecibo(reciboId, state.cotizaciones, state.tx);
+  var abierto = !!(state.reciboExpandido || {})[reciboId];
+  var cab = r.cabecera || {};
+  var chips = r.pedidoIds.map(function (pid) {
+    var p = pedidoPorId(pid);
+    return '<span class="cc-chip">' + esc(p ? (p.numeroOp || "OP-????") : "Pedido eliminado") + (p && pedidoCancelado(p) ? " (cancelado)" : "") + "</span>";
+  }).join("");
+
+  var html = '<div class="card cc-grupo" style="margin-bottom:14px;" data-recibo-id="' + esc(reciboId) + '">';
+  html += '<div class="cot-col-title" style="margin-top:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+    '<button class="btn ghost small" data-action="toggle-recibo" data-recibo-id="' + esc(reciboId) + '" aria-label="Ver detalle">' + (abierto ? "▾" : "▸") + "</button>" +
+    "<span>🧾 <b>Recibo de compra</b> · " + esc(nombreProveedorRecibo(r)) + " · " + esc(cab.fecha || "") + (cab.numero ? " · N.º " + esc(cab.numero) : "") + "</span>" +
+    (problemas.length ? '<span class="tag" style="background:var(--danger-soft);color:var(--danger-ink);" title="' + esc(problemas.join(" ")) + '">⚠ descuadre</span>' : "") +
+    '<span class="amount neg" style="margin-left:auto;">Pagado: -' + fmt(pagado) + "</span>" +
+    "</div>";
+  html += '<div class="cc-grupo-participantes">' + chips + "</div>";
+
+  // Resumen de una línea: cuánto le tocó a cada pedido y cuánto quedó libre.
+  var porPedido = {};
+  r.lineas.forEach(function (L) {
+    L.partes.forEach(function (p) { porPedido[p.pedidoId] = (porPedido[p.pedidoId] || 0) + p.costo; });
+  });
+  var resumen = Object.keys(porPedido).filter(function (pid) { return porPedido[pid] > 0; }).map(function (pid) {
+    var p = pedidoPorId(pid);
+    return esc(p ? (p.numeroOp || "OP-????") : "Pedido eliminado") + " " + fmt(porPedido[pid]);
+  });
+  var enReserva = 0;
+  r.lineas.forEach(function (L) {
+    if (L.reserva.cantidad > 0 || L.reserva.costo > 0) {
+      enReserva += Math.max(0, L.reserva.costo);
+      resumen.push((L.esGlobal ? "Sin asignar " + esc(L.nombre) : "↺ " + esc(L.nombre) + " " + fmtCant(L.reserva.cantidad, L.esProducto ? 0 : 2) + " " + esc(L.unidad)) + " " + fmt(L.reserva.costo));
+    }
+  });
+  html += '<div class="section-sub" style="margin-top:6px;">' + resumen.join(" · ") + "</div>";
+
+  if (abierto) {
+    r.lineas.forEach(function (L) {
+      var dec = L.esProducto ? 0 : 2;
+      html += '<div style="margin-top:10px;"><b>' + esc(L.nombre) + "</b> · " + (L.esGlobal ? "" : fmtCant(L.cantidadTotal, dec) + " " + esc(L.unidad) + " · ") + fmt(L.costoTotal) + (L.congelada ? ' <span class="tag" title="Ya no queda ningún pedido vivo en esta línea: lo pagado quedó como reserva.">sin pedidos</span>' : "") + "</div>";
+      L.partes.forEach(function (p) {
+        var ped = pedidoPorId(p.pedidoId);
+        var cancelado = ped && pedidoCancelado(ped);
+        html += '<div class="section-sub" style="margin:2px 0 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          "<span>" + esc(ped ? (ped.numeroOp || "OP-????") : "Pedido eliminado") + (L.esGlobal ? "" : " · " + fmtCant(p.cantidad, dec) + " " + esc(L.unidad)) + " · " + fmt(p.costo) + " <i>(va en su pedido)</i></span>" +
+          (cancelado && (p.cantidad > 0 || p.costo > 0)
+            ? '<button class="btn ghost small" data-action="devolver-parte-recibo" data-recibo-id="' + esc(reciboId) + '" data-cot="' + esc(p.cotId) + '" data-clave="' + esc(p.compraClave) + '" title="El pedido se canceló: su parte vuelve a la reserva del recibo (la plata ya se pagó, no sale de la caja).">↩ Devolver a la reserva</button>'
+            : "") +
+          "</div>";
+      });
+      if (L.reserva.cantidad > 0 || L.reserva.costo > 0) {
+        html += '<div class="section-sub" style="margin:2px 0 0 12px;">' + (L.esGlobal ? "Sin asignar" : "↺ Reserva " + fmtCant(L.reserva.cantidad, dec) + " " + esc(L.unidad)) + " · " + fmt(L.reserva.costo) + "</div>";
+      }
+    });
+    if ((cab.servicios || []).length) {
+      html += '<div class="section-sub" style="margin-top:8px;">📋 Pagado con: ' + cab.servicios.map(function (s) { return esc(s.nombre) + " " + fmt(s.monto); }).join(", ") + "</div>";
+    }
+    html += '<div class="section-sub" style="margin-top:8px;">' + fmt(pagado - enReserva) + " en pedidos + " + fmt(enReserva) + " en reserva = <b>" + fmt(pagado) + " pagados</b></div>";
+    if (problemas.length) {
+      html += '<div class="section-sub" style="margin-top:8px;color:var(--danger-ink);">' + problemas.map(esc).join("<br>") + "</div>";
+    }
+    html += '<div class="row-actions" style="margin-top:10px;flex-wrap:wrap;">' +
+      (problemas.length ? '<button class="btn small" data-action="completar-movimientos-recibo" data-recibo-id="' + esc(reciboId) + '">Completar movimientos</button>' : "") +
+      '<button class="btn ghost small" data-action="anular-corregir-recibo" data-recibo-id="' + esc(reciboId) + '" title="Anula este recibo y deja el formulario lleno con sus datos para registrarlo de nuevo, corregido.">Anular y corregir…</button>' +
+      '<button class="btn danger small" data-action="anular-recibo" data-recibo-id="' + esc(reciboId) + '">Anular recibo</button>' +
+      "</div>";
+  }
+  html += "</div>";
+  return html;
 }
 
 // El formulario de un movimiento, en TRES bloques con jerarquía propia en vez
@@ -411,10 +440,16 @@ function renderHistorial() {
 
   var filtered = filtrarTx();
 
-  var conPedido = {}, sinPedido = [];
+  // Una fila de un Recibo de compra va a la tarjeta de su recibo; si
+  // además es la parte de un pedido, TAMBIÉN sigue en la tarjeta de ese
+  // pedido (decisión del usuario 2026-09-23: cada pedido sigue viendo su
+  // parte en su Neto). La reserva ya no cae en "Movimientos sueltos": es
+  // del recibo, no de nadie más.
+  var conPedido = {}, sinPedido = [], porRecibo = {};
   filtered.forEach(function (t) {
+    if (esFilaRecibo(t)) (porRecibo[t.reciboCompraId] = porRecibo[t.reciboCompraId] || []).push(t);
     if (t.pedidoId) { (conPedido[t.pedidoId] = conPedido[t.pedidoId] || []).push(t); }
-    else sinPedido.push(t);
+    else if (!esFilaRecibo(t)) sinPedido.push(t);
   });
 
   if (filtered.length === 0) {
@@ -432,7 +467,10 @@ function renderHistorial() {
     var pedido = state.pedidos.filter(function (p) { return p.id === pid; })[0];
     var txs = conPedido[pid].slice().sort(compararTxRecienteFirst);
     return { pedido: pedido, pid: pid, txs: txs, fechaTope: txs[0] ? txs[0].fecha : "" };
-  }).sort(function (a, b) {
+  }).concat(Object.keys(porRecibo).map(function (rid) {
+    var txs = porRecibo[rid].slice().sort(compararTxRecienteFirst);
+    return { reciboId: rid, txs: txs, fechaTope: txs[0] ? txs[0].fecha : "" };
+  })).sort(function (a, b) {
     return String(b.fechaTope).localeCompare(String(a.fechaTope));
   });
   sinPedido.sort(compararTxRecienteFirst);
@@ -441,6 +479,7 @@ function renderHistorial() {
   // sobrecostos, comisiones, estimados...) en un solo panel, con el total
   // neto de ese pedido a la vista.
   gruposOrdenados.forEach(function (g) {
+    if (g.reciboId) { html += renderTarjetaRecibo(g.reciboId); return; }
     var cliente = g.pedido && g.pedido.clienteId ? clienteById(g.pedido.clienteId) : null;
     var neto = g.txs.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
     html += '<div class="card" style="margin-bottom:14px;">';
@@ -485,12 +524,24 @@ function filtrarTx() {
 
   var q = norm(state.buscarTx || "").trim();
   if (q) {
+    // Una fila de un recibo se encuentra también por los pedidos de TODO su
+    // recibo y por su proveedor/N.º (así "OP-102" encuentra la tarjeta del
+    // recibo aunque la fila sea la reserva, que no tiene pedido).
+    var textoRecibo = {};
+    function textoDeRecibo(rid) {
+      if (textoRecibo[rid] !== undefined) return textoRecibo[rid];
+      var r = calcRecibo(rid, state.cotizaciones, state.tx);
+      var partes = [nombreProveedorRecibo(r), (r.cabecera || {}).numero || ""];
+      r.pedidoIds.forEach(function (pid) { var p = pedidoPorId(pid); if (p) partes.push(p.numeroOp, p.cliente, p.descripcion); });
+      textoRecibo[rid] = partes.map(norm).join(" | ");
+      return textoRecibo[rid];
+    }
     list = list.filter(function (t) {
       var pedido = t.pedidoId ? state.pedidos.filter(function (p) { return p.id === t.pedidoId; })[0] : null;
       var cliente = pedido && pedido.clienteId ? clienteById(pedido.clienteId) : null;
       var cedula = cliente ? cliente.cedula : "";
       var haystack = [t.concepto, t.contraparte, t.fecha, pedido ? pedido.numeroOp : "", pedido ? pedido.cliente : "", pedido ? pedido.descripcion : "", cedula]
-        .map(norm).join(" | ");
+        .map(norm).join(" | ") + (esFilaRecibo(t) ? " | " + textoDeRecibo(t.reciboCompraId) : "");
       return haystack.indexOf(q) >= 0;
     });
   }
@@ -524,6 +575,7 @@ function renderFila(t) {
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) +
     (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde. (' + esc(huerfano.campo) + ": " + esc(huerfano.valor) + ')">origen eliminado</span>' : "") +
+    (esFilaRecibo(t) ? ' <button class="tag" style="cursor:pointer;border:none;" data-action="ver-recibo" data-recibo-id="' + esc(t.reciboCompraId) + '" title="Parte de un recibo de compra — ver el recibo completo">🧾 Recibo</button>' : "") +
     ((t.serviciosDescuento || []).length
       ? ' <span class="tag" title="Descontado de: ' + (t.serviciosDescuento || []).map(function (d) { return esc(d.nombre) + " " + fmt(d.monto); }).join(", ") + '">📋 ' + (t.serviciosDescuento.length === 1 ? esc(t.serviciosDescuento[0].nombre) : t.serviciosDescuento.length + " servicios") + "</span>"
       : "") +
@@ -536,7 +588,9 @@ function renderFila(t) {
     // que navegar — ya se ve con el tag 📋 de arriba — así que no ofrece el
     // botón "↗ Origen", solo bloquea la edición de tipo/monto.
     (origen && origen.tipo !== "servicio" ? '<button class="btn ghost small" data-action="ver-origen-tx" data-id="' + t.id + '" title="Ir a ' + esc(origen.label) + '">↗ Origen</button>' : "") +
-    '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>' +
+    // Una fila de recibo no se edita suelta: su concepto/fecha los arma el
+    // recibo y se reescribirían en la próxima reconciliación.
+    (esFilaRecibo(t) ? "" : '<button class="btn ghost small" data-action="editar-tx" data-id="' + t.id + '">Editar</button>') +
     '<button class="btn ' + (sistema ? "ghost" : "danger") + ' small" data-action="remove-tx" data-id="' + t.id + '" title="' + esc(tituloBorrar) + '">' + (sistema ? "🔒" : "🗑") + "</button>" +
     "</span>" +
     "</div>";
@@ -717,6 +771,7 @@ export var actions = {
     if (!t) return;
     var origen = origenDeTx(t);
     if (!origen) return;
+    if (origen.tipo === "recibo") { irARecibo(origen.id); return; }
     var TAB_POR_ORIGEN = { pedido: "pedidos", cotizacion: "cotizaciones", gastoFijo: "pendientes", deuda: "pendientes" };
     var ATTR_POR_ORIGEN = { pedido: "data-pedido-id", gastoFijo: "data-gasto-fijo-id", deuda: "data-deuda-id" };
     state.tab = TAB_POR_ORIGEN[origen.tipo] || state.tab;
@@ -809,7 +864,7 @@ export var actions = {
     var sel = (state.formCompraConjunta.seleccion || []).slice();
     var idx = sel.indexOf(id);
     if (idx === -1) sel.push(id); else sel.splice(idx, 1);
-    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { seleccion: sel });
+    state.formCompraConjunta = Object.assign({}, formReciboCompleto(), { seleccion: sel });
     notify();
   },
   "set-compra-conjunta-campo": function (el) {
@@ -818,7 +873,7 @@ export var actions = {
     var fila = Object.assign({}, porClave[clave] || {});
     fila[campo] = el.value;
     porClave[clave] = fila;
-    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
+    state.formCompraConjunta = Object.assign({}, formReciboCompleto(), { porClave: porClave });
     notify();
   },
   // Cantidad de UN pedido participante escrita a mano, en vez de dejar que
@@ -850,226 +905,214 @@ export var actions = {
     state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClave });
     notify();
   },
-  // El corazón de "Compras conjuntas": reparte lo comprado de verdad entre
-  // los pedidos que compartían ese insumo (a prorrata de lo que cada uno
-  // necesitaba, ver repartirProporcional en core/calc.js), deja cada compra
-  // marcada "Sí" con su cantidad/costo real, y usa la MISMA sincronización
-  // que "Actualizar movimientos financieros" (ver sincronizarComprasFinanzasDe
-  // en modules/cotizaciones.js) para que cada pedido quede con su propio
-  // movimiento en Finanzas — nunca uno solo repartido a mano entre todos.
-  "registrar-compra-conjunta": function (el) {
-    var clave = el.getAttribute("data-clave");
-    var sel = state.formCompraConjunta.seleccion || [];
-    var grupo = calcGruposCompraCompartida(sel).filter(function (g) { return g.clave === clave; })[0];
-    if (!grupo) return;
-    var draft = (state.formCompraConjunta.porClave || {})[clave] || {};
-    var cantidadTotal = num(draft.cantidadTotal), costoTotal = num(draft.costoTotal);
-    if (cantidadTotal <= 0 || costoTotal <= 0) {
-      window.alert("Escribe cuánto se compró en total y cuánto costó antes de registrar.");
-      return;
-    }
-    // Igual que "Registrar gasto/nómina": cada servicio asignado se topa a lo
-    // disponible y a que la suma no pase del costo total de esta compra — ver
-    // validarServiciosAsignados en core/calc.js. Lo que no se cubra acá sale
-    // de Ganancia como siempre, sin bloquear nada.
-    var validacionServicios = validarServiciosAsignados(draft.servicios, costoTotal);
-    if (!validacionServicios.ok) { window.alert(validacionServicios.error); return; }
-    var serviciosLimpios = validacionServicios.limpias;
-
-    var pesos = grupo.participantes.map(function (p) { return p.cantidadEstimada; });
-    // Una prenda comprada entera (`esProducto`) no se puede repartir en
-    // fracciones — "1.34 camisetas" no existe — así que se reparte en
-    // enteros (mismo repartirProporcional, solo sin decimales). El resto de
-    // insumos (cantidades continuas: metros, kilos...) sigue con 2
-    // decimales, como siempre. Ver el mismo criterio en
-    // renderFilaGrupoCompraConjunta (el preview tiene que coincidir con lo
-    // que esto termina guardando).
-    var decCant = grupo.esProducto ? 0 : 2;
-    var cantidades = repartirProporcional(cantidadTotal, pesos, decCant);
-    // La cantidad de cada pedido admite corrección manual (ver
-    // renderFilaGrupoCompraConjunta / "set-compra-conjunta-cantidad-pedido")
-    // — sin nada escrito, usa la proporcional de siempre. Mismo criterio de
-    // "cero descuadre" que ya exige validarServiciosAsignados: si lo escrito
-    // a mano no suma exacto el total comprado, se bloquea el registro
-    // ANTES de tocar nada (nunca se guarda una cantidad que no cuadre).
-    var overridesCantidad = draft.cantidadesPorPedido || {};
-    var cantidadesFinal = grupo.participantes.map(function (p, i) {
-      var ov = overridesCantidad[p.cotId];
-      return (ov !== undefined && ov !== "") ? num(ov) : cantidades[i];
-    });
-    var sumaCantidadesFinal = cantidadesFinal.reduce(function (a, v) { return a + v; }, 0);
-    var toleranciaCantidad = grupo.esProducto ? 0.001 : 0.01;
-    if (Math.abs(sumaCantidadesFinal - cantidadTotal) > toleranciaCantidad) {
-      window.alert("Lo repartido entre los pedidos (" + sumaCantidadesFinal.toFixed(decCant) + ") no coincide con el total comprado (" + cantidadTotal.toFixed(decCant) + "). Ajusta las cantidades para que sumen exacto.");
-      return;
-    }
-    // Excedente (compra de insumo aparte): se reparte con el MISMO criterio
-    // que el resto — a prorrata de lo que cada pedido necesitaba — pero cada
-    // parte queda marcada aparte (cantidadExcedente) para que no cuente
-    // como costo/sobrecosto de ese pedido. Mismo mecanismo exacto que una
-    // compra individual (ver sincronizarComprasFinanzasDe), nada especial
-    // por tratarse de varios pedidos a la vez.
-    var cantidadExcedenteTotal = num(draft.cantidadExcedente);
-    var excedentes = cantidadExcedenteTotal > 0 ? repartirProporcional(cantidadExcedenteTotal, pesos, decCant) : null;
-    // El costo total pagado cubre TANTO lo que necesitaban los pedidos COMO
-    // el excedente que se llevó de más — si no se descuenta su porción antes
-    // de repartir, los pedidos terminan pagando ellos solos una compra que
-    // no fue solo suya (reportado por el usuario 2026-09-21, ver Hallazgo
-    // #45). Se reparte con el MISMO método, agregando el excedente como un
-    // participante más (pesado por su propia cantidad) — la suma sigue
-    // dando exacto el total pagado, cero descuadre. El preview
-    // (renderFilaGrupoCompraConjunta) tiene que coincidir con esto.
-    var pesosCosto = cantidadExcedenteTotal > 0 ? pesos.concat([cantidadExcedenteTotal]) : pesos;
-    var costosConExcedente = repartirProporcional(costoTotal, pesosCosto, 0);
-    var costos = costosConExcedente.slice(0, pesos.length);
-    var costoExcedenteTotal = cantidadExcedenteTotal > 0 ? costosConExcedente[pesos.length] : 0;
-    // La porción de ese costo de excedente que le toca a CADA tenedor (puede
-    // caer entera en uno solo, por el método del mayor residuo) se reparte a
-    // prorrata de cuánta cantidad de excedente le tocó — así costoReal/
-    // cantidadReal de esa compra sigue siendo un precio unitario uniforme,
-    // sin importar cómo haya caído el reparto de cantidad.
-    var costosExcedente = excedentes ? repartirProporcional(costoExcedenteTotal, excedentes, 0) : null;
-    // Cada servicio asignado se reparte con el MISMO criterio que cantidad/
-    // costo/excedente — a prorrata — para que la suma de lo descontado en
-    // los movimientos de cada pedido participante siga cuadrando exacto
-    // contra lo que se asignó acá arriba (repartirProporcional ya garantiza
-    // cero descuadre por redondeo, ver core/calc.js).
-    var repartosServicios = serviciosLimpios.map(function (s) {
-      return { nombre: s.nombre, partes: repartirProporcional(s.monto, pesos, 0) };
-    });
-    var grupoId = uid(), fecha = todayStr();
-    var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
-    var proveedorId = draft.proveedorId || "";
-    var reparto = {};
-    grupo.participantes.forEach(function (p, i) {
-      var serviciosDescuento = repartosServicios
-        .map(function (r) { return { nombre: r.nombre, monto: r.partes[i] }; })
-        .filter(function (s) { return s.monto > 0; });
-      // cantidadExcedenteCompra/costoExcedenteCompra (core/calc.js) asumen
-      // que el excedente de una compra es SIEMPRE una porción de su propia
-      // cantidadReal/costoReal (nunca algo aparte) — así que cantidadReal y
-      // costoReal de cada compra tienen que incluir lo que le tocó de
-      // excedente a ESE tenedor, no solo lo que ese pedido necesitaba. Si no,
-      // costoRealPedido/cantidadRealPedido (la única puerta de lectura, ver
-      // Hallazgo #29) restan el excedente completo de una cantidadReal que
-      // nunca lo incluyó, dejando en $0 el costo propio de quien tiene la
-      // reserva.
-      var cantidadExcedentePedido = excedentes ? excedentes[i] : 0;
-      var costoExcedentePedido = costosExcedente ? costosExcedente[i] : 0;
-      reparto[p.cotId] = {
-        cantidadReal: cantidadesFinal[i] + cantidadExcedentePedido,
-        costoReal: costos[i] + costoExcedentePedido,
-        cantidadExcedente: cantidadExcedentePedido,
-        serviciosDescuento: serviciosDescuento
-      };
-    });
-
-    var afectadas = 0;
-    state.cotizaciones = state.cotizaciones.map(function (c) {
-      if (!reparto[c.id]) return c;
-      afectadas++;
-      var compras = (c.compras || []).slice();
-      var idx = -1;
-      compras.forEach(function (x, j) { if (x.clave === clave) idx = j; });
-      var base = idx >= 0 ? compras[idx] : { clave: clave, observaciones: "", txId: "", excedenteTxId: "" };
-      var actualizada = Object.assign({}, base, {
-        clave: clave, estado: "si",
-        cantidadReal: reparto[c.id].cantidadReal, costoReal: reparto[c.id].costoReal,
-        cantidadExcedente: reparto[c.id].cantidadExcedente,
-        proveedorId: proveedorId || base.proveedorId || "",
-        fecha: base.fecha || fecha,
-        compartida: { grupoId: grupoId, fecha: fecha, etiquetas: etiquetas }
-      });
-      if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
-      var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
-      // El descuento de servicio no vive dentro de sincronizarComprasFinanzasDe
-      // (la usan otros caminos, ej. "Actualizar movimientos financieros" de
-      // una compra individual, que no conocen este concepto) — se cuelga acá,
-      // directo sobre el tx ya creado/actualizado para ESTE pedido, una vez
-      // resuelto su txId.
-      if (reparto[c.id].serviciosDescuento.length) {
-        var compraSinc = sinc.compras.filter(function (x) { return x.clave === clave; })[0];
-        var txServ = compraSinc && compraSinc.txId ? state.tx.filter(function (t) { return t.id === compraSinc.txId; })[0] : null;
-        if (txServ) txServ.serviciosDescuento = reparto[c.id].serviciosDescuento;
-      }
-      return Object.assign({}, c, { compras: sinc.compras });
-    });
-
-    var porClaveNuevo = Object.assign({}, state.formCompraConjunta.porClave || {});
-    delete porClaveNuevo[clave];
-    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClaveNuevo });
-    persist("cotizaciones"); persist("tx"); notify();
-    mostrarToast("✓ Compra compartida registrada entre " + afectadas + " pedidos.");
+  "set-recibo-campo": function (el) {
+    var campo = el.getAttribute("data-campo");
+    var recibo = Object.assign({}, state.formCompraConjunta.recibo || {});
+    recibo[campo] = el.value;
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { recibo: recibo });
+    notify();
   },
-  // Espejo de "registrar-compra-conjunta" pero para un costo FIJO del
-  // pedido (domicilio, diseño) — sin cantidad ni excedente, solo un monto
-  // que se reparte entre los pedidos. A diferencia de una compra
-  // compartida, cada participante ya tiene su PROPIA compra (su propio
-  // `claveGlobal`, "global|"+id) — nunca se fusionan registros de
-  // cotizaciones distintas en uno solo, cada uno se busca y actualiza por
-  // separado dentro de su propia cotización.
-  "registrar-costo-compartido": function (el) {
+  "toggle-ajustar-recibo": function (el) {
     var clave = el.getAttribute("data-clave");
-    var sel = state.formCompraConjunta.seleccion || [];
-    var grupo = calcGruposCostoCompartido(sel).filter(function (g) { return g.clave === clave; })[0];
-    if (!grupo) return;
-    var draft = (state.formCompraConjunta.porClave || {})[clave] || {};
-    var costoTotal = num(draft.costoTotal);
-    if (costoTotal <= 0) {
-      window.alert("Escribe cuánto pagaste en total antes de registrar.");
-      return;
+    var ajustar = Object.assign({}, state.formCompraConjunta.ajustar || {});
+    if (ajustar[clave]) delete ajustar[clave]; else ajustar[clave] = true;
+    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { ajustar: ajustar });
+    notify();
+  },
+  // Registra UN recibo con todas las líneas que tengan algo en "Pagué".
+  // Cada línea se reparte con calcRepartoLineaRecibo — la MISMA función que
+  // arma la vista previa, así lo que se guarda es exactamente lo que se vio.
+  // Todo pasa dentro de ejecutarAccionRecibo: si algo no cuadra al peso, no
+  // se guarda nada.
+  "registrar-recibo-compra": function () {
+    var f = state.formCompraConjunta;
+    var sel = f.seleccion || [];
+    var draft = f.porClave || {};
+    var lineas = calcLineasParaRecibo(sel).filter(function (g) { return num((draft[g.linea] || {}).costoPagado) > 0; });
+    if (!lineas.length) { window.alert("Escribe cuánto pagaste en al menos una línea antes de registrar."); return; }
+    var repartos = [];
+    for (var i = 0; i < lineas.length; i++) {
+      var reparto = calcRepartoLineaRecibo(lineas[i], draft[lineas[i].linea] || {});
+      if (!reparto.ok) { window.alert(lineas[i].nombre + ": " + reparto.error); return; }
+      repartos.push({ grupo: lineas[i], reparto: reparto });
     }
-    var pesos = grupo.participantes.map(function (p) { return p.costoEstimado; });
-    var costos = repartirProporcional(costoTotal, pesos, 0);
-    // El monto de cada pedido admite corrección manual (ver
-    // "set-costo-compartido-monto") — sin nada escrito, usa el
-    // proporcional de siempre. Mismo criterio de "cero descuadre" que
-    // "registrar-compra-conjunta": si lo escrito a mano no suma exacto el
-    // total pagado, se bloquea el registro ANTES de tocar nada.
-    var overridesCosto = draft.costosPorPedido || {};
-    var costosFinal = grupo.participantes.map(function (p, i) {
-      var ov = overridesCosto[p.cotId];
-      return (ov !== undefined && ov !== "") ? num(ov) : costos[i];
-    });
-    var sumaCostosFinal = costosFinal.reduce(function (a, v) { return a + v; }, 0);
-    // Tolerancia CERO, no de "un peso" — a diferencia de una cantidad física
-    // (metros, que pueden arrastrar coma flotante), un monto acá siempre es
-    // un peso entero exacto (repartirProporcional con decimales:0), así que
-    // no hay ningún redondeo legítimo que perdonar. Un peso de descuadre
-    // silencioso rompería el mismo criterio bancario que el resto de la app
-    // exige en todos lados — ver rigor_matematico_dinero.
-    if (Math.abs(sumaCostosFinal - costoTotal) > 0) {
-      window.alert("Lo repartido entre los pedidos (" + fmt(sumaCostosFinal) + ") no coincide con el total pagado (" + fmt(costoTotal) + "). Ajusta los montos para que sumen exacto.");
-      return;
-    }
-    var grupoId = uid(), fecha = todayStr();
-    var etiquetas = grupo.participantes.map(function (p) { return p.etiqueta; });
-    var montoPorCot = {};
-    grupo.participantes.forEach(function (p, i) { montoPorCot[p.cotId] = { monto: costosFinal[i], claveGlobal: p.claveGlobal }; });
-
-    var afectadas = 0;
-    state.cotizaciones = state.cotizaciones.map(function (c) {
-      if (!montoPorCot[c.id]) return c;
-      afectadas++;
-      var claveGlobal = montoPorCot[c.id].claveGlobal;
-      var compras = (c.compras || []).slice();
-      var idx = -1;
-      compras.forEach(function (x, j) { if (x.clave === claveGlobal) idx = j; });
-      var base = idx >= 0 ? compras[idx] : { clave: claveGlobal, observaciones: "", txId: "", excedenteTxId: "" };
-      var actualizada = Object.assign({}, base, {
-        clave: claveGlobal, estado: "si", costoReal: montoPorCot[c.id].monto,
-        fecha: base.fecha || fecha,
-        compartida: { grupoId: grupoId, fecha: fecha, etiquetas: etiquetas }
+    var total = repartos.reduce(function (a, x) { return a + x.reparto.totales.costoTotal; }, 0);
+    var rec = f.recibo || {};
+    var validacion = validarServiciosAsignados(rec.servicios, total);
+    if (!validacion.ok) { window.alert(validacion.error); return; }
+    // Una compra que todavía tiene un movimiento viejo propio en Finanzas
+    // (ej. se pasó a "Aún no" sin pulsar "Actualizar movimientos") contaría
+    // esa plata dos veces si entra a un recibo — mejor pedir que se ponga al
+    // día primero que adivinar cuál de las dos es la real.
+    var cotIds = [];
+    repartos.forEach(function (x) { x.reparto.partes.forEach(function (p) { if (cotIds.indexOf(p.cotId) === -1) cotIds.push(p.cotId); }); });
+    var conMovimientoViejo = [];
+    repartos.forEach(function (x) {
+      x.grupo.participantes.forEach(function (p) {
+        var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotId; })[0];
+        var compra = cot && (cot.compras || []).filter(function (c) { return c.clave === p.compraClave; })[0];
+        if (!compra) return;
+        var viejo = [compra.txId, compra.excedenteTxId].filter(Boolean).some(function (id) {
+          return state.tx.some(function (t) { return t.id === id && !esFilaRecibo(t); });
+        });
+        if (viejo) conMovimientoViejo.push(soloOp(p.etiqueta) + " (" + x.grupo.nombre + ")");
       });
-      if (idx >= 0) compras[idx] = actualizada; else compras.push(actualizada);
-      var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
-      return Object.assign({}, c, { compras: sinc.compras });
     });
+    if (conMovimientoViejo.length) {
+      window.alert("Antes de registrar este recibo, pulsa \"Actualizar movimientos financieros\" en la cotización de: " + conMovimientoViejo.join(", ") + ". Esa compra todavía tiene un movimiento viejo en Finanzas y se contaría dos veces.");
+      return;
+    }
+    // Mismo aviso que "Actualizar movimientos financieros": si un pedido ya
+    // tiene su costo ESTIMADO completo registrado, sumarle compras reales
+    // contaría su costo dos veces.
+    var conEstimado = state.cotizaciones.filter(function (c) {
+      return cotIds.indexOf(c.id) !== -1 && c.estimadoTxId && state.tx.some(function (t) { return t.id === c.estimadoTxId; });
+    });
+    if (conEstimado.length && !window.confirm("Estos pedidos ya tienen su costo ESTIMADO completo registrado en Finanzas: " +
+      conEstimado.map(function (c) { return c.descripcion || c.cliente; }).join(", ") +
+      ".\n\nSi además registras este recibo, su costo se contará DOS veces. Lo recomendable es borrar ese estimado en Finanzas.\n\n¿Continuar de todos modos?")) return;
 
-    var porClaveNuevo = Object.assign({}, state.formCompraConjunta.porClave || {});
-    delete porClaveNuevo[clave];
-    state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: porClaveNuevo });
-    persist("cotizaciones"); persist("tx"); notify();
-    mostrarToast("✓ Costo compartido registrado entre " + afectadas + " pedidos.");
+    var etiquetas = [];
+    repartos.forEach(function (x) { x.grupo.participantes.forEach(function (p) { if (etiquetas.indexOf(p.etiqueta) === -1) etiquetas.push(p.etiqueta); }); });
+    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: validacion.limpias, etiquetas: etiquetas };
+    var reciboId = uid();
+    var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: -total }, function () {
+      state.cotizaciones = aplicarReciboACotizaciones(state.cotizaciones, reciboId, cabecera, repartos);
+      state.tx = reconciliarTxRecibo(state.tx, reciboId, state.cotizaciones).tx;
+    });
+    if (!ok) return;
+    var porClave = Object.assign({}, draft);
+    repartos.forEach(function (x) { delete porClave[x.grupo.linea]; });
+    state.formCompraConjunta = Object.assign({}, f, { porClave: porClave, ajustar: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] } });
+    var reserva = repartos.reduce(function (a, x) { return a + x.reparto.reserva.costo; }, 0);
+    mostrarToast("✓ Recibo registrado: " + fmt(total) + (reserva > 0 ? " (" + fmt(reserva) + " quedan en reserva)" : "") + ".");
+    irARecibo(reciboId);
+  },
+  "toggle-recibo": function (el) {
+    var id = el.getAttribute("data-recibo-id");
+    var abiertos = Object.assign({}, state.reciboExpandido || {});
+    if (abiertos[id]) delete abiertos[id]; else abiertos[id] = true;
+    state.reciboExpandido = abiertos;
+    notify();
+  },
+  "ver-recibo": function (el) {
+    irARecibo(el.getAttribute("data-recibo-id"));
+  },
+  // Anula el recibo entero: cada compra pierde su parte (si no le queda
+  // otra, vuelve a "Aún no"), y todas sus filas se van a la papelera — de
+  // donde NO se pueden restaurar sueltas (ver "restaurar-tx"): para
+  // tenerlas de nuevo hay que volver a registrar el recibo.
+  "anular-recibo": function (el) {
+    anularRecibo(el.getAttribute("data-recibo-id"), false);
+  },
+  "anular-corregir-recibo": function (el) {
+    anularRecibo(el.getAttribute("data-recibo-id"), true);
+  },
+  // Un recibo cuyas filas en Finanzas no coinciden con lo registrado (ej.
+  // se guardaron las compras pero no los movimientos) se completa acá, con
+  // un clic y avisando — nunca solo al cargar la app (ver Hallazgo #52).
+  "completar-movimientos-recibo": function (el) {
+    var id = el.getAttribute("data-recibo-id");
+    var antes = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === id; }).reduce(function (a, t) { return a + num(t.monto); }, 0);
+    var despues = reconciliarTxRecibo(state.tx, id, state.cotizaciones).tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === id; }).reduce(function (a, t) { return a + num(t.monto); }, 0);
+    var diferencia = despues - antes;
+    if (!window.confirm("Se van a dejar los movimientos de este recibo igual a lo registrado en sus pedidos." +
+      (diferencia ? "\n\nLa caja cambia " + (diferencia > 0 ? "-" : "+") + fmt(Math.abs(diferencia)) + "." : "\n\nLa caja no cambia.") + "\n\n¿Continuar?")) return;
+    var ok = ejecutarAccionRecibo({ recibos: [id], deltaCaja: -diferencia }, function () {
+      state.tx = reconciliarTxRecibo(state.tx, id, state.cotizaciones).tx;
+    });
+    if (ok) { notify(); mostrarToast("✓ Movimientos del recibo al día."); }
+  },
+  // Pedido CANCELADO (sí existió, pero no se va a completar): su parte del
+  // recibo se puede devolver a la reserva a mano — no se hace sola porque a
+  // veces el material ya se usó o se perdió.
+  "devolver-parte-recibo": function (el) {
+    var reciboId = el.getAttribute("data-recibo-id"), cotId = el.getAttribute("data-cot"), clave = el.getAttribute("data-clave");
+    if (!window.confirm("¿Devolver a la reserva del recibo la parte de este pedido cancelado?\n\nLa plata ya se pagó: no sale de la caja, solo deja de contar como costo de este pedido.")) return;
+    var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: 0 }, function () {
+      state.cotizaciones = state.cotizaciones.map(function (c) {
+        if (c.id !== cotId) return c;
+        return Object.assign({}, c, {
+          compras: (c.compras || []).map(function (compra) {
+            if (compra.clave !== clave) return compra;
+            var partes = (compra.partesRecibo || []).map(function (p) { return p.reciboId === reciboId ? Object.assign({}, p, { cantidad: 0, costo: 0 }) : p; });
+            return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: 0 }));
+          })
+        });
+      });
+      state.tx = reconciliarTxRecibo(state.tx, reciboId, state.cotizaciones).tx;
+    });
+    if (ok) { notify(); mostrarToast("↩ La parte volvió a la reserva del recibo."); }
   }
+
 };
+
+// Lleva a Finanzas → Historial con la tarjeta del recibo abierta y a la
+// vista (limpia filtros para que no quede escondida detrás de uno).
+function irARecibo(reciboId) {
+  if (!reciboId) return;
+  state.tab = "finanzas";
+  state.sidebarMobileOpen = false;
+  state.finanzasVista = "historial";
+  state.filtroTxVista = "activos";
+  state.filtroTx = "todos";
+  state.filtroTxPeriodo = "todos";
+  state.buscarTx = "";
+  var abiertos = Object.assign({}, state.reciboExpandido || {});
+  abiertos[reciboId] = true;
+  state.reciboExpandido = abiertos;
+  notify();
+  setTimeout(function () {
+    var card = document.querySelector('.cc-grupo[data-recibo-id="' + reciboId + '"]');
+    if (!card) return;
+    if (card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    card.classList.add("destello");
+  }, 60);
+}
+
+function anularRecibo(reciboId, corregir) {
+  var r = calcRecibo(reciboId, state.cotizaciones, state.tx);
+  var filas = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
+  var pagado = filas.reduce(function (a, t) { return a + num(t.monto); }, 0);
+  var cab = r.cabecera || {};
+  if (!window.confirm("¿Anular este recibo de compra (" + fmt(pagado) + ")?\n\n" +
+    "Sus " + filas.length + " movimiento(s) salen de Finanzas (quedan en la papelera) y la caja vuelve a subir " + fmt(pagado) + ". Las compras de sus pedidos vuelven a quedar pendientes." +
+    ((cab.servicios || []).length ? "\n\nLa plata que se había tomado de servicios vuelve a quedar disponible." : "") +
+    (corregir ? "\n\nEl formulario queda lleno con sus datos para registrarlo de nuevo, corregido." : ""))) return;
+  var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: pagado }, function () {
+    state.cotizaciones = quitarReciboDeCotizaciones(state.cotizaciones, reciboId);
+    var ids = filas.map(function (t) { return t.id; });
+    state.tx = state.tx.filter(function (t) { return ids.indexOf(t.id) === -1; });
+    filas.forEach(function (t) {
+      state.txPapelera.unshift(Object.assign({}, t, { eliminadoEl: todayStr(), eliminadoConRecibo: reciboId }));
+    });
+  });
+  if (!ok) return;
+  if (corregir) {
+    // Nunca se copian ids que apunten hacia afuera (el del recibo anulado,
+    // los de sus movimientos): el recibo corregido es uno nuevo.
+    var porClave = {};
+    r.lineas.forEach(function (L) {
+      if (!L.partes.length) return;
+      var d = { costoPagado: String(L.costoTotal) };
+      if (L.esGlobal) {
+        d.costosPorPedido = {};
+        L.partes.forEach(function (p) { d.costosPorPedido[p.cotId] = String(p.costo); });
+      } else {
+        d.cantidadComprada = String(L.cantidadTotal);
+        d.cantidadesPorPedido = {};
+        L.partes.forEach(function (p) { d.cantidadesPorPedido[p.cotId] = String(p.cantidad); });
+      }
+      porClave[L.linea] = d;
+    });
+    state.formCompraConjunta = {
+      seleccion: r.pedidoIds.filter(function (pid) { return state.pedidos.some(function (p) { return p.id === pid; }); }),
+      porClave: porClave, ajustar: {},
+      recibo: { fecha: cab.fecha || "", proveedorId: cab.proveedorId || "", numero: cab.numero || "", servicios: (cab.servicios || []).map(function (s) { return { nombre: s.nombre, monto: String(s.monto) }; }) }
+    };
+    state.finanzasVista = "conjuntas";
+  }
+  notify();
+  mostrarToast(corregir ? "Recibo anulado — corrígelo abajo y vuelve a registrarlo." : "Recibo anulado: " + fmt(pagado) + " de vuelta en la caja.");
+}
+

@@ -10,7 +10,7 @@ import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar
 import { getSession } from "../core/auth.js";
 import { ajustarStockProducto } from "../core/stock.js";
 import { subirImagenReferencia } from "../core/drive.js";
-import { duplicarCotizacionCompleta } from "./cotizaciones.js";
+import { duplicarCotizacionCompleta, resumenRecibosDePedido, devolverRecibosAlEliminarPedido, retomarRecibosAlRestaurarPedido } from "./cotizaciones.js";
 
 // Nuevo total abonado de un pedido después de agregar, editar o eliminar una
 // fila de su lista de abonos. Todo lo que toque esa lista pasa por acá, así
@@ -2339,7 +2339,15 @@ export var actions = {
     var avisoStock = enElPunto > 0
       ? ("\n\nOjo: quedan " + enElPunto + " unidad(es) entregadas a este punto. Eliminar el pedido NO las devuelve al stock del Catálogo (siguen físicamente allá) — si te las regresaron, registra primero un retiro.")
       : "";
-    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero + avisoStock)) return;
+    // Su parte de un Recibo de compra vuelve a la reserva del recibo (esa
+    // plata ya se le pagó al proveedor: no sale de la caja) — y se vuelve a
+    // tomar si el pedido se restaura. Ver devolverRecibosAlEliminarPedido.
+    var enRecibos = resumenRecibosDePedido(pedido);
+    var avisoRecibos = enRecibos.recibos
+      ? "\n\nSu parte de " + enRecibos.recibos + " recibo(s) de compra (" + fmt(enRecibos.monto) + ") vuelve a la reserva del recibo: esa plata ya se pagó y no sale de la caja."
+      : "";
+    if (!window.confirm('¿Eliminar el pedido "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nSe mueve a la papelera de pedidos y puedes restaurarlo si fue un error.' + avisoDinero + avisoStock + avisoRecibos)) return;
+    if (!devolverRecibosAlEliminarPedido(pedido)) return;
     state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
     state.pedidosPapelera.unshift(Object.assign({}, pedido, { eliminadoEl: todayStr() }));
     // Los movimientos generados se MUEVEN a la papelera de movimientos, no se
@@ -2365,6 +2373,10 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidosPapelera.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
+    // Vuelve a tomar su parte de cada Recibo de compra (se había devuelto a
+    // la reserva al eliminarlo) — hasta donde todavía alcance.
+    var retomaRecibos = retomarRecibosAlRestaurarPedido(pedido);
+    if (!retomaRecibos.ok) return;
     state.pedidosPapelera = state.pedidosPapelera.filter(function (p) { return p.id !== id; });
     var restaurado = Object.assign({}, pedido);
     delete restaurado.eliminadoEl;
@@ -2406,6 +2418,11 @@ export var actions = {
     if (faltantes.length) {
       window.alert('Se restauró el pedido "' + restaurado.numeroOp + '", pero parte del stock que tenía reservado ya se vendió mientras estuvo en la papelera:\n\n' +
         faltantes.map(function (f) { return "- " + f.productoNombre + " (" + f.talla + "): faltaron " + f.faltan; }).join("\n"));
+    }
+    if (retomaRecibos.faltantes.length) {
+      window.alert('Se restauró el pedido "' + restaurado.numeroOp + '", pero otro pedido ya usó parte de lo que tenía en su recibo de compra mientras estuvo en la papelera:\n\n' +
+        retomaRecibos.faltantes.map(function (f) { return "- " + f.nombre + ": faltaron " + (f.cantidad ? f.cantidad : fmt(f.costo)); }).join("\n") +
+        "\n\nLo que falta, cómpralo con un recibo nuevo (Finanzas → Recibos de compra).");
     }
   },
   "eliminar-pedido-definitivo": function (el) {
