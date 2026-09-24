@@ -82,7 +82,15 @@ export var COLUMNAS_MOVIMIENTOS = [
   // pedidoId — el excedente reaparecía dentro del card de su pedido en
   // Finanzas aunque los Hallazgos #44/#49/#50 lo hubieran sacado.
   // Hallazgo #51, 2026-09-23. AL FINAL a propósito, ver el aviso arriba.
-  { key: "origenCompraExcedenteClave", header: "origen_compra_excedente_clave" }
+  { key: "origenCompraExcedenteClave", header: "origen_compra_excedente_clave" },
+  // Recibo de compra (ver calcFilasRecibo en core/calc.js): a qué recibo
+  // pertenece la fila, qué papel cumple ("parte" de un pedido o "reserva"
+  // de lo que sobró) y de qué línea del recibo es. Las TRES juntas son lo
+  // que el sistema exige para reconocer una fila como suya — nunca un campo
+  // vacío (lección de los Hallazgos #50/#51). AL FINAL, ver el aviso arriba.
+  { key: "reciboCompraId", header: "recibo_compra_id" },
+  { key: "reciboCompraRol", header: "recibo_compra_rol" },
+  { key: "reciboCompraLinea", header: "recibo_compra_linea" }
 ];
 export var tablaMovimientos = crearTablaSheet("Movimientos", COLUMNAS_MOVIMIENTOS);
 

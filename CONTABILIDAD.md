@@ -2652,6 +2652,102 @@ la reparación de los datos viejos.
 pasar por la capa que lo guarda. Probar la lógica con objetos en memoria
 no detecta que el dato nunca llega a la Sheet.
 
+### 🟡 Hallazgo #52 — "Recibo de compra": una compra real queda registrada como una sola cosa. EN CURSO (fase 1 de 4 hecha)
+
+**Por qué.** Hoy una compra real (un pago a un proveedor) no queda guardada
+en ningún lado como tal. Al registrar una compra conjunta, el total pagado,
+el proveedor y la fecha se reparten entre los pedidos y el borrador se
+borra. Lo que queda en Finanzas son N movimientos (uno por pedido) más
+hasta N excedentes sueltos, sin nada que los una. De ahí salieron los
+Hallazgos #44 al #51 y el límite de que el costo de la reserva se quedaba en
+el pedido que la tenía guardada. El usuario propuso el "recibo" (2026-09-23)
+y decidió cómo debía funcionar en dos rondas de preguntas:
+- una tarjeta por recibo con el total pagado;
+- cada pedido sigue viendo su parte;
+- un recibo puede traer varios insumos y costos;
+- la reserva la usan solo los pedidos de ese recibo;
+- se escribe el total del papel;
+- una reposición es otro recibo;
+- lo ya registrado se convierte;
+- los pedidos rápidos quedan fuera.
+
+**Modelo (sin colección nueva).** Cada dato tiene una sola fuente:
+- **Lo que le tocó a cada pedido.** Vive en `compra.partesRecibo[]` de su
+  cotización, con una entrada por recibo. Una misma línea puede estar en
+  varios recibos.
+- **Los datos del papel y los totales de cada línea.** Van copiados en cada
+  parte y no cambian. Todo vive en la clave `cotizaciones`, así que un
+  recibo se guarda en una sola escritura.
+- **La reserva.** Es derivada: total de la línea menos lo que tienen los
+  pedidos. Nunca se guarda.
+- **Los movimientos.** Son una proyección de lo anterior (`calcFilasRecibo`):
+  - una fila "parte" por pedido, con su `pedidoId`, que sigue contando en el
+    Neto de su pedido;
+  - una fila "reserva" por línea, sin `pedidoId` y sin `cotizacionId`, así
+    ninguna reparación vieja la alcanza.
+  - Resultado: cada peso se descuenta una sola vez. En el ejemplo, una
+    factura de $375.000 da filas de 100.000 + 200.000 + 60.000 (reserva) +
+    5.000 + 10.000.
+- **Columnas y marca.** Tres columnas nuevas al final de la hoja Movimientos
+  (`reciboCompraId`, `reciboCompraRol`, `reciboCompraLinea`). El sistema
+  solo reconoce como suya una fila que tenga las tres. La marca
+  `reciboCompraId` va primera en `MARCAS_ORIGEN_SISTEMA`.
+- **`cantidadReal`/`costoReal` del miembro.** Se guardan redundantes (= la
+  suma de sus partes) para que todo lo que ya los lee siga igual. Solo los
+  escribe `totalesDesdePartes`, y `verificarRecibo` exige que coincidan.
+
+**Garantías.**
+- `ejecutarAccionRecibo` (modules/cotizaciones.js) envuelve toda acción de
+  recibo: toma una foto, corre la acción, y solo guarda si cada recibo
+  cuadra al peso y la caja se movió exactamente lo esperado. Si no, restaura
+  la foto y avisa. También se niega a correr si hay una cotización con
+  cambios sin guardar, porque esos cambios se guardarían junto con el
+  recibo.
+- **Al cargar la app, nada reescribe plata:** solo se verifica. Reescribir
+  movimientos en cada carga es justo la clase de riesgo del #50.
+- **Resguardos contra choques con reparaciones viejas** (lección del #50):
+  - `repararComprasSinSeguimiento`. Choque real: reinyectaba la parte como
+    compra suelta y contaba doble.
+  - `movimientosGeneradosPorCotizacion`. Al borrar una cotización, su parte
+    pasa a la reserva y no a la papelera.
+  - `repararTxHuerfanosDeCotEscalada`, `repararPedidoIdExcedente` y
+    `repararMarcaExcedentePerdida`.
+  - `repararMarcasOrigenInconsistentes`: limpia las 3 columnas juntas.
+  - `sincronizarComprasFinanzasDe`: salta a los miembros antes de la
+    limpieza de `global|`, que borra por id.
+  - "Restaurar" de la papelera rechaza las filas de un recibo anulado.
+
+**Fase 1 (esta entrega): sin nada visible todavía.** Incluye las columnas,
+la marca, los resguardos y las funciones puras:
+- `calcRepartoLineaRecibo`: reparte con el total del papel; el costo sigue a
+  la cantidad final;
+- `aplicarReciboACotizaciones`;
+- `calcRecibo` y `calcFilasRecibo`: los servicios se reparten por
+  capacidad, así ninguna fila descuenta más que su monto;
+- `reconciliarTxRecibo` y `verificarRecibo`;
+- `calcTomaReserva` y `calcDevolucionParte`: la última toma se lleva el
+  resto exacto.
+
+Pruebas (`test/smoke.mjs`), con el ejemplo de $375.000:
+- **Reparto y filas:** reparto exacto; ajuste a mano; compra corta con
+  aviso de faltante; prendas en enteros; 5 filas que suman exacto;
+  reconciliar es idempotente.
+- **Borrar cotizaciones:** al borrar una, su parte pasa a la reserva y la
+  caja no cambia; al borrar todas, la línea queda congelada.
+- **Servicios:** se reparten por capacidad.
+- **Ida y vuelta por la hoja Movimientos:** después, toda la secuencia de
+  reparaciones de `loadAll()` devuelve false dos veces seguidas.
+- **`ejecutarAccionRecibo`:** si la acción está rota, restaura byte a byte.
+
+Cada resguardo tiene su prueba, y se comprobó que esa prueba falla si se
+quita el resguardo.
+
+**Siguientes fases:**
+- **F2:** registrar, tarjeta en el Historial, usar y devolver reserva,
+  reposición, anular, eliminar.
+- **F3:** convertir compras conjuntas y excedentes viejos.
+- **F4:** agrupar en reportes y limpiar el mecanismo viejo.
+
 ---
 
 ## Próximos pasos

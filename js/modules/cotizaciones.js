@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -2686,21 +2686,8 @@ function repartirCostosGlobales(cot, lineas) {
   });
 }
 
-// A qué pedido pertenece un movimiento de Finanzas generado DESDE una
-// cotización (compra real, costo estimado, comisión de vendedor...). Usa
-// `pedidoOrigenId` como respaldo cuando todavía no hay `pedidoId`: una
-// cotización "escalada" desde un pedido rápido (ver pedidos.js:
-// escalar-a-cotizacion) sigue siendo un borrador — sus NÚMEROS no mandan
-// sobre el pedido hasta "Aplicar a pedido" (ver calcDesfaseCotizacionPedido,
-// que por eso solo mira pedidoId) — pero un movimiento de caja que ya se
-// registró ahí es plata real, ya ligada a un pedido real que existe desde
-// antes. Sin este respaldo, cualquier compra/estimado/comisión registrado en
-// ese borrador quedaba con pedidoId vacío: no aparecía agrupado bajo su
-// pedido en Finanzas, sino como "Movimientos sueltos (sin pedido)", aunque el
-// pedido siguiera ahí y el vínculo (pedidoOrigenId ↔ cotizacionId) también.
-function pedidoIdDeCotParaTx(cot) {
-  return (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
-}
+// pedidoIdDeCotParaTx vive en core/calc.js (también la usan las filas de
+// un Recibo de compra) — ver el porqué completo allá.
 
 // Sincroniza las compras de UNA cotización contra Finanzas: por cada línea
 // marcada "Sí" crea o actualiza su movimiento de gasto, y por cada línea que
@@ -2718,8 +2705,20 @@ function pedidoIdDeCotParaTx(cot) {
 export function sincronizarComprasFinanzasDe(cot) {
   var lineas = calcListaCompras(cot);
   var creados = 0, actualizados = 0, borrados = 0, huerfanas = 0;
+  var recibosTocados = [];
 
   var compras = (cot.compras || []).map(function (compra) {
+    // Una compra que es parte de un Recibo de compra no se sincroniza por
+    // acá: sus movimientos los arma el recibo (reconciliarTxRecibo, al
+    // final). Se salta ANTES de la limpieza de "global|" de abajo, que
+    // borra por id — el recibo nunca deja que una compra suya se borre
+    // así, sin pasar su plata a la reserva.
+    if (esMiembroRecibo(compra)) {
+      compra.partesRecibo.forEach(function (p) {
+        if (recibosTocados.indexOf(p.reciboId) === -1) recibosTocados.push(p.reciboId);
+      });
+      return compra;
+    }
     var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
     // Sin `linea`, el insumo/referencia/costo global/servicio cobrado que
     // originó esta compra ya no existe en la cotización — pero "no hay
@@ -2858,7 +2857,73 @@ export function sincronizarComprasFinanzasDe(cot) {
     return resultado;
   }).filter(Boolean); // las huérfanas devuelven null arriba: se descartan de cot.compras
 
+  // Recibos de esta cotización: sus filas se reconcilian contra la versión
+  // de la cotización que se está sincronizando (puede no estar todavía en
+  // state.cotizaciones) — ej. si cambió su descripción o su pedido.
+  if (recibosTocados.length) {
+    var cotizacionesVista = state.cotizaciones.map(function (c) {
+      return c.id === cot.id ? Object.assign({}, cot, { compras: compras }) : c;
+    });
+    recibosTocados.forEach(function (reciboId) {
+      var rec = reconciliarTxRecibo(state.tx, reciboId, cotizacionesVista);
+      state.tx = rec.tx;
+      creados += rec.creadas; actualizados += rec.actualizadas; borrados += rec.borradas;
+    });
+  }
+
   return { compras: compras, creados: creados, actualizados: actualizados, borrados: borrados, huerfanas: huerfanas };
+}
+
+// Envoltorio de TODA acción que toca un Recibo de compra: toma una foto de
+// la plata, corre la acción, y solo guarda si cada recibo tocado cuadra al
+// peso (verificarRecibo) Y la caja se movió exactamente lo esperado. Si no,
+// restaura la foto y no guarda nada — criterio bancario: nada descuadrado
+// llega a la Sheet.
+// opts: { recibos: [ids] | function () -> [ids] (si la acción crea el id),
+//         deltaCaja: número exacto esperado (ej. -total al registrar),
+//         permitirCotSucia: true solo para "Guardar" de la propia cotización }
+// Devuelve true si guardó.
+export function ejecutarAccionRecibo(opts, fn) {
+  if (state.cotSucia && !opts.permitirCotSucia) {
+    var sucia = state.cotizaciones.filter(function (c) { return c.id === state.cotSucia; })[0];
+    // Guardar ahora arrastraría también sus cambios sin confirmar (se
+    // guarda la clave "cotizaciones" entera).
+    window.alert("Primero guarda o descarta los cambios de la cotización \"" + ((sucia && (sucia.descripcion || sucia.cliente)) || "abierta") + "\".");
+    return false;
+  }
+  var foto = {
+    tx: JSON.stringify(state.tx),
+    cotizaciones: JSON.stringify(state.cotizaciones),
+    txPapelera: JSON.stringify(state.txPapelera || [])
+  };
+  var cajaAntes = calcCaja();
+  var problemas = [];
+  try {
+    fn();
+    var ids = typeof opts.recibos === "function" ? opts.recibos() : (opts.recibos || []);
+    ids.forEach(function (id) {
+      verificarRecibo(id, state.cotizaciones, state.tx).forEach(function (p) { problemas.push(p); });
+    });
+    var delta = calcCaja() - cajaAntes;
+    if (Math.abs(delta - num(opts.deltaCaja)) > 0.005) {
+      problemas.push("La caja se movería " + fmt(delta) + " y se esperaba " + fmt(num(opts.deltaCaja)) + ".");
+    }
+  } catch (e) {
+    console.error(e);
+    problemas.push("Error inesperado: " + (e && e.message ? e.message : e));
+  }
+  if (problemas.length) {
+    state.tx = JSON.parse(foto.tx);
+    state.cotizaciones = JSON.parse(foto.cotizaciones);
+    state.txPapelera = JSON.parse(foto.txPapelera);
+    console.error("Recibo de compra — no se guardó nada:", problemas);
+    window.alert("No se guardó nada: " + problemas[0]);
+    return false;
+  }
+  persist("cotizaciones");
+  persist("tx");
+  if (JSON.stringify(state.txPapelera || []) !== foto.txPapelera) persist("txPapelera");
+  return true;
 }
 
 // Toma `cantidadNecesaria` de la reserva compartida de excedente de una

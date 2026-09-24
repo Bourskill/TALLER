@@ -781,6 +781,13 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var item = state.txPapelera.filter(function (t) { return t.id === id; })[0];
     if (!item) return;
+    // Una fila de un Recibo de compra anulado no se puede traer de vuelta
+    // suelta: el recibo ya no la respalda, y volver a ponerla en la caja
+    // sin sus compras contaría esa plata de nuevo (o a medias).
+    if (item.reciboCompraId || item.eliminadoConRecibo) {
+      window.alert("Este movimiento era parte de un recibo de compra anulado. Para volver a tenerlo, registra el recibo de nuevo.");
+      return;
+    }
     state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
     var restaurado = Object.assign({}, item);
     delete restaurado.eliminadoEl;

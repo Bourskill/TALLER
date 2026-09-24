@@ -259,6 +259,20 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo cuarta ronda: Recibo de compra, fase 1 — la base, sin cambios visibles)
+
+Primera de cuatro entregas del "Recibo de compra": una compra real (un
+papel del proveedor) que reparte insumos y plata entre uno o varios
+pedidos y guarda lo que sobra como reserva para esos mismos pedidos.
+
+Esta entrega no cambia nada en pantalla. Deja lista la base: dónde se
+guarda cada dato, las cuentas del reparto, cómo se ven sus movimientos en
+Finanzas (cada peso una sola vez) y las protecciones para que ninguna
+reparación automática vieja los toque.
+
+- Tres columnas nuevas al final de la hoja Movimientos. Se agregan solas.
+- Ver CONTABILIDAD.md, Hallazgo #52.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo tercera ronda: la marca del excedente ahora sí se guarda en la Sheet)
 
 El arreglo de la ronda anterior solo duraba hasta la primera recarga. La

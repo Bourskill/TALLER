@@ -558,6 +558,10 @@ export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
     // más abajo — esa reparación sigue viva como red de seguridad para lo
     // que ya quedó mal escrito, pero el hueco real estaba ACÁ).
     if (t.origenCompraExcedenteClave) return;
+    // Una fila de un Recibo de compra tampoco es "huérfana": su reserva
+    // va sin pedido A PROPÓSITO (y sin cotizacionId, pero se guarda igual
+    // por si algún día una fila vieja trae uno). Hallazgo #52.
+    if (t.reciboCompraId) return;
     if (t.pedidoId || !t.cotizacionId) return;
     var cot = (cotizaciones || []).filter(function (c) { return c.id === t.cotizacionId; })[0];
     var pedidoId = cot && (cot.pedidoId || cot.pedidoOrigenId);
@@ -622,7 +626,8 @@ var TIPOS_VALIDOS_POR_MARCA = {
   origenComisionPedidoId: ["comision"],
   origenDeudaIngresoId: ["ingreso"],
   origenColchonId: ["ingreso"],
-  deudaId: ["gasto"]
+  deudaId: ["gasto"],
+  reciboCompraId: ["gasto"]
 };
 
 // Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que
@@ -658,6 +663,9 @@ export function repararMarcasOrigenInconsistentes(tx) {
       if (!t[campo]) return;
       if (TIPOS_VALIDOS_POR_MARCA[campo].indexOf(t.tipo) !== -1) return; // combinación posible, no se toca
       t[campo] = "";
+      // Las tres columnas de un Recibo de compra van juntas: sin su id, el
+      // rol y la línea sueltos no significan nada.
+      if (campo === "reciboCompraId") { t.reciboCompraRol = ""; t.reciboCompraLinea = ""; }
       huboReparacion = true;
     });
     // Chequeo más preciso, más allá del tipo: origenGastoFijoPeriodo SIEMPRE
@@ -698,6 +706,7 @@ export function repararMarcasOrigenInconsistentes(tx) {
 export function repararPedidoIdExcedente(tx) {
   var huboReparacion = false;
   (tx || []).forEach(function (t) {
+    if (t.reciboCompraId) return; // una parte de recibo SÍ lleva su pedido (Hallazgo #52)
     if (!t.origenCompraExcedenteClave || !t.pedidoId) return;
     t.pedidoId = "";
     huboReparacion = true;
@@ -733,7 +742,7 @@ export function repararMarcaExcedentePerdida(tx, cotizaciones) {
     (cot.compras || []).forEach(function (compra) {
       if (!compra.excedenteTxId) return;
       var t = txPorId[compra.excedenteTxId];
-      if (!t || t.cotizacionId !== cot.id || t.origenCompraExcedenteClave) return;
+      if (!t || t.cotizacionId !== cot.id || t.origenCompraExcedenteClave || t.reciboCompraId) return;
       t.origenCompraExcedenteClave = compra.clave;
       huboReparacion = true;
     });

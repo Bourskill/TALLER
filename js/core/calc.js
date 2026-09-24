@@ -4,7 +4,7 @@
 // sin arrastrar código de HTML.
 
 import { state } from "./store.js";
-import { num, norm, todayStr, diasPagoDe, fmt, redondear2 } from "./utils.js";
+import { num, norm, todayStr, diasPagoDe, fmt, redondear2, hashCorto } from "./utils.js";
 import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
 
 // Flujo por defecto para una referencia que solo trae prendas COMPRADAS ya
@@ -346,6 +346,18 @@ export function origenDeTx(t) {
 // sheetsEsquemas.js) — una marca sin columna se pierde en cada recarga
 // (pasó con origenCompraExcedenteClave, Hallazgo #51).
 export var MARCAS_ORIGEN_SISTEMA = [
+  // PRIMERA a propósito: la parte de un recibo también lleva
+  // origenCompraClave (identifica a qué compra de la cotización pertenece),
+  // y marcaDeTx se queda con la primera marca que encuentre — el recibo
+  // manda. Protegida mientras sea una fila de recibo reconocible (las tres
+  // columnas válidas, ver esFilaRecibo): solo se quita anulando el recibo.
+  // Una fila con reciboCompraId pero rol/línea inválidos no la reconoce
+  // nadie, así que queda huérfana y se puede borrar a mano.
+  {
+    campo: "reciboCompraId", que: "un Recibo de compra",
+    donde: "Finanzas → Recibos de compra → el recibo → Anular recibo (para devolver material de un pedido a la reserva, baja su Cant. real en Producción)",
+    existe: function (t) { return esFilaRecibo(t); }
+  },
   {
     campo: "origenAbonoId", que: "un abono cobrado de un pedido",
     donde: "Pedidos → tarjeta del pedido → Dinero y documentos → Abonos registrados → Eliminar",
@@ -497,6 +509,11 @@ export function movimientosGeneradosPorCotizacion(cot) {
   // juntos"), no huérfano como otros orígenes.
   var idsExcedente = (cot.compras || []).map(function (c) { return c.excedenteTxId; }).filter(Boolean);
   return state.tx.filter(function (t) {
+    // Una fila de un Recibo de compra NO es de esta cotización aunque
+    // lleve su cotizacionId/origenCompraClave: es plata de una factura real
+    // que ya se pagó. Al borrar la cotización, su parte pasa a la reserva
+    // del recibo (ver reconciliarTxRecibo) — nunca a la papelera.
+    if (t.reciboCompraId) return false;
     if (t.origenComisionCotId === cot.id) return true;
     // t.cotizacionId === cot.id de más en las dos siguientes: una cotización
     // duplicada ANTES del fix de duplicarCotizacionCompleta pudo quedar con
@@ -2510,6 +2527,11 @@ export function calcListaCompras(cot) {
 export function repararComprasSinSeguimiento(tx, cotizaciones) {
   var huboReparacion = false;
   (tx || []).forEach(function (t) {
+    // La parte de un Recibo de compra también lleva origenCompraClave +
+    // cotizacionId, pero su compra puede faltar A PROPÓSITO (se borró la
+    // cotización y su parte pasó a la reserva). Reinyectarla como compra
+    // suelta contaría la misma plata dos veces. Lección del Hallazgo #50.
+    if (t.reciboCompraId) return;
     if (!t.origenCompraClave || !t.cotizacionId) return;
     var cot = (cotizaciones || []).filter(function (c) { return c.id === t.cotizacionId; })[0];
     if (!cot) return;
@@ -2651,6 +2673,435 @@ export function repartirProporcional(total, pesos, decimales) {
     .sort(function (a, b) { return b.residuo - a.residuo; });
   for (var k = 0; k < faltan; k++) { pisos[orden[k % orden.length].i]++; }
   return pisos.map(function (p) { return p / factor; });
+}
+
+// ---------- Recibo de compra ----------
+// Una compra REAL (un pago a un proveedor, un papel) que reparte insumos y
+// plata entre 1 o varios pedidos, y guarda lo que sobra como reserva para
+// esos mismos pedidos. Propuesto por el usuario 2026-09-23 ("recibo, porque
+// literal es una compra conjunta en la vida real de insumos para varios
+// pedidos, o insumos de más para aprovechar la ocasión") — antes una compra
+// así terminaba en pedazos sueltos en Finanzas que nada unía (Hallazgos
+// #44-#51). Diseño completo y por qué: CONTABILIDAD.md, Hallazgo #52.
+//
+// Dónde vive cada cifra (una sola fuente):
+// - Lo que le tocó a cada pedido: `compra.partesRecibo[]` de su propia
+//   cotización (una entrada por recibo — una misma línea puede estar en
+//   varios recibos, ej. una reposición comprada después).
+// - Los datos del papel (fecha, proveedor, N.º, servicios) y los totales de
+//   cada línea (cuánto se compró, cuánto se pagó): copiados en cada parte,
+//   inmutables. Todo vive en la clave "cotizaciones": un recibo se guarda
+//   en UNA sola escritura.
+// - La reserva: DERIVADA (total de la línea − lo que tienen los pedidos),
+//   nunca guardada — así no hay una segunda cifra que se pueda descuadrar.
+// - Los movimientos de Finanzas: una PROYECCIÓN de lo anterior (ver
+//   calcFilasRecibo), nunca al revés.
+
+var ROLES_FILA_RECIBO = ["parte", "reserva"];
+
+// Una fila de Finanzas que el sistema reconoce como de un recibo: las TRES
+// columnas válidas, nunca solo una (una fila a medias no la toca nadie).
+export function esFilaRecibo(t) {
+  return !!(t && t.reciboCompraId && ROLES_FILA_RECIBO.indexOf(t.reciboCompraRol) !== -1 && t.reciboCompraLinea);
+}
+
+export function esMiembroRecibo(compra) {
+  return !!(compra && (compra.partesRecibo || []).length);
+}
+
+// Una prenda comprada entera (`esProducto`) se cuenta en enteros; el resto
+// (metros de tela, hilo...) con 2 decimales — mismo criterio que Compras
+// conjuntas (Hallazgo #43). Las cuentas se hacen en UNIDADES enteras
+// (centésimas) para que 0.1 + 0.2 nunca descuadre una reserva.
+function decimalesLineaRecibo(totales) { return totales && totales.esProducto ? 0 : 2; }
+function aUnidades(x, dec) { return Math.round(num(x) * Math.pow(10, dec)); }
+function deUnidades(u, dec) { return u / Math.pow(10, dec); }
+
+// El pedido al que va un movimiento generado desde una cotización (compra
+// real, costo estimado, comisión de vendedor...). Usa `pedidoOrigenId` como
+// respaldo cuando todavía no hay `pedidoId`: una cotización "escalada"
+// desde un pedido rápido (ver pedidos.js: escalar-a-cotizacion) sigue siendo
+// un borrador — sus NÚMEROS no mandan sobre el pedido hasta "Aplicar a
+// pedido" (ver calcDesfaseCotizacionPedido, que por eso solo mira pedidoId)
+// — pero un movimiento de caja que ya se registró ahí es plata real, ya
+// ligada a un pedido real que existe desde antes. Sin este respaldo,
+// cualquier compra/estimado/comisión registrado en ese borrador quedaba con
+// pedidoId vacío: no aparecía agrupado bajo su pedido en Finanzas, sino
+// como "Movimientos sueltos (sin pedido)", aunque el pedido siguiera ahí y
+// el vínculo (pedidoOrigenId ↔ cotizacionId) también. Vive acá (no en
+// modules/cotizaciones.js) porque también la usan las filas del recibo.
+export function pedidoIdDeCotParaTx(cot) {
+  return (cot && (cot.pedidoId || cot.pedidoOrigenId)) || "";
+}
+
+// `cantidadReal`/`costoReal` de una compra miembro se guardan de forma
+// redundante (= suma de sus partes) para que TODO lo que ya los lee
+// (costoRealPedido, el PDF, el resumen de compras...) siga igual. Esta es la
+// ÚNICA función que los escribe para un miembro; verificarRecibo exige que
+// coincidan.
+export function totalesDesdePartes(compra) {
+  var unidades = 0, costo = 0;
+  ((compra && compra.partesRecibo) || []).forEach(function (p) {
+    unidades += aUnidades(p.cantidad, 2);
+    costo += Math.round(num(p.costo));
+  });
+  return Object.assign({}, compra, { cantidadReal: deUnidades(unidades, 2), costoReal: costo });
+}
+
+// Todo lo que se sabe de un recibo, armado desde las partes de las
+// cotizaciones (y, para una línea que ya no tiene ningún pedido vivo, desde
+// sus propias filas en Finanzas — ver "congelada" abajo).
+export function calcRecibo(reciboId, cotizaciones, tx) {
+  var lineas = {}, orden = [], cabecera = null, problemas = [];
+  (cotizaciones || []).forEach(function (cot) {
+    (cot.compras || []).forEach(function (compra) {
+      (compra.partesRecibo || []).forEach(function (p) {
+        if (p.reciboId !== reciboId) return;
+        if (!cabecera) cabecera = p.recibo || {};
+        else if (JSON.stringify(p.recibo || {}) !== JSON.stringify(cabecera)) {
+          problemas.push("Los datos del recibo (fecha, proveedor, N.º) no coinciden en todas sus partes.");
+        }
+        var L = lineas[p.linea];
+        if (!L) {
+          L = lineas[p.linea] = { linea: p.linea, totales: Object.assign({}, p.totalesLinea || {}), partes: [], congelada: false };
+          orden.push(p.linea);
+        } else if (JSON.stringify(p.totalesLinea || {}) !== JSON.stringify(L.totales)) {
+          problemas.push("Los totales de \"" + (L.totales.nombre || p.linea) + "\" no coinciden en todas sus partes.");
+        }
+        L.partes.push({
+          cotId: cot.id, pedidoId: pedidoIdDeCotParaTx(cot), compraClave: compra.clave,
+          descripcion: cot.descripcion || "", cantidad: num(p.cantidad), costo: Math.round(num(p.costo))
+        });
+      });
+    });
+  });
+  // Línea "congelada": ya no queda NINGÚN pedido vivo en ella (se borraron
+  // todas sus cotizaciones), así que sus totales ya no están en ninguna
+  // parte. La plata que ya se pagó no desaparece: queda como reserva, igual
+  // a la suma de las filas que esa línea tenga en Finanzas.
+  var filas = (tx || []).filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
+  var primeraFila = filas[0] || null;
+  filas.forEach(function (t) {
+    var L = lineas[t.reciboCompraLinea];
+    if (L && !L.congelada) return;
+    if (!L) {
+      L = lineas[t.reciboCompraLinea] = {
+        linea: t.reciboCompraLinea,
+        totales: { nombre: t.insumoNombre || "", unidad: t.unidad || "", esProducto: false, esGlobal: t.reciboCompraLinea.indexOf("costoglobal|") === 0, cantidadTotal: 0, costoTotal: 0 },
+        partes: [], congelada: true
+      };
+      orden.push(t.reciboCompraLinea);
+    }
+    L.totales.cantidadTotal = deUnidades(aUnidades(L.totales.cantidadTotal, 2) + aUnidades(t.cantidad, 2), 2);
+    L.totales.costoTotal = Math.round(num(L.totales.costoTotal)) + Math.round(num(t.monto));
+  });
+  if (!cabecera) {
+    // Recibo sin ningún pedido vivo: lo que se sabe del papel sale de sus
+    // propias filas (los servicios, sumados por nombre).
+    var servicios = {};
+    filas.forEach(function (t) {
+      (t.serviciosDescuento || []).forEach(function (s) { servicios[s.nombre] = (servicios[s.nombre] || 0) + Math.round(num(s.monto)); });
+    });
+    cabecera = {
+      fecha: primeraFila ? primeraFila.fecha : "", proveedorId: primeraFila ? (primeraFila.proveedorId || "") : "",
+      contraparte: primeraFila ? (primeraFila.contraparte || "") : "", numero: "", etiquetas: [],
+      servicios: Object.keys(servicios).map(function (n) { return { nombre: n, monto: servicios[n] }; })
+    };
+  }
+  var total = 0, pedidoIds = [];
+  var lineasOut = orden.map(function (k) {
+    var L = lineas[k];
+    var dec = decimalesLineaRecibo(L.totales);
+    var unidadesPartes = 0, costoPartes = 0;
+    L.partes.forEach(function (p) {
+      unidadesPartes += aUnidades(p.cantidad, dec);
+      costoPartes += p.costo;
+      if (p.pedidoId && pedidoIds.indexOf(p.pedidoId) === -1) pedidoIds.push(p.pedidoId);
+    });
+    var reserva = {
+      cantidad: deUnidades(aUnidades(L.totales.cantidadTotal, dec) - unidadesPartes, dec),
+      costo: Math.round(num(L.totales.costoTotal)) - costoPartes
+    };
+    if (reserva.cantidad < 0 || reserva.costo < 0) {
+      problemas.push("Lo repartido en \"" + (L.totales.nombre || k) + "\" es más de lo que se compró (la reserva quedaría negativa).");
+    }
+    total += Math.round(num(L.totales.costoTotal));
+    return {
+      linea: k, nombre: L.totales.nombre || "", unidad: L.totales.unidad || "",
+      esProducto: !!L.totales.esProducto, esGlobal: !!L.totales.esGlobal, congelada: L.congelada,
+      cantidadTotal: num(L.totales.cantidadTotal), costoTotal: Math.round(num(L.totales.costoTotal)),
+      partes: L.partes, reserva: reserva
+    };
+  });
+  return { id: reciboId, cabecera: cabecera, lineas: lineasOut, total: total, pedidoIds: pedidoIds, problemas: problemas };
+}
+
+// Todos los recibos que existen (en alguna cotización o en alguna fila de
+// Finanzas), sin repetir.
+export function calcIdsRecibos(cotizaciones, tx) {
+  var vistos = {}, ids = [];
+  function agregar(id) { if (id && !vistos[id]) { vistos[id] = true; ids.push(id); } }
+  (cotizaciones || []).forEach(function (cot) {
+    (cot.compras || []).forEach(function (compra) {
+      (compra.partesRecibo || []).forEach(function (p) { agregar(p.reciboId); });
+    });
+  });
+  (tx || []).forEach(function (t) { if (esFilaRecibo(t)) agregar(t.reciboCompraId); });
+  return ids;
+}
+
+// Las filas que un recibo DEBE tener en Finanzas — cada peso una sola vez:
+// - "parte": una por pedido (con su pedidoId, así sigue contando en el Neto
+//   de ese pedido, decisión del usuario 2026-09-23);
+// - "reserva": una por línea con algo sobrante, SIN pedidoId y SIN
+//   cotizacionId — no es de ningún pedido, y así ninguna reparación vieja
+//   de loadAll() (que buscan "cotizacionId sin pedidoId") la puede tocar.
+// Ids determinísticos: dos dispositivos llegan a las mismas filas.
+export function calcFilasRecibo(reciboId, cotizaciones, tx) {
+  var r = calcRecibo(reciboId, cotizaciones, tx);
+  var cab = r.cabecera || {};
+  var proveedor = cab.proveedorId ? clienteById(cab.proveedorId) : null;
+  var contraparte = proveedor ? proveedor.nombre : (cab.contraparte || "");
+  var fecha = cab.fecha || todayStr();
+  var filas = [];
+  r.lineas.forEach(function (L) {
+    L.partes.forEach(function (p) {
+      if (p.costo <= 0) return;
+      filas.push({
+        id: "rcp_" + reciboId + "_" + hashCorto(p.cotId + "|" + p.compraClave),
+        tipo: "gasto", concepto: "Compra — " + L.nombre + " — " + p.descripcion,
+        monto: p.costo, contraparte: contraparte, fecha: fecha,
+        pedidoId: p.pedidoId, cotizacionId: p.cotId, esInsumo: "1",
+        proveedorId: cab.proveedorId || "", insumoNombre: L.nombre,
+        cantidad: L.esGlobal ? 0 : p.cantidad, unidad: L.unidad,
+        origenCompraClave: p.compraClave,
+        reciboCompraId: reciboId, reciboCompraRol: "parte", reciboCompraLinea: L.linea
+      });
+    });
+    if (L.reserva.cantidad > 0 || L.reserva.costo > 0) {
+      filas.push({
+        id: "rsv_" + reciboId + "_" + hashCorto(L.linea),
+        tipo: "gasto",
+        concepto: L.esGlobal
+          ? "Sin asignar — " + L.nombre + " (recibo de compra)"
+          : "Reserva del recibo — " + L.nombre + " (" + L.reserva.cantidad + (L.unidad ? " " + L.unidad : "") + ")",
+        monto: Math.max(0, L.reserva.costo), contraparte: contraparte, fecha: fecha,
+        pedidoId: "", cotizacionId: "", esInsumo: "1",
+        proveedorId: cab.proveedorId || "", insumoNombre: L.nombre,
+        cantidad: L.esGlobal ? 0 : L.reserva.cantidad, unidad: L.unidad,
+        reciboCompraId: reciboId, reciboCompraRol: "reserva", reciboCompraLinea: L.linea
+      });
+    }
+  });
+  repartirServiciosEnFilasRecibo(filas, cab.servicios || []);
+  return { recibo: r, filas: filas };
+}
+
+// La plata de un servicio asignada al recibo (se asigna UNA vez, al recibo
+// entero) se reparte entre sus filas "por capacidad": cada servicio se
+// reparte proporcional a lo que a cada fila todavía le queda sin cubrir, así
+// ninguna fila descuenta más que su propio monto y la suma por servicio da
+// exacta. Corrige lo que pasaba en Compras conjuntas (el descuento de un
+// pedido podía superar su monto y el excedente nunca llevaba ninguno).
+function repartirServiciosEnFilasRecibo(filas, servicios) {
+  var orden = filas.slice().sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  var usado = orden.map(function () { return 0; });
+  orden.forEach(function (f) { f.serviciosDescuento = []; });
+  (servicios || []).forEach(function (s) {
+    var monto = Math.round(num(s.monto));
+    if (monto <= 0) return;
+    var capacidades = orden.map(function (f, i) { return Math.max(0, Math.round(num(f.monto)) - usado[i]); });
+    var capacidadTotal = capacidades.reduce(function (a, c) { return a + c; }, 0);
+    if (capacidadTotal <= 0) return;
+    var partes = repartirProporcional(Math.min(monto, capacidadTotal), capacidades, 0);
+    partes.forEach(function (m, i) {
+      if (m <= 0) return;
+      usado[i] += m;
+      orden[i].serviciosDescuento.push({ nombre: s.nombre, monto: m });
+    });
+  });
+}
+
+function claveNaturalFilaRecibo(t) {
+  return t.reciboCompraRol === "parte"
+    ? "parte|" + t.cotizacionId + "|" + t.origenCompraClave
+    : "reserva|" + t.reciboCompraLinea;
+}
+
+// Deja las filas de UN recibo en Finanzas exactamente como deben ser
+// (calcFilasRecibo), sin tocar ninguna otra fila. Empareja por clave natural
+// (conserva el id de una fila que ya existía), quita duplicadas y sobrantes.
+// Devuelve un arreglo NUEVO — nunca muta `tx`. Solo la llaman acciones del
+// usuario (registrar, guardar, anular, eliminar...) y el botón "Completar
+// movimientos" — NUNCA loadAll() por su cuenta: reescribir plata en cada
+// carga es justo la clase de riesgo del Hallazgo #50.
+export function reconciliarTxRecibo(tx, reciboId, cotizaciones) {
+  var deseadas = calcFilasRecibo(reciboId, cotizaciones, tx).filas;
+  var porClave = {};
+  deseadas.forEach(function (f) { porClave[claveNaturalFilaRecibo(f)] = f; });
+  var usadas = {}, creadas = 0, actualizadas = 0, borradas = 0;
+  var resultado = [];
+  (tx || []).forEach(function (t) {
+    if (!(esFilaRecibo(t) && t.reciboCompraId === reciboId)) { resultado.push(t); return; }
+    var k = claveNaturalFilaRecibo(t);
+    var d = porClave[k];
+    if (!d || usadas[k]) { borradas++; return; }
+    usadas[k] = true;
+    var cambio = Object.keys(d).some(function (campo) {
+      return campo !== "id" && JSON.stringify(t[campo]) !== JSON.stringify(d[campo]);
+    });
+    if (cambio) actualizadas++;
+    resultado.push(cambio ? Object.assign({}, t, d, { id: t.id }) : t);
+  });
+  var nuevas = deseadas.filter(function (f) { return !usadas[claveNaturalFilaRecibo(f)]; });
+  creadas = nuevas.length;
+  return {
+    tx: nuevas.concat(resultado),
+    creadas: creadas, actualizadas: actualizadas, borradas: borradas,
+    hayCambios: creadas + actualizadas + borradas > 0
+  };
+}
+
+// Lista de problemas de un recibo (vacía = cuadra al peso). Tolerancia cero.
+export function verificarRecibo(reciboId, cotizaciones, tx) {
+  var r = calcRecibo(reciboId, cotizaciones, tx);
+  var problemas = r.problemas.slice();
+  (cotizaciones || []).forEach(function (cot) {
+    (cot.compras || []).forEach(function (compra) {
+      if (!(compra.partesRecibo || []).some(function (p) { return p.reciboId === reciboId; })) return;
+      if (estadoCompra(compra) !== "si") problemas.push("Una compra del recibo no está marcada como comprada (" + (cot.descripcion || cot.id) + ").");
+      var t = totalesDesdePartes(compra);
+      if (Math.round(num(compra.costoReal)) !== t.costoReal || aUnidades(compra.cantidadReal, 2) !== aUnidades(t.cantidadReal, 2)) {
+        problemas.push("El costo o la cantidad de una compra no coincide con sus partes del recibo (" + (cot.descripcion || cot.id) + ").");
+      }
+    });
+  });
+  var rec = reconciliarTxRecibo(tx, reciboId, cotizaciones);
+  if (rec.hayCambios) {
+    problemas.push("Los movimientos de este recibo en Finanzas no coinciden con lo registrado (faltan " + rec.creadas + ", desactualizados " + rec.actualizadas + ", sobran " + rec.borradas + ").");
+  }
+  return problemas;
+}
+
+// Cuánto sale de la reserva cuando un pedido del recibo toma `cantidad`: la
+// cantidad pedida (o toda la que haya) y su costo ENTERO, a prorrata de lo
+// que queda — la última toma se lleva el resto exacto, así la reserva nunca
+// queda con pesos sueltos ni negativos.
+export function calcTomaReserva(reserva, cantidad, dec) {
+  return tomarProporcional(reserva, cantidad, dec);
+}
+// Lo mismo al revés: cuánto costo devuelve una parte al soltar `cantidad`
+// (al precio promedio de ESA parte).
+export function calcDevolucionParte(parte, cantidad, dec) {
+  return tomarProporcional(parte, cantidad, dec);
+}
+function tomarProporcional(origen, cantidad, dec) {
+  var disponibleU = aUnidades(origen.cantidad, dec);
+  var pedidoU = Math.min(aUnidades(cantidad, dec), disponibleU);
+  if (pedidoU <= 0) return { cantidad: 0, costo: 0 };
+  var costoOrigen = Math.round(num(origen.costo));
+  if (pedidoU === disponibleU) return { cantidad: deUnidades(pedidoU, dec), costo: costoOrigen };
+  var costo = repartirProporcional(costoOrigen, [pedidoU, disponibleU - pedidoU], 0)[0];
+  return { cantidad: deUnidades(pedidoU, dec), costo: costo };
+}
+
+// Reparto de UNA línea al registrar un recibo — la MISMA función para la
+// vista previa y para lo que se guarda (nunca dos cuentas distintas).
+// grupo: { linea, nombre, unidad, esProducto, esGlobal, participantes:
+//   [{ cotId, pedidoId, compraClave, necesita, costoEstimado }] }
+// draft: { cantidadComprada, costoPagado, cantidadesPorPedido: {cotId: n},
+//   costosPorPedido: {cotId: n} }
+// Se escribe el total del PAPEL ("compré 36 m, pagué $360.000" — decisión
+// del usuario 2026-09-23): cada pedido recibe lo que necesita y lo que
+// sobra es la reserva. Si se compró menos de lo necesario, se reparte a
+// prorrata y se avisa cuánto falta. El costo SIGUE a la cantidad final
+// (también con un ajuste a mano), la reserva incluida.
+export function calcRepartoLineaRecibo(grupo, draft) {
+  draft = draft || {};
+  var ps = grupo.participantes || [];
+  var res = { ok: false, error: "", partes: [], reserva: { cantidad: 0, costo: 0 }, faltan: 0, totales: null };
+  var pagado = Math.round(num(draft.costoPagado));
+  if (!(pagado > 0)) { res.error = "Falta escribir cuánto se pagó."; return res; }
+  function escrito(v) { return v !== undefined && v !== null && v !== ""; }
+  if (grupo.esGlobal) {
+    var ovCosto = draft.costosPorPedido || {};
+    var base = repartirProporcional(pagado, ps.map(function (p) { return p.costoEstimado; }), 0);
+    var costos = ps.map(function (p, i) { return escrito(ovCosto[p.cotId]) ? Math.round(num(ovCosto[p.cotId])) : base[i]; });
+    var suma = costos.reduce(function (a, c) { return a + c; }, 0);
+    if (costos.some(function (c) { return c < 0; })) res.error = "Ningún pedido puede quedar con un costo negativo.";
+    else if (suma !== pagado) res.error = "El reparto suma " + fmt(suma) + " pero se pagó " + fmt(pagado) + ".";
+    res.partes = ps.map(function (p, i) { return { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: 0, costo: costos[i] }; });
+    res.totales = { nombre: grupo.nombre, unidad: "", esProducto: false, esGlobal: true, cantidadTotal: 0, costoTotal: pagado };
+    res.ok = !res.error;
+    return res;
+  }
+  var dec = grupo.esProducto ? 0 : 2;
+  var necesidadesU = ps.map(function (p) { return Math.max(0, aUnidades(p.necesita, dec)); });
+  var sumaNecU = necesidadesU.reduce(function (a, u) { return a + u; }, 0);
+  var compradaU = escrito(draft.cantidadComprada) ? aUnidades(draft.cantidadComprada, dec) : sumaNecU;
+  if (compradaU <= 0) { res.error = "Falta escribir cuánto se compró."; return res; }
+  var cantidadesU;
+  if (compradaU >= sumaNecU) {
+    cantidadesU = necesidadesU.slice();
+  } else {
+    cantidadesU = repartirProporcional(deUnidades(compradaU, dec), necesidadesU, dec).map(function (x) { return aUnidades(x, dec); });
+    res.faltan = deUnidades(sumaNecU - compradaU, dec);
+  }
+  var ovCant = draft.cantidadesPorPedido || {};
+  cantidadesU = ps.map(function (p, i) { return escrito(ovCant[p.cotId]) ? aUnidades(ovCant[p.cotId], dec) : cantidadesU[i]; });
+  var asignadoU = cantidadesU.reduce(function (a, u) { return a + u; }, 0);
+  if (cantidadesU.some(function (u) { return u < 0; })) res.error = "Ningún pedido puede quedar con una cantidad negativa.";
+  else if (asignadoU > compradaU) res.error = "Se repartieron " + deUnidades(asignadoU, dec) + " pero se compraron " + deUnidades(compradaU, dec) + ".";
+  var reservaU = Math.max(0, compradaU - asignadoU);
+  var costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
+  res.partes = ps.map(function (p, i) {
+    return { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: deUnidades(cantidadesU[i], dec), costo: costosLinea[i] };
+  });
+  res.reserva = { cantidad: deUnidades(reservaU, dec), costo: costosLinea[ps.length] };
+  res.totales = { nombre: grupo.nombre, unidad: grupo.unidad || "", esProducto: !!grupo.esProducto, esGlobal: false, cantidadTotal: deUnidades(compradaU, dec), costoTotal: pagado };
+  res.ok = !res.error;
+  return res;
+}
+
+// Escribe un recibo nuevo en las compras de sus pedidos (sin tocar
+// state — devuelve las cotizaciones nuevas). `repartos`: [{ grupo, reparto }]
+// con reparto = calcRepartoLineaRecibo(grupo, draft), ya validado. Cada
+// compra queda "si" con una parte más (una misma línea puede estar en
+// varios recibos, ej. una reposición), sus totales recalculados desde las
+// partes, y lo que tenía de un mecanismo viejo (excedente propio, marca de
+// compra conjunta) limpio: desde ahora la reserva vive en el recibo.
+export function aplicarReciboACotizaciones(cotizaciones, reciboId, cabecera, repartos) {
+  var porCot = {};
+  (repartos || []).forEach(function (x) {
+    x.reparto.partes.forEach(function (p) {
+      (porCot[p.cotId] = porCot[p.cotId] || []).push({
+        compraClave: p.compraClave,
+        parte: { reciboId: reciboId, linea: x.grupo.linea, cantidad: p.cantidad, costo: p.costo, recibo: cabecera, totalesLinea: x.reparto.totales }
+      });
+    });
+  });
+  return (cotizaciones || []).map(function (cot) {
+    var nuevas = porCot[cot.id];
+    if (!nuevas) return cot;
+    var compras = (cot.compras || []).slice();
+    nuevas.forEach(function (n) {
+      var idx = -1;
+      compras.forEach(function (c, i) { if (idx === -1 && c.clave === n.compraClave) idx = i; });
+      var base = idx >= 0 ? compras[idx] : { clave: n.compraClave };
+      var faltanteU = Math.max(0, aUnidades(base.faltante, 2) - aUnidades(n.parte.cantidad, 2));
+      var nueva = Object.assign({}, base, {
+        estado: "si", partesRecibo: (base.partesRecibo || []).concat([n.parte]),
+        cantidadExcedente: "", excedenteTxId: "", txId: "",
+        fecha: cabecera.fecha || todayStr(), proveedorId: cabecera.proveedorId || base.proveedorId || "",
+        faltante: deUnidades(faltanteU, 2)
+      });
+      delete nueva.compartida;
+      delete nueva.comprado;
+      nueva = totalesDesdePartes(nueva);
+      if (idx >= 0) compras[idx] = nueva; else compras.push(nueva);
+    });
+    return Object.assign({}, cot, { compras: compras });
+  });
 }
 
 // ---------- costeo de productos del catálogo ----------

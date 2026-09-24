@@ -43,6 +43,19 @@ export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// Id DETERMINÍSTICO a partir de un texto (djb2 → base36): el mismo texto da
+// siempre el mismo resultado, en cualquier dispositivo. Lo usan las filas
+// que el sistema arma solo a partir de otros datos (ver calcFilasRecibo en
+// core/calc.js) — así dos dispositivos que reconstruyen el mismo recibo
+// llegan al MISMO id en vez de crear dos filas distintas para lo mismo.
+// No es criptográfico: siempre se usa junto a un id único (el del recibo).
+export function hashCorto(texto) {
+  var h = 5381;
+  var s = String(texto);
+  for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 // Código corto NO secuencial para mostrarle al CLIENTE en vez del número
 // interno del documento (ver README "PDF: código público en vez de N.º
 // secuencial"): dos letras + 6 dígitos, generado una sola vez por pedido/

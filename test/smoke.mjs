@@ -5060,7 +5060,7 @@ assert(JSON.stringify(COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; })) 
   "origenComisionConsignacionId", "origenCompraClave", "origenGastoFijoPeriodo", "origenComisionCotId",
   "origenComisionPedidoId", "origenGastoId", "origenDeudaIngresoId", "origenColchonId",
   "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId",
-  "origenCompraExcedenteClave"
+  "origenCompraExcedenteClave", "reciboCompraId", "reciboCompraRol", "reciboCompraLinea"
 ]), "el orden de columnas de tablaMovimientos no cambió: una columna nueva se agregó al final, nunca insertada en medio (ver el incidente del 2026-09-20 arriba)");
 
 // --- Hallazgo #51 (2026-09-23): origenCompraExcedenteClave nunca fue
@@ -5148,6 +5148,179 @@ assert(excViejo2.origenCompraExcedenteClave === "montreal|mt|tela" && excViejo2.
 assert(!normalViejo.origenCompraExcedenteClave && normalViejo.pedidoId === "ped-rt", "el movimiento NORMAL de la misma compra no recibe la marca de excedente y conserva su pedido");
 assert(!otroViejo.origenCompraExcedenteClave, "un tx de OTRA cotización no recibe la marca aunque su id coincida con un excedenteTxId (se exige el mismo cotizacionId)");
 assert(repararMarcaExcedentePerdida(leidosViejosRoundTrip, cotsViejasRoundTrip) === false, "y correrla de nuevo ya no hace nada (está al día)");
+
+// ---------------------------------------------------------------------------
+// Recibo de compra — fase 1 (Hallazgo #52, 2026-09-23): el modelo y sus
+// cuentas, sin nada visible todavía. Propuesto por el usuario: "recibo,
+// porque literal es una compra conjunta en la vida real de insumos para
+// varios pedidos, o insumos de más para aprovechar la ocasión". Ejemplo
+// verificado del plan: factura de $375.000 — tela 36 m por $360.000
+// (OP-A necesita 10, OP-B necesita 20, sobran 6) + domicilio $15.000.
+// ---------------------------------------------------------------------------
+const {
+  calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, reconciliarTxRecibo,
+  verificarRecibo, calcTomaReserva, calcDevolucionParte, totalesDesdePartes, esFilaRecibo, calcIdsRecibos,
+  origenSistemaDeTx: origenSisReciboTest, origenSistemaHuerfano: origenHuerfReciboTest,
+  repararComprasSinSeguimiento: repararSeguimientoReciboTest
+} = await import("../js/core/calc.js");
+const CLAVE_TELA_RC = "tela montreal|mt|tela";
+const grupoTelaRc = { linea: CLAVE_TELA_RC, nombre: "Tela Montreal", unidad: "MT", esProducto: false, esGlobal: false, participantes: [
+  { cotId: "cotA-rc", pedidoId: "pA-rc", compraClave: CLAVE_TELA_RC, necesita: 10, costoEstimado: 90000 },
+  { cotId: "cotB-rc", pedidoId: "pB-rc", compraClave: CLAVE_TELA_RC, necesita: 20, costoEstimado: 180000 }
+] };
+const grupoDomRc = { linea: "costoglobal|domicilio", nombre: "Domicilio", unidad: "", esProducto: false, esGlobal: true, participantes: [
+  { cotId: "cotA-rc", pedidoId: "pA-rc", compraClave: "global|gA-rc", costoEstimado: 5000 },
+  { cotId: "cotB-rc", pedidoId: "pB-rc", compraClave: "global|gB-rc", costoEstimado: 10000 }
+] };
+const repTelaRc = calcRepartoLineaRecibo(grupoTelaRc, { cantidadComprada: 36, costoPagado: 360000 });
+assert(repTelaRc.ok && repTelaRc.partes[0].cantidad === 10 && repTelaRc.partes[1].cantidad === 20 && repTelaRc.reserva.cantidad === 6, "recibo: con el total del papel (36 m), cada pedido recibe lo que necesita (10 y 20) y sobran 6 m de reserva");
+assert(repTelaRc.partes[0].costo === 100000 && repTelaRc.partes[1].costo === 200000 && repTelaRc.reserva.costo === 60000, "recibo: el costo sigue a la cantidad, reserva incluida: $100.000 / $200.000 / $60.000 (suma exacta $360.000)");
+const repDomRc = calcRepartoLineaRecibo(grupoDomRc, { costoPagado: 15000 });
+assert(repDomRc.ok && repDomRc.partes[0].costo === 5000 && repDomRc.partes[1].costo === 10000 && repDomRc.reserva.costo === 0, "recibo: un costo fijo (domicilio) se reparte por el estimado de cada pedido, sin reserva");
+const repAjusteRc = calcRepartoLineaRecibo(grupoTelaRc, { cantidadComprada: 36, costoPagado: 360000, cantidadesPorPedido: { "cotA-rc": 16 } });
+assert(repAjusteRc.ok && repAjusteRc.partes[0].cantidad === 16 && repAjusteRc.reserva.cantidad === 0 && repAjusteRc.partes[0].costo === 160000, "recibo: con un ajuste a mano (A se lleva 16), el costo SIGUE a la cantidad final ($160.000), no al estimado");
+const repCortoRc = calcRepartoLineaRecibo(grupoTelaRc, { cantidadComprada: 27, costoPagado: 270000 });
+assert(repCortoRc.ok && repCortoRc.faltan === 3 && repCortoRc.partes[0].cantidad === 9 && repCortoRc.partes[1].cantidad === 18 && repCortoRc.reserva.cantidad === 0, "recibo: si se compró MENOS de lo necesario, se reparte a prorrata y avisa cuánto falta (3 m)");
+assert(!calcRepartoLineaRecibo(grupoTelaRc, { cantidadComprada: 36 }).ok, "recibo: sin lo pagado, la línea no es válida");
+assert(!calcRepartoLineaRecibo(grupoTelaRc, { cantidadComprada: 36, costoPagado: 360000, cantidadesPorPedido: { "cotA-rc": 30 } }).ok, "recibo: repartir más de lo comprado (30 + 20 > 36) no es válido");
+const grupoCamisasRc = { linea: "producto|camisa", nombre: "Camisa", unidad: "UND", esProducto: true, esGlobal: false, participantes: [
+  { cotId: "cotA-rc", pedidoId: "pA-rc", compraClave: "producto|camisa", necesita: 3 }, { cotId: "cotB-rc", pedidoId: "pB-rc", compraClave: "producto|camisa", necesita: 4 }
+] };
+const repCamisasRc = calcRepartoLineaRecibo(grupoCamisasRc, { cantidadComprada: 5, costoPagado: 100000 });
+assert(repCamisasRc.partes.every(function (p) { return Number.isInteger(p.cantidad); }) && repCamisasRc.partes[0].cantidad + repCamisasRc.partes[1].cantidad === 5, "recibo: una prenda comprada entera se reparte en enteros (nunca 1,43 camisas)");
+
+const cotsRc0 = [
+  { id: "cotA-rc", descripcion: "Uniformes A", pedidoId: "pA-rc", compras: [] },
+  { id: "cotB-rc", descripcion: "Uniformes B", pedidoId: "pB-rc", compras: [{ clave: CLAVE_TELA_RC, estado: "no", compartida: { grupoId: "viejo" }, faltante: 0 }] }
+];
+const cabeceraRc = { fecha: "2026-09-23", proveedorId: "", numero: "4411", servicios: [], etiquetas: ["OP-A", "OP-B"] };
+const cotsRc = aplicarReciboACotizaciones(cotsRc0, "R1-rc", cabeceraRc, [{ grupo: grupoTelaRc, reparto: repTelaRc }, { grupo: grupoDomRc, reparto: repDomRc }]);
+const compraTelaA = cotsRc[0].compras.filter(function (c) { return c.clave === CLAVE_TELA_RC; })[0];
+const compraTelaB = cotsRc[1].compras.filter(function (c) { return c.clave === CLAVE_TELA_RC; })[0];
+assert(compraTelaA.estado === "si" && compraTelaA.cantidadReal === 10 && compraTelaA.costoReal === 100000 && compraTelaA.partesRecibo.length === 1, "recibo: la compra de A queda \"Sí\" con su parte (10 m, $100.000) — cantidadReal/costoReal = suma de sus partes");
+assert(compraTelaB.costoReal === 200000 && !compraTelaB.compartida, "recibo: la compra de B (que ya existía en \"Aún no\") queda con su parte, sin la marca vieja de compra conjunta");
+assert(cotsRc0[1].compras[0].estado === "no", "recibo: aplicarReciboACotizaciones no muta las cotizaciones que recibe");
+const rRc = calcRecibo("R1-rc", cotsRc, []);
+assert(rRc.total === 375000 && rRc.problemas.length === 0, "recibo: total = $375.000 y sin problemas");
+assert(rRc.lineas.filter(function (l) { return l.linea === CLAVE_TELA_RC; })[0].reserva.costo === 60000, "recibo: la reserva de tela es DERIVADA: $360.000 − $300.000 = $60.000");
+assert(JSON.stringify(calcIdsRecibos(cotsRc, [])) === JSON.stringify(["R1-rc"]), "recibo: calcIdsRecibos lo encuentra");
+
+// Filas de Finanzas: cada peso una sola vez.
+const recRc = reconciliarTxRecibo([], "R1-rc", cotsRc);
+const txRc = recRc.tx;
+const sumaRc = txRc.reduce(function (a, t) { return a + t.monto; }, 0);
+assert(recRc.creadas === 5 && sumaRc === 375000, "recibo: 5 filas (2 partes de tela, 1 reserva, 2 partes de domicilio) que suman exacto $375.000 — se descuenta UNA sola vez");
+assert(txRc.every(function (t) { return Number.isInteger(t.monto) && t.monto > 0 && esFilaRecibo(t); }), "recibo: todas las filas en pesos enteros y reconocibles (las 3 columnas)");
+const reservaRc = txRc.filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(reservaRc.monto === 60000 && reservaRc.pedidoId === "" && reservaRc.cotizacionId === "", "recibo: la reserva va sin pedido y sin cotización (no entra en el Neto de ningún pedido, ninguna reparación vieja la alcanza)");
+const netoARc = txRc.filter(function (t) { return t.pedidoId === "pA-rc"; }).reduce(function (a, t) { return a + t.monto; }, 0);
+assert(netoARc === 105000, "recibo: el pedido A sigue viendo SU parte en su tarjeta (tela $100.000 + domicilio $5.000)");
+assert(reconciliarTxRecibo(txRc, "R1-rc", cotsRc).hayCambios === false, "recibo: reconciliar dos veces no cambia nada (idempotente)");
+assert(verificarRecibo("R1-rc", cotsRc, txRc).length === 0, "recibo: verificarRecibo no encuentra ningún problema en un recibo bien armado");
+assert(verificarRecibo("R1-rc", cotsRc, []).length > 0, "recibo: verificarRecibo sí avisa si faltan sus movimientos en Finanzas");
+const cotsRcMal = cotsRc.map(function (c) { return c.id !== "cotA-rc" ? c : Object.assign({}, c, { compras: c.compras.map(function (co) { return co.clave === CLAVE_TELA_RC ? Object.assign({}, co, { costoReal: 99999 }) : co; }) }); });
+assert(verificarRecibo("R1-rc", cotsRcMal, txRc).some(function (p) { return p.indexOf("no coincide con sus partes") !== -1; }), "recibo: verificarRecibo avisa si el costo de una compra no coincide con sus partes");
+const txAjenaRc = { id: "tx-ajena-rc", tipo: "gasto", monto: 777, reciboCompraId: "R1-rc", reciboCompraRol: "", reciboCompraLinea: "" };
+const recConAjena = reconciliarTxRecibo([txAjenaRc].concat(txRc), "R1-rc", cotsRc);
+assert(!recConAjena.hayCambios && recConAjena.tx.indexOf(txAjenaRc) !== -1, "recibo: una fila con reciboCompraId pero sin rol/línea válidos NO se toca (regla de las 3 columnas)");
+assert(origenSisReciboTest(reservaRc) !== null && origenSisReciboTest(reservaRc).donde.indexOf("Anular recibo") !== -1, "recibo: una fila del recibo queda bloqueada para borrar a mano, y dice dónde se deshace");
+assert(origenHuerfReciboTest(txAjenaRc) !== null, "recibo: ...pero una fila a medias queda huérfana (se puede borrar), nunca atrapada");
+
+// Servicios asignados al recibo: se reparten por capacidad.
+const cabServRc = Object.assign({}, cabeceraRc, { servicios: [{ nombre: "Colchón", monto: 370000 }] });
+const cotsServRc = aplicarReciboACotizaciones(cotsRc0, "R2-rc", cabServRc, [{ grupo: grupoTelaRc, reparto: repTelaRc }, { grupo: grupoDomRc, reparto: repDomRc }]);
+const txServRc = reconciliarTxRecibo([], "R2-rc", cotsServRc).tx;
+const sumaServRc = txServRc.reduce(function (a, t) { return a + (t.serviciosDescuento || []).reduce(function (b, s) { return b + s.monto; }, 0); }, 0);
+assert(sumaServRc === 370000, "recibo: la plata del servicio se reparte exacta entre las filas ($370.000)");
+assert(txServRc.every(function (t) { return (t.serviciosDescuento || []).reduce(function (b, s) { return b + s.monto; }, 0) <= t.monto; }), "recibo: ninguna fila descuenta del servicio más que su propio monto (la reserva también lleva su parte)");
+
+// Borrar una cotización: su parte pasa a la reserva, la caja no cambia.
+const cotsSinB = cotsRc.filter(function (c) { return c.id !== "cotB-rc"; });
+const txSinB = reconciliarTxRecibo(txRc, "R1-rc", cotsSinB).tx;
+assert(txSinB.reduce(function (a, t) { return a + t.monto; }, 0) === 375000, "recibo: al borrar la cotización B, el total pagado sigue siendo $375.000 (esa plata ya salió)");
+const resTelaSinB = txSinB.filter(function (t) { return t.reciboCompraRol === "reserva" && t.reciboCompraLinea === CLAVE_TELA_RC; })[0];
+assert(resTelaSinB.monto === 260000 && resTelaSinB.cantidad === 26, "recibo: ...la parte de B (20 m, $200.000) pasa a la reserva de tela: 26 m, $260.000");
+assert(txSinB.filter(function (t) { return t.reciboCompraRol === "reserva" && t.reciboCompraLinea === "costoglobal|domicilio"; })[0].monto === 10000, "recibo: ...y su domicilio queda \"Sin asignar\" ($10.000)");
+assert(!txSinB.some(function (t) { return t.cotizacionId === "cotB-rc"; }), "recibo: ...y ya no queda ninguna fila apuntando a la cotización borrada");
+// Borrar TODAS las cotizaciones de una línea: queda congelada con su plata.
+const txSinNadie = reconciliarTxRecibo(txSinB, "R1-rc", []).tx;
+assert(txSinNadie.reduce(function (a, t) { return a + t.monto; }, 0) === 375000 && txSinNadie.every(function (t) { return t.reciboCompraRol === "reserva"; }), "recibo: sin ningún pedido vivo, las líneas quedan congeladas como reserva y la plata pagada no desaparece");
+assert(reconciliarTxRecibo(txSinNadie, "R1-rc", []).hayCambios === false, "recibo: ...y una línea congelada se queda quieta en la siguiente pasada");
+
+// Tomar y devolver reserva (cuentas).
+const tomaRc = calcTomaReserva({ cantidad: 6, costo: 60000 }, 2, 2);
+assert(tomaRc.cantidad === 2 && tomaRc.costo === 20000, "recibo: tomar 2 m de una reserva de 6 m / $60.000 se lleva $20.000");
+assert(calcTomaReserva({ cantidad: 6, costo: 60000 }, 9, 2).cantidad === 6, "recibo: pedir más de lo que hay solo toma lo disponible");
+assert(calcTomaReserva({ cantidad: 3, costo: 10000 }, 3, 2).costo === 10000, "recibo: la última toma se lleva el resto exacto (nunca quedan pesos sueltos)");
+const toma1de3 = calcTomaReserva({ cantidad: 3, costo: 10000 }, 1, 2);
+assert(toma1de3.costo + calcTomaReserva({ cantidad: 2, costo: 10000 - toma1de3.costo }, 2, 2).costo === 10000, "recibo: tomas parciales sucesivas suman exacto el costo de la reserva");
+assert(calcDevolucionParte({ cantidad: 10, costo: 100000 }, 4, 2).costo === 40000, "recibo: devolver 4 m de una parte de 10 m / $100.000 devuelve $40.000");
+assert(totalesDesdePartes({ partesRecibo: [{ cantidad: 10, costo: 100000 }, { cantidad: 2.5, costo: 25000 }] }).costoReal === 125000, "recibo: una compra en DOS recibos (reposición) tiene de costo la suma de sus dos partes");
+
+// Choques con reparaciones viejas (lección del Hallazgo #50).
+const txParteHuerfanaRc = Object.assign({}, txRc.filter(function (t) { return t.reciboCompraRol === "parte" && t.cotizacionId === "cotA-rc" && t.origenCompraClave === CLAVE_TELA_RC; })[0]);
+const cotASinComprasRc = [{ id: "cotA-rc", descripcion: "Uniformes A", pedidoId: "pA-rc", compras: [], referencias: [{ nombre: "Camiseta", cantidadPedida: 10, insumos: [{ nombre: "Tela Montreal", unidad: "mt", tipo: "tela", cantidad: 1 }] }] }];
+assert(calcListaComprasServ(cotASinComprasRc[0]).some(function (l) { return l.clave === CLAVE_TELA_RC; }), "(control) la línea de tela SIGUE viva en esa cotización — si no, la reparación ni la miraría");
+assert(repararSeguimientoReciboTest([txParteHuerfanaRc], cotASinComprasRc) === false && cotASinComprasRc[0].compras.length === 0, "recibo: repararComprasSinSeguimiento NO reinyecta como compra suelta la parte de un recibo (contaría doble)");
+const txGuardadoRc = state.tx;
+state.tx = txRc.concat([{ id: "tx-normal-rc", tipo: "gasto", monto: 5, cotizacionId: "cotA-rc", origenCompraClave: "hilo|und|por_prenda" }]);
+const movGenRc = movimientosGeneradosPorCotizacion({ id: "cotA-rc", compras: cotsRc[0].compras });
+state.tx = txGuardadoRc;
+assert(movGenRc.length === 1 && movGenRc[0].id === "tx-normal-rc", "recibo: al borrar una cotización, sus filas de recibo NO se van a la papelera (solo sus movimientos propios)");
+
+// Ida y vuelta REAL por la hoja Movimientos (Hallazgo #51) + la secuencia
+// completa de reparaciones de loadAll(): nada que reparar, dos veces.
+_resetCacheParaPruebas();
+var filasMovRc = [];
+const fetchOriginalRc = global.fetch;
+global.fetch = async function (url, options) {
+  var u = decodeURIComponent(String(url));
+  var metodo = (options && options.method) || "GET";
+  if (u.indexOf("fields=sheets.properties") !== -1) {
+    return { ok: true, status: 200, json: async function () { return { sheets: [{ properties: { sheetId: 77002, title: "Movimientos", gridProperties: { columnCount: COLUMNAS_MOVIMIENTOS.length + 5 } } }] }; } };
+  }
+  if (u.indexOf("/values/Movimientos") !== -1) {
+    var esEnc = u.indexOf("Movimientos!A1:") !== -1;
+    if (u.indexOf(":clear") !== -1) { if (!esEnc) filasMovRc = []; return { ok: true, status: 200, json: async function () { return {}; } }; }
+    if (metodo === "PUT") { if (!esEnc) filasMovRc = JSON.parse(options.body).values; return { ok: true, status: 200, json: async function () { return {}; } }; }
+    if (esEnc) return { ok: true, status: 200, json: async function () { return { values: [COLUMNAS_MOVIMIENTOS.map(function (c) { return c.header; })] }; } };
+    return { ok: true, status: 200, json: async function () { return { values: filasMovRc }; } };
+  }
+  return { ok: true, status: 200, json: async function () { return {}; } };
+};
+await tablaMovRoundTrip.escribir(txServRc);
+const leidosRc = await tablaMovRoundTrip.leer();
+global.fetch = fetchOriginalRc;
+_resetCacheParaPruebas();
+assert(leidosRc.length === 5 && leidosRc.every(esFilaRecibo), "recibo: las 3 columnas del recibo sobreviven a escribir() + leer() de la hoja Movimientos");
+assert(reconciliarTxRecibo(leidosRc, "R2-rc", cotsServRc).hayCambios === false, "recibo: después de la ida y vuelta por la Sheet, las filas siguen cuadrando exacto (servicios incluidos)");
+const pedsRc = [{ id: "pA-rc", vendedor: { nombre: "X" } }, { id: "pB-rc", vendedor: { nombre: "Y" } }];
+function reparacionesLoadAllRc() {
+  return [
+    repararMarcaExcedentePerdida(leidosRc, cotsServRc),
+    repararTxHuerfanosDeCotEscalada(leidosRc, cotsServRc, pedsRc),
+    repararVendedorPerdido(pedsRc, leidosRc),
+    repararMarcasOrigenInconsistentes(leidosRc),
+    repararPedidoIdExcedente(leidosRc),
+    repararSeguimientoReciboTest(leidosRc, cotsServRc)
+  ];
+}
+assert(reparacionesLoadAllRc().every(function (r) { return r === false; }) && reparacionesLoadAllRc().every(function (r) { return r === false; }), "recibo: TODA la secuencia de reparaciones de loadAll() no encuentra nada que tocar en un recibo, dos veces seguidas");
+assert(verificarRecibo("R2-rc", cotsServRc, leidosRc).length === 0, "recibo: ...y el recibo sigue sin ningún problema");
+
+// ejecutarAccionRecibo: si la acción deja algo descuadrado, no guarda nada.
+const { ejecutarAccionRecibo } = await import("../js/modules/cotizaciones.js");
+const txAntesEjRc = JSON.stringify(state.tx), cotsAntesEjRc = JSON.stringify(state.cotizaciones);
+const alertOriginalRc = window.alert;
+let alertaRc = "";
+window.alert = function (m) { alertaRc = m; };
+const guardoRoto = ejecutarAccionRecibo({ recibos: ["R9-rc"], deltaCaja: -375000, permitirCotSucia: true }, function () {
+  state.cotizaciones = state.cotizaciones.concat(cotsRc.map(function (c) { return Object.assign({}, c, { id: c.id + "-ej" }); }));
+  // A propósito se "olvida" de crear las filas en Finanzas.
+});
+window.alert = alertOriginalRc;
+assert(guardoRoto === false && alertaRc.indexOf("No se guardó nada") === 0, "recibo: ejecutarAccionRecibo rechaza una acción que deja la caja distinta de lo esperado, y lo dice");
+assert(JSON.stringify(state.tx) === txAntesEjRc && JSON.stringify(state.cotizaciones) === cotsAntesEjRc, "recibo: ...y deja la plata y las cotizaciones EXACTAMENTE como estaban");
 
 // --- Compras conjuntas: varios pedidos que comparten un insumo (ver
 // modules/finanzas.js) — reportado por el usuario 2026-09-20: "hay pedidos
