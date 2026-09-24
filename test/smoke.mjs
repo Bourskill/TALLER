@@ -6260,43 +6260,54 @@ var inputExcedenteTest = document.querySelector('input[data-action-change="set-c
 assert(!!inputExcedenteTest, "el detalle de la compra tiene el campo para ajustar el excedente");
 assert(inputExcedenteTest.value === "5", "...precargado con el excedente ya sugerido/guardado");
 
+// -- "Actualizar movimientos financieros" (Hallazgo #52, fase 3 — caso
+// "medias", decisión del usuario 2026-09-23): lo comprado de más para UN
+// pedido pasa en el acto a ser un RECIBO DE COMPRA de 1 pedido. El pedido
+// queda con su parte (lo que necesitaba) y el excedente queda como la
+// reserva de ese recibo — el mismo mecanismo que una compra para varios
+// pedidos, en vez de un excedente suelto aparte.
 click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
 cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
 compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
-assert(!!compraExcTest.txId, "crea el movimiento del pedido");
-assert(!!compraExcTest.excedenteTxId, "...Y crea aparte el movimiento del excedente (compra de insumo)");
-var txPedidoExcTest = state.tx.filter(function (t) { return t.id === compraExcTest.txId; })[0];
-var txExcedenteTest = state.tx.filter(function (t) { return t.id === compraExcTest.excedenteTxId; })[0];
-assert(txPedidoExcTest.monto === 100000, "el movimiento del pedido queda con el neto (100.000)");
-assert(txExcedenteTest.monto === 50000 && txExcedenteTest.cantidad === 5, "el movimiento del excedente queda con su propio monto y cantidad (50.000, 5)");
-assert(txExcedenteTest.esInsumo === "1" && txExcedenteTest.insumoNombre === "Tela por unidad", "el movimiento del excedente es una compra de insumo normal, reconocible igual que cualquier otra (\"Es insumo\")");
-assert(txExcedenteTest.origenCompraExcedenteClave === claveExcTest, "...vinculado a esta misma compra");
-assert(txPedidoExcTest.id !== txExcedenteTest.id, "son dos movimientos DISTINTOS en Finanzas, no uno repartido a mano");
+assert((compraExcTest.partesRecibo || []).length === 1, "al sincronizar, la compra con excedente pasa a ser un recibo de compra de 1 pedido");
+assert(compraExcTest.cantidadReal === 10 && compraExcTest.costoReal === 100000 && !compraExcTest.excedenteTxId && !compraExcTest.cantidadExcedente, "el pedido queda con SU parte (10, $100.000) y sin excedente propio: la reserva vive en el recibo");
+const reciboExcTest = compraExcTest.partesRecibo[0].reciboId;
+var filasExcTest = state.tx.filter(function (t) { return t.reciboCompraId === reciboExcTest; });
+var txPedidoExcTest = filasExcTest.filter(function (t) { return t.reciboCompraRol === "parte"; })[0];
+var txExcedenteTest = filasExcTest.filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(filasExcTest.length === 2 && txPedidoExcTest.monto === 100000 && txPedidoExcTest.pedidoId === "ped-exc-test", "en Finanzas: la parte del pedido (neto, $100.000, en su tarjeta)...");
+assert(txExcedenteTest.monto === 50000 && txExcedenteTest.cantidad === 5 && txExcedenteTest.pedidoId === "", "...y la reserva del recibo (5 unidades, $50.000), sin pedido");
+assert(txExcedenteTest.esInsumo === "1" && txExcedenteTest.insumoNombre === "Tela por unidad", "la reserva sigue siendo una compra de insumo reconocible (\"Es insumo\")");
+assert(state.tx.reduce(function (a, t) { return a + t.monto; }, 0) === 150000, "la caja tiene exacto lo que se pagó (150.000), una sola vez");
 
-// -- corrección: en producción se usaron 12, no 10 (2 del "excedente" se
-// gastaron de más por un error) — el usuario ajusta el excedente de 5 a 3 --
-setChange('[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="cantidadExcedente"]', "3");
-click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
+// -- en producción se usaron 12, no 10: se sube la Cant. real y se toma de
+// la reserva — la parte del pedido sube con su costo, la reserva baja,
+// mismos movimientos (mismo id), la caja no cambia --
+setChange('[data-action-change="set-cot-compra"][data-cot="cot-exc-test"][data-clave="' + claveExcTest + '"][data-campo="cantidadReal"]', "12");
+click('[data-action="guardar-cotizacion"][data-id="cot-exc-test"]');
 cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
 compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
-assert(costoRealPedidoTest(compraExcTest) === 120000, "al corregir el excedente de 5 a 3, el costo del pedido sube solo: 150.000 − 30.000 = 120.000");
+assert(costoRealPedidoTest(compraExcTest) === 120000, "al usar 2 más de la reserva, el costo del pedido sube solo: 120.000");
 assert(calcGastosExcTest(cotExcTestObj) === 20000, "...y ahora SÍ hay sobrecosto real: 120.000 − 100.000 = 20.000, justo los 2 extra a $10.000");
-var txExcedenteTest2 = state.tx.filter(function (t) { return t.id === compraExcTest.excedenteTxId; })[0];
-assert(txExcedenteTest2.id === txExcedenteTest.id, "el movimiento del excedente se ACTUALIZA (mismo id), no se duplica");
-assert(txExcedenteTest2.monto === 30000 && txExcedenteTest2.cantidad === 3, "...con la cifra corregida (30.000, 3 unidades)");
-var txPedidoExcTest2 = state.tx.filter(function (t) { return t.id === compraExcTest.txId; })[0];
-assert(txPedidoExcTest2.id === txPedidoExcTest.id && txPedidoExcTest2.monto === 120000, "el movimiento del pedido también se actualiza solo (mismo id, 120.000)");
+var txExcedenteTest2 = state.tx.filter(function (t) { return t.id === txExcedenteTest.id; })[0];
+assert(!!txExcedenteTest2 && txExcedenteTest2.monto === 30000 && txExcedenteTest2.cantidad === 3, "la reserva se ACTUALIZA (mismo id): 3 unidades, $30.000");
+var txPedidoExcTest2 = state.tx.filter(function (t) { return t.id === txPedidoExcTest.id; })[0];
+assert(!!txPedidoExcTest2 && txPedidoExcTest2.monto === 120000, "la parte del pedido también se actualiza sola (mismo id, 120.000)");
+assert(state.tx.reduce(function (a, t) { return a + t.monto; }, 0) === 150000, "...y la caja sigue en 150.000 exactos");
 
+// -- sus filas son del RECIBO, no de la cotización: al borrarla, su parte
+// pasa a la reserva (la plata ya se pagó) en vez de irse a la papelera --
 var movsExcTest = movGenExcTest(cotExcTestObj);
-assert(movsExcTest.some(function (t) { return t.id === compraExcTest.txId; }) && movsExcTest.some(function (t) { return t.id === compraExcTest.excedenteTxId; }), "al eliminar la cotización, los DOS movimientos (pedido y excedente) se reconocen como generados por ella — se borran juntos, tal como lo pidió el usuario");
+assert(!movsExcTest.some(function (t) { return t.reciboCompraId; }), "las filas del recibo no cuentan como \"movimientos generados por la cotización\"");
 
-// -- desmarcar la compra retira los DOS movimientos, no solo el del pedido --
-setChange(selEstadoExcTest, "no");
-click('[data-action="sincronizar-compras-finanzas"][data-id="cot-exc-test"]');
+// -- deshacer la compra: se anula el recibo (el estado ya no se cambia en
+// Producción) — las dos filas salen juntas y la compra vuelve a "Aún no" --
+click('[data-action="cerrar-cotizacion-editor"]');
+finanzasAccionesRcF2["anular-recibo"]({ getAttribute: function () { return reciboExcTest; } });
 cotExcTestObj = state.cotizaciones.filter(function (c) { return c.id === "cot-exc-test"; })[0];
 compraExcTest = cotExcTestObj.compras.filter(function (c) { return c.clave === claveExcTest; })[0];
-assert(!state.tx.some(function (t) { return t.id === txPedidoExcTest.id; }) && !state.tx.some(function (t) { return t.id === txExcedenteTest.id; }), "al desmarcar la compra, los DOS movimientos se retiran juntos de Finanzas");
-assert(!compraExcTest.txId && !compraExcTest.excedenteTxId, "...y la compra queda sin ninguno de los dos ids vinculados");
+assert(!state.tx.some(function (t) { return t.id === txPedidoExcTest.id; }) && !state.tx.some(function (t) { return t.id === txExcedenteTest.id; }), "al anular el recibo, las DOS filas se retiran juntas de Finanzas");
+assert(compraExcTest.estado === "no" && !compraExcTest.partesRecibo, "...y la compra vuelve a quedar pendiente, sin nada vinculado");
 
 // -- Hallazgo #48: la RESERVA PROPIA de un pedido individual (sin
 // compartir con nadie) también se consume sola al subir cantidadReal —
@@ -6471,6 +6482,126 @@ assert(compraBCruzadaTest.cantidadExcedente === 2, "...y como A ya no tenía res
 state.pedidos = pedidosPreviosConjExcTest; state.cotizaciones = cotizacionesPreviasConjExcTest; state.tx = txPreviosConjExcTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
 state.formCompraConjunta = { seleccion: [], porClave: {} };
+
+// ---------------------------------------------------------------------------
+// Recibo de compra — fase 3 (Hallazgo #52): convertir lo que ya estaba
+// registrado (decisión del usuario 2026-09-23: "convertirlas en recibos").
+// La verdad es la CAJA: cada grupo se convierte en una copia de prueba y
+// solo se acepta si la caja se mueve menos de $1 (redondeo de pesos con
+// decimales), el recibo cuadra al peso, es estable y los servicios quedan
+// iguales. Si no, NO se toca y se reporta el motivo.
+// ---------------------------------------------------------------------------
+const { migrarComprasARecibos: migrarTest } = await import("../js/core/calc.js");
+const pedidosPreviosMigTest = state.pedidos, cotizacionesPreviasMigTest = state.cotizaciones, txPreviosMigTest = state.tx;
+function cajaDe(lista) { return lista.reduce(function (a, t) { return t.tipo === "ingreso" ? a + Number(t.monto) : a - Number(t.monto); }, 0); }
+function copiaProfunda(x) { return JSON.parse(JSON.stringify(x)); }
+function compraLegacy(clave, cantidadReal, costoReal, excedente, grupoId, fecha) {
+  var c = { clave: clave, estado: "si", cantidadReal: cantidadReal, costoReal: costoReal, cantidadExcedente: excedente, proveedorId: "", observaciones: "", fecha: fecha, txId: "", excedenteTxId: "" };
+  if (grupoId) c.compartida = { grupoId: grupoId, fecha: fecha, etiquetas: ["OP-MIGA · Cliente", "OP-MIGB · Cliente"] };
+  return c;
+}
+function sincronizarTodas() {
+  state.cotizaciones = state.cotizaciones.map(function (c) { return Object.assign({}, c, { compras: sincronizarComprasLegacyTest(c).compras }); });
+}
+
+// (a) Compra conjunta vieja CON excedente en dos pedidos y montos con
+// decimales: 13 m por $120.000 (A necesita 5, B 6, sobran 2 — uno en cada
+// uno), A con $10.000 descontados de un servicio.
+const cotMigA = cotConTela("cot-migA-test", "ped-migA-test", 5);
+const cotMigB = cotConTela("cot-migB-test", "ped-migB-test", 6);
+state.pedidos = [pedidoConjuntaTest("ped-migA-test", "cot-migA-test", "OP-MIGA"), pedidoConjuntaTest("ped-migB-test", "cot-migB-test", "OP-MIGB")];
+cotMigA.compras = [compraLegacy("tela algodón|m|tela", 6, 55385, 1, "grupo-mig-test", "2026-09-20")];
+cotMigB.compras = [compraLegacy("tela algodón|m|tela", 7, 64615, 1, "grupo-mig-test", "2026-09-20")];
+state.cotizaciones = [cotMigA, cotMigB];
+state.tx = [];
+sincronizarTodas();
+const parteViejaA = state.tx.filter(function (t) { return t.cotizacionId === "cot-migA-test" && t.origenCompraClave; })[0];
+parteViejaA.serviciosDescuento = [{ nombre: "Colchón", monto: 10000 }];
+const idsExcViejos = state.tx.filter(function (t) { return t.origenCompraExcedenteClave; }).map(function (t) { return t.id; });
+assert(idsExcViejos.length === 2 && state.tx.length === 4, "(datos viejos) 2 partes + 2 excedentes sueltos, uno por pedido, como los dejaba Compras conjuntas");
+assert(state.tx.some(function (t) { return !Number.isInteger(t.monto); }), "(datos viejos) hay montos con pesos con decimales (55.385 / 6 × 1 = 9.230,83)");
+const txAntesMig = copiaProfunda(state.tx), cotsAntesMig = copiaProfunda(state.cotizaciones);
+const mig = migrarTest(state.tx, state.cotizaciones);
+assert(mig.convertidos.length === 1 && mig.convertidos[0].reciboId === "grupo-mig-test" && mig.saltados.length === 0, "la compra conjunta vieja se convierte en UN recibo, con el mismo id del grupo");
+assert(Math.abs(cajaDe(mig.tx) - cajaDe(txAntesMig)) < 1, "la caja se mueve menos de $1 (solo el redondeo de los pesos con decimales)");
+assert(JSON.stringify(state.tx) === JSON.stringify(txAntesMig) && JSON.stringify(state.cotizaciones) === JSON.stringify(cotsAntesMig), "la conversión es pura: no toca lo que recibe");
+const filasMig = mig.tx.filter(function (t) { return t.reciboCompraId === "grupo-mig-test"; });
+const reservaMig = filasMig.filter(function (t) { return t.reciboCompraRol === "reserva"; });
+assert(filasMig.length === 3 && reservaMig.length === 1, "quedan las 2 partes y UNA sola reserva (los dos excedentes sueltos se juntan)");
+assert(idsExcViejos.indexOf(reservaMig[0].id) !== -1, "la reserva conserva el id de uno de los excedentes viejos (no se inventa un movimiento nuevo)");
+assert(filasMig.some(function (t) { return t.id === parteViejaA.id; }), "la parte de A conserva su id de siempre");
+assert(filasMig.every(function (t) { return Number.isInteger(t.monto) && t.fecha === "2026-09-20"; }), "todas las filas en pesos enteros y con su fecha de siempre (ninguna fecha cambia)");
+assert(reservaMig[0].cantidad === 2 && reservaMig[0].pedidoId === "" && reservaMig[0].cotizacionId === "", "la reserva: 2 m, sin pedido y sin cotización");
+const servMig = filasMig.reduce(function (a, t) { return a + (t.serviciosDescuento || []).reduce(function (b, s) { return b + s.monto; }, 0); }, 0);
+assert(servMig === 10000, "lo descontado del servicio queda igual ($10.000)");
+assert(verificarRecibo("grupo-mig-test", mig.cotizaciones, mig.tx).length === 0, "el recibo convertido cuadra al peso");
+const compraMigA = mig.cotizaciones[0].compras[0];
+assert(compraMigA.partesRecibo.length === 1 && !compraMigA.compartida && !compraMigA.cantidadExcedente && !compraMigA.excedenteTxId, "la compra de A queda como miembro del recibo, sin la marca vieja ni excedente propio");
+assert(compraMigA.cantidadReal === 5, "...con la cantidad que de verdad es suya (5 m, sin el excedente)");
+const mig2 = migrarTest(mig.tx, mig.cotizaciones);
+assert(mig2.convertidos.length === 0 && JSON.stringify(mig2.tx) === JSON.stringify(mig.tx), "correrla otra vez no hace nada (lo ya convertido no vuelve a ser candidato)");
+const migCopia = migrarTest(copiaProfunda(txAntesMig), copiaProfunda(cotsAntesMig));
+assert(JSON.stringify(migCopia.tx.map(function (t) { return t.id; }).sort()) === JSON.stringify(mig.tx.map(function (t) { return t.id; }).sort()), "dos corridas sobre copias independientes llegan a los MISMOS movimientos (dos dispositivos convergen)");
+
+// (b) Costo compartido viejo (domicilio): recibo sin reserva.
+const cotDomMigA = cotSoloDomicilio("cot-dommigA-test", "ped-dommigA-test", 5000);
+const cotDomMigB = cotSoloDomicilio("cot-dommigB-test", "ped-dommigB-test", 10000);
+state.pedidos = [pedidoConjuntaTest("ped-dommigA-test", "cot-dommigA-test", "OP-DMA"), pedidoConjuntaTest("ped-dommigB-test", "cot-dommigB-test", "OP-DMB")];
+cotDomMigA.compras = [Object.assign(compraLegacy("global|dom-cot-dommigA-test", "", 5000, "", "grupo-dom-mig-test", "2026-09-19"), { cantidadReal: "" })];
+cotDomMigB.compras = [Object.assign(compraLegacy("global|dom-cot-dommigB-test", "", 10000, "", "grupo-dom-mig-test", "2026-09-19"), { cantidadReal: "" })];
+state.cotizaciones = [cotDomMigA, cotDomMigB];
+state.tx = [];
+sincronizarTodas();
+const migDom = migrarTest(state.tx, state.cotizaciones);
+const filasDomMig = migDom.tx.filter(function (t) { return t.reciboCompraId === "grupo-dom-mig-test"; });
+assert(migDom.convertidos.length === 1 && filasDomMig.length === 2 && filasDomMig.every(function (t) { return t.reciboCompraRol === "parte" && t.reciboCompraLinea === "costoglobal|domicilio"; }), "un domicilio compartido viejo pasa a ser un recibo sin reserva, una fila por pedido");
+assert(cajaDe(migDom.tx) === cajaDe(state.tx), "...con la caja exactamente igual");
+
+// (c) Lo que NO se puede convertir con seguridad no se toca, y se dice por qué.
+const cotFaltaA = cotConTela("cot-faltaA-test", "ped-faltaA-test", 10);
+const cotFaltaB = cotConTela("cot-faltaB-test", "ped-faltaB-test", 20);
+state.pedidos = [pedidoConjuntaTest("ped-faltaA-test", "cot-faltaA-test", "OP-FA"), pedidoConjuntaTest("ped-faltaB-test", "cot-faltaB-test", "OP-FB")];
+cotFaltaA.compras = [compraLegacy("tela algodón|m|tela", 10, 30000, "", "grupo-falta-test", "2026-09-18")];
+cotFaltaB.compras = [compraLegacy("tela algodón|m|tela", 20, 60000, "", "grupo-falta-test", "2026-09-18")];
+state.cotizaciones = [cotFaltaA, cotFaltaB];
+state.tx = [];
+sincronizarTodas();
+state.tx = state.tx.filter(function (t) { return t.cotizacionId !== "cot-faltaB-test"; }); // se perdió el movimiento de B
+const migFalta = migrarTest(state.tx, state.cotizaciones);
+assert(migFalta.convertidos.length === 0 && migFalta.saltados.length === 1 && migFalta.saltados[0].motivo.indexOf("no tiene su movimiento") !== -1, "un grupo al que le falta un movimiento en Finanzas NO se convierte, y se dice por qué");
+assert(JSON.stringify(migFalta.tx) === JSON.stringify(state.tx) && !!migFalta.cotizaciones[1].compras[0].compartida, "...y queda exactamente como estaba");
+sincronizarTodas();
+state.tx.forEach(function (t) { if (t.cotizacionId === "cot-faltaB-test") t.fecha = "2026-09-19"; });
+const migFechas = migrarTest(state.tx, state.cotizaciones);
+assert(migFechas.convertidos.length === 0 && migFechas.saltados[0].motivo.indexOf("fechas distintas") !== -1, "un grupo con movimientos de fechas distintas NO se convierte (cambiaría fechas de la caja)");
+
+// (d) El excedente de UNA compra individual (el caso medias, 12 pares
+// necesitando 10): pasa a ser un recibo de 1 pedido.
+const cotMedias = {
+  id: "cot-medias-mig-test", clienteId: "", cliente: "Cliente Medias", descripcion: "Medias", fecha: "2026-09-01",
+  estado: "convertida", pedidoId: "ped-medias-mig-test", pedidoOrigenId: "",
+  vendedor: null, gastosReales: [], iva: { activo: false, porcentaje: 19 }, codigoPublico: "cmedmig",
+  referencias: [], serviciosCobrados: [],
+  costosGlobales: [{ id: "cg-medias-mig", nombre: "Medias", costo: 100000, cantidad: 10, unidad: "par", proveedorId: "", esServicio: false }],
+  compras: [compraLegacy("global|cg-medias-mig", 12, 120000, 2, "", "2026-09-15")]
+};
+state.pedidos = [pedidoConjuntaTest("ped-medias-mig-test", "cot-medias-mig-test", "OP-MED")];
+state.cotizaciones = [cotMedias];
+state.tx = [];
+sincronizarTodas();
+const excMediasViejo = state.tx.filter(function (t) { return t.origenCompraExcedenteClave; })[0];
+const migMedias = migrarTest(state.tx, state.cotizaciones);
+assert(migMedias.convertidos.length === 1 && migMedias.convertidos[0].tipo === "excedente", "el excedente de una compra individual pasa a ser un recibo de 1 pedido");
+const compraMediasMig = migMedias.cotizaciones[0].compras[0];
+const filasMediasMig = migMedias.tx.filter(function (t) { return t.reciboCompraId === compraMediasMig.partesRecibo[0].reciboId; });
+const parteMediasMig = filasMediasMig.filter(function (t) { return t.reciboCompraRol === "parte"; })[0];
+const reservaMediasMig = filasMediasMig.filter(function (t) { return t.reciboCompraRol === "reserva"; })[0];
+assert(parteMediasMig.monto === 100000 && parteMediasMig.cantidad === 10 && compraMediasMig.cantidadReal === 10, "el pedido queda con sus 10 pares ($100.000)...");
+assert(reservaMediasMig.monto === 20000 && reservaMediasMig.cantidad === 2 && reservaMediasMig.id === excMediasViejo.id, "...y los 2 de más quedan como reserva del recibo, en el MISMO movimiento que ya era el excedente");
+assert(!compraMediasMig.excedenteTxId && compraMediasMig.partesRecibo[0].linea === "insumoglobal|medias", "la compra ya no apunta al movimiento viejo (así \"Actualizar movimientos\" no lo borra), y su línea es un insumo con cantidad");
+assert(cajaDe(migMedias.tx) === cajaDe(state.tx), "la caja queda exactamente igual");
+
+state.pedidos = pedidosPreviosMigTest; state.cotizaciones = cotizacionesPreviasMigTest; state.tx = txPreviosMigTest;
 
 // --- Sin interruptor "se fabrica en el taller / se compra a proveedor":
 // una prenda comprada hecha es, desde 2026-09-21, un insumo más ("Prenda

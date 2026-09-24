@@ -2652,7 +2652,7 @@ la reparación de los datos viejos.
 pasar por la capa que lo guarda. Probar la lógica con objetos en memoria
 no detecta que el dato nunca llega a la Sheet.
 
-### 🟡 Hallazgo #52 — "Recibo de compra": una compra real queda registrada como una sola cosa. EN CURSO (fases 1 y 2 de 4 hechas)
+### 🟡 Hallazgo #52 — "Recibo de compra": una compra real queda registrada como una sola cosa. EN CURSO (fases 1, 2 y 3 de 4 hechas)
 
 **Por qué.** Hoy una compra real (un pago a un proveedor) no queda guardada
 en ningún lado como tal. Al registrar una compra conjunta, el total pagado,
@@ -2841,9 +2841,75 @@ siguen con su mecanismo de siempre hasta la fase 3, que los convierte.
   ningún descuadre), y el formulario en el celular (375 px, sin
   desplazamiento horizontal).
 
-**Siguientes fases:**
-- **F3:** convertir compras conjuntas y excedentes viejos.
-- **F4:** agrupar en reportes y limpiar el mecanismo viejo.
+**Fase 3 (hecha): convertir lo viejo.** La función es
+`migrarComprasARecibos` (core/calc.js, pura). Lo que se convierte:
+- cada compra conjunta o costo compartido ya registrado (un recibo por
+  `compartida.grupoId`, con el mismo id);
+- cada excedente de una compra individual (un recibo de 1 pedido).
+
+*Cuándo corre:*
+- **Al cargar la app**, en `loadAll()`, después de las reparaciones del
+  excedente y antes de `repararComprasSinSeguimiento`. Necesita red real y
+  nada por recuperar en tx/cotizaciones. Muestra un aviso y, en la pestaña
+  Recibos, la lista de lo que no se pudo convertir con su motivo.
+- **En el acto, con "Actualizar movimientos financieros"**, para el caso
+  medias: lo comprado de más para un pedido pasa a ser un recibo de 1
+  pedido al sincronizarlo.
+
+Es la única excepción a "al cargar nunca se reescribe plata": corre una
+sola vez por dato y cada grupo se verifica al peso antes de aceptarlo.
+
+*Cómo convierte (la verdad es la CAJA, no lo que diga cada compra):*
+- Los movimientos que ya existen se **adoptan**: conservan su id y su fecha.
+  - Las partes siguen siendo las mismas filas.
+  - El primer excedente de la línea pasa a ser su fila de reserva. Los
+    demás salen y su plata queda sumada en esa reserva.
+- Los montos exactos, que podían traer pesos con decimales, se redondean a
+  enteros con el método del mayor residuo.
+- Los servicios asignados quedan iguales en total.
+
+*Un grupo solo se acepta si:*
+1. la caja se mueve menos de $1;
+2. `verificarRecibo` no encuentra nada;
+3. una segunda reconciliación no cambia nada;
+4. los servicios suman lo mismo.
+
+Si no cumple, **no se toca** y se reporta el motivo. Ejemplos: a una parte
+le falta su movimiento, o sus movimientos tienen fechas distintas (se
+reporta en vez de cambiar fechas de la caja).
+
+*Una distinción que salió al convertir el caso medias:* un costo global
+con cantidad estimada (ej. "Medias", 10 pares) es un **insumo con
+cantidad**, no un costo fijo. `lineaSinCantidad`/`claveLineaRecibo` lo
+deciden en un solo lugar:
+- costo fijo: servicio o sin cantidad estimada → `costoglobal|<nombre>`;
+- global con cantidad → `insumoglobal|<nombre>`.
+
+**Pruebas:**
+- Compra conjunta vieja con excedente en dos pedidos y pesos con
+  decimales ($120.000 / 13 m) y un servicio:
+  - un solo recibo con el mismo id y una sola reserva (con el id de un
+    excedente viejo);
+  - la caja se mueve menos de $1;
+  - las fechas no cambian y el servicio queda igual;
+  - la conversión es pura, idempotente, y dos corridas independientes
+    llegan a los mismos ids.
+- Domicilio compartido viejo: recibo sin reserva, con la caja idéntica.
+- Grupo al que le falta un movimiento, y grupo con fechas distintas: los
+  dos quedan intactos y reportados.
+- Medias: parte de 10 pares y reserva de 2 en el mismo movimiento que era
+  el excedente, `excedenteTxId` limpio y línea `insumoglobal|medias`.
+- La prueba vieja del excedente individual (Hallazgo #29) se reescribió:
+  - al sincronizar, pasa a recibo;
+  - usar 2 más de la reserva sube el costo del pedido y actualiza las
+    mismas filas;
+  - para deshacer se anula el recibo.
+
+**Siguiente fase:**
+- **F4:** agrupar por recibo en "Gasto en insumos", en el historial del
+  proveedor y en el del servicio; CSV/PDF; "Editar datos" del recibo; y
+  borrar el mecanismo viejo de reserva (`tomarDeReservaCompraConjunta`, la
+  rama del #48) cuando ya no quede nada por convertir.
 
 ---
 

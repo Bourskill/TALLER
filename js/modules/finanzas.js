@@ -55,7 +55,8 @@ function renderRecibosCompra() {
     return calcLineasParaRecibo([p.id]).length > 0;
   });
 
-  var html = '<div class="card">';
+  var html = renderAvisoMigracionRecibos();
+  html += '<div class="card">';
   html += '<div class="cot-col-title" style="margin-top:0;">¿Para qué pedidos es esta compra?' +
     renderHelp("Marca el pedido (o los pedidos) para los que compraste con este mismo papel del proveedor. Abajo sale sola la lista de lo que les falta comprar: escribe cuánto compraste y cuánto pagaste por cada cosa, y la app reparte entre los pedidos lo que cada uno necesita. Lo que sobre queda como reserva de ESTOS pedidos — si alguno necesita más después, se toma de ahí.") +
     (sel.length ? ' <span class="tag">' + sel.length + " elegido" + (sel.length === 1 ? "" : "s") + "</span>" : "") +
@@ -78,6 +79,25 @@ function renderRecibosCompra() {
   if (sel.length) html += renderFormRecibo(calcLineasParaRecibo(sel));
   html += renderUltimosRecibos();
   return html;
+}
+
+// Resultado de la conversión de compras viejas a recibos (ver loadAll en
+// core/store.js): lo convertido se cuenta en una línea; lo que NO se pudo
+// convertir se lista con su motivo — sigue funcionando como antes, nada se
+// tocó, pero el usuario tiene que saber que está ahí.
+function renderAvisoMigracionRecibos() {
+  var m = state.migracionRecibos;
+  if (!m || (!m.convertidos.length && !m.saltados.length)) return "";
+  var html = '<div class="card" style="margin-bottom:12px;">';
+  if (m.convertidos.length) {
+    html += '<div class="section-sub" style="margin:0;">✓ ' + m.convertidos.length + " compra(s) que ya tenías registradas (compras conjuntas y excedentes) pasaron a ser recibos de compra. La caja no cambió.</div>";
+  }
+  if (m.saltados.length) {
+    html += '<div class="section-sub" style="margin:' + (m.convertidos.length ? "8px" : "0") + ' 0 0;color:var(--warning-ink);">' +
+      m.saltados.length + " compra(s) viejas NO se pasaron a recibo — siguen funcionando como antes, no se tocó nada:<br>" +
+      m.saltados.map(function (s) { return "• " + esc(s.motivo); }).join("<br>") + "</div>";
+  }
+  return html + "</div>";
 }
 
 function soloOp(etiqueta) { return String(etiqueta || "").split(" · ")[0]; }

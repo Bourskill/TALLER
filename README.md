@@ -259,6 +259,20 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo sexta ronda: Recibo de compra, fase 3 — lo ya registrado pasa a ser recibo)
+
+- **Al abrir la app**, cada compra conjunta que ya tenías registrada (y cada
+  excedente de una compra para un solo pedido) pasa a ser un recibo de
+  compra. Sus movimientos de Finanzas se conservan, con su misma fecha, y
+  los excedentes sueltos quedan juntos como la reserva del recibo.
+- Antes de convertir cada compra se verifica que la caja quede igual al
+  peso. Si algo no cuadra, esa compra no se toca: sigue funcionando como
+  antes, y la pestaña Recibos de compra dice cuál fue y por qué.
+- **Caso medias:** si compras de más para un solo pedido y pulsas
+  "Actualizar movimientos financieros", eso pasa a ser un recibo de 1 pedido
+  en el acto, con lo que sobró como su reserva.
+- Ver CONTABILIDAD.md, Hallazgo #52.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo quinta ronda: Recibo de compra, fase 2 — registrar, usar la reserva, anular)
 
 La pestaña "Compras conjuntas" de Finanzas ahora es **🧾 Recibos de compra**:

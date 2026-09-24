@@ -3070,6 +3070,28 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   return res;
 }
 
+// Una línea de la lista de compras que en un recibo va SIN cantidad: un
+// costo fijo del pedido (domicilio, diseño, un servicio cobrado). Un costo
+// global CON cantidad estimada (ej. "Medias", 10 pares — el caso real del
+// usuario) es un insumo más: se compra por cantidad y puede tener reserva.
+// En un recibo, `esGlobal` significa justo esto: "sin cantidad".
+export function lineaSinCantidad(linea) {
+  return !!(linea && linea.esGlobal) && (!!linea.esServicio || !(num(linea.cantidadFisica) > 0));
+}
+// Clave de la línea DENTRO de un recibo. Un insumo de referencia usa su
+// clave de siempre (mismo insumo físico = misma clave en cualquier
+// pedido). Uno global tiene una clave única por cotización ("global|"+id),
+// así que se junta por NOMBRE entre pedidos (mismo criterio que
+// calcGruposCostoCompartido) — con un prefijo distinto según vaya con o
+// sin cantidad, para que una línea "congelada" (ver calcRecibo) se siga
+// reconociendo como tal solo por su clave.
+export function claveLineaRecibo(linea) {
+  if (!linea.esGlobal) return linea.clave;
+  var nombreKey = (linea.nombre || "").trim().toLowerCase();
+  if (!nombreKey) return "";
+  return (lineaSinCantidad(linea) ? "costoglobal|" : "insumoglobal|") + nombreKey;
+}
+
 // Lo que se puede meter en un recibo nuevo para los pedidos elegidos, una
 // línea por cosa comprada:
 // - un insumo físico PENDIENTE ("Aún no") — lo que falta comprar;
@@ -3091,12 +3113,11 @@ export function calcLineasParaRecibo(pedidoIds) {
     calcListaCompras(cot).forEach(function (linea) {
       var compra = compraDeLinea(cot, linea.clave);
       var estado = estadoLineaCompra(cot, linea);
-      var clave, necesita = 0, costoEstimado = num(linea.costoTotal), esReposicion = false;
-      if (linea.esGlobal) {
+      var clave = claveLineaRecibo(linea), sinCantidad = lineaSinCantidad(linea);
+      var necesita = 0, costoEstimado = num(linea.costoTotal), esReposicion = false;
+      if (!clave) return;
+      if (sinCantidad) {
         if (estado !== "no") return;
-        var nombreKey = (linea.nombre || "").trim().toLowerCase();
-        if (!nombreKey) return;
-        clave = "costoglobal|" + nombreKey;
       } else {
         if (linea.esServicio) return;
         if (estado === "no") {
@@ -3106,10 +3127,9 @@ export function calcLineasParaRecibo(pedidoIds) {
           esReposicion = true;
           costoEstimado = num(linea.cantidadFisica) > 0 ? num(linea.costoTotal) / num(linea.cantidadFisica) * necesita : 0;
         } else return;
-        clave = linea.clave;
       }
       if (!mapa[clave]) {
-        mapa[clave] = { linea: clave, nombre: linea.nombre, unidad: linea.esGlobal ? "" : (linea.unidad || ""), esProducto: !!linea.esProducto, esGlobal: !!linea.esGlobal, participantes: [] };
+        mapa[clave] = { linea: clave, nombre: linea.nombre, unidad: sinCantidad ? "" : (linea.unidad || ""), esProducto: !!linea.esProducto, esGlobal: sinCantidad, participantes: [] };
         orden.push(clave);
       }
       mapa[clave].participantes.push({
@@ -3281,6 +3301,188 @@ export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
       })
     });
   });
+}
+
+// ---------- Conversión de lo viejo a Recibos (fase 3, Hallazgo #52) ----------
+// Decisión del usuario 2026-09-23: las compras conjuntas ya registradas se
+// convierten en recibos. También el excedente de una compra individual
+// (caso "medias") pasa a ser un recibo de 1 pedido — así hay UN solo
+// mecanismo de reserva, no dos.
+//
+// Criterio bancario: la verdad es la CAJA (los movimientos que ya existen),
+// no lo que diga cada compra. Cada grupo se convierte en una copia de
+// prueba, y solo se acepta si (1) la caja se mueve menos de $1 (solo el
+// redondeo de pesos con decimales que dejaba costoExcedenteCompra, ej.
+// 120000/13), (2) verificarRecibo no encuentra nada, (3) una segunda
+// reconciliación no cambia nada, y (4) lo descontado de servicios queda
+// igual. Si algo falla, ese grupo NO se toca y se reporta el motivo. Nunca
+// se cambia la fecha de un movimiento: si las filas de un grupo tienen
+// fechas distintas, se reporta en vez de convertir. Pura: devuelve copias.
+// opts.soloCotId: solo los excedentes individuales de esa cotización (lo
+// usa "Actualizar movimientos financieros" para el caso medias).
+export function migrarComprasARecibos(tx, cotizaciones, opts) {
+  opts = opts || {};
+  var txW = (tx || []).slice();
+  var cotsW = (cotizaciones || []).slice();
+  var convertidos = [], saltados = [];
+  function caja(lista) { return lista.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0); }
+  function sumaServicios(lista) {
+    var s = {};
+    lista.forEach(function (t) { (t.serviciosDescuento || []).forEach(function (d) { s[d.nombre] = (s[d.nombre] || 0) + num(d.monto); }); });
+    return s;
+  }
+  function libre(t) { return !t.reciboCompraId; }
+
+  function intentar(reciboId, refs, tipo, etiquetas) {
+    var cotsN = cotsW.slice();
+    var txN = txW.slice();
+    var entradas = [], motivo = "";
+    refs.forEach(function (ref) {
+      if (motivo) return;
+      var cot = cotsN.filter(function (c) { return c.id === ref.cotId; })[0];
+      var compra = cot ? compraDeLinea(cot, ref.clave) : null;
+      if (!compra || esMiembroRecibo(compra) || estadoCompra(compra) !== "si") return;
+      var lineaLista = calcListaCompras(cot).filter(function (l) { return l.clave === compra.clave; })[0];
+      var parteTx = txN.filter(function (t) { return libre(t) && t.id === compra.txId && t.cotizacionId === cot.id; })[0] ||
+        txN.filter(function (t) { return libre(t) && t.origenCompraClave === compra.clave && t.cotizacionId === cot.id; })[0] || null;
+      var excTx = txN.filter(function (t) { return libre(t) && t.id === compra.excedenteTxId && t.cotizacionId === cot.id; })[0] ||
+        txN.filter(function (t) { return libre(t) && t.origenCompraExcedenteClave === compra.clave && t.cotizacionId === cot.id; })[0] || null;
+      var claveGlobal = compra.clave.indexOf("global|") === 0 || compra.clave.indexOf("servicio|") === 0;
+      var nombre = (lineaLista && lineaLista.nombre) || (parteTx && parteTx.insumoNombre) || (excTx && excTx.insumoNombre) || compra.clave;
+      // Mismo criterio que lineaSinCantidad; si la línea ya no existe en la
+      // cotización, decide lo que se registró: con cantidad o sin ella.
+      var esGlobal = lineaLista ? lineaSinCantidad(lineaLista) : (claveGlobal && !(num(compra.cantidadReal) > 0));
+      var claveLinea = lineaLista ? claveLineaRecibo(lineaLista)
+        : (claveGlobal ? (esGlobal ? "costoglobal|" : "insumoglobal|") + String(nombre).trim().toLowerCase() : compra.clave);
+      var desc = cot.descripcion || cot.cliente || cot.id;
+      if (costoRealPedido(compra) > 0 && !parteTx) { motivo = "\"" + nombre + "\" de " + desc + " no tiene su movimiento en Finanzas (pulsa \"Actualizar movimientos financieros\" en esa cotización)."; return; }
+      if (cantidadExcedenteCompra(compra) > 0 && !excTx) { motivo = "El excedente de \"" + nombre + "\" en " + desc + " no tiene su movimiento en Finanzas (pulsa \"Actualizar movimientos financieros\" en esa cotización; al volver a abrir la app se convierte)."; return; }
+      entradas.push({
+        cotId: cot.id, compra: compra, parteTx: parteTx, excTx: excTx, esGlobal: esGlobal, nombre: nombre,
+        unidad: esGlobal ? "" : ((lineaLista && lineaLista.unidad) || (parteTx && parteTx.unidad) || (excTx && excTx.unidad) || ""),
+        esProducto: !!(lineaLista && lineaLista.esProducto) || compra.clave.indexOf("producto|") === 0,
+        linea: claveLinea
+      });
+    });
+    if (motivo) return { ok: false, motivo: motivo };
+    if (!entradas.length) return { ok: false, motivo: "", nada: true };
+    var filasViejas = [];
+    entradas.forEach(function (e) { if (e.parteTx) filasViejas.push(e.parteTx); if (e.excTx) filasViejas.push(e.excTx); });
+    var fechas = [];
+    filasViejas.forEach(function (t) { if (fechas.indexOf(t.fecha) === -1) fechas.push(t.fecha); });
+    if (fechas.length > 1) return { ok: false, motivo: "Sus movimientos tienen fechas distintas (" + fechas.join(", ") + "): convertirlo cambiaría fechas de la caja." };
+    var provs = {};
+    entradas.forEach(function (e) { var p = e.compra.proveedorId || ""; if (p) provs[p] = (provs[p] || 0) + 1; });
+    var proveedorId = Object.keys(provs).sort(function (a, b) { return provs[b] - provs[a]; })[0] || "";
+    var servViejos = sumaServicios(filasViejas);
+    var cabecera = {
+      fecha: fechas[0] || todayStr(), proveedorId: proveedorId, numero: "",
+      servicios: Object.keys(servViejos).map(function (n) { return { nombre: n, monto: Math.round(servViejos[n]) }; }),
+      etiquetas: etiquetas || []
+    };
+    // Por línea: los montos EXACTOS de la caja, redondeados a pesos enteros
+    // con el mismo método del mayor residuo (la suma queda exacta).
+    var porLinea = {}, ordenLineas = [];
+    entradas.forEach(function (e) {
+      if (!porLinea[e.linea]) { porLinea[e.linea] = []; ordenLineas.push(e.linea); }
+      porLinea[e.linea].push(e);
+    });
+    var adoptadas = {};
+    ordenLineas.forEach(function (L) {
+      var es = porLinea[L];
+      var dec = es[0].esProducto ? 0 : 2;
+      var exactos = es.map(function (e) { return e.parteTx ? num(e.parteTx.monto) : 0; });
+      var excExacto = es.reduce(function (a, e) { return a + (e.excTx ? num(e.excTx.monto) : 0); }, 0);
+      var totalExacto = exactos.reduce(function (a, x) { return a + x; }, 0) + excExacto;
+      var enteros = repartirProporcional(Math.round(totalExacto), exactos.concat([excExacto]), 0);
+      var cantPartesU = es.map(function (e) { return e.esGlobal ? 0 : aUnidades(cantidadRealPedido(e.compra), dec); });
+      var cantExcU = es.reduce(function (a, e) { return a + (e.esGlobal ? 0 : aUnidades(cantidadExcedenteCompra(e.compra), dec)); }, 0);
+      var totales = {
+        nombre: es[0].nombre, unidad: es[0].unidad, esProducto: es[0].esProducto, esGlobal: es[0].esGlobal,
+        cantidadTotal: deUnidades(cantPartesU.reduce(function (a, u) { return a + u; }, 0) + cantExcU, dec),
+        costoTotal: Math.round(totalExacto)
+      };
+      es.forEach(function (e, i) {
+        e.parte = { reciboId: reciboId, linea: L, cantidad: deUnidades(cantPartesU[i], dec), costo: enteros[i], recibo: cabecera, totalesLinea: totales };
+        if (e.parteTx) adoptadas[e.parteTx.id] = Object.assign({}, e.parteTx, { reciboCompraId: reciboId, reciboCompraRol: "parte", reciboCompraLinea: L, origenCompraExcedenteClave: "" });
+      });
+      // El primer movimiento de excedente de la línea se queda como SU fila
+      // de reserva (mismo id); los demás salen — su plata queda sumada ahí.
+      var primeraExc = es.filter(function (e) { return e.excTx; })[0];
+      if (primeraExc) {
+        adoptadas[primeraExc.excTx.id] = Object.assign({}, primeraExc.excTx, {
+          reciboCompraId: reciboId, reciboCompraRol: "reserva", reciboCompraLinea: L,
+          pedidoId: "", cotizacionId: "", origenCompraExcedenteClave: "", origenCompraClave: ""
+        });
+      }
+    });
+    var idsViejos = filasViejas.map(function (t) { return t.id; });
+    txN = txN.filter(function (t) { return idsViejos.indexOf(t.id) === -1 || adoptadas[t.id]; })
+      .map(function (t) { return adoptadas[t.id] || t; });
+    cotsN = cotsN.map(function (cot) {
+      var mias = entradas.filter(function (e) { return e.cotId === cot.id; });
+      if (!mias.length) return cot;
+      return Object.assign({}, cot, {
+        compras: (cot.compras || []).map(function (compra) {
+          var e = mias.filter(function (x) { return x.compra.clave === compra.clave; })[0];
+          if (!e) return compra;
+          var nueva = Object.assign({}, compra, {
+            estado: "si", partesRecibo: [e.parte], cantidadExcedente: "", excedenteTxId: "", txId: "", faltante: 0,
+            fecha: cabecera.fecha, proveedorId: compra.proveedorId || cabecera.proveedorId
+          });
+          delete nueva.compartida;
+          return totalesDesdePartes(nueva);
+        })
+      });
+    });
+    txN = reconciliarTxRecibo(txN, reciboId, cotsN).tx;
+    var delta = caja(txN) - caja(txW);
+    if (Math.abs(delta) >= 1) return { ok: false, motivo: "La caja se movería " + delta.toFixed(2) + " (se esperaba menos de $1 de redondeo)." };
+    var problemas = verificarRecibo(reciboId, cotsN, txN);
+    if (problemas.length) return { ok: false, motivo: problemas[0] };
+    if (reconciliarTxRecibo(txN, reciboId, cotsN).hayCambios) return { ok: false, motivo: "Sus movimientos no quedan estables." };
+    var servNuevos = sumaServicios(txN.filter(function (t) { return t.reciboCompraId === reciboId; }));
+    var mismosServicios = Object.keys(servViejos).concat(Object.keys(servNuevos)).every(function (n) { return Math.abs(Math.round(servViejos[n] || 0) - (servNuevos[n] || 0)) < 1; });
+    if (!mismosServicios) return { ok: false, motivo: "Lo descontado de servicios no quedaría igual." };
+    txW = txN;
+    cotsW = cotsN;
+    return { ok: true, delta: delta, total: calcRecibo(reciboId, cotsN, txN).total };
+  }
+
+  // (a) Compras conjuntas y costos compartidos viejos: un recibo por grupo.
+  if (!opts.soloCotId) {
+    var grupos = {}, ordenGrupos = [];
+    cotsW.forEach(function (cot) {
+      (cot.compras || []).forEach(function (compra) {
+        if (esMiembroRecibo(compra) || !(compra.compartida && compra.compartida.grupoId)) return;
+        var g = compra.compartida.grupoId;
+        if (!grupos[g]) { grupos[g] = { refs: [], etiquetas: compra.compartida.etiquetas || [] }; ordenGrupos.push(g); }
+        grupos[g].refs.push({ cotId: cot.id, clave: compra.clave });
+      });
+    });
+    ordenGrupos.forEach(function (g) {
+      var r = intentar(g, grupos[g].refs, "conjunta", grupos[g].etiquetas);
+      if (r.ok) convertidos.push({ reciboId: g, tipo: "conjunta", total: r.total, redondeo: r.delta });
+      else if (!r.nada) saltados.push({ reciboId: g, tipo: "conjunta", motivo: r.motivo });
+    });
+  }
+  // (b) Excedentes individuales: un recibo de 1 pedido.
+  cotsW.slice().forEach(function (cotOriginal) {
+    if (opts.soloCotId && cotOriginal.id !== opts.soloCotId) return;
+    (cotOriginal.compras || []).forEach(function (compra) {
+      if (esMiembroRecibo(compra) || (compra.compartida && compra.compartida.grupoId)) return;
+      if (estadoCompra(compra) !== "si" || cantidadExcedenteCompra(compra) <= 0) return;
+      // Todavía sin sincronizar ("Sí" sin pulsar "Actualizar movimientos"):
+      // no hay plata en la caja que convertir — no es un error.
+      var hayExc = txW.some(function (t) { return !t.reciboCompraId && t.cotizacionId === cotOriginal.id && (t.id === compra.excedenteTxId || t.origenCompraExcedenteClave === compra.clave); });
+      if (!hayExc) return;
+      var reciboId = "rc-" + hashCorto(cotOriginal.id + "|" + compra.clave + "|" + (compra.excedenteTxId || ""));
+      var r = intentar(reciboId, [{ cotId: cotOriginal.id, clave: compra.clave }], "excedente", []);
+      if (r.ok) convertidos.push({ reciboId: reciboId, tipo: "excedente", total: r.total, redondeo: r.delta });
+      else if (!r.nada) saltados.push({ reciboId: reciboId, tipo: "excedente", motivo: r.motivo });
+    });
+  });
+  return { tx: txW, cotizaciones: cotsW, convertidos: convertidos, saltados: saltados };
 }
 
 // Escribe un recibo nuevo en las compras de sus pedidos (sin tocar

@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -771,7 +771,7 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
     '<span class="mobile-th">Cant. est.</span><span class="amount">' + estimadoCant + "</span>" +
     '<span class="mobile-th">Costo est.</span><span class="amount">' + fmt(linea.costoTotal) + "</span>" +
     '<span class="mobile-th">Cant. real</span>' +
-    (linea.esGlobal || linea.esServicio
+    (lineaSinCantidad(linea) || linea.esServicio
       ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
       : '<input type="number" class="mini-input" style="width:100%" ' + (linea.esProducto ? 'step="1" ' : "") + 'value="' + esc(usado) + '"' + attrs + ' data-campo="cantidadReal" title="Cuánto usa de verdad este pedido. Si sube, se toma de la reserva del recibo; si baja, vuelve a la reserva." />') +
     '<span class="mobile-th">Costo real</span><span class="amount" title="Lo que le toca a este pedido del recibo de compra">' + fmt(compra.costoReal) + "</span>" +
@@ -787,8 +787,8 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
       var cab = r.cabecera || {};
       var prov = cab.proveedorId ? clienteById(cab.proveedorId) : null;
       html += '<div class="section-sub" style="margin:0 0 6px;flex-basis:100%;">🧾 Recibo del ' + esc(cab.fecha || "") + (prov ? " · " + esc(prov.nombre) : "") +
-        " · su parte: " + (linea.esGlobal ? "" : num(p.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(p.costo) +
-        (L && (L.reserva.cantidad > 0 || L.reserva.costo > 0) ? " · reserva libre: " + (linea.esGlobal ? "" : num(L.reserva.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(L.reserva.costo) : "") +
+        " · su parte: " + (lineaSinCantidad(linea) ? "" : num(p.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(p.costo) +
+        (L && (L.reserva.cantidad > 0 || L.reserva.costo > 0) ? " · reserva libre: " + (lineaSinCantidad(linea) ? "" : num(L.reserva.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(L.reserva.costo) : "") +
         ' <button class="btn ghost small" data-action="ver-recibo" data-recibo-id="' + esc(p.reciboId) + '">Ver recibo</button></div>';
     });
     html += '<div class="field" style="flex:1;"><label>Observaciones</label><input class="mini-input" style="width:100%" placeholder="Ej. quedó pendiente medio rollo" value="' + esc(compra.observaciones || "") + '"' + attrs + ' data-campo="observaciones" /></div>';
@@ -2153,8 +2153,20 @@ export var actions = {
     state.cotizaciones = state.cotizaciones.map(function (c) {
       return c.id === id ? Object.assign({}, c, { compras: r.compras }) : c;
     });
+    // Caso "medias" (decisión del usuario 2026-09-23): lo que se compró de
+    // más para UN pedido pasa en el acto a ser un recibo de compra de 1
+    // pedido — su excedente queda como la reserva de ese recibo, el mismo
+    // mecanismo que una compra para varios pedidos (Hallazgo #52, fase 3).
+    // Misma conversión verificada al peso que corre al cargar la app.
+    var promocion = migrarComprasARecibos(state.tx, state.cotizaciones, { soloCotId: id });
+    if (promocion.convertidos.length) {
+      state.tx = promocion.tx;
+      state.cotizaciones = promocion.cotizaciones;
+    }
     guardarCotizaciones(); persist("tx"); notify();
     var partes = [];
+    if (promocion.convertidos.length) partes.push(promocion.convertidos.length + " compra(s) con excedente pasaron a ser recibo de compra (lo que sobró queda como su reserva)");
+    if (promocion.saltados.length) partes.push("no se pudo pasar a recibo: " + promocion.saltados[0].motivo);
     if (r.creados) partes.push(r.creados + " movimiento(s) creado(s)");
     if (r.actualizados) partes.push(r.actualizados + " actualizado(s)");
     if (r.borrados) partes.push(r.borrados + " retirado(s)");

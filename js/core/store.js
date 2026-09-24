@@ -17,7 +17,7 @@ import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsqu
 // en tiempo de ejecución, mucho después de que los dos módulos ya
 // terminaron de evaluarse. La alternativa (duplicar calcListaCompras acá)
 // rompería "una sola fuente por fórmula".
-import { repararComprasSinSeguimiento } from "./calc.js";
+import { repararComprasSinSeguimiento, migrarComprasARecibos } from "./calc.js";
 import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
@@ -442,6 +442,10 @@ export const state = {
   // Qué tarjetas de Recibo de compra están desplegadas en Finanzas →
   // Historial ({<reciboId>: true}). Solo pantalla, no se guarda.
   reciboExpandido: {},
+  // Resultado de la conversión de lo viejo a recibos en esta carga
+  // ({convertidos, saltados}, ver loadAll) — para avisarlo en la pestaña
+  // Recibos de compra. Solo pantalla.
+  migracionRecibos: null,
   // { [insumoId]: true } — qué panel de "Enlace" (ver renderEnlacePanel en
   // core/components.js) está desplegado, y { [insumoId]: texto } lo que hay
   // escrito en su buscador de insumo específico. Estado de UI: nunca se
@@ -1245,6 +1249,28 @@ export async function loadAll() {
     // Mismo criterio de "solo con red real" que las reparaciones de arriba.
     if (!huboFalloDeRed && repararPedidoIdExcedente(state.tx)) {
       persist("tx");
+    }
+
+    // Conversión única de lo viejo a Recibos de compra (Hallazgo #52, fase
+    // 3 — decisión del usuario 2026-09-23): cada compra conjunta ya
+    // registrada pasa a ser un recibo, y cada excedente individual un
+    // recibo de 1 pedido. Va DESPUÉS de las dos reparaciones del excedente
+    // (así parte de datos ya canónicos: marca presente, sin pedidoId) y
+    // ANTES de repararComprasSinSeguimiento. Es la ÚNICA excepción a "al
+    // cargar nunca se reescribe plata": corre una sola vez por dato (lo ya
+    // convertido no vuelve a ser candidato), cada grupo se verifica al peso
+    // antes de aceptarlo (ver migrarComprasARecibos en core/calc.js) y se
+    // avisa en pantalla. No corre si hay algo por recuperar de una sesión
+    // anterior en tx/cotizaciones: el usuario podría reemplazar esos datos.
+    if (!huboFalloDeRed && candidatasRecuperacion.indexOf("tx") === -1 && candidatasRecuperacion.indexOf("cotizaciones") === -1) {
+      var migracion = migrarComprasARecibos(state.tx, state.cotizaciones);
+      if (migracion.convertidos.length) {
+        state.tx = migracion.tx;
+        state.cotizaciones = migracion.cotizaciones;
+        persist("tx"); persist("cotizaciones");
+        mostrarToast("✓ " + migracion.convertidos.length + " compra(s) ya registrada(s) pasaron a ser recibos de compra (Finanzas → Recibos de compra). La caja no cambió.");
+      }
+      state.migracionRecibos = { convertidos: migracion.convertidos, saltados: migracion.saltados };
     }
 
     // Auto-reparación: una compra que perdió su seguimiento en
