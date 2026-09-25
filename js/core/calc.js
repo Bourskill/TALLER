@@ -2478,55 +2478,64 @@ export function estadoLineaCompra(cot, linea) {
 // anterior (un registro suelto que elegía su destino en un desplegable). Una
 // cotización vieja solo tiene el segundo y sigue calculando igual que
 // siempre; las nuevas solo usan el primero.
+// Variación (real contra estimado) de UNA compra de la lista, y la línea a
+// la que pertenece. Es la única fórmula: la suman calcCotGastosReales (el
+// costo real del pedido) y el reparto por origen del reporte de Productos
+// (calcProductosVendidosRango), así los dos nunca pueden discrepar.
+// `lineas` = calcListaCompras(cot).
+export function variacionCompra(c, lineas, cot) {
+  // "servicio" también es un costo real (de verdad se produjo), así que
+  // entra a la variación igual que "si" — la única diferencia entre los dos
+  // es si además genera un movimiento en Finanzas (ver sincronizar-compras-
+  // finanzas en modules/cotizaciones.js), no si cuenta como costo.
+  var estado = estadoCompra(c);
+  if (estado === "no") {
+    // Sin comprar todavía cuenta a su estimado (variación 0), más lo que
+    // el pedido ya se sabe que usa por encima (ver faltanteVigenteCompra).
+    var lineaNo = lineas.filter(function (l) { return l.clave === c.clave; })[0];
+    return { linea: lineaNo || null, variacion: lineaNo ? costoFaltanteCompra(c, lineaNo, cot) : 0 };
+  }
+  var linea = lineas.filter(function (l) { return l.clave === c.clave; })[0];
+  // Sin `linea` (el insumo/referencia/costo global que la originó ya se
+  // borró de la cotización), esta compra quedó huérfana — no es un
+  // sobrecosto real de nada que exista hoy, es una entrada vieja
+  // esperando que "Actualizar movimientos financieros" la limpie (ver
+  // sincronizar-compras-finanzas). Contarla acá inflaba "costo real" para
+  // siempre por algo que ya no está en la cotización. Auditoría 2026-09-20.
+  if (!linea) return { linea: null, variacion: 0 };
+  // "Ahorro": se decidió a propósito NO comprarlo/hacerlo — por
+  // definición cuenta como el ahorro completo frente al estimado, sin
+  // depender de `costoReal` (la fila ni lo pide, ver renderFilaCompra en
+  // modules/cotizaciones.js). Se resuelve ANTES del chequeo de abajo a
+  // propósito: no necesita que nadie haya escrito nada para contar.
+  if (estado === "ahorro") return { linea: linea, variacion: -linea.costoTotal };
+  // Ojo con "!num(...)": 0 es falsy, así que trataba IGUAL un costo real
+  // escrito A PROPÓSITO en $0 (de verdad no costó nada — ej. un domicilio
+  // que resultó gratis) que uno que NUNCA se escribió (dato viejo, de
+  // antes de que "Sí"/"Servicio" autorellenara con el estimado, ver
+  // set-cot-compra en modules/cotizaciones.js) — el primero es un ahorro
+  // real que hay que contar, el segundo no es dato y hay que ignorarlo.
+  // Con la comparación falsy, el primer caso quedaba invisible: la
+  // ganancia real se quedaba corta exactamente en lo que esa línea sí
+  // ahorró. Mismo patrón ya corregido en calcResumenCompras (más abajo).
+  // Reportado en producción 2026-09-21 — la razón por la que hoy existe
+  // el estado "Ahorro" (antes había que elegir "Sí" y escribir "0" a
+  // mano, una forma confusa de decir "no lo compré").
+  var costoEscrito = c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
+  if (!costoEscrito) return { linea: linea, variacion: 0 };
+  // costoRealPedido, no c.costoReal a secas: si se compró de más y esa
+  // parte se separó como excedente (compra de insumo aparte), esa parte
+  // no es sobrecosto de ESTE pedido — ver cantidadExcedenteCompra.
+  // Más lo que le falta comprar (compra de recibo con faltante), a su
+  // costo estimado: no es un ahorro, el pedido lo sigue necesitando
+  // (Hallazgo #54).
+  return { linea: linea, variacion: costoRealPedido(c) + costoFaltanteCompra(c, linea, cot) - linea.costoTotal };
+}
+
 export function calcCotGastosReales(cot) {
   var compras = calcListaCompras(cot);
   var deCompras = ((cot && cot.compras) || []).reduce(function (a, c) {
-    // "servicio" también es un costo real (de verdad se produjo), así que
-    // entra a la variación igual que "si" — la única diferencia entre los dos
-    // es si además genera un movimiento en Finanzas (ver sincronizar-compras-
-    // finanzas en modules/cotizaciones.js), no si cuenta como costo.
-    var estado = estadoCompra(c);
-    if (estado === "no") {
-      // Sin comprar todavía cuenta a su estimado (variación 0), más lo que
-      // el pedido ya se sabe que usa por encima (ver faltanteVigenteCompra).
-      var lineaNo = compras.filter(function (l) { return l.clave === c.clave; })[0];
-      return lineaNo ? a + costoFaltanteCompra(c, lineaNo, cot) : a;
-    }
-    var linea = compras.filter(function (l) { return l.clave === c.clave; })[0];
-    // Sin `linea` (el insumo/referencia/costo global que la originó ya se
-    // borró de la cotización), esta compra quedó huérfana — no es un
-    // sobrecosto real de nada que exista hoy, es una entrada vieja
-    // esperando que "Actualizar movimientos financieros" la limpie (ver
-    // sincronizar-compras-finanzas). Contarla acá inflaba "costo real" para
-    // siempre por algo que ya no está en la cotización. Auditoría 2026-09-20.
-    if (!linea) return a;
-    // "Ahorro": se decidió a propósito NO comprarlo/hacerlo — por
-    // definición cuenta como el ahorro completo frente al estimado, sin
-    // depender de `costoReal` (la fila ni lo pide, ver renderFilaCompra en
-    // modules/cotizaciones.js). Se resuelve ANTES del chequeo de abajo a
-    // propósito: no necesita que nadie haya escrito nada para contar.
-    if (estado === "ahorro") return a - linea.costoTotal;
-    // Ojo con "!num(...)": 0 es falsy, así que trataba IGUAL un costo real
-    // escrito A PROPÓSITO en $0 (de verdad no costó nada — ej. un domicilio
-    // que resultó gratis) que uno que NUNCA se escribió (dato viejo, de
-    // antes de que "Sí"/"Servicio" autorellenara con el estimado, ver
-    // set-cot-compra en modules/cotizaciones.js) — el primero es un ahorro
-    // real que hay que contar, el segundo no es dato y hay que ignorarlo.
-    // Con la comparación falsy, el primer caso quedaba invisible: la
-    // ganancia real se quedaba corta exactamente en lo que esa línea sí
-    // ahorró. Mismo patrón ya corregido en calcResumenCompras (más abajo).
-    // Reportado en producción 2026-09-21 — la razón por la que hoy existe
-    // el estado "Ahorro" (antes había que elegir "Sí" y escribir "0" a
-    // mano, una forma confusa de decir "no lo compré").
-    var costoEscrito = c.costoReal !== "" && c.costoReal !== undefined && c.costoReal !== null;
-    if (!costoEscrito) return a;
-    // costoRealPedido, no c.costoReal a secas: si se compró de más y esa
-    // parte se separó como excedente (compra de insumo aparte), esa parte
-    // no es sobrecosto de ESTE pedido — ver cantidadExcedenteCompra.
-    // Más lo que le falta comprar (compra de recibo con faltante), a su
-    // costo estimado: no es un ahorro, el pedido lo sigue necesitando
-    // (Hallazgo #54).
-    return a + (costoRealPedido(c) + costoFaltanteCompra(c, linea, cot) - linea.costoTotal);
+    return a + variacionCompra(c, compras, cot).variacion;
   }, 0);
   var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
   return deCompras + deGastos;
@@ -2590,6 +2599,13 @@ export function calcCotResultadoReal(cot) {
 // Agrega los insumos usados en un conjunto de referencias de UNA cotización
 // en un mapa {clave: {...}} — usado por calcListaCompras ("Qué falta
 // comprar" de esa cotización).
+// La clave de la línea de compra de un insumo (ver agregarInsumosDeReferencias).
+// Una sola fórmula: también la usa el reparto por origen del reporte de
+// Productos para saber qué referencias usan cada compra.
+function claveInsumoCompra(ins) {
+  var nombre = (ins.nombre || "Insumo").trim();
+  return ins.tipo === "producto_comprado" ? "producto|" + nombre.toLowerCase() : nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
+}
 function agregarInsumosDeReferencias(referencias) {
   var mapa = {};
   (referencias || []).forEach(function (ref) {
@@ -2605,7 +2621,7 @@ function agregarInsumosDeReferencias(referencias) {
       // Finanzas) sigue encontrando su línea después de migrar datos viejos,
       // en vez de quedar huérfana.
       var esProductoComprado = ins.tipo === "producto_comprado";
-      var key = esProductoComprado ? "producto|" + nombre.toLowerCase() : nombre.toLowerCase() + "|" + ins.unidad + "|" + ins.tipo;
+      var key = claveInsumoCompra(ins);
       if (!mapa[key]) mapa[key] = { clave: key, nombre: nombre, unidad: esProductoComprado ? "UND" : ins.unidad, tipo: ins.tipo, esProducto: esProductoComprado, esServicio: esInsumoServicio(ins), proveedorId: ins.proveedorId || "", cantidadFisica: 0, costoTotal: 0, refs: [] };
       var cantFisica = 0;
       // Consumo PROPIO del insumo, no el de la referencia — ver
@@ -3895,14 +3911,8 @@ export function calcProductosVendidosRango(desde, hasta) {
     // quedan idénticas a las de siempre. Las filas viejas que salen de
     // stockConsumido no cubren todo el pedido y no se tocan.
     var costos = base.map(function (b) { return b.costoEstimado; });
-    if (desdeLineas && cotizacionQueMandaEnPedido(p)) {
-      var real = costoRealDePedido(p);
-      var estimado = costos.reduce(function (a, c) { return a + c; }, 0);
-      if (Math.abs(real - estimado) >= 0.005) {
-        var pesos = estimado > 0 ? costos : base.map(function (b) { return b.cant; });
-        costos = repartirProporcional(real, pesos, 2);
-      }
-    }
+    var cotManda = desdeLineas ? cotizacionQueMandaEnPedido(p) : null;
+    if (cotManda) costos = costoRealPorLineaPedido(p, cotManda, base);
     base.forEach(function (b, i) {
       var costoTotal = costos[i];
       filas.push({
@@ -3925,6 +3935,107 @@ export function calcProductosVendidosRango(desde, hasta) {
   return filas.sort(function (a, b) { return String(a.fecha).localeCompare(String(b.fecha)); });
 }
 
+// El costo REAL de cada línea de un pedido que viene de una cotización:
+// su costo estimado + la variación (real contra estimado) de cada compra,
+// atribuida a su ORIGEN — la de un insumo, a las referencias que lo usan
+// (en proporción a lo que aporta a cada una, y dentro de la referencia a
+// sus tallas por cantidad); la de un costo global, a las prendas por
+// unidad (igual que repartirCostosGlobales); la de un servicio cobrado, a
+// su propia línea. Lo que no se puede atribuir (datos viejos de
+// gastosReales, una línea sin referencia reconocible, un costo global sin
+// prendas donde caer) se reparte al final en proporción, para que la suma
+// sea EXACTAMENTE el costo real del pedido (costoRealDePedido).
+//
+// POR QUÉ POR ORIGEN (revisión del Hallazgo #55): repartir el total en
+// proporción al estimado le cargaba a un producto el sobrecosto de otro —
+// una tela pagada de más le caía también al Diseño, que llegó a salir con
+// ganancia negativa; una gorra marcada "Ahorro" le quitaba costo a la
+// camiseta. El "Consolidado por producto" del PDF mostraba así cifras de
+// un producto que eran de otro.
+function costoRealPorLineaPedido(p, cot, base) {
+  var est = base.map(function (b) { return b.costoEstimado; });
+  var variacion = base.map(function () { return 0; });
+  var sinAtribuir = 0;
+  var refs = cot.referencias || [];
+  var prendas = [];
+  base.forEach(function (b, i) { if (!b.l.esServicioCobrado) prendas.push(i); });
+  // Las líneas del pedido que salieron de cada referencia / servicio. Las
+  // nuevas llevan refId/servicioId (lineasDeCotizacion); las viejas se
+  // reconocen por el nombre, solo si no se repite.
+  function nombreRef(ref) { return ref.nombre || cot.descripcion || "—"; }
+  function lineasDeRef(ref) {
+    var porId = prendas.filter(function (i) { return base[i].l.refId === ref.id; });
+    if (porId.length) return porId;
+    var nombre = nombreRef(ref);
+    if (refs.filter(function (r) { return nombreRef(r) === nombre; }).length !== 1) return [];
+    return prendas.filter(function (i) { return !base[i].l.refId && base[i].l.productoNombre === nombre; });
+  }
+  function lineasDeServicio(s) {
+    var todas = base.map(function (b, i) { return i; }).filter(function (i) { return base[i].l.esServicioCobrado; });
+    var porId = todas.filter(function (i) { return base[i].l.servicioId === s.id; });
+    if (porId.length) return porId;
+    var nombre = s.nombre || "Servicio";
+    if ((cot.serviciosCobrados || []).filter(function (x) { return (x.nombre || "Servicio") === nombre; }).length !== 1) return [];
+    return todas.filter(function (i) { return !base[i].l.servicioId && base[i].l.productoNombre === nombre; });
+  }
+  function repartir(v, destinos, pesos) {
+    if (!destinos.length) { sinAtribuir += v; return; }
+    var partes = repartirProporcional(v, pesos, 2);
+    destinos.forEach(function (i, k) { variacion[i] += partes[k]; });
+  }
+  var lineasCompra = calcListaCompras(cot);
+  (cot.compras || []).forEach(function (c) {
+    var r = variacionCompra(c, lineasCompra, cot);
+    if (!r.variacion || !r.linea) return;
+    var clave = r.linea.clave;
+    if (clave.indexOf("servicio|") === 0) {
+      var s = (cot.serviciosCobrados || []).filter(function (x) { return "servicio|" + x.id === clave; })[0];
+      var idxS = s ? lineasDeServicio(s) : [];
+      repartir(r.variacion, idxS, idxS.map(function () { return 1; }));
+    } else if (r.linea.esGlobal) {
+      repartir(r.variacion, prendas, prendas.map(function (i) { return base[i].cant; }));
+    } else {
+      // Cuánto aporta cada referencia a esta línea de compra: su costo
+      // estimado, o su cantidad si el estimado es 0.
+      var aportes = refs.map(function (ref) {
+        var cant = num(ref.cantidadPedida) || 0;
+        var ins = (ref.insumos || []).filter(function (x) { return claveInsumoCompra(x) === clave; });
+        return {
+          ref: ref,
+          costo: ins.reduce(function (a, x) { return a + calcCostoPrenda(x, ref) * cant; }, 0),
+          cantidad: ins.length ? cant : 0
+        };
+      }).filter(function (x) { return x.cantidad > 0 || x.costo > 0; });
+      var porCosto = aportes.some(function (x) { return x.costo > 0; });
+      var destinos = [], pesos = [];
+      aportes.forEach(function (x) {
+        var idx = lineasDeRef(x.ref);
+        var peso = porCosto ? x.costo : x.cantidad;
+        var cantRef = idx.reduce(function (a, i) { return a + base[i].cant; }, 0);
+        idx.forEach(function (i) {
+          destinos.push(i);
+          pesos.push(cantRef > 0 ? peso * base[i].cant / cantRef : peso / idx.length);
+        });
+      });
+      repartir(r.variacion, destinos, pesos);
+    }
+  });
+  (cot.gastosReales || []).forEach(function (g) { sinAtribuir += calcCotGastoVariacion(cot, g); });
+  var costos = est.map(function (e, i) { return e + variacion[i]; });
+  // Lo que falte para llegar al costo real exacto (lo no atribuido y
+  // cualquier diferencia entre el estimado de las líneas y el de la
+  // cotización), en proporción a cada línea.
+  var real = costoRealDePedido(p);
+  var diferencia = real - costos.reduce(function (a, c) { return a + c; }, 0);
+  if (Math.abs(diferencia) >= 0.005) {
+    var pesosDif = costos.map(function (c) { return Math.max(0, c); });
+    if (!pesosDif.some(function (x) { return x > 0; })) pesosDif = base.map(function (b) { return b.cant; });
+    var ajuste = repartirProporcional(diferencia, pesosDif, 2);
+    costos = costos.map(function (c, i) { return c + ajuste[i]; });
+  }
+  return costos;
+}
+
 // El costo que debe contar en el reporte de un pedido: si viene de una
 // cotización, el costo REAL (estimado + lo que las compras registradas en
 // Producción de verdad costaron, ver calcCotResultadoReal) en vez del
@@ -3943,11 +4054,19 @@ export function calcProductosVendidosRango(desde, hasta) {
 // calcDesfaseCotizacionPedido). Antes esto no se miraba y el reporte de
 // Pedidos le ponía al pedido rápido el costo del borrador — reproducido:
 // costo $0 y toda la venta como ganancia (Hallazgo #55).
+//
+// Pero si en ese borrador YA se registraron compras (una compra "Sí" de un
+// borrador escalado es plata real, ligada al pedido — pedidoIdDeCotParaTx),
+// esas sí mandan: descartarlas dejaba el pedido con su costo tecleado y toda
+// la tela pagada fuera del reporte (revisión del Hallazgo #55).
 function cotizacionQueMandaEnPedido(p) {
   if (!p || !p.cotizacionId) return null;
   var cot = (state.cotizaciones || []).filter(function (c) { return c.id === p.cotizacionId; })[0];
   if (!cot) return null;
-  if (cot.pedidoOrigenId === p.id && cot.pedidoId !== p.id) return null;
+  if (cot.pedidoOrigenId === p.id && cot.pedidoId !== p.id) {
+    var hayCompras = (cot.compras || []).some(function (c) { return estadoCompra(c) !== "no"; }) || (cot.gastosReales || []).length > 0;
+    if (!hayCompras) return null;
+  }
   return cot;
 }
 export function costoRealDePedido(p) {

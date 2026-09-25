@@ -2013,7 +2013,9 @@ export var actions = {
       // puntual, no algo que "otro cliente también pidió" — duplicar deja
       // siempre una venta normal con las mismas líneas.
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
-      lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); return copia; })
+      // refId/servicioId apuntan a la cotización del ORIGINAL: un id hacia
+      // afuera no se copia (el duplicado es un pedido rápido, sin cotización).
+      lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); delete copia.refId; delete copia.servicioId; return copia; })
     };
     state.pedidoVendedorAbierto = !!(p.vendedor && p.vendedor.nombre);
     // Marca este borrador como "duplicado": SOLO en este caso la base del

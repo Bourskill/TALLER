@@ -2742,6 +2742,9 @@ function lineasDeCotizacion(cot) {
     function nuevaLinea(talla, cantidad) {
       return {
         id: uid(), tipo: ref.productoId ? "catalogo" : "libre",
+        // De qué referencia salió: el reporte de Productos le atribuye a
+        // esta línea las compras de SU referencia (Hallazgo #55).
+        refId: ref.id || "",
         productoId: ref.productoId || "", productoNombre: ref.nombre || cot.descripcion || "—",
         imagenUrl: ref.imagenUrl || "", talla: talla, cantidad: cantidad,
         precioUnitario: t.precioUnit, costoUnitario: t.costoUnit,
@@ -2770,6 +2773,7 @@ function lineasDeCotizacion(cot) {
   (cot.serviciosCobrados || []).forEach(function (s) {
     lineas.push({
       id: uid(), tipo: "libre", productoId: "",
+      servicioId: s.id || "", // ver refId arriba: a esta línea van las compras de SU servicio
       productoNombre: s.nombre || "Servicio",
       imagenUrl: "", talla: "", cantidad: 1,
       precioUnitario: num(s.precio), costoUnitario: num(s.costo),

@@ -3122,11 +3122,29 @@ el estimado. De eso depende la detección de desfase, así que no se tocan.
 - Textos corregidos: la ayuda de "Costo x prenda" y la de la sección del
   reporte, y el comentario del PDF.
 
-**Límite declarado:** el reparto es proporcional. En un pedido con varias
-referencias, un sobrecosto de una tela también se reparte sobre las otras.
-Los totales siempre cuadran; el costo por PRODUCTO es una aproximación.
-Atribuirlo por origen exigiría guardar `refId` en las líneas; se decide si
-hace falta.
+**Revisión independiente (mismo día) — dos correcciones:**
+1. **El reparto proporcional podía invertir el signo de la ganancia de un
+   producto.** Una tela con estimado $0 pagada en $100.000 le caía casi
+   entera al Diseño, que salía con −$70.000 cuando ganó $30.000. Una
+   gorra marcada "Ahorro" le quitaba costo a la camiseta. Ahora
+   `costoRealPorLineaPedido` atribuye cada variación a su ORIGEN:
+   - la de un insumo, a las referencias que lo usan, en proporción a lo
+     que aporta a cada una, y dentro de la referencia a sus tallas por
+     cantidad;
+   - la de un costo global, a las prendas por unidad;
+   - la de un servicio cobrado, a su línea.
+   Lo no atribuible se reparte al final, así que la suma sigue siendo
+   exactamente el costo real. La variación de cada compra sale de una sola
+   fórmula (`variacionCompra`, extraída de `calcCotGastosReales`). Las
+   líneas nuevas llevan `refId`/`servicioId`; las viejas se reconocen por
+   el nombre si no se repite. Duplicar un pedido no copia esos ids.
+2. **Mi guarda del borrador escalado descartaba plata real.** Si en el
+   borrador ya se registraron compras (una compra "Sí" de un escalado es
+   un gasto real ligado al pedido), el borrador sí manda. Solo un borrador
+   sin compras deja el costo del pedido tal cual.
+
+Pruebas: borrador con compra de $150.000, Diseño con +$30.000, Gorra en
+"Ahorro" con $0. Sin el cambio fallan.
 
 **Pruebas:**
 - El caso del mapa (Productos = Pedidos = $150.000).

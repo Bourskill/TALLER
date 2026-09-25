@@ -7985,6 +7985,45 @@ state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 state.tab = "resumen";
 
+// ---------------------------------------------------------------------
+// Revisión del Hallazgo #55: el borrador escalado CON compras sí manda, y
+// el costo real se atribuye por origen (no en proporción al estimado).
+// ---------------------------------------------------------------------
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+// (1) Pedido rápido escalado, con la tela ya pagada en el borrador.
+state.cotizaciones = [cotMapa("cot-h55b-esc", "", 10, 12000, { estado: "borrador", pedidoOrigenId: "ped-h55b-esc", compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 12, costoReal: 150000, txId: "" }] })];
+state.pedidos = [pedidoMapa("ped-h55b-esc", "cot-h55b-esc", 500000, 0, { lineas: [lineaPedidoMapa("Camiseta", "", 10, 50000, 0)] })];
+assert(filaPedidosMapa("ped-h55b-esc").costo === 150000 && filasProductosMapa("OP-ped-h55b-esc")[0].costoTotal === 150000, "#55: un pedido escalado cuyo borrador YA tiene compras registradas cuenta esa plata real ($150.000) — la guarda del borrador solo aplica si no hay compras");
+
+// (2) Tela con estimado $0 pagada en $100.000, más un Diseño cobrado: el
+// sobrecosto es de la camiseta, no del Diseño. Líneas viejas, sin refId.
+state.cotizaciones = [cotMapa("cot-h55b-dis", "ped-h55b-dis", 10, 0, {
+  serviciosCobrados: [{ id: "srv-h55b-dis", nombre: "Diseño", precio: 80000, costo: 50000, proveedorId: "" }],
+  compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 100000, txId: "" }]
+})];
+state.pedidos = [pedidoMapa("ped-h55b-dis", "cot-h55b-dis", 580000, 50000, { lineas: [
+  lineaPedidoMapa("Camiseta", "", 10, 50000, 0), lineaPedidoMapa("Diseño", "", 1, 80000, 50000, { esServicioCobrado: true })
+] })];
+const prodDisH55 = filasProductosMapa("OP-ped-h55b-dis");
+assert(prodDisH55[0].costoTotal === 100000 && prodDisH55[1].costoTotal === 50000 && prodDisH55[1].ganancia === 30000, "#55: la tela pagada ($100.000) le cae a la Camiseta y el Diseño sigue ganando $30.000 — con el reparto proporcional el Diseño salía con −$70.000");
+
+// (3) Camiseta con tela exacta + Gorra marcada "Ahorro" (el cliente la trajo).
+state.cotizaciones = [cotMapa("cot-h55b-ah", "ped-h55b-ah", 10, 12000, {
+  referencias: [
+    { id: "ref-h55b-cam", nombre: "Camiseta", imagenUrl: "", cantidadPedida: 10, precioVenta: 50000, insumos: [{ id: "ins-h55b-tela", nombre: "Tela", unidad: "m", costo: 12000, tipo: "tela", cantidad: 1, categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } }], detalle: [], estado: "", estadosDef: [] },
+    { id: "ref-h55b-gor", nombre: "Gorra", imagenUrl: "", cantidadPedida: 10, precioVenta: 20000, insumos: [{ id: "ins-h55b-gor", nombre: "Gorra", unidad: "UND", costo: 8000, tipo: "producto_comprado", cantidad: 1, categoriaId: "", esServicio: false, enlace: { categorias: [], insumos: [] } }], detalle: [], estado: "", estadosDef: [] }
+  ],
+  compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 120000, txId: "" }, { clave: "producto|gorra", estado: "ahorro" }]
+})];
+state.pedidos = [pedidoMapa("ped-h55b-ah", "cot-h55b-ah", 700000, 200000, { lineas: [
+  lineaPedidoMapa("Camiseta", "", 10, 50000, 12000, { refId: "ref-h55b-cam" }), lineaPedidoMapa("Gorra", "", 10, 20000, 8000, { refId: "ref-h55b-gor" })
+] })];
+const prodAhH55 = filasProductosMapa("OP-ped-h55b-ah");
+assert(prodAhH55[0].costoTotal === 120000 && prodAhH55[1].costoTotal === 0 && filaPedidosMapa("ped-h55b-ah").costo === 120000, "#55: la Gorra marcada \"Ahorro\" queda en $0 y la Camiseta conserva sus $120.000 exactos — el reparto proporcional daba $72.000 y $48.000");
+
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
