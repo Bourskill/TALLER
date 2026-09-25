@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -649,7 +649,7 @@ function renderTablaCompras(c, compras, hayProveedor) {
     '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra en estado \'Sí\', y borra el de las que ya no lo estén. Las de \'Servicio\' NO generan movimiento: no hubo un pago instantáneo que registrar. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
     (c.estado === "convertida"
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como UN solo movimiento en Finanzas. Es una alternativa a llevar las compras reales una por una: registrar los dos contaría el mismo costo dos veces.">' +
-        (c.estimadoTxId ? "Actualizar el estimado ya registrado" : "Registrar estimado completo como movimiento") + "</button>"
+        (estimadoTxDeCot(c, state.tx) ? "Actualizar el estimado ya registrado" : "Registrar estimado completo como movimiento") + "</button>"
       : '<span class="tag" style="background:var(--surface-3);" title="Disponible una vez esta cotización ya sea un pedido — es una medida de seguridad para no registrar gastos sin que exista un pedido con abono real.">🔒 Estimado completo (disponible al convertir en pedido)</span>') +
     "</div>";
   return html;
@@ -2144,7 +2144,7 @@ export var actions = {
     // El otro camino (registrar el costo estimado completo como un solo
     // movimiento) ya metió ese costo en la caja. Llevar además las compras
     // reales contaría el mismo pedido dos veces — se avisa antes, no después.
-    if (cot.estimadoTxId && state.tx.some(function (t) { return t.id === cot.estimadoTxId; })) {
+    if (estimadoTxDeCot(cot, state.tx)) {
       if (!window.confirm("Este pedido ya tiene su costo ESTIMADO completo registrado como un movimiento en Finanzas.\n\n" +
         "Si además llevas las compras reales, el costo de este pedido va a contarse DOS veces.\n\n" +
         "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
@@ -2436,11 +2436,17 @@ export var actions = {
     // limpiara podía apuntar al movimiento de OTRA cotización — se trata
     // como si no existiera, y se crea uno nuevo propio en vez de reescribir
     // el ajeno.
-    var existente = cot.estimadoTxId ? state.tx.filter(function (t) { return t.id === cot.estimadoTxId && t.cotizacionId === cot.id; })[0] : null;
-    var yaHayCompras = (cot.compras || []).some(function (c) { return c.txId; });
+    var existente = estimadoTxDeCot(cot, state.tx);
+    // Las compras ya llevadas a Finanzas, por CUALQUIERA de las dos vías:
+    // compra suelta o parte de un Recibo de compra. Antes se miraba solo
+    // `compra.txId`, que en una compra de recibo está vacío — con la tela
+    // pagada en un recibo, el aviso de doble conteo no salía (Hallazgo #53).
+    var enFinanzas = comprasEnFinanzas(cot, state.tx);
+    var yaHayCompras = enFinanzas.costoPedido > 0;
+    var avisoCompras = "⚠ Ojo: este pedido ya tiene " + fmt(enFinanzas.costoPedido) + " en compras reales llevadas a Finanzas (sueltas o en un recibo de compra). Si registras también el estimado, el costo de este pedido va a contarse DOS veces en la caja y en el reporte.";
 
     if (existente) {
-      if (!window.confirm("Este pedido ya tiene su costo estimado registrado en Finanzas por " + fmt(existente.monto) + ".\n\n¿Actualizarlo a " + fmt(totales.costoTotal) + "?\n\nSe modifica ese mismo movimiento, no se crea uno nuevo.")) return;
+      if (!window.confirm("Este pedido ya tiene su costo estimado registrado en Finanzas por " + fmt(existente.monto) + ".\n\n¿Actualizarlo a " + fmt(totales.costoTotal) + "?\n\nSe modifica ese mismo movimiento, no se crea uno nuevo." + (yaHayCompras ? "\n\n" + avisoCompras : ""))) return;
       state.tx = state.tx.map(function (t) {
         return t.id === existente.id ? Object.assign({}, t, { monto: totales.costoTotal, concepto: "Estimado completo del pedido — " + cot.descripcion }) : t;
       });
@@ -2450,7 +2456,7 @@ export var actions = {
     }
 
     if (!window.confirm("Se registra en Finanzas un gasto de " + fmt(totales.costoTotal) + " (el costo ESTIMADO de todo el pedido)." +
-      (yaHayCompras ? "\n\n⚠ Ojo: este pedido ya tiene compras reales llevadas a Finanzas. Si registras también el estimado, el costo de este pedido va a contarse DOS veces en la caja y en el reporte." : "") +
+      (yaHayCompras ? "\n\n" + avisoCompras : "") +
       "\n\n¿Continuar?")) return;
     var txId = uid();
     state.tx.unshift({
@@ -2813,6 +2819,22 @@ export function sincronizarComprasFinanzasDe(cot) {
   var creados = 0, actualizados = 0, borrados = 0, huerfanas = 0;
   var recibosTocados = [];
 
+  // Borra de la caja el movimiento `id` SOLO si es de verdad una compra
+  // suelta de ESTA cotización. Un id guardado en una compra apunta hacia
+  // afuera: en una cotización duplicada antes del arreglo de
+  // duplicarCotizacionCompleta puede ser el movimiento del ORIGINAL, y
+  // desde la fase 3 del Recibo ese movimiento pudo pasar a ser la parte o
+  // la reserva de un recibo (mismo id). Borrarlo por id a secas sacaba
+  // plata real de la caja y descuadraba el recibo del original (Hallazgo
+  // #53). Devuelve si borró algo; quien llama limpia el puntero igual,
+  // porque un id ajeno nunca es válido.
+  function quitarPropio(id) {
+    if (!id) return false;
+    var antes = state.tx.length;
+    state.tx = state.tx.filter(function (t) { return !(t.id === id && t.cotizacionId === cot.id && !t.reciboCompraId); });
+    return state.tx.length !== antes;
+  }
+
   var compras = (cot.compras || []).map(function (compra) {
     // Una compra que es parte de un Recibo de compra no se sincroniza por
     // acá: sus movimientos los arma el recibo (reconciliarTxRecibo, al
@@ -2841,12 +2863,8 @@ export function sincronizarComprasFinanzasDe(cot) {
     // mismo día que se agregó este chequeo. Auditoría 2026-09-20,
     // corregido el mismo día tras el reporte.
     if (!linea && compra.clave.indexOf("global|") === 0) {
-      if (compra.txId) {
-        state.tx = state.tx.filter(function (t) { return t.id !== compra.txId; });
-      }
-      if (compra.excedenteTxId) {
-        state.tx = state.tx.filter(function (t) { return t.id !== compra.excedenteTxId; });
-      }
+      quitarPropio(compra.txId);
+      quitarPropio(compra.excedenteTxId);
       huerfanas++;
       return null;
     }
@@ -2864,8 +2882,7 @@ export function sincronizarComprasFinanzasDe(cot) {
     var monto = esCompraSi ? costoRealPedido(compra) : 0;
     if (!esCompraSi || monto <= 0) {
       if (resultado.txId) {
-        state.tx = state.tx.filter(function (t) { return t.id !== resultado.txId; });
-        borrados++;
+        if (quitarPropio(resultado.txId)) borrados++;
         resultado = Object.assign({}, resultado, { txId: "" });
       }
     } else {
@@ -2895,7 +2912,7 @@ export function sincronizarComprasFinanzasDe(cot) {
       // id) y lo reescribía en vez de crear uno nuevo, dejando al original
       // sin su propio movimiento. Un txId que apunta a un tx de OTRA
       // cotización se trata como si no existiera: se crea uno nuevo, propio.
-      var existente = resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id; })[0] : null;
+      var existente = resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null;
       if (existente) {
         Object.assign(existente, datos);
         actualizados++;
@@ -2944,7 +2961,7 @@ export function sincronizarComprasFinanzasDe(cot) {
         unidad: linea.unidad || "",
         origenCompraExcedenteClave: compra.clave
       };
-      var existenteExc = resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id; })[0] : null;
+      var existenteExc = resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null;
       if (existenteExc) {
         Object.assign(existenteExc, datosExc);
         actualizados++;
@@ -2955,8 +2972,7 @@ export function sincronizarComprasFinanzasDe(cot) {
         resultado = Object.assign({}, resultado, { excedenteTxId: excId });
       }
     } else if (resultado.excedenteTxId) {
-      state.tx = state.tx.filter(function (t) { return t.id !== resultado.excedenteTxId; });
-      borrados++;
+      if (quitarPropio(resultado.excedenteTxId)) borrados++;
       resultado = Object.assign({}, resultado, { excedenteTxId: "" });
     }
 

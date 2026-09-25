@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -972,9 +972,11 @@ export var actions = {
         var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotId; })[0];
         var compra = cot && (cot.compras || []).filter(function (c) { return c.clave === p.compraClave; })[0];
         if (!compra) return;
-        var viejo = [compra.txId, compra.excedenteTxId].filter(Boolean).some(function (id) {
-          return state.tx.some(function (t) { return t.id === id && !esFilaRecibo(t); });
-        });
+        // Solo cuenta un movimiento suelto que sea de ESTA cotización (ver
+        // comprasEnFinanzas): un id heredado de un duplicado viejo apunta al
+        // del original, y pedir "Actualizar movimientos" por eso terminaba
+        // borrando un movimiento ajeno (Hallazgo #53).
+        var viejo = comprasEnFinanzas(cot, state.tx, compra.clave).sueltas.length > 0;
         if (viejo) conMovimientoViejo.push(soloOp(p.etiqueta) + " (" + x.grupo.nombre + ")");
       });
     });
@@ -986,7 +988,7 @@ export var actions = {
     // tiene su costo ESTIMADO completo registrado, sumarle compras reales
     // contaría su costo dos veces.
     var conEstimado = state.cotizaciones.filter(function (c) {
-      return cotIds.indexOf(c.id) !== -1 && c.estimadoTxId && state.tx.some(function (t) { return t.id === c.estimadoTxId; });
+      return cotIds.indexOf(c.id) !== -1 && !!estimadoTxDeCot(c, state.tx);
     });
     if (conEstimado.length && !window.confirm("Estos pedidos ya tienen su costo ESTIMADO completo registrado en Finanzas: " +
       conEstimado.map(function (c) { return c.descripcion || c.cliente; }).join(", ") +

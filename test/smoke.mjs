@@ -7460,6 +7460,161 @@ state.catalogoInsumos = catalogoPrevioMismoTipoPropTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
 state.enlacePanelAbierto = {}; state.enlaceBusqueda = {};
 
+// =====================================================================
+// Mapa del dinero (2026-09-25): números que tomaban un valor equivocado.
+// Cada bloque arma su caso con el flujo real (calcLineasParaRecibo →
+// calcRepartoLineaRecibo → aplicarReciboACotizaciones → reconciliarTxRecibo)
+// y, cuando el arreglo depende de algo guardado, lo pasa por la Sheet
+// simulada ida y vuelta (lección del Hallazgo #51).
+// =====================================================================
+const mapaCalc = await import("../js/core/calc.js");
+const { fmt: fmtMapa } = await import("../js/core/utils.js");
+const { sincronizarComprasFinanzasDe: sincronizarMapa, actions: cotAccionesMapa } = await import("../js/modules/cotizaciones.js");
+const { tablaCotizaciones: tablaCotMapa, COLUMNAS_COTIZACIONES: COLS_COT_MAPA } = await import("../js/core/sheetsEsquemas.js");
+
+async function idaYVueltaSheetsMapa(tx, cotizaciones) {
+  loginComo("admin", "", "admin-mapa-test@taller.test");
+  _resetCacheParaPruebas();
+  var hojas = {};
+  var fetchPrevio = global.fetch;
+  global.fetch = async function (url, options) {
+    var u = decodeURIComponent(String(url));
+    var metodo = (options && options.method) || "GET";
+    if (u.indexOf("fields=sheets.properties") !== -1) {
+      return { ok: true, status: 200, json: async function () { return { sheets: [
+        { properties: { sheetId: 77201, title: "Movimientos", gridProperties: { columnCount: 80 } } },
+        { properties: { sheetId: 77202, title: "Cotizaciones", gridProperties: { columnCount: 80 } } }
+      ] }; } };
+    }
+    var m = u.match(/\/values\/(Movimientos|Cotizaciones)!/);
+    if (m) {
+      var hoja = m[1];
+      var esEnc = u.indexOf(hoja + "!A1:") !== -1;
+      var cols = hoja === "Movimientos" ? COLUMNAS_MOVIMIENTOS : COLS_COT_MAPA;
+      if (u.indexOf(":clear") !== -1) { if (!esEnc) hojas[hoja] = []; return { ok: true, status: 200, json: async function () { return {}; } }; }
+      if (metodo === "PUT") { if (!esEnc) hojas[hoja] = JSON.parse(options.body).values; return { ok: true, status: 200, json: async function () { return {}; } }; }
+      if (esEnc) return { ok: true, status: 200, json: async function () { return { values: [cols.map(function (c) { return c.header; })] }; } };
+      return { ok: true, status: 200, json: async function () { return { values: hojas[hoja] || [] }; } };
+    }
+    return { ok: true, status: 200, json: async function () { return {}; } };
+  };
+  await tablaMovRoundTrip.escribir(tx);
+  await tablaCotMapa.escribir(cotizaciones);
+  var txLeidos = await tablaMovRoundTrip.leer();
+  var cotsLeidas = await tablaCotMapa.leer();
+  global.fetch = fetchPrevio;
+  _resetCacheParaPruebas();
+  return { tx: txLeidos, cotizaciones: cotsLeidas };
+}
+
+function cotMapa(id, pedidoId, cantidad, costoTela, extra) {
+  return Object.assign({
+    id: id, clienteId: "", cliente: "Cliente " + id, descripcion: "Pedido " + id, fecha: "2026-09-10",
+    estado: "convertida", pedidoId: pedidoId, pedidoOrigenId: "", vendedor: null, gastosReales: [],
+    iva: { activo: false, porcentaje: 19 }, codigoPublico: "c" + id, costosGlobales: [], serviciosCobrados: [],
+    referencias: [{ id: "ref-" + id, nombre: "Camiseta", imagenUrl: "", cantidadPedida: cantidad, precioVenta: 50000,
+      insumos: [{ id: "ins-" + id, nombre: "Tela", unidad: "m", costo: costoTela, tipo: "tela", cantidad: 1, categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } }],
+      detalle: [], estado: "", estadosDef: [] }],
+    compras: []
+  }, extra || {});
+}
+function pedidoMapa(id, cotId, total, costo, extra) {
+  return Object.assign({ id: id, cotizacionId: cotId, numeroOp: "OP-" + id, cliente: "Cliente " + id, descripcion: "Pedido " + id,
+    fechaCreacion: "2026-09-10", total: total, costo: costo, cantidad: "10", abonos: [], abono: 0, lineas: [] }, extra || {});
+}
+// Registra un recibo con las funciones reales del flujo (sin la pantalla).
+// drafts: { claveLineaRecibo: { cantidadComprada, costoPagado } }
+function registrarReciboMapa(pedidoIds, drafts, fecha) {
+  var lineas = mapaCalc.calcLineasParaRecibo(pedidoIds).filter(function (g) { return drafts[g.linea]; });
+  var repartos = lineas.map(function (g) {
+    var r = mapaCalc.calcRepartoLineaRecibo(g, drafts[g.linea]);
+    if (!r.ok) throw new Error("reparto de prueba inválido: " + r.error);
+    return { grupo: g, reparto: r };
+  });
+  var reciboId = "rc-mapa-" + Math.random().toString(36).slice(2, 8);
+  var cabecera = { fecha: fecha || "2026-09-12", proveedorId: "", numero: "", servicios: [], etiquetas: [] };
+  state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, reciboId, cabecera, repartos);
+  state.tx = mapaCalc.reconciliarTxRecibo(state.tx, reciboId, state.cotizaciones).tx;
+  return reciboId;
+}
+const cajaMapa = function () { return mapaCalc.calcCaja(); };
+const compraMapa = function (cotId, clave) { return state.cotizaciones.filter(function (c) { return c.id === cotId; })[0].compras.filter(function (x) { return x.clave === clave; })[0]; };
+const previoMapa = { pedidos: state.pedidos, cotizaciones: state.cotizaciones, tx: state.tx, txPapelera: state.txPapelera, pedidosPapelera: state.pedidosPapelera, cotSucia: state.cotSucia };
+const confirmPrevioMapa = global.confirm;
+const CLAVE_TELA = "tela|m|tela";
+
+// ---------------------------------------------------------------------
+// Hallazgo #53 — "Registrar estimado completo" no avisaba si las compras
+// entraron por un recibo, y "Actualizar movimientos" borraba por id
+// movimientos que no eran de esa cotización.
+// ---------------------------------------------------------------------
+state.pedidos = [pedidoMapa("ped-h55-a", "cot-h55-a", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h55-a", "ped-h55-a", 10, 10000)];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+registrarReciboMapa(["ped-h55-a"], { "tela|m|tela": { cantidadComprada: 10, costoPagado: 100000 } });
+assert(cajaMapa() === -100000 && compraMapa("cot-h55-a", CLAVE_TELA).txId === "", "(punto de partida #53) la tela se pagó en un recibo: $100.000 en la caja y la compra sin txId propio");
+var mensajeMapa = "";
+global.confirm = dom.window.confirm = function (m) { mensajeMapa = m; return false; };
+cotAccionesMapa["add-cot-estimado-movimiento"]({ getAttribute: function () { return "cot-h55-a"; } });
+assert(mensajeMapa.indexOf("DOS veces") !== -1 && mensajeMapa.indexOf(fmtMapa(100000)) !== -1, "#53: \"Registrar estimado completo\" AVISA del doble conteo cuando la compra se pagó en un recibo, con el monto ya llevado (" + fmtMapa(100000) + ") — antes no avisaba y la caja quedaba en −$200.000");
+assert(cajaMapa() === -100000 && !state.cotizaciones[0].estimadoTxId, "...y al decir que no, nada cambia en la caja");
+const rtH55 = await idaYVueltaSheetsMapa(state.tx, state.cotizaciones);
+state.tx = rtH55.tx; state.cotizaciones = rtH55.cotizaciones; mensajeMapa = "";
+cotAccionesMapa["add-cot-estimado-movimiento"]({ getAttribute: function () { return "cot-h55-a"; } });
+assert(mensajeMapa.indexOf("DOS veces") !== -1, "#53: el aviso sigue saliendo después de guardar y volver a leer las dos hojas");
+
+// Compra vieja convertida en recibo por la fase 3 (excedente propio).
+state.pedidos = [pedidoMapa("ped-h55-b", "cot-h55-b", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h55-b", "ped-h55-b", 10, 10000, { compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 12, costoReal: 120000, cantidadExcedente: 2, txId: "tx-h55-tA", excedenteTxId: "tx-h55-tB", fecha: "2026-09-11", proveedorId: "" }] })];
+state.tx = [
+  { id: "tx-h55-tA", tipo: "gasto", fecha: "2026-09-11", concepto: "Compra — Tela — Pedido cot-h55-b", monto: 100000, contraparte: "", pedidoId: "ped-h55-b", cotizacionId: "cot-h55-b", esInsumo: "1", origenCompraClave: CLAVE_TELA, cantidad: 10, unidad: "m", serviciosDescuento: [] },
+  { id: "tx-h55-tB", tipo: "gasto", fecha: "2026-09-11", concepto: "Compra de insumo (excedente) — Tela — Pedido cot-h55-b", monto: 20000, contraparte: "", pedidoId: "", cotizacionId: "cot-h55-b", esInsumo: "1", origenCompraExcedenteClave: CLAVE_TELA, cantidad: 2, unidad: "m", serviciosDescuento: [] }
+];
+const migH55 = mapaCalc.migrarComprasARecibos(state.tx, state.cotizaciones, { soloCotId: "cot-h55-b" });
+assert(migH55.convertidos.length === 1, "(punto de partida #53) la compra vieja con excedente pasa a ser un recibo (fase 3)");
+state.tx = migH55.tx; state.cotizaciones = migH55.cotizaciones;
+const reciboBH55 = compraMapa("cot-h55-b", CLAVE_TELA).partesRecibo[0].reciboId;
+mensajeMapa = "";
+cotAccionesMapa["add-cot-estimado-movimiento"]({ getAttribute: function () { return "cot-h55-b"; } });
+assert(mensajeMapa.indexOf("DOS veces") !== -1 && mensajeMapa.indexOf(fmtMapa(100000)) !== -1, "#53: también avisa en una compra que la fase 3 convirtió en recibo — cuenta la parte del pedido ($100.000), no la reserva");
+
+// Un duplicado viejo heredó los ids de B: ahora son filas del recibo de B.
+state.cotizaciones = state.cotizaciones.concat([cotMapa("cot-h55-dup", "", 10, 10000, { estado: "borrador", compras: [{ clave: CLAVE_TELA, estado: "no", txId: "tx-h55-tA", excedenteTxId: "tx-h55-tB" }] })]);
+assert(state.tx.filter(function (t) { return (t.id === "tx-h55-tA" || t.id === "tx-h55-tB") && t.reciboCompraId === reciboBH55; }).length === 2, "(control #53) la fase 3 adoptó los dos movimientos viejos con su MISMO id como filas del recibo — por eso un id heredado apunta a ellas");
+const cajaAntesDupH55 = cajaMapa();
+const dupH55 = state.cotizaciones.filter(function (c) { return c.id === "cot-h55-dup"; })[0];
+const sincDupH55 = sincronizarMapa(dupH55);
+assert(sincDupH55.borrados === 0 && cajaMapa() === cajaAntesDupH55, "#53: \"Actualizar movimientos\" en un duplicado viejo NO borra las filas del recibo del original (antes borraba 2 y la caja subía $120.000)");
+assert(mapaCalc.verificarRecibo(reciboBH55, state.cotizaciones, state.tx).length === 0, "...y el recibo del original sigue cuadrando al peso");
+assert(sincDupH55.compras[0].txId === "" && sincDupH55.compras[0].excedenteTxId === "", "...y el duplicado suelta los ids ajenos (un id que apunta afuera nunca es suyo)");
+
+// Mismo caso sin recibo: el movimiento suelto de OTRA cotización sobrevive.
+state.tx = state.tx.concat([{ id: "tx-h55-ajeno", tipo: "gasto", fecha: "2026-09-11", concepto: "Compra suelta de otra cotización", monto: 40000, pedidoId: "", cotizacionId: "cot-h55-otra", esInsumo: "1", origenCompraClave: CLAVE_TELA }]);
+const sincAjenoH55 = sincronizarMapa(cotMapa("cot-h55-dup2", "", 10, 10000, { estado: "borrador", compras: [{ clave: CLAVE_TELA, estado: "no", txId: "tx-h55-ajeno" }] }));
+assert(sincAjenoH55.borrados === 0 && state.tx.some(function (t) { return t.id === "tx-h55-ajeno"; }), "#53: tampoco borra el movimiento suelto de otra cotización al que apuntaba un id heredado");
+
+// Las dos preguntas unitarias, con los tres tipos de compra juntos.
+const cotUnitH55 = { id: "cot-h55-u", compras: [
+  { clave: "a", estado: "si", txId: "tx-u-a" },
+  { clave: "b", estado: "si", txId: "", partesRecibo: [{ reciboId: "R", linea: "b", cantidad: 10, costo: 100000 }] },
+  { clave: "c", estado: "si", txId: "", excedenteTxId: "tx-u-c-exc" }
+], estimadoTxId: "tx-u-est" };
+const txUnitH55 = [
+  { id: "tx-u-a", tipo: "gasto", monto: 40000, cotizacionId: "cot-h55-u", origenCompraClave: "a" },
+  { id: "tx-u-c-exc", tipo: "gasto", monto: 20000, cotizacionId: "cot-h55-u", origenCompraExcedenteClave: "c" },
+  { id: "rcp_R_x", tipo: "gasto", monto: 100000, cotizacionId: "cot-h55-u", origenCompraClave: "b", reciboCompraId: "R", reciboCompraRol: "parte", reciboCompraLinea: "b" },
+  { id: "tx-u-est", tipo: "gasto", monto: 300000, cotizacionId: "otra-cotizacion" }
+];
+const enFinU = mapaCalc.comprasEnFinanzas(cotUnitH55, txUnitH55);
+assert(enFinU.costoPedido === 140000 && enFinU.excedente === 20000 && enFinU.sueltas.length === 2, "#53 comprasEnFinanzas: compra suelta ($40.000) + parte de recibo ($100.000) = $140.000 del pedido; el excedente ($20.000) va aparte; la fila del recibo no cuenta como suelta");
+assert(mapaCalc.comprasEnFinanzas(cotUnitH55, txUnitH55, "b").costoPedido === 100000 && mapaCalc.comprasEnFinanzas(cotUnitH55, txUnitH55, "b").sueltas.length === 0, "...con una sola clave responde solo por esa compra");
+assert(mapaCalc.estimadoTxDeCot(cotUnitH55, txUnitH55) === null, "#53 estimadoTxDeCot: un estimadoTxId que apunta al movimiento de OTRA cotización no es el estimado de esta");
+
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+// @@FIN-MAPA@@
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

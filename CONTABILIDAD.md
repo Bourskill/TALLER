@@ -2911,6 +2911,65 @@ deciden en un solo lugar:
   borrar el mecanismo viejo de reserva (`tomarDeReservaCompraConjunta`, la
   rama del #48) cuando ya no quede nada por convertir.
 
+### 🔴 Hallazgo #53 — "Registrar estimado completo" no avisaba si las compras entraron por un recibo, y "Actualizar movimientos" podía borrar filas de un recibo ajeno. ✅ CORREGIDO
+
+Salió del "Mapa del dinero" (2026-09-25). El usuario notó que revisar
+fórmulas no alcanzaba: *"puede que la función esté perfecta pero puede
+estar agarrando valores que no son"*. Este es uno de esos casos, y lo causó
+la fase 2 del Recibo (Hallazgo #52).
+
+**Qué pasaba.**
+1. El botón "Registrar estimado completo como movimiento" decidía si
+   avisar de doble conteo mirando `compra.txId`. Una compra de un recibo
+   tiene ese campo vacío, porque su plata vive en las filas del recibo. Con
+   la tela ya pagada en un recibo ($100.000), el botón no avisaba y la caja
+   quedaba en −$200.000. También pasaba con todo lo que la fase 3 convirtió
+   en recibo.
+2. Hermano encontrado en el barrido, más grave: "Actualizar movimientos
+   financieros" borraba de la caja los ids guardados en una compra
+   (`txId`, `excedenteTxId`) sin comprobar que fueran de esa cotización. En
+   una cotización duplicada antes del arreglo de
+   `duplicarCotizacionCompleta`, esos ids son los del ORIGINAL, y desde la
+   fase 3 pueden ser la parte y la reserva de un recibo (se adoptaron con
+   el mismo id). Resultado reproducido: se borraban 2 filas, la caja subía
+   $120.000 y el recibo del original quedaba descuadrado.
+3. Menores, del mismo patrón: el aviso del estimado en "Actualizar
+   movimientos" y al registrar un recibo, y la etiqueta del botón, miraban
+   el `estimadoTxId` sin comprobar que el movimiento fuera de esa
+   cotización. Al registrar un recibo, el bloqueo por "movimiento viejo"
+   tampoco lo comprobaba.
+
+**Corrección (una sola fuente para cada pregunta):**
+- `estimadoTxDeCot(cot, tx)` (core/calc.js): el estimado de ESTA
+  cotización, si sigue en la caja. Lo usan el botón, su etiqueta,
+  "Actualizar movimientos" y registrar un recibo.
+- `comprasEnFinanzas(cot, tx, clave?)`: cuánto de lo que compró la
+  cotización ya está en Finanzas, por las dos vías:
+  - la compra suelta, solo si su movimiento es de esa cotización;
+  - la parte de un recibo, leída de `partesRecibo`, que es la fuente de
+    verdad. Si el recibo estuviera descuadrado, el aviso sale de más,
+    nunca de menos.
+  El excedente viejo y la reserva de un recibo no cuentan como costo del
+  pedido. El aviso del estimado ahora dice el monto ya llevado.
+- `sincronizarComprasFinanzasDe` borra solo con `quitarPropio(id)`: el
+  movimiento tiene que tener ese id, ser de esa cotización y no ser fila de
+  un recibo. El puntero de la compra se limpia siempre, porque un id ajeno
+  nunca es suyo. Al buscar el movimiento para actualizarlo, tampoco se toma
+  nunca una fila de recibo.
+
+**Pruebas:**
+- Recibo nuevo: el aviso sale con "$100.000" y, al decir que no, la caja no
+  cambia. También sale después de la ida y vuelta por las dos hojas.
+- Compra vieja convertida por la fase 3: el aviso sale y cuenta la parte
+  del pedido, no la reserva.
+- Duplicado viejo con los ids adoptados por el recibo del original: 0
+  borrados, la caja igual y el recibo cuadrando. Tiene un control que
+  confirma que los ids sí apuntan a filas del recibo.
+- Movimiento suelto de otra cotización: sobrevive.
+- Unitarias de `comprasEnFinanzas` (suelta + parte + excedente) y de
+  `estimadoTxDeCot` con un id ajeno.
+- Sin el arreglo, fallan todas.
+
 ---
 
 ## Próximos pasos

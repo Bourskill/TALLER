@@ -534,6 +534,52 @@ export function movimientosGeneradosPorCotizacion(cot) {
     return !!(t.origenCompraClave && t.cotizacionId === cot.id);
   });
 }
+
+// El movimiento del "estimado completo" de ESTA cotización, si sigue en la
+// caja. Es la única fórmula para las cuatro preguntas que lo necesitan (el
+// botón del estimado y su etiqueta, "Actualizar movimientos financieros" y
+// registrar un recibo). Antes cada una miraba solo el id, y un estimadoTxId
+// heredado de un duplicado viejo apuntaba al movimiento de OTRA cotización
+// (Hallazgo #53).
+export function estimadoTxDeCot(cot, tx) {
+  if (!cot || !cot.estimadoTxId) return null;
+  return (tx || []).filter(function (t) { return t.id === cot.estimadoTxId && t.cotizacionId === cot.id; })[0] || null;
+}
+
+// Cuánto de lo que compró ESTA cotización ya está en Finanzas, por las dos
+// vías que existen: la compra suelta de siempre (su movimiento propio) y la
+// parte de un Recibo de compra. Con `clave` responde por una sola compra.
+// Devuelve { costoPedido, excedente, sueltas: [tx] }.
+//
+// POR QUÉ EXISTE (Hallazgo #53): "Registrar estimado completo" decidía si
+// avisar de doble conteo con `compra.txId`, y una compra de un recibo tiene
+// ese campo vacío (su plata vive en las filas del recibo). Con la tela ya
+// pagada en un recibo, el botón no avisaba y la caja contaba el pedido dos
+// veces. De un recibo se cuentan sus partes (la fuente de verdad; las filas
+// son su proyección): si el recibo estuviera descuadrado, el aviso sale de
+// más, nunca de menos. Una compra suelta cuenta solo si su movimiento es de
+// esta cotización: un id heredado de un duplicado viejo no es suyo. El
+// excedente viejo y la reserva de un recibo no son costo de este pedido.
+export function comprasEnFinanzas(cot, tx, clave) {
+  var res = { costoPedido: 0, excedente: 0, sueltas: [] };
+  if (!cot) return res;
+  var ids = {};
+  (cot.compras || []).forEach(function (c) {
+    if (clave && c.clave !== clave) return;
+    (c.partesRecibo || []).forEach(function (p) { res.costoPedido += num(p.costo); });
+    if (c.txId) ids[c.txId] = "costo";
+    if (c.excedenteTxId) ids[c.excedenteTxId] = "excedente";
+  });
+  (tx || []).forEach(function (t) {
+    if (t.cotizacionId !== cot.id || t.reciboCompraId) return;
+    var marca = t.origenCompraExcedenteClave || t.origenCompraClave || "";
+    var tipo = ids[t.id] || (marca && (!clave || marca === clave) ? (t.origenCompraExcedenteClave ? "excedente" : "costo") : "");
+    if (!tipo) return;
+    res.sueltas.push(t);
+    if (tipo === "costo") res.costoPedido += num(t.monto); else res.excedente += num(t.monto);
+  });
+  return res;
+}
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que
 // aún no se recibió no es un movimiento de Finanzas, es saldo de un pedido.

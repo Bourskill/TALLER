@@ -259,6 +259,20 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo séptima ronda: el estimado completo avisa aunque las compras vengan de un recibo)
+
+Salió del "Mapa del dinero" (revisar de dónde lee cada número, no solo si
+su fórmula suma bien):
+- **"Registrar estimado completo"** vuelve a avisar del doble conteo cuando
+  las compras del pedido se pagaron en un recibo. Antes no avisaba y la
+  caja contaba el pedido dos veces. El aviso ahora dice cuánto ya hay en
+  compras.
+- **"Actualizar movimientos financieros"** ya no puede borrar un
+  movimiento de otra cotización. Una cotización duplicada hace tiempo
+  podía guardar los ids del original, y borraba sus movimientos, incluso
+  las filas de su recibo.
+- Ver CONTABILIDAD.md, Hallazgo #53.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo sexta ronda: Recibo de compra, fase 3 — lo ya registrado pasa a ser recibo)
 
 - **Al abrir la app**, cada compra conjunta que ya tenías registrada (y cada
