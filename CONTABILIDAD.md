@@ -2972,6 +2972,27 @@ la fase 2 del Recibo (Hallazgo #52).
   `estimadoTxDeCot` con un id ajeno.
 - Sin el arreglo, fallan todas.
 
+**Revisión independiente (mismo día) — lo que faltaba.** Un revisor que
+intentó romper el arreglo encontró que las dos puntas no usaban el mismo
+criterio:
+- El registro de un recibo detectaba el movimiento viejo por su MARCA (con
+  `comprasEnFinanzas`).
+- "Actualizar movimientos financieros", que es lo que el aviso pide pulsar,
+  solo miraba el PUNTERO de la compra.
+
+Un movimiento propio sin puntero, por ejemplo tras un guardado a medias
+entre Cotizaciones y Movimientos, dejaba el recibo bloqueado para siempre,
+con un aviso que no servía. Ahora `sincronizarComprasFinanzasDe` reconoce
+como propio cualquier movimiento suelto de esa cotización con la marca de
+esa compra:
+- **compra que no está en "Sí":** los retira todos;
+- **compra en "Sí":** adopta uno en vez de crear otro, y retira los que
+  sobren;
+- **compra de un recibo:** retira el suelto, porque su plata ya está en el
+  recibo.
+
+Pruebas: los 4 casos, que fallan sin el cambio.
+
 ### 🔴 Hallazgo #54 — lo que falta comprar se veía como ahorro, y anular un recibo o eliminar y restaurar el pedido lo borraban. ✅ CORREGIDO
 
 También salió del "Mapa del dinero", y también lo causó la fase 2 del

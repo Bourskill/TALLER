@@ -2849,6 +2849,23 @@ export function sincronizarComprasFinanzasDe(cot) {
     state.tx = state.tx.filter(function (t) { return !(t.id === id && t.cotizacionId === cot.id && !t.reciboCompraId); });
     return state.tx.length !== antes;
   }
+  // Los movimientos sueltos de ESTA cotización que llevan la marca de esta
+  // compra (`campo` = origenCompraClave u origenCompraExcedenteClave),
+  // tengan o no el puntero de la compra. Es el MISMO criterio con el que el
+  // registro de un recibo detecta "un movimiento viejo" (comprasEnFinanzas):
+  // si aquí solo se miraba el puntero, un movimiento que lo perdió (p. ej.
+  // un guardado a medias entre Cotizaciones y Movimientos) dejaba el recibo
+  // bloqueado para siempre, con un aviso que pedía justo este botón
+  // (revisión del Hallazgo #53).
+  function propiosPorMarca(campo, clave) {
+    return state.tx.filter(function (t) { return t.cotizacionId === cot.id && !t.reciboCompraId && t[campo] === clave; });
+  }
+  function quitarLista(lista) {
+    if (!lista.length) return 0;
+    var ids = lista.map(function (t) { return t.id; });
+    state.tx = state.tx.filter(function (t) { return ids.indexOf(t.id) === -1; });
+    return lista.length;
+  }
 
   var compras = (cot.compras || []).map(function (compra) {
     // Una compra que es parte de un Recibo de compra no se sincroniza por
@@ -2860,6 +2877,9 @@ export function sincronizarComprasFinanzasDe(cot) {
       compra.partesRecibo.forEach(function (p) {
         if (recibosTocados.indexOf(p.reciboId) === -1) recibosTocados.push(p.reciboId);
       });
+      // La plata de una compra de recibo vive en las filas del recibo: un
+      // movimiento suelto propio con su marca es plata contada dos veces.
+      borrados += quitarLista(propiosPorMarca("origenCompraClave", compra.clave).concat(propiosPorMarca("origenCompraExcedenteClave", compra.clave)));
       return compra;
     }
     var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
@@ -2880,6 +2900,7 @@ export function sincronizarComprasFinanzasDe(cot) {
     if (!linea && compra.clave.indexOf("global|") === 0) {
       quitarPropio(compra.txId);
       quitarPropio(compra.excedenteTxId);
+      quitarLista(propiosPorMarca("origenCompraClave", compra.clave).concat(propiosPorMarca("origenCompraExcedenteClave", compra.clave)));
       huerfanas++;
       return null;
     }
@@ -2900,6 +2921,7 @@ export function sincronizarComprasFinanzasDe(cot) {
         if (quitarPropio(resultado.txId)) borrados++;
         resultado = Object.assign({}, resultado, { txId: "" });
       }
+      borrados += quitarLista(propiosPorMarca("origenCompraClave", compra.clave));
     } else {
       var datos = {
         tipo: "gasto",
@@ -2927,10 +2949,15 @@ export function sincronizarComprasFinanzasDe(cot) {
       // id) y lo reescribía en vez de crear uno nuevo, dejando al original
       // sin su propio movimiento. Un txId que apunta a un tx de OTRA
       // cotización se trata como si no existiera: se crea uno nuevo, propio.
-      var existente = resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null;
+      // Primero el del puntero; si no sirve, uno propio con la marca (se
+      // adopta en vez de crear otro); cualquier otro con la marca sobra.
+      var marcados = propiosPorMarca("origenCompraClave", compra.clave);
+      var existente = (resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null) || marcados[0] || null;
+      borrados += quitarLista(marcados.filter(function (t) { return t !== existente; }));
       if (existente) {
         Object.assign(existente, datos);
         actualizados++;
+        if (resultado.txId !== existente.id) resultado = Object.assign({}, resultado, { txId: existente.id });
       } else {
         var txId = uid();
         state.tx.unshift(Object.assign({ id: txId }, datos));
@@ -2976,19 +3003,25 @@ export function sincronizarComprasFinanzasDe(cot) {
         unidad: linea.unidad || "",
         origenCompraExcedenteClave: compra.clave
       };
-      var existenteExc = resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null;
+      var marcadosExc = propiosPorMarca("origenCompraExcedenteClave", compra.clave);
+      var existenteExc = (resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null) || marcadosExc[0] || null;
+      borrados += quitarLista(marcadosExc.filter(function (t) { return t !== existenteExc; }));
       if (existenteExc) {
         Object.assign(existenteExc, datosExc);
         actualizados++;
+        if (resultado.excedenteTxId !== existenteExc.id) resultado = Object.assign({}, resultado, { excedenteTxId: existenteExc.id });
       } else {
         var excId = uid();
         state.tx.unshift(Object.assign({ id: excId }, datosExc));
         creados++;
         resultado = Object.assign({}, resultado, { excedenteTxId: excId });
       }
-    } else if (resultado.excedenteTxId) {
-      if (quitarPropio(resultado.excedenteTxId)) borrados++;
-      resultado = Object.assign({}, resultado, { excedenteTxId: "" });
+    } else {
+      if (resultado.excedenteTxId) {
+        if (quitarPropio(resultado.excedenteTxId)) borrados++;
+        resultado = Object.assign({}, resultado, { excedenteTxId: "" });
+      }
+      borrados += quitarLista(propiosPorMarca("origenCompraExcedenteClave", compra.clave));
     }
 
     return resultado;

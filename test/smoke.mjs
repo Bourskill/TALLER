@@ -7860,6 +7860,43 @@ state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 state.tab = "resumen";
 
+// ---------------------------------------------------------------------
+// Revisión del Hallazgo #53: "Actualizar movimientos" reconoce un
+// movimiento propio por su MARCA, no solo por el puntero de la compra —
+// mismo criterio con el que registrar un recibo detecta un movimiento viejo.
+// ---------------------------------------------------------------------
+const txMarcadoMapa = function (id, cotId, monto) {
+  return { id: id, tipo: "gasto", fecha: "2026-09-11", concepto: "Compra — Tela", monto: monto, contraparte: "", pedidoId: "ped-" + cotId, cotizacionId: cotId, esInsumo: "1", origenCompraClave: CLAVE_TELA, cantidad: 10, unidad: "m", serviciosDescuento: [] };
+};
+state.pedidos = [pedidoMapa("ped-h53b-a", "cot-h53b-a", 500000, 100000)];
+// (1) Compra en "Aún no" SIN puntero, pero con su movimiento propio marcado
+// (queda así tras un guardado a medias).
+state.cotizaciones = [cotMapa("cot-h53b-a", "ped-h53b-a", 10, 10000, { compras: [{ clave: CLAVE_TELA, estado: "no", txId: "" }] })];
+state.tx = [txMarcadoMapa("tx-h53b-x", "cot-h53b-a", 100000)];
+assert(mapaCalc.comprasEnFinanzas(state.cotizaciones[0], state.tx, CLAVE_TELA).sueltas.length === 1, "(punto de partida #53) registrar un recibo lo bloquearía: la compra tiene un movimiento viejo propio, aunque sin puntero");
+const sincSinPunteroH53 = sincronizarMapa(state.cotizaciones[0]);
+assert(sincSinPunteroH53.borrados === 1 && state.tx.length === 0 && mapaCalc.comprasEnFinanzas(Object.assign({}, state.cotizaciones[0], { compras: sincSinPunteroH53.compras }), state.tx, CLAVE_TELA).sueltas.length === 0, "#53: \"Actualizar movimientos\" SÍ lo retira (lo que pide el aviso del recibo) — antes solo miraba el puntero y el recibo quedaba bloqueado para siempre");
+// (2) Compra en "Sí" sin puntero: se ADOPTA el movimiento propio, no se crea otro.
+state.cotizaciones = [cotMapa("cot-h53b-a", "ped-h53b-a", 10, 10000, { compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 100000, txId: "" }] })];
+state.tx = [txMarcadoMapa("tx-h53b-x", "cot-h53b-a", 100000)];
+const sincAdoptaH53 = sincronizarMapa(state.cotizaciones[0]);
+assert(sincAdoptaH53.creados === 0 && cajaMapa() === -100000 && sincAdoptaH53.compras[0].txId === "tx-h53b-x", "#53: con la compra en \"Sí\" y sin puntero, adopta su movimiento propio (caja −$100.000, no −$200.000)");
+// (3) Dos movimientos propios de la misma compra: sobra uno.
+state.tx = [txMarcadoMapa("tx-h53b-x", "cot-h53b-a", 100000), txMarcadoMapa("tx-h53b-y", "cot-h53b-a", 100000)];
+const sincDobleH53 = sincronizarMapa(Object.assign({}, state.cotizaciones[0], { compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 100000, txId: "tx-h53b-x" }] }));
+assert(sincDobleH53.borrados === 1 && cajaMapa() === -100000 && state.tx[0].id === "tx-h53b-x", "#53: si la misma compra tiene dos movimientos propios, se queda el del puntero y el otro se retira");
+// (4) Una compra de recibo con un movimiento suelto propio marcado: esa plata
+// ya está en las filas del recibo.
+state.pedidos = [pedidoMapa("ped-h53b-r", "cot-h53b-r", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h53b-r", "ped-h53b-r", 10, 10000)];
+state.tx = [];
+registrarReciboMapa(["ped-h53b-r"], { "tela|m|tela": { cantidadComprada: 10, costoPagado: 100000 } });
+state.tx = state.tx.concat([txMarcadoMapa("tx-h53b-suelto", "cot-h53b-r", 100000)]);
+const sincMiembroH53 = sincronizarMapa(state.cotizaciones[0]);
+assert(sincMiembroH53.borrados === 1 && cajaMapa() === -100000 && !state.tx.some(function (t) { return t.id === "tx-h53b-suelto"; }), "#53: en una compra de recibo, un movimiento suelto propio con su marca se retira (la plata ya está en el recibo) — la caja queda en lo del recibo");
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
