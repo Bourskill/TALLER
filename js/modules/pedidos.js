@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
+import { clienteById, calcComisionValor, costoRealDePedido, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
@@ -612,7 +612,15 @@ function renderHistorialPedidos() {
     // toda pérdida— pero el porcentaje no, porque no hay sobre qué calcularlo.
     // Cuando el porcentaje se dejaba en null y la ganancia no, el .toFixed() de
     // más abajo reventaba y TUMBABA el render de toda la pestaña Pedidos.
-    var ganancia = num(p.costo) > 0 ? num(p.total) - num(p.costo) : null;
+    //
+    // El costo es el REAL del pedido (el mismo de los reportes, ver
+    // costoRealDePedido en core/calc.js), no la foto del estimado que se
+    // guardó al convertir: la tarjeta decía $120.000 de costo mientras el
+    // reporte de Pedidos, con la tela ya pagada, decía $150.000 (Hallazgo
+    // #55). Se muestra si hay costo estimado O real: un pedido con todo en
+    // "Ahorro" tiene costo real 0 y su ganancia igual existe.
+    var costoPedido = costoRealDePedido(p);
+    var ganancia = (num(p.costo) > 0 || costoPedido > 0) ? num(p.total) - costoPedido : null;
     var gananciaPct = (ganancia != null && num(p.total) > 0) ? (ganancia / num(p.total) * 100) : null;
     var gananciaTxt = ganancia == null ? "" : (fmt(ganancia) + (gananciaPct != null ? " (" + gananciaPct.toFixed(1) + "%)" : " · sin precio de venta asignado"));
 
@@ -626,7 +634,7 @@ function renderHistorialPedidos() {
         : '<span class="pedido-tipo">' + (p.tipoCliente === "propio" ? "Propio" : "Tercero") + "</span>") +
       '<div class="pedido-meta">' + esc(p.descripcion) + " · cantidad " + esc(p.cantidad) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + "</div>" +
       (cliente ? '<div class="pedido-meta">📦 ' + esc(cliente.direccion || "—") + ", " + esc(cliente.ciudad || "—") + (cliente.cp ? " (CP " + esc(cliente.cp) + ")" : "") + "</div>" : "") +
-      (ganancia != null ? '<div class="pedido-meta">Costo ' + fmt(p.costo) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
+      (ganancia != null ? '<div class="pedido-meta"' + (costoPedido !== num(p.costo) ? ' title="Costo estimado al cotizar: ' + fmt(p.costo) + '"' : "") + '>Costo ' + fmt(costoPedido) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
       "</div>" + renderCabeceraDinero(p, saldo, cancelado) +
       "</div>" +
       renderDetalleLineasPedido(p) +

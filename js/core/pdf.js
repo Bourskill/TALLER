@@ -787,9 +787,10 @@ export async function generarPDFReporteProductos(filas, etiquetaPeriodo) {
       return [
         f.fecha, f.numeroOp, f.concepto, f.talla, f.cliente,
         f.vendedor || "—", f.tipo === "consignacion" ? "Consignación" : "Directa",
-        // Costo por unidad Y total: el por unidad es el que se compara contra
-        // el "Costo x prenda" de la cotización; el total es ese por la
-        // cantidad de la fila. Tenerlos separados evita leer uno por el otro.
+        // Costo por unidad Y total. Es el costo REAL del pedido repartido
+        // entre sus líneas (ver calcProductosVendidosRango): se compara
+        // contra el "Costo x prenda" estimado de la cotización para ver
+        // cuánto se desvió. Tenerlos separados evita leer uno por el otro.
         numFmt(f.cantidad), money(f.costoUnit), money(f.costoTotal), money(f.precioTotal), money(f.ganancia)
       ];
     }),

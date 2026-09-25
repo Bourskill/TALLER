@@ -259,6 +259,18 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo novena ronda: el mismo pedido ya gana lo mismo en todos los reportes)
+
+- **Productos vendidos** usa el costo real del pedido, igual que el reporte
+  de Pedidos, repartido entre sus líneas. Antes usaba el costo estimado del
+  día que se convirtió la cotización, y el mismo pedido ganaba distinto en
+  los dos reportes.
+- La **tarjeta del pedido** también muestra el costo real. El estimado
+  queda al pasar el mouse.
+- Un **pedido rápido escalado a cotización** que todavía no se aplicó
+  conserva su costo en los reportes. Antes tomaba el del borrador ($0).
+- Ver CONTABILIDAD.md, Hallazgo #55.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo octava ronda: lo que falta comprar ya no se ve como ahorro)
 
 - Cuando a un pedido le falta material porque la reserva de su recibo no

@@ -3762,8 +3762,9 @@ export function calcProductosVendidosRango(desde, hasta) {
     // `lineas` es el detalle completo (precio y costo de cada línea tal como
     // se vendió). Los pedidos anteriores a las líneas solo tienen
     // `stockConsumido`, sin precio propio — se completa con el catálogo.
-    var lineas = (p.lineas && p.lineas.length) ? p.lineas : (p.stockConsumido || []);
-    lineas.forEach(function (l) {
+    var desdeLineas = !!(p.lineas && p.lineas.length);
+    var lineas = desdeLineas ? p.lineas : (p.stockConsumido || []);
+    var base = lineas.map(function (l) {
       var prod = l.productoId ? productoById(l.productoId) : null;
       var cant = num(l.cantidad) || 0;
       var precioUnit = l.precioUnitario !== undefined ? num(l.precioUnitario) : num(prod && prod.precioVenta);
@@ -3772,19 +3773,47 @@ export function calcProductosVendidosRango(desde, hasta) {
       // los costos globales del pedido (domicilio, diseño...). Sin sumarla, el
       // reporte reportaba MENOS costo del que la cotización ya había contado,
       // e inflaba la ganancia por esa misma diferencia.
-      var costoUnit = costoDirectoUnit + num(l.costoIndirectoUnitario);
+      var costoEstimadoUnit = costoDirectoUnit + num(l.costoIndirectoUnitario);
+      return { l: l, prod: prod, cant: cant, precioUnit: precioUnit, costoDirectoUnit: costoDirectoUnit, costoEstimadoUnit: costoEstimadoUnit, costoEstimado: costoEstimadoUnit * cant };
+    });
+    // Las líneas del pedido guardan el costo ESTIMADO (la foto que se tomó
+    // al convertir la cotización; calcDesfaseCotizacionPedido depende de que
+    // siga siendo el estimado, así que no se reescribe). El reporte, en
+    // cambio, tiene que contar con el costo REAL del pedido, el mismo del
+    // reporte de Pedidos (costoRealDePedido, Hallazgo #24). Antes cada
+    // reporte leía un costo distinto y el mismo pedido ganaba $350.000 en uno
+    // y $380.000 en el otro (Hallazgo #55).
+    //
+    // El real se reparte entre las líneas en proporción a su costo estimado
+    // (o a su cantidad, si el estimado es 0). Los TOTALES cuadran siempre con
+    // el reporte de Pedidos; el costo por PRODUCTO es una aproximación cuando
+    // el pedido tiene varias referencias. Si no hay diferencia, las filas
+    // quedan idénticas a las de siempre. Las filas viejas que salen de
+    // stockConsumido no cubren todo el pedido y no se tocan.
+    var costos = base.map(function (b) { return b.costoEstimado; });
+    if (desdeLineas && cotizacionQueMandaEnPedido(p)) {
+      var real = costoRealDePedido(p);
+      var estimado = costos.reduce(function (a, c) { return a + c; }, 0);
+      if (Math.abs(real - estimado) >= 0.005) {
+        var pesos = estimado > 0 ? costos : base.map(function (b) { return b.cant; });
+        costos = repartirProporcional(real, pesos, 2);
+      }
+    }
+    base.forEach(function (b, i) {
+      var costoTotal = costos[i];
       filas.push({
         fecha: fecha, tipo: "directa",
-        productoId: l.productoId || "",
-        concepto: l.productoNombre || l.textoDescripcion || (prod && prod.nombre) || "—",
-        talla: l.talla || "—", cantidad: cant,
-        costoUnit: costoUnit, costoDirectoUnit: costoDirectoUnit, precioUnit: precioUnit,
-        costoTotal: costoUnit * cant, precioTotal: precioUnit * cant,
-        ganancia: (precioUnit - costoUnit) * cant,
+        productoId: b.l.productoId || "",
+        concepto: b.l.productoNombre || b.l.textoDescripcion || (b.prod && b.prod.nombre) || "—",
+        talla: b.l.talla || "—", cantidad: b.cant,
+        costoUnit: b.cant > 0 ? costoTotal / b.cant : b.costoEstimadoUnit,
+        costoDirectoUnit: b.costoDirectoUnit, costoEstimadoUnit: b.costoEstimadoUnit, precioUnit: b.precioUnit,
+        costoTotal: costoTotal, precioTotal: b.precioUnit * b.cant,
+        ganancia: b.precioUnit * b.cant - costoTotal,
         comision: 0,
         numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor,
-        observacion: l.observacion || "",
-        campos: l.campos || []
+        observacion: b.l.observacion || "",
+        campos: b.l.campos || []
       });
     });
   });
@@ -3802,10 +3831,24 @@ export function calcProductosVendidosRango(desde, hasta) {
 // verdad". Sin cotización (pedido rápido, escrito a mano línea por línea)
 // no hay estimado/real que comparar — `p.costo` YA es el único costo que
 // existe, se deja tal cual.
-function costoRealDePedido(p) {
-  if (!p || !p.cotizacionId) return num(p && p.costo);
+//
+// La cotización manda sobre el pedido solo si de verdad ES ese pedido. Una
+// cotización ESCALADA desde un pedido rápido que todavía no se aplicó
+// ("Aplicar a pedido") es un borrador: tiene pedidoOrigenId pero no
+// pedidoId, y sus números no mandan (mismo criterio que
+// calcDesfaseCotizacionPedido). Antes esto no se miraba y el reporte de
+// Pedidos le ponía al pedido rápido el costo del borrador — reproducido:
+// costo $0 y toda la venta como ganancia (Hallazgo #55).
+function cotizacionQueMandaEnPedido(p) {
+  if (!p || !p.cotizacionId) return null;
   var cot = (state.cotizaciones || []).filter(function (c) { return c.id === p.cotizacionId; })[0];
-  return cot ? calcCotResultadoReal(cot).costoTotal : num(p.costo);
+  if (!cot) return null;
+  if (cot.pedidoOrigenId === p.id && cot.pedidoId !== p.id) return null;
+  return cot;
+}
+export function costoRealDePedido(p) {
+  var cot = cotizacionQueMandaEnPedido(p);
+  return cot ? calcCotResultadoReal(cot).costoTotal : num(p && p.costo);
 }
 
 // Pedidos cuya venta cae en el rango, con lo que hace falta para leerlos de

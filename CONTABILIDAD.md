@@ -3034,6 +3034,67 @@ como ahorro. No se tocó sin su respuesta.
   faltante se conserva y el recibo cuadra.
 - Sin el arreglo, fallan todas.
 
+### 🔴 Hallazgo #55 — el mismo pedido ganaba distinto en dos reportes, y un pedido escalado sin aplicar tomaba el costo de su borrador. ✅ CORREGIDO
+
+Del "Mapa del dinero".
+
+**Qué pasaba.**
+- **Productos vendidos contra Pedidos.** "Productos vendidos" (Resumen →
+  Reportes, su PDF y el PDF detallado de productos) leía el costo de cada
+  línea del pedido. Ese costo es una COPIA del estimado, hecha al convertir
+  la cotización. "Pedidos" lee el costo real desde el Hallazgo #24. Con la
+  tela estimada en $120.000 y pagada en $150.000, el mismo pedido de
+  $500.000 ganaba $350.000 en un reporte y $380.000 en el otro. La tarjeta
+  del pedido (Pedidos → Historial) también mostraba el estimado como si
+  fuera el costo.
+- **Pedido escalado sin aplicar (hermano).** `costoRealDePedido` tomaba el
+  costo de cualquier cotización enlazada. Un pedido rápido escalado a
+  cotización, que todavía no se aplicó, apunta a un BORRADOR. Resultado
+  reproducido: costo $0 en el reporte de Pedidos y toda la venta como
+  ganancia. Eso rompe la regla de `calcDesfaseCotizacionPedido`: el
+  borrador escalado no manda.
+- **Servicio más domicilio sin prendas (hermano).** Productos daba $50.000
+  y Pedidos $70.000, porque el domicilio no tenía línea donde caer.
+
+**Corrección (solo de lectura).** Las líneas y `p.costo` siguen guardando
+el estimado. De eso depende la detección de desfase, así que no se tocan.
+- `cotizacionQueMandaEnPedido`: la cotización manda solo si de verdad es
+  ese pedido. Un borrador escalado no manda. `costoRealDePedido` queda
+  exportada.
+- `calcProductosVendidosRango` reparte el costo real del pedido entre sus
+  líneas con `repartirProporcional`, en proporción a su costo estimado (o
+  a la cantidad, si el estimado es 0). Los totales cuadran con el reporte
+  de Pedidos al centavo. Sin diferencia, las filas quedan idénticas a las
+  de siempre. Las filas viejas de `stockConsumido` no se tocan, porque no
+  cubren todo el pedido.
+- La tarjeta del pedido usa `costoRealDePedido`. Si difiere del estimado,
+  el estimado queda en la ayuda del texto.
+- Textos corregidos: la ayuda de "Costo x prenda" y la de la sección del
+  reporte, y el comentario del PDF.
+
+**Límite declarado:** el reparto es proporcional. En un pedido con varias
+referencias, un sobrecosto de una tela también se reparte sobre las otras.
+Los totales siempre cuadran; el costo por PRODUCTO es una aproximación.
+Atribuirlo por origen exigiría guardar `refId` en las líneas; se decide si
+hace falta.
+
+**Pruebas:**
+- El caso del mapa (Productos = Pedidos = $150.000).
+- La tarjeta del pedido.
+- Dos tallas y un servicio cobrado: la suma cuadra al centavo.
+- Pedido escalado sin aplicar: $18.000, no $0.
+- Cotización borrada: sin cambios.
+- Servicio más domicilio sin prendas: $70.000 en los dos reportes.
+- Sin el arreglo fallan todas, salvo la de cotización borrada, que protege
+  lo que ya funcionaba.
+
+**Visto en el barrido, fuera de esta corrección:**
+- La consignación en Productos usa el costo de catálogo de HOY, no el del
+  día de la venta.
+- La cuenta de cobro al cliente (pdf.js) arma sus filas desde la
+  cotización sin los servicios cobrados, mientras su SUBTOTAL es
+  `p.total`.
+
 ---
 
 ## Próximos pasos

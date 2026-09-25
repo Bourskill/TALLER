@@ -585,7 +585,7 @@ function fmtCorto(n) {
 var SECCIONES_REPORTE = [
   { id: "movimientos", label: "Movimientos", ayuda: "Todos los ingresos y gastos del rango, uno por línea." },
   { id: "insumos", label: "Gasto en insumos", ayuda: "Compras de insumo ya pagadas, con cuánto se compró de cada cosa." },
-  { id: "productos", label: "Productos vendidos", ayuda: "Qué se vendió, a qué costo y cuánta ganancia dejó cada línea." },
+  { id: "productos", label: "Productos vendidos", ayuda: "Qué se vendió, a qué costo y cuánta ganancia dejó cada línea. Si el pedido viene de una cotización, el costo es el real (lo que costaron sus compras), repartido entre sus líneas: suma lo mismo que el reporte de Pedidos." },
   { id: "pedidos", label: "Pedidos", ayuda: "Los pedidos del rango con su total, lo abonado y lo que falta cobrar." },
   { id: "vendedores", label: "Ventas por vendedor", ayuda: "Cuánto vendió cada quien y qué comisión generó." },
   { id: "grafica", label: "Gráfica de ingresos y gastos", ayuda: "La evolución del rango, en barras." }

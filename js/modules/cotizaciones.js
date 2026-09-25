@@ -1150,7 +1150,7 @@ function renderRefCard(cotId, ref) {
   html += '<div class="ref-summary">' +
     '<div class="rs-item"><div class="rl">Costo x prenda' +
     (calc.costoGlobalUnit
-      ? renderHelp("Incluye " + fmt(calc.costoDirectoUnit) + " de los insumos de esta referencia, más " + fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente). Es el mismo costo con el que cuentan el total de la cotización y el reporte de productos vendidos.")
+      ? renderHelp("Incluye " + fmt(calc.costoDirectoUnit) + " de los insumos de esta referencia, más " + fmt(calc.costoGlobalUnit) + " que le toca de los costos globales del pedido (los de abajo de la línea intermitente). Es el costo ESTIMADO con el que cuenta el total de la cotización. Los reportes (Pedidos y Productos vendidos) usan el costo real una vez registradas las compras.")
       : "") +
     '</div><div class="rv">' + fmt(calc.costoUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +

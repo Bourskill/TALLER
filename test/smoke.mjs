@@ -7697,6 +7697,67 @@ assert(mapaCalc.verificarRecibo(r1H54, state.cotizaciones, state.tx).length === 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 
+// ---------------------------------------------------------------------
+// Hallazgo #55 — el reporte de Productos vendidos usaba el costo ESTIMADO
+// (la foto de las líneas del pedido) mientras el de Pedidos usaba el real;
+// y un pedido escalado sin aplicar tomaba el costo de su borrador.
+// ---------------------------------------------------------------------
+const lineaPedidoMapa = function (nombre, talla, cant, precio, costo, extra) {
+  return Object.assign({ id: "l-" + nombre + talla, tipo: "libre", productoId: "", productoNombre: nombre, talla: talla, cantidad: cant, precioUnitario: precio, costoUnitario: costo, costoIndirectoUnitario: 0, observacion: "", campos: [] }, extra || {});
+};
+const filaPedidosMapa = function (id) { return mapaCalc.calcPedidosRango("2026-09-01", "2026-09-30").filter(function (f) { return f.id === id; })[0]; };
+const filasProductosMapa = function (op) { return mapaCalc.calcProductosVendidosRango("2026-09-01", "2026-09-30").filter(function (f) { return f.numeroOp === op; }); };
+const sumaMapa = function (filas, campo) { return filas.reduce(function (a, f) { return a + f[campo]; }, 0); };
+
+// El caso del mapa: tela estimada en $120.000, pagada en $150.000.
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+state.cotizaciones = [cotMapa("cot-h55-a", "ped-h55-a", 10, 12000, { compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 12, costoReal: 150000, txId: "" }] })];
+state.pedidos = [pedidoMapa("ped-h55-a", "cot-h55-a", 500000, 120000, { lineas: [lineaPedidoMapa("Camiseta", "", 10, 50000, 12000)] })];
+const pedidoH55 = filaPedidosMapa("ped-h55-a");
+const prodH55 = filasProductosMapa("OP-ped-h55-a");
+assert(pedidoH55.costo === 150000 && pedidoH55.ganancia === 350000, "(punto de partida #55) el reporte de Pedidos usa el costo real: $150.000, ganancia $350.000");
+assert(prodH55.length === 1 && prodH55[0].costoTotal === 150000 && prodH55[0].costoUnit === 15000 && prodH55[0].ganancia === 350000, "#55: el reporte de Productos vendidos da el MISMO costo real ($150.000, $15.000 por unidad) y la misma ganancia — antes $120.000 y $380.000");
+state.tab = "pedidos"; state.pedidosVista = "historial"; state.filtroPedidosVista = ""; state.filtroPedidos = "todos"; state.filtroPedidosSoloSaldo = false; state.buscarPedidos = ""; render();
+assert(document.body.textContent.indexOf("Costo " + fmtMapa(150000)) !== -1, "#55: la tarjeta del pedido también muestra el costo real (" + fmtMapa(150000) + "), no el estimado del día que se convirtió");
+
+// Varias líneas (dos tallas + un servicio cobrado): los totales cuadran.
+state.cotizaciones = [cotMapa("cot-h55-b", "ped-h55-b", 10, 12000, {
+  serviciosCobrados: [{ id: "srv-h55", nombre: "Diseño", precio: 80000, costo: 50000, proveedorId: "" }],
+  compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 12, costoReal: 150000, txId: "" }]
+})];
+state.pedidos = [pedidoMapa("ped-h55-b", "cot-h55-b", 580000, 170000, { lineas: [
+  lineaPedidoMapa("Camiseta", "S", 8, 50000, 12000), lineaPedidoMapa("Camiseta", "M", 2, 50000, 12000),
+  lineaPedidoMapa("Diseño", "", 1, 80000, 50000, { esServicioCobrado: true })
+] })];
+const pedidoVariasH55 = filaPedidosMapa("ped-h55-b");
+const prodVariasH55 = filasProductosMapa("OP-ped-h55-b");
+assert(pedidoVariasH55.costo === 200000 && Math.abs(sumaMapa(prodVariasH55, "costoTotal") - 200000) < 0.01 && Math.abs(sumaMapa(prodVariasH55, "ganancia") - pedidoVariasH55.ganancia) < 0.01, "#55: con varias líneas (tallas S/M y un Diseño) el costo real ($200.000) se reparte y la suma de Productos cuadra con Pedidos al centavo");
+assert(Math.abs(prodVariasH55[0].costoUnit - prodVariasH55[1].costoUnit) < 0.01, "...y las dos tallas de la misma prenda quedan con el mismo costo por unidad (a menos de un centavo: el reparto se redondea al centavo)");
+
+// Pedido rápido escalado a cotización y SIN aplicar: el borrador no manda.
+state.cotizaciones = [cotMapa("cot-h55-esc", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-h55-esc", referencias: [{ id: "ref-esc", nombre: "Gorra", imagenUrl: "", cantidadPedida: 1, precioVenta: 30000, insumos: [], detalle: [], estado: "", estadosDef: [] }] })];
+state.pedidos = [pedidoMapa("ped-h55-esc", "cot-h55-esc", 30000, 18000, { lineas: [lineaPedidoMapa("Gorra", "", 1, 30000, 18000)] })];
+assert(filaPedidosMapa("ped-h55-esc").costo === 18000 && filaPedidosMapa("ped-h55-esc").ganancia === 12000, "#55: un pedido rápido escalado a una cotización que todavía no se aplicó conserva su costo ($18.000) en el reporte de Pedidos — antes tomaba el del borrador ($0) y toda la venta salía como ganancia");
+assert(filasProductosMapa("OP-ped-h55-esc")[0].costoTotal === 18000, "...y Productos vendidos coincide");
+
+// Cotización borrada: se usa el costo del pedido, igual que siempre.
+state.cotizaciones = [];
+state.pedidos = [pedidoMapa("ped-h55-sin", "cot-que-no-existe", 500000, 120000, { lineas: [lineaPedidoMapa("Camiseta", "", 10, 50000, 12000)] })];
+assert(filaPedidosMapa("ped-h55-sin").costo === 120000 && filasProductosMapa("OP-ped-h55-sin")[0].costoUnit === 12000, "#55: si la cotización ya no existe, los dos reportes usan el costo del pedido, sin cambios");
+
+// Solo un servicio más un domicilio, sin prendas: el domicilio no tenía
+// línea donde caer y Productos lo perdía.
+state.cotizaciones = [cotMapa("cot-h55-srv", "ped-h55-srv", 0, 0, {
+  referencias: [], costosGlobales: [{ id: "g-h55", nombre: "Domicilio", costo: 20000, cantidad: 0, proveedorId: "" }],
+  serviciosCobrados: [{ id: "srv-h55b", nombre: "Diseño", precio: 80000, costo: 50000, proveedorId: "" }]
+})];
+state.pedidos = [pedidoMapa("ped-h55-srv", "cot-h55-srv", 80000, 70000, { lineas: [lineaPedidoMapa("Diseño", "", 1, 80000, 50000, { esServicioCobrado: true })] })];
+assert(filaPedidosMapa("ped-h55-srv").costo === 70000 && filasProductosMapa("OP-ped-h55-srv")[0].costoTotal === 70000, "#55: un pedido de solo servicio + domicilio cuadra en los dos reportes ($70.000) — antes Productos decía $50.000");
+
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.tab = "resumen";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
