@@ -8146,10 +8146,10 @@ const marcarCompraH58 = function (cotId, compra) {
 };
 abrirProduccionH58("cot-h58");
 marcarCompraH58("cot-h58", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "", fecha: "2026-09-12" });
-assert(cajaMapa() === 0 && document.body.textContent.indexOf("se llevan solas al pulsar Guardar") !== -1, "(punto de partida #58) marcada \"Sí\" y sin guardar: la caja todavía no la cuenta, y Compras del pedido lo dice");
+assert(cajaMapa() === 0 && document.body.textContent.indexOf("se ponen al día al pulsar Guardar") !== -1, "(punto de partida #58) marcada \"Sí\" y sin guardar: la caja todavía no la cuenta, y Compras del pedido lo dice");
 click('[data-action="guardar-cotizacion"][data-id="cot-h58"]');
 assert(cajaMapa() === -110000 && state.tx.length === 1 && state.tx[0].origenCompraClave === CLAVE_TELA && compraMapa("cot-h58", CLAVE_TELA).txId === state.tx[0].id, "#58: al pulsar Guardar, la compra \"Sí\" ($110.000) ya está en Finanzas — sin tener que pulsar \"Actualizar movimientos\"");
-assert(document.body.textContent.indexOf("todavía no está en Finanzas") === -1, "...y el aviso desaparece");
+assert(document.body.textContent.indexOf("no coincide con Finanzas") === -1, "...y el aviso desaparece");
 cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return "cot-h58"; } }); render();
 assert(state.tx.length === 1 && cajaMapa() === -110000, "#58: guardar otra vez no duplica nada");
 marcarCompraH58("cot-h58", Object.assign({}, compraMapa("cot-h58", CLAVE_TELA), { estado: "no", costoReal: "", cantidadReal: "" }));
@@ -8163,6 +8163,97 @@ state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-
 marcarCompraH58("cot-h58", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "", fecha: "2026-09-12" });
 cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return "cot-h58"; } }); render();
 assert(state.tx.length === 1 && cajaMapa() === -100000 && document.body.textContent.indexOf("estimado completo registrado") !== -1, "#58: si el pedido tiene su estimado completo registrado, guardar NO lleva la compra (contaría el costo dos veces) y Compras del pedido explica por qué");
+
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.cotSucia = ""; state.cotSnapshot = null;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.tab = "resumen";
+
+// ---------------------------------------------------------------------
+// Revisión del Hallazgo #58.
+// ---------------------------------------------------------------------
+const guardarH58b = function (id) { cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return id; } }); render(); };
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+state.pedidos = [pedidoMapa("ped-h58b", "cot-h58b", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h58b", "ped-h58b", 10, 10000)];
+abrirProduccionH58("cot-h58b");
+marcarCompraH58("cot-h58b", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "", fecha: "2026-09-30" });
+guardarH58b("cot-h58b");
+// (1) Lo corregido a mano en Finanzas se respeta.
+state.tx[0].fecha = "2026-10-02"; state.tx[0].concepto = "Tela antifluido factura 8812"; state.tx[0].contraparte = "Textiles Sur";
+marcarCompraH58("cot-h58b", Object.assign({}, compraMapa("cot-h58b", CLAVE_TELA)));
+state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-h58b" ? Object.assign({}, c, { fechaEntrega: "2026-10-20" }) : c; });
+guardarH58b("cot-h58b");
+assert(state.tx[0].fecha === "2026-10-02" && state.tx[0].concepto === "Tela antifluido factura 8812" && state.tx[0].contraparte === "Textiles Sur" && state.tx[0].monto === 110000, "#58: guardar la cotización ya NO deshace lo corregido a mano en Finanzas (fecha, concepto, persona) — antes el gasto volvía a septiembre");
+// ...pero sí sigue un cambio hecho en la propia compra, si Finanzas no lo tocó.
+marcarCompraH58("cot-h58b", Object.assign({}, compraMapa("cot-h58b", CLAVE_TELA), { costoReal: 125000 }));
+guardarH58b("cot-h58b");
+assert(state.tx[0].monto === 125000 && state.tx[0].fecha === "2026-10-02", "#58: un cambio de costo en la compra sí llega al movimiento ($125.000), sin tocar la fecha corregida");
+marcarCompraH58("cot-h58b", Object.assign({}, compraMapa("cot-h58b", CLAVE_TELA), { fecha: "2026-10-05" }));
+guardarH58b("cot-h58b");
+assert(state.tx[0].fecha === "2026-10-05" && state.tx[0].concepto === "Tela antifluido factura 8812", "#58: si luego se cambia la fecha EN LA COMPRA, esa sí llega a Finanzas (es lo más nuevo), y el concepto corregido se queda");
+// (2) Un movimiento viejo (compra reparada, sin registro de lo sincronizado):
+// no se le cambia la fecha a hoy ni la cantidad al estimado.
+state.tx = [{ id: "tx-h58b-viejo", tipo: "gasto", fecha: "2026-08-15", concepto: "Compra — Tela", monto: 120000, contraparte: "Textiles Sur", pedidoId: "ped-h58b", cotizacionId: "cot-h58b", esInsumo: "1", origenCompraClave: CLAVE_TELA, cantidad: 12, unidad: "m", serviciosDescuento: [] }];
+marcarCompraH58("cot-h58b", { clave: CLAVE_TELA, estado: "si", costoReal: 120000, txId: "tx-h58b-viejo" });
+guardarH58b("cot-h58b");
+assert(state.tx[0].fecha === "2026-08-15" && state.tx[0].cantidad === 12 && state.tx[0].contraparte === "Textiles Sur", "#58: un movimiento viejo conserva su fecha (agosto), su cantidad y su persona — antes quedaba con fecha de hoy y la cantidad estimada");
+
+// (3) "Aplicar a pedido" lleva las compras (el editor ya se cerró).
+state.tx = []; state.cotSucia = "";
+state.pedidos = [pedidoMapa("ped-h58b-e", "cot-h58b-e", 500000, 0, { lineas: [lineaPedidoMapa("Camiseta", "", 10, 50000, 0)] })];
+state.cotizaciones = [cotMapa("cot-h58b-e", "", 10, 10000, { estado: "borrador", pedidoOrigenId: "ped-h58b-e" })];
+abrirProduccionH58("cot-h58b-e");
+marcarCompraH58("cot-h58b-e", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 100000, txId: "", fecha: "2026-09-12" });
+global.confirm = dom.window.confirm = function () { return true; };
+cotAccionesMapa["aplicar-cotizacion-a-pedido"]({ getAttribute: function () { return "cot-h58b-e"; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(cajaMapa() === -100000 && state.tx[0].pedidoId === "ped-h58b-e", "#58: \"Aplicar a pedido\" también lleva la compra \"Sí\" a Finanzas ($100.000, ligada al pedido) — antes quedaba afuera");
+
+// (4) Guardar no convierte en recibo lo comprado de más (eso es del botón).
+state.tx = []; state.cotSucia = "";
+state.pedidos = [pedidoMapa("ped-h58b-x", "cot-h58b-x", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h58b-x", "ped-h58b-x", 10, 10000)];
+abrirProduccionH58("cot-h58b-x");
+marcarCompraH58("cot-h58b-x", { clave: CLAVE_TELA, estado: "si", cantidadReal: 12, costoReal: 120000, cantidadExcedente: 2, txId: "", fecha: "2026-09-12" });
+guardarH58b("cot-h58b-x");
+assert(!mapaCalc.esMiembroRecibo(compraMapa("cot-h58b-x", CLAVE_TELA)) && cajaMapa() === -120000, "#58: guardar lleva la compra con su excedente pero NO la convierte en recibo — así un costo mal tecleado se sigue corrigiendo desde la cotización");
+cotAccionesMapa["sincronizar-compras-finanzas"]({ getAttribute: function () { return "cot-h58b-x"; } }); render();
+assert(mapaCalc.esMiembroRecibo(compraMapa("cot-h58b-x", CLAVE_TELA)) && cajaMapa() === -120000, "...el botón \"Actualizar movimientos financieros\" sí la convierte (caso medias), con la caja igual");
+
+// (5) "Descartar" en una cotización abierta sin foto (desde Pedidos): revierte.
+state.tx = []; state.cotSucia = ""; state.cotSnapshot = null;
+state.pedidos = [pedidoMapa("ped-h58b-d", "cot-h58b-d", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h58b-d", "ped-h58b-d", 10, 10000)];
+state.tab = "cotizaciones"; state.cotizacionesVista = "nueva"; state.cotizacionEditando = "cot-h58b-d"; render();
+marcarCompraH58("cot-h58b-d", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 100000, txId: "", fecha: "2026-09-12" });
+global.confirm = dom.window.confirm = function () { return true; };
+cotAccionesMapa["descartar-cambios-cotizacion"]({ getAttribute: function () { return ""; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-h58b-d" ? Object.assign({}, c, { fechaEntrega: "2026-10-20" }) : c; });
+state.cotSucia = "cot-h58b-d";
+guardarH58b("cot-h58b-d");
+assert(!(compraMapa("cot-h58b-d", CLAVE_TELA) || {}).estado && cajaMapa() === 0, "#58: \"Descartar\" en una cotización abierta desde otro lado sí revierte la compra, y el siguiente Guardar no mete esa plata en la caja");
+
+// (6) Después de una recarga, "" vuelve como 0: no es un cambio.
+state.pedidos = [pedidoMapa("ped-h58b-s", "cot-h58b-s", 580000, 20000)];
+state.cotizaciones = [cotMapa("cot-h58b-s", "ped-h58b-s", 0, 0, { referencias: [], serviciosCobrados: [{ id: "srv-h58b", nombre: "Diseño", precio: 80000, costo: 20000, proveedorId: "" }], compras: [{ clave: "servicio|srv-h58b", estado: "si", costoReal: 20000, txId: "" }] })];
+state.tx = [];
+const sincServH58 = sincronizarMapa(state.cotizaciones[0]);
+state.cotizaciones = state.cotizaciones.map(function (c) { return Object.assign({}, c, { compras: sincServH58.compras }); });
+state.tx[0].cantidad = 0;
+assert(sincronizarMapa(state.cotizaciones[0]).actualizados === 0, "#58: una cantidad vacía que volvió de la Sheet como 0 no cuenta como \"actualizado\" (antes salía un aviso sin que nada cambiara)");
+
+// (7) El aviso: sin cambios sin guardar, apunta al botón; un movimiento
+// ligado por puntero (sin marca) sí cuenta como llevado.
+state.tx = [{ id: "tx-h58b-p", tipo: "gasto", fecha: "2026-09-12", concepto: "Compra — Tela", monto: 110000, contraparte: "", pedidoId: "ped-h58b-v", cotizacionId: "cot-h58b-v" }];
+state.pedidos = [pedidoMapa("ped-h58b-v", "cot-h58b-v", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h58b-v", "ped-h58b-v", 10, 10000, { compras: [{ clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "tx-h58b-p" }] })];
+abrirProduccionH58("cot-h58b-v");
+assert(document.body.textContent.indexOf("no coincide con Finanzas") === -1 && document.body.textContent.indexOf("todavía no está en Finanzas") === -1, "#58: una compra cuyo movimiento está ligado por su puntero (sin marca) no sale como pendiente");
+state.cotizaciones = state.cotizaciones.map(function (c) { return Object.assign({}, c, { compras: [Object.assign({}, c.compras[0], { costoReal: 150000 })] }); });
+state.cotSucia = ""; render();
+assert(document.body.textContent.indexOf("1 compra no coincide con Finanzas: pulsa «Actualizar movimientos financieros»") !== -1, "#58: si la compra no coincide y no hay cambios sin guardar, el aviso apunta al botón (no hay Guardar que pulsar)");
 
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.cotSucia = ""; state.cotSnapshot = null;
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;

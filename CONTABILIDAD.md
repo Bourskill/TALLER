@@ -3326,6 +3326,35 @@ que se lleve sola al guardar? Respuesta: **que se lleve sola**.
 - El aviso de compras sin llevar aparece y desaparece.
 - Sin el cambio, fallan.
 
+**Revisión independiente (mismo día) — lo que el guardado automático
+rompía, corregido:**
+1. **🔴 Deshacía lo corregido a mano en Finanzas.** Cada Guardar volvía a
+   escribir la fecha, el concepto, la persona y la cantidad del
+   movimiento. Un gasto corregido al 2 de octubre volvía al 30 de
+   septiembre, y un movimiento viejo reparado tomaba la fecha de hoy.
+   Ahora, campo por campo, se compara con lo que la compra pedía la última
+   vez que se sincronizó (`compra.txSync`):
+   - si la compra cambió desde entonces, gana la compra;
+   - si no, se conserva lo de Finanzas;
+   - una compra sin fecha toma la de su movimiento, nunca la de hoy.
+2. **"Aplicar a pedido" no llevaba las compras**, porque el editor ya se
+   había cerrado. `guardarCotizaciones({ cotId })` las lleva.
+3. **Guardar convertía en recibo cualquier excedente**, incluso uno de
+   redondeo, y una compra de recibo ya no se corrige desde la cotización.
+   Ahora solo convierten el botón y la carga de la app.
+4. **"Descartar" sin foto no revertía** (cotización abierta desde Pedidos o
+   Finanzas), y el siguiente Guardar convertía esa edición descartada en
+   plata real. Ahora la foto se toma al dibujar la cotización si falta.
+5. **Menores:**
+   - después de una recarga, `""` contra `0` ya no cuenta como
+     "actualizado";
+   - el aviso cubre cualquier diferencia entre Compras y Finanzas
+     (`comprasDesfasadasConFinanzas`), no solo una compra sin movimiento;
+   - un movimiento ligado por su puntero ya no sale como pendiente;
+   - si no hay cambios sin guardar, el aviso apunta al botón.
+
+Pruebas: los casos anteriores, que fallan sin el cambio.
+
 ---
 
 ## Próximos pasos
