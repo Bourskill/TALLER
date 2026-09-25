@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
+import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
@@ -1156,7 +1156,7 @@ function renderVendedor(p) {
     '<div class="pedido-comision-quien">' + esc(v.nombre) + " · <b>" + etiquetaValor + "</b></div>" +
     '<span class="badge ' + (pagado ? "success" : "warning") + '">' + (pagado ? "Ya se le pagó" : "Pendiente de pago") + "</span>" +
     (pagado
-      ? '<button class="btn ghost small" data-action="toggle-comision" data-id="' + p.id + '" title="Deshace el pago: retira de Finanzas el gasto de esta comisión y la deja otra vez pendiente.">↩ Deshacer el pago</button>'
+      ? '<button class="btn ghost small" data-action="toggle-comision" data-id="' + p.id + '" title="' + (pedidoCancelado(p) ? "Deshace el pago: retira de Finanzas el gasto de esta comisión. Como el pedido está cancelado, la comisión queda ANULADA y no se podrá volver a registrar sin reactivarlo." : "Deshace el pago: retira de Finanzas el gasto de esta comisión y la deja otra vez pendiente.") + '">↩ Deshacer el pago</button>'
       : '<button class="btn small" data-action="toggle-comision" data-id="' + p.id + '">Marcar comisión como pagada</button>') +
     (!pagado
       ? '<label class="pedido-comision-fecha">Fecha prevista de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-vendedor-fecha-pago" data-id="' + p.id + '" /></label>'
@@ -2078,8 +2078,12 @@ export var actions = {
         "Se registra un gasto de " + fmt(valor) + " en Finanzas (esa plata sale de la caja). Puedes deshacerlo desde este mismo pedido.")) return;
       state.tx.unshift({ id: uid(), tipo: "comision", concepto: "Comisión — " + ped.vendedor.nombre, monto: valor, contraparte: ped.vendedor.nombre, fecha: todayStr(), pedidoId: ped.id, origenComisionPedidoId: id });
     } else {
+      // En un pedido cancelado, deshacer deja la comisión ANULADA, no
+      // pendiente: se dice así (antes el aviso prometía lo contrario).
       if (!window.confirm("¿Deshacer el pago de la comisión de " + ped.vendedor.nombre + " (" + fmt(valor) + ")?\n\n" +
-        "Se retira de Finanzas el gasto que se había creado y la comisión vuelve a quedar pendiente de pago.")) return;
+        (pedidoCancelado(ped)
+          ? "Se retira de Finanzas el gasto que se había creado. Como el pedido está CANCELADO, la comisión queda anulada (no pendiente): no se podrá volver a registrar sin reactivar el pedido. Hazlo solo si ese pago nunca ocurrió."
+          : "Se retira de Finanzas el gasto que se había creado y la comisión vuelve a quedar pendiente de pago."))) return;
       state.tx = state.tx.filter(function (t) { return t.origenComisionPedidoId !== id; });
     }
     persist("tx");
@@ -2488,9 +2492,14 @@ export var actions = {
     var detalle = "";
     if (saldo > 0) detalle += "· Deja de figurar " + fmt(saldo) + " como saldo por cobrar." + "\n";
     detalle += "· Deja de contar como pedido activo y como venta en los reportes." + "\n";
-    if (pedido.vendedor && pedido.vendedor.nombre && pedido.vendedor.estado !== "pagado") {
+    if (estadoComisionPedido(pedido) === "pendiente") {
       detalle += "· Su comisión pendiente deja de deberse." + "\n";
     }
+    // Una cotización escalada de este pedido con su propia comisión
+    // pendiente también queda anulada (estadoComisionCot): se avisa.
+    var comisionCotPendiente = state.cotizaciones.filter(function (c) { return pedidoIdDeCotParaTx(c) === id && estadoComisionCot(c) === "pendiente"; })
+      .reduce(function (a, c) { return a + calcComisionValorCot(c); }, 0);
+    if (comisionCotPendiente > 0) detalle += "· La comisión pendiente de su cotización (" + fmt(comisionCotPendiente) + ") deja de deberse." + "\n";
     if (stock) detalle += "· Vuelven " + stock + " unidad(es) al stock del Catálogo." + "\n";
     if (!window.confirm("¿Cancelar el pedido " + (pedido.numeroOp || "") + " — " + pedido.descripcion + "?\n\n" +
       "Queda registrado como cancelado y NO se toca nada de lo que ya se movió en Finanzas" +

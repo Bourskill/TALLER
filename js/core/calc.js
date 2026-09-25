@@ -1533,14 +1533,22 @@ export function estadoComisionPedido(p) {
   if (pedidoCancelado(p)) return "anulada";
   return "pendiente";
 }
+// ¿El pedido real que tiene detrás una cotización sin convertir (el de
+// origen de una escalada) está cancelado? Una sola respuesta para el estado
+// de su comisión y para "Mis ventas" — antes la fila de la cotización solo
+// se marcaba cancelada si su comisión seguía pendiente, así que una ya
+// pagada volvía a sumar la venta cancelada (revisión del Hallazgo #56).
+export function cotSobrePedidoCancelado(c) {
+  var pid = pedidoIdDeCotParaTx(c);
+  var ped = pid ? (state.pedidos || []).filter(function (p) { return p.id === pid; })[0] : null;
+  return !!(ped && pedidoCancelado(ped));
+}
 // Igual para una cotización sin convertir: queda anulada si el pedido real
 // que tiene detrás (el de origen de una escalada) está cancelado.
 export function estadoComisionCot(c) {
   if (!c || c.estado === "convertida" || !c.vendedor || !c.vendedor.nombre) return "";
   if (c.vendedor.estado === "pagado") return "pagada";
-  var pid = pedidoIdDeCotParaTx(c);
-  var ped = pid ? (state.pedidos || []).filter(function (p) { return p.id === pid; })[0] : null;
-  if (ped && pedidoCancelado(ped)) return "anulada";
+  if (cotSobrePedidoCancelado(c)) return "anulada";
   return "pendiente";
 }
 export function calcComisionesPendientes() {
@@ -1586,12 +1594,12 @@ export function calcFilasVentasVendedor(nombre) {
   state.pedidos.forEach(function (p) {
     if (!p.vendedor || p.vendedor.nombre !== nombre) return;
     var estado = estadoComisionPedido(p);
-    filas.push({ tipo: "pedido", id: p.id, cliente: p.cliente, descripcion: p.descripcion, total: num(p.total), cancelado: pedidoCancelado(p), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValor(p), comisionAnulada: estado === "anulada" ? calcComisionValor(p) : 0 });
+    filas.push({ tipo: "pedido", id: p.id, pedidoId: p.id, cliente: p.cliente, descripcion: p.descripcion, total: num(p.total), cancelado: pedidoCancelado(p), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValor(p), comisionAnulada: estado === "anulada" ? calcComisionValor(p) : 0 });
   });
   state.cotizaciones.forEach(function (c) {
     if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
     var estado = estadoComisionCot(c);
-    filas.push({ tipo: "cotizacion", id: c.id, cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, cancelado: estado === "anulada", estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValorCot(c), comisionAnulada: estado === "anulada" ? calcComisionValorCot(c) : 0 });
+    filas.push({ tipo: "cotizacion", id: c.id, pedidoId: pedidoIdDeCotParaTx(c), cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, cancelado: cotSobrePedidoCancelado(c), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValorCot(c), comisionAnulada: estado === "anulada" ? calcComisionValorCot(c) : 0 });
   });
   return filas;
 }
@@ -1604,13 +1612,18 @@ export function etiquetaComisionVendedor(f) {
 }
 // Totales de "Mis ventas": la suma de esas mismas filas, así la tabla y los
 // KPIs no pueden separarse. Mismo criterio que calcComisionesPendientes/Cot.
+// `cancelados` cuenta PEDIDOS distintos: un pedido cancelado y su
+// cotización escalada son una sola venta cancelada, no dos.
 export function calcVentasVendedor(nombre) {
-  return calcFilasVentasVendedor(nombre).reduce(function (a, f) {
-    if (f.cancelado) a.cancelados++; else a.totalVendido += f.total;
+  var pedidosCancelados = {};
+  var r = calcFilasVentasVendedor(nombre).reduce(function (a, f) {
+    if (f.cancelado) pedidosCancelados[f.pedidoId || f.id] = true; else a.totalVendido += f.total;
     if (f.estadoComision === "pendiente") a.comisionPendiente += f.comision;
     if (f.estadoComision === "pagada") a.comisionPagada += f.comision;
     return a;
   }, { totalVendido: 0, comisionPendiente: 0, comisionPagada: 0, cancelados: 0 });
+  r.cancelados = Object.keys(pedidosCancelados).length;
+  return r;
 }
 
 // ---------- consignación (puntos de venta externos con comisión) ----------

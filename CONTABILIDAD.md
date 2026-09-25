@@ -3213,6 +3213,25 @@ Del "Mapa del dinero".
 - Ficha del cliente: $300.000 y no $700.000.
 - Sin el arreglo, fallan todas.
 
+**Revisión independiente (mismo día) — corregido:**
+- **Deshacer un pago en un pedido cancelado.** El aviso decía "vuelve a
+  quedar pendiente", pero queda ANULADA y ya no se puede volver a pagar
+  sin reactivar el pedido. Ahora el aviso y la ayuda del botón lo dicen,
+  en el pedido y en la cotización.
+- **Cotización escalada de un pedido cancelado con la comisión ya
+  pagada.** Volvía a sumar como venta en Mis ventas. Ahora "cancelado" sale
+  del pedido que tiene detrás (`cotSobrePedidoCancelado`), no del estado
+  de la comisión.
+- **Conteo de cancelados.** Un pedido cancelado y su escalada contaban
+  como 2; ahora cuentan pedidos distintos.
+- **Aviso al cancelar.** Ahora menciona la comisión pendiente de su
+  cotización escalada, que deja de deberse.
+- **PDF interno de la cotización.** Decía "(pendiente)" para una comisión
+  anulada; ahora usa `estadoComisionCot`.
+
+Pruebas: los 5 casos (el PDF, con un doble de jsPDF). Sin el cambio
+fallan.
+
 **Visto en el barrido, fuera de esta corrección (para decidir):**
 - Una cotización escalada NO cancelada cuenta su comisión y su venta
   ADEMÁS de las de su propio pedido rápido. Pendientes muestra $80.000

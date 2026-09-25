@@ -8024,6 +8024,70 @@ assert(prodAhH55[0].costoTotal === 120000 && prodAhH55[1].costoTotal === 0 && fi
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 
+// ---------------------------------------------------------------------
+// Revisión del Hallazgo #56.
+// ---------------------------------------------------------------------
+state.config.gastosFijos = []; state.config.nomina = []; state.deudas = [];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+var mensajeH56b = "";
+global.confirm = dom.window.confirm = function (m) { mensajeH56b = m; return false; };
+// (1) Deshacer el pago en un pedido cancelado: el aviso dice lo que pasa.
+state.cotizaciones = [];
+state.pedidos = [pedidoMapa("ped-h56b-d", "", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pagado") })];
+pedAccionesH56["toggle-comision"]({ getAttribute: function () { return "ped-h56b-d"; } });
+assert(mensajeH56b.indexOf("queda anulada") !== -1 && mensajeH56b.indexOf("vuelve a quedar pendiente") === -1, "#56: deshacer el pago de la comisión de un pedido CANCELADO avisa que queda anulada (no pendiente) — antes prometía lo contrario");
+
+// (2) Cotización escalada con la comisión pagada desde ella, pedido cancelado.
+state.pedidos = [pedidoMapa("ped-h56b-e", "cot-h56b-e", 400000, 0, { cancelado: true })];
+state.cotizaciones = [cotMapa("cot-h56b-e", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-h56b-e", vendedor: vendedorAnaMapa("pagado"),
+  referencias: [{ id: "ref-h56b", nombre: "Uniforme", imagenUrl: "", cantidadPedida: 1, precioVenta: 400000, insumos: [], detalle: [], estado: "", estadosDef: [] }] })];
+const ventasEscH56 = mapaCalc.calcVentasVendedor("Ana");
+assert(ventasEscH56.totalVendido === 0 && ventasEscH56.cancelados === 1 && ventasEscH56.comisionPagada === 40000 && mapaCalc.etiquetaComisionVendedor(mapaCalc.calcFilasVentasVendedor("Ana")[0]) === "Pagada · pedido cancelado", "#56: la cotización escalada de un pedido cancelado no suma como venta aunque su comisión se haya pagado — sale \"Pagada · pedido cancelado\"");
+
+// (3) Un pedido cancelado y su escalada cuentan como UN cancelado.
+state.pedidos = [pedidoMapa("ped-h56b-e", "cot-h56b-e", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pendiente") })];
+state.cotizaciones[0].vendedor = vendedorAnaMapa("pendiente");
+assert(mapaCalc.calcVentasVendedor("Ana").cancelados === 1, "#56: un pedido cancelado y su cotización escalada cuentan como UN pedido cancelado, no dos");
+
+// (4) Cancelar avisa de la comisión de su cotización escalada.
+state.pedidos = [pedidoMapa("ped-h56b-c", "cot-h56b-c", 400000, 0)];
+state.cotizaciones = [cotMapa("cot-h56b-c", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-h56b-c", vendedor: vendedorAnaMapa("pendiente"),
+  referencias: [{ id: "ref-h56b-c", nombre: "Uniforme", imagenUrl: "", cantidadPedida: 1, precioVenta: 400000, insumos: [], detalle: [], estado: "", estadosDef: [] }] })];
+mensajeH56b = "";
+pedAccionesH56["cancelar-pedido"]({ getAttribute: function () { return "ped-h56b-c"; } });
+assert(mensajeH56b.indexOf("comisión pendiente de su cotización") !== -1 && mensajeH56b.indexOf(fmtMapa(40000)) !== -1, "#56: al cancelar, el aviso menciona que la comisión pendiente de su cotización escalada ($40.000) deja de deberse");
+
+// (5) El PDF interno de esa cotización (ya con el pedido cancelado).
+state.pedidos = [pedidoMapa("ped-h56b-c", "cot-h56b-c", 400000, 0, { cancelado: true })];
+const textosPdfH56b = [];
+const jspdfPrevioH56b = window.jspdf;
+window.jspdf = { jsPDF: function () {
+  var guardado = {};
+  var doc = new Proxy(guardado, {
+    get: function (t, k) {
+      if (k in t) return t[k];
+      if (k === "internal") return { pageSize: { getWidth: function () { return 612; }, getHeight: function () { return 792; }, width: 612, height: 792 }, getNumberOfPages: function () { return 1; } };
+      if (k === "autoTable") return function () { t.lastAutoTable = { finalY: 400 }; };
+      if (k === "text") return function (txt) { textosPdfH56b.push([].concat(txt).join(" ")); return doc; };
+      if (k === "getTextWidth") return function () { return 10; };
+      if (k === "splitTextToSize") return function (txt) { return [String(txt)]; };
+      return function () { return doc; };
+    },
+    set: function (t, k, v) { t[k] = v; return true; }
+  });
+  return doc;
+} };
+const { generarPDFInternoCotizacion: pdfInternoH56b } = await import("../js/core/pdf.js");
+try { await pdfInternoH56b(state.cotizaciones[0], { vendedor: true }); } catch (e) { /* mostrar el PDF en pantalla no aplica acá */ }
+window.jspdf = jspdfPrevioH56b;
+assert(textosPdfH56b.some(function (t) { return t.indexOf("Ana") !== -1 && t.indexOf("anulada, pedido cancelado") !== -1; }), "#56: el PDF interno de la cotización dice \"anulada, pedido cancelado\", como la app — antes decía \"pendiente\"");
+
+state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = configPreviaH56.nomina; state.deudas = deudasPreviasH56;
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.tab = "resumen";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

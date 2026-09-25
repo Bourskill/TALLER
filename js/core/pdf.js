@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -1075,7 +1075,10 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     doc.text("Comisión vendedor", marginX, y); y += 16;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(60, 60, 60);
     var etiquetaCom = cot.vendedor.tipo === "fijo" ? "valor fijo" : (cot.vendedor.valor + "%");
-    doc.text(cot.vendedor.nombre + " — " + etiquetaCom + " = " + money(valorCom) + " (" + (cot.vendedor.estado === "pagado" ? "pagada" : "pendiente") + ")", marginX, y);
+    // Mismo estado que la app (estadoComisionCot): una comisión anulada por
+    // un pedido cancelado no se imprime como "pendiente" (revisión del #56).
+    var estadoCom = estadoComisionCot(cot);
+    doc.text(cot.vendedor.nombre + " — " + etiquetaCom + " = " + money(valorCom) + " (" + (estadoCom === "anulada" ? "anulada, pedido cancelado" : cot.vendedor.estado === "pagado" ? "pagada" : "pendiente") + ")", marginX, y);
     y += 20;
   }
 
