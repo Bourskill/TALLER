@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -474,7 +474,7 @@ function renderCotVendedorCompact(c) {
   var porAceptar = estadoComisionCot(c) === "por-aceptar";
 
   if (!expandido) {
-    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : anulada ? " · anulada (pedido cancelado)" : porAceptar ? " · se debe cuando el cliente acepte" : " · pendiente")) : "Sin vendedor asignado";
+    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : anulada ? " · anulada (pedido cancelado)" : porAceptar && cotConPedidoEliminado(c) ? " · su pedido se eliminó" : porAceptar ? " · se debe cuando el cliente acepte" : " · pendiente")) : "Sin vendedor asignado";
     return '<div class="cot-vendedor-compact" data-action="toggle-cot-vendedor" data-id="' + c.id + '">👤 Vendedor: ' + resumen + "</div>";
   }
 
@@ -490,6 +490,8 @@ function renderCotVendedorCompact(c) {
         ? '<span class="badge" title="Esta cotización ya tiene un pedido real — la comisión se paga/deshace desde ahí.">' + (pagado ? "pagada" : "pendiente") + " · ver Pedidos</span>"
         : anulada
         ? '<span class="badge" title="El pedido de esta cotización se canceló: su comisión pendiente dejó de deberse.">anulada · pedido cancelado</span>'
+        : porAceptar && cotConPedidoEliminado(c)
+        ? '<span class="badge" title="El pedido de esta cotización se eliminó: restáuralo desde la papelera (Pedidos) para que la comisión vuelva a deberse.">pedido eliminado · restáuralo</span>'
         : porAceptar
         ? '<span class="badge" title="La comisión se debe desde que el cliente acepta: cuando esta cotización se convierta en pedido pasa a Por pagar.">se debe cuando el cliente acepte</span>'
         : ('<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision-cot" data-id="' + c.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
@@ -2418,7 +2420,9 @@ export var actions = {
     }
     // La comisión se debe desde que el cliente acepta (Hallazgo #57).
     if (pagando && estadoComisionCot(cot) === "por-aceptar") {
-      window.alert("El cliente todavía no acepta esta cotización: la comisión se debe desde que se convierte en pedido.");
+      window.alert(cotConPedidoEliminado(cot)
+        ? "El pedido de esta cotización se eliminó: la comisión no se puede registrar. Restaura el pedido desde la papelera (Pedidos) para poder pagarla."
+        : "El cliente todavía no acepta esta cotización: la comisión se debe desde que se convierte en pedido.");
       return;
     }
     if (pagando) {
@@ -2430,6 +2434,11 @@ export var actions = {
       if (!window.confirm("¿Deshacer el pago de la comisión de " + cot.vendedor.nombre + " (" + fmt(valor) + ")?\n\n" +
         (cotSobrePedidoCancelado(cot)
           ? "Se retira de Finanzas el gasto que se había creado. Como el pedido de esta cotización está CANCELADO, la comisión queda anulada (no pendiente): no se podrá volver a registrar sin reactivar el pedido. Hazlo solo si ese pago nunca ocurrió."
+          // Pagada desde un borrador (antes del #57 se podía): al deshacer
+          // queda "por aceptar" y no se puede volver a registrar hasta que el
+          // cliente acepte. Se dice así (revisión del #57).
+          : !cotizacionAceptada(cot)
+          ? "Se retira de Finanzas el gasto que se había creado. Como el cliente todavía no acepta esta cotización, la comisión queda POR ACEPTAR: no se podrá volver a registrar hasta que la cotización se convierta en pedido. Hazlo solo si ese pago nunca ocurrió."
           : "Se retira de Finanzas el gasto que se había creado y la comisión vuelve a quedar pendiente de pago."))) return;
       state.tx = state.tx.filter(function (t) { return t.origenComisionCotId !== id; });
     }

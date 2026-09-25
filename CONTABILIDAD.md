@@ -3288,6 +3288,22 @@ desde que el cliente acepta? Respuesta: **desde que el cliente acepta**.
 - `cotizacionAceptada` con una convertida y con una escalada huérfana.
 - Sin el cambio, fallan.
 
+**Revisión independiente (mismo día) — tres textos que decían otra cosa,
+corregidos:**
+- **Deshacer una comisión pagada desde un borrador** (se podía antes del
+  #57). El aviso decía "vuelve a quedar pendiente", pero queda "por
+  aceptar" y no se puede volver a registrar hasta que el cliente acepte.
+  Ahora lo dice.
+- **Una cotización escalada cuyo pedido se eliminó** prometía "cuando se
+  convierta en pedido", pero no se puede convertir, porque "Aplicar a
+  pedido" falla. Ahora dice que se restaure el pedido desde la papelera
+  (`cotConPedidoEliminado`).
+- **"N por aceptar" en Mis ventas y su PDF** contaba también un borrador
+  con la comisión ya pagada. Ahora cuenta solo las filas que dicen "Por
+  aceptar". Ese borrador sigue sin sumar como venta.
+
+Pruebas: los 3 casos, que fallan sin el cambio.
+
 ### 🟡 Hallazgo #58 — una compra marcada "Sí" va sola a Finanzas al Guardar. ✅ IMPLEMENTADO (decisión del dueño)
 
 Del "Mapa del dinero" (punto ⑦). Una compra marcada "Sí" solo llegaba a

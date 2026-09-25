@@ -1547,6 +1547,13 @@ export function cotizacionAceptada(c) {
 // de su comisión y para "Mis ventas" — antes la fila de la cotización solo
 // se marcaba cancelada si su comisión seguía pendiente, así que una ya
 // pagada volvía a sumar la venta cancelada (revisión del Hallazgo #56).
+// Una cotización escalada cuyo pedido de origen ya no existe (se eliminó):
+// no está aceptada, pero tampoco se puede convertir — "Aplicar a pedido"
+// falla. Los textos lo dicen así en vez de prometer "cuando se convierta".
+export function cotConPedidoEliminado(c) {
+  if (!c || c.estado === "convertida" || !c.pedidoOrigenId) return false;
+  return !(state.pedidos || []).some(function (p) { return p.id === c.pedidoOrigenId; });
+}
 export function cotSobrePedidoCancelado(c) {
   var pid = pedidoIdDeCotParaTx(c);
   var ped = pid ? (state.pedidos || []).filter(function (p) { return p.id === pid; })[0] : null;
@@ -1635,8 +1642,11 @@ export function calcVentasVendedor(nombre) {
   // Una cotización que el cliente todavía no acepta no es una venta: se
   // lista, pero no suma (Hallazgo #57).
   var r = calcFilasVentasVendedor(nombre).reduce(function (a, f) {
+    // "N por aceptar" cuenta solo las filas que dicen "Por aceptar": un
+    // borrador cuya comisión ya se pagó no suma como venta, pero tampoco se
+    // anuncia como algo que se deberá (revisión del #57).
     if (f.cancelado) pedidosCancelados[f.pedidoId || f.id] = true;
-    else if (f.porAceptar) a.porAceptar++;
+    else if (f.porAceptar) { if (f.estadoComision === "por-aceptar") a.porAceptar++; }
     else a.totalVendido += f.total;
     if (f.estadoComision === "pendiente") a.comisionPendiente += f.comision;
     if (f.estadoComision === "pagada") a.comisionPagada += f.comision;

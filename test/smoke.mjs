@@ -8260,6 +8260,39 @@ state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 state.tab = "resumen";
 
+// ---------------------------------------------------------------------
+// Revisión del Hallazgo #57.
+// ---------------------------------------------------------------------
+state.config.gastosFijos = []; state.config.nomina = []; state.deudas = [];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+var mensajeH57b = "";
+// (1) Deshacer una comisión pagada desde un borrador: el aviso dice que queda
+// "por aceptar", no "pendiente".
+state.pedidos = [];
+state.cotizaciones = [cotMapa("cot-h57b-p", "", 1, 0, { estado: "borrador", vendedor: vendedorAnaMapa("pagado"), referencias: refUniformeH57("ref-h57b-p") })];
+global.confirm = dom.window.confirm = function (m) { mensajeH57b = m; return false; };
+cotAccionesMapa["toggle-comision-cot"]({ getAttribute: function () { return "cot-h57b-p"; } });
+assert(mensajeH57b.indexOf("POR ACEPTAR") !== -1 && mensajeH57b.indexOf("vuelve a quedar pendiente") === -1, "#57: deshacer el pago de una comisión pagada desde un borrador avisa que queda \"por aceptar\" y que no se podrá volver a registrar hasta que el cliente acepte — antes decía \"pendiente\"");
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+
+// (2) Ese borrador ya pagado no sale contado como "por aceptar".
+const ventasPagBorrH57 = mapaCalc.calcVentasVendedor("Ana");
+assert(ventasPagBorrH57.porAceptar === 0 && ventasPagBorrH57.totalVendido === 0 && ventasPagBorrH57.comisionPagada === 50000, "#57: un borrador con la comisión ya pagada no se anuncia como \"1 por aceptar\" (su comisión ya se cobró), aunque tampoco suma como venta");
+
+// (3) Escalada cuyo pedido se eliminó: no promete "cuando se convierta".
+state.cotizaciones = [cotMapa("cot-h57b-e", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-borrado-h57", vendedor: vendedorAnaMapa("pendiente"), referencias: refUniformeH57("ref-h57b-e") })];
+var alertaH57b = "";
+const alertPrevioH57b = window.alert; window.alert = function (m) { alertaH57b = m; };
+global.confirm = dom.window.confirm = function () { return true; };
+cotAccionesMapa["toggle-comision-cot"]({ getAttribute: function () { return "cot-h57b-e"; } });
+assert(alertaH57b.indexOf("se eliminó") !== -1 && alertaH57b.indexOf("papelera") !== -1 && state.tx.length === 0, "#57: si el pedido de una cotización escalada se eliminó, el aviso dice que se restaure desde la papelera — antes prometía \"cuando se convierta en pedido\", algo imposible");
+window.alert = alertPrevioH57b;
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+
+state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = configPreviaH56.nomina; state.deudas = deudasPreviasH56;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
