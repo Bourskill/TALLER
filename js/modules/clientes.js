@@ -369,11 +369,14 @@ function renderClienteCard(c) {
       // cuánto ha comprado, cuándo fue la última vez) y recién después la
       // ficha de datos — antes el historial quedaba enterrado como una celda
       // más entre la cuenta bancaria y el código postal.
-      (historial.cantidadPedidos > 0
+      (historial.cantidadPedidos > 0 || historial.cancelados > 0
         ? '<div class="cliente-resumen">' +
           '<span><b>' + historial.cantidadPedidos + "</b> " + (historial.cantidadPedidos === 1 ? "pedido" : "pedidos") + "</span>" +
           '<span><b>' + fmt(historial.totalComprado) + "</b> comprado</span>" +
           (historial.ultimaEntrega ? "<span>última entrega <b>" + esc(historial.ultimaEntrega) + "</b></span>" : "") +
+          // Los cancelados no suman como compra (ver calcHistorialCliente),
+          // pero se dicen aparte para que el conteo no parezca incompleto.
+          (historial.cancelados > 0 ? '<span title="No cuentan como compra: no se completaron">' + historial.cancelados + (historial.cancelados === 1 ? " cancelado" : " cancelados") + "</span>" : "") +
           (esPuntoC ? "<span>comisión <b>" + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? fmt(c.comisionDefault.valor) + " por unidad" : esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta") + "</b></span>" : "") +
           "</div>"
         : (esPuntoC ? '<div class="cliente-resumen"><span>comisión <b>' + (c.comisionDefault && c.comisionDefault.tipo === "fijo" ? fmt(c.comisionDefault.valor) + " por unidad" : esc((c.comisionDefault && c.comisionDefault.valor) || 0) + "% por venta") + "</b></span></div>" : "")) +

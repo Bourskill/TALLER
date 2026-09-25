@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -832,8 +832,12 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
   doc.line(marginX, y, pageW - marginX, y);
   y += 16;
 
+  // Mismas filas y misma etiqueta que el panel (calcFilasVentasVendedor /
+  // etiquetaComisionVendedor): un pedido cancelado sale marcado, no suma
+  // en "Total vendido" y su comisión pendiente sale anulada en $0 — antes
+  // este PDF decía que se le debía (Hallazgo #56).
   var body = filas.map(function (f) {
-    return [f.cliente || "—", f.descripcion || "—", money(f.total), money(f.comision), f.pagado ? "Pagada" : "Pendiente"];
+    return [f.cliente || "—", f.descripcion || "—", money(f.total) + (f.cancelado ? " (cancelado)" : ""), money(f.comision), etiquetaComisionVendedor(f)];
   });
 
   var pagVend = opcionesPaginacion(doc, "REPORTE DE VENTAS", docNum);
@@ -848,6 +852,11 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
     columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
     theme: "grid"
   });
+  if (resumen.cancelados) {
+    var yNota = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : y) + 14;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110, 110, 110);
+    doc.text(resumen.cancelados + (resumen.cancelados === 1 ? " pedido cancelado: no suma" : " pedidos cancelados: no suman") + " en Total vendido; su comisión pendiente quedó anulada.", marginX, yNota);
+  }
 
   mostrarPdfEnApp(doc, docNum + "-reporte-" + slugify(nombreVendedor) + ".pdf");
 }

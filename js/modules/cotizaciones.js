@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -460,9 +460,12 @@ function renderCotVendedorCompact(c) {
   // permitía pagarla (o deshacerla) dos veces sobre la misma venta, cada
   // lado con su propio tx sin cruzarse. Auditoría financiera 2026-09-20.
   var tieneDetrasUnPedido = !!c.pedidoId;
+  // Escalada desde un pedido que se canceló: la comisión pendiente quedó
+  // anulada (Hallazgo #56) — se dice así y no se ofrece pagarla.
+  var anulada = estadoComisionCot(c) === "anulada";
 
   if (!expandido) {
-    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : " · pendiente")) : "Sin vendedor asignado";
+    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : anulada ? " · anulada (pedido cancelado)" : " · pendiente")) : "Sin vendedor asignado";
     return '<div class="cot-vendedor-compact" data-action="toggle-cot-vendedor" data-id="' + c.id + '">👤 Vendedor: ' + resumen + "</div>";
   }
 
@@ -476,6 +479,8 @@ function renderCotVendedorCompact(c) {
     (v.nombre ? ('<b style="color:var(--ink);">' + fmt(valor) + "</b>" +
       (tieneDetrasUnPedido
         ? '<span class="badge" title="Esta cotización ya tiene un pedido real — la comisión se paga/deshace desde ahí.">' + (pagado ? "pagada" : "pendiente") + " · ver Pedidos</span>"
+        : anulada
+        ? '<span class="badge" title="El pedido de esta cotización se canceló: su comisión pendiente dejó de deberse.">anulada · pedido cancelado</span>'
         : ('<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision-cot" data-id="' + c.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
           (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-cot-vendedor-fecha" data-id="' + c.id + '" /></label>') : "")))) : "") +
     '<button class="btn ghost small" data-action="toggle-cot-vendedor" data-id="' + c.id + '">Listo</button>' +
@@ -2403,6 +2408,12 @@ export var actions = {
     if (cot.pedidoId) { window.alert("Esta cotización ya tiene un pedido real — paga o deshaz la comisión desde ahí (Pedidos)."); return; }
     var pagando = cot.vendedor.estado !== "pagado";
     var valor = calcComisionValorCot(cot);
+    // Escalada desde un pedido que después se canceló: su comisión pendiente
+    // ya no se debe (estadoComisionCot, Hallazgo #56). Deshacer sí se puede.
+    if (pagando && estadoComisionCot(cot) === "anulada") {
+      window.alert("El pedido de esta cotización está cancelado: su comisión pendiente ya no se debe. Si de verdad se va a pagar, reactiva el pedido primero.");
+      return;
+    }
     if (pagando) {
       if (!window.confirm("¿Marcar como pagada la comisión de " + cot.vendedor.nombre + "?\n\n" +
         "Monto: " + fmt(valor) + "\n\n" +

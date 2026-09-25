@@ -1241,14 +1241,13 @@ export function calcResumenPorPagar() {
   // de pago propia definida, se consideran urgentes desde ya (vencidas), sin
   // mostrar una fecha inventada en su lugar.
   state.pedidos.forEach(function (p) {
-    if (pedidoCancelado(p)) return;
-    if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") {
+    if (estadoComisionPedido(p) === "pendiente") {
       if (p.vendedor.fechaPago) items.push({ monto: calcComisionValor(p), fecha: new Date(p.vendedor.fechaPago + "T00:00:00") });
       else items.push({ monto: calcComisionValor(p), vencida: true });
     }
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") {
+    if (estadoComisionCot(c) === "pendiente") {
       if (c.vendedor.fechaPago) items.push({ monto: calcComisionValorCot(c), fecha: new Date(c.vendedor.fechaPago + "T00:00:00") });
       else items.push({ monto: calcComisionValorCot(c), vencida: true });
     }
@@ -1300,11 +1299,10 @@ export function calcSaldosVendedores() {
     if (!mapa[nombre].fechaPago && fechaPago) mapa[nombre].fechaPago = fechaPago;
   }
   state.pedidos.forEach(function (p) {
-    if (pedidoCancelado(p)) return;
-    if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") agregar(p.vendedor.nombre, calcComisionValor(p), p.vendedor.fechaPago);
+    if (estadoComisionPedido(p) === "pendiente") agregar(p.vendedor.nombre, calcComisionValor(p), p.vendedor.fechaPago);
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") agregar(c.vendedor.nombre, calcComisionValorCot(c), c.vendedor.fechaPago);
+    if (estadoComisionCot(c) === "pendiente") agregar(c.vendedor.nombre, calcComisionValorCot(c), c.vendedor.fechaPago);
   });
   return Object.keys(mapa).map(function (k) { return mapa[k]; }).sort(function (a, b) { return b.monto - a.monto; });
 }
@@ -1316,13 +1314,12 @@ export function calcSaldosVendedores() {
 export function calcDetalleComisionesVendedor(nombre) {
   var items = [];
   state.pedidos.forEach(function (p) {
-    if (pedidoCancelado(p)) return;
-    if (p.vendedor && p.vendedor.nombre === nombre && p.vendedor.estado !== "pagado") {
+    if (estadoComisionPedido(p) === "pendiente" && p.vendedor.nombre === nombre) {
       items.push({ tipo: "pedido", id: p.id, label: (p.numeroOp || "Pedido") + " — " + p.cliente + " · " + p.descripcion, monto: calcComisionValor(p) });
     }
   });
   state.cotizaciones.forEach(function (c) {
-    if (c.estado !== "convertida" && c.vendedor && c.vendedor.nombre === nombre && c.vendedor.estado !== "pagado") {
+    if (estadoComisionCot(c) === "pendiente" && c.vendedor.nombre === nombre) {
       items.push({ tipo: "cotizacion", id: c.id, label: "Cotización — " + c.cliente + " · " + c.descripcion, monto: calcComisionValorCot(c) });
     }
   });
@@ -1519,14 +1516,39 @@ export function calcComisionValor(p) {
   var pct = v.porcentaje != null ? num(v.porcentaje) : num(v.valor);
   return calcBaseComision(p) * (pct / 100);
 }
+// ---------- estado de una comisión: UNA sola regla (Hallazgo #56) ----------
+// "pagada" | "pendiente" | "anulada" | "" (sin vendedor).
+// - Lo PAGADO se queda: esa plata salió, aunque el pedido se cancele
+//   después (cancelado ≠ eliminado).
+// - Lo PENDIENTE de un pedido cancelado ya no se debe: "anulada". Es lo que
+//   promete el aviso al cancelar ("su comisión pendiente deja de deberse").
+// POR QUÉ UNA SOLA: la regla estaba copiada a mano en 6 sitios (ya lo
+// advertía CONTABILIDAD.md). Pendientes excluía los cancelados, pero "Mis
+// ventas" del vendedor (y su PDF) no: le mostraba $40.000 de comisión
+// pendiente de un pedido cancelado que Pendientes daba en $0. Y una
+// cotización escalada seguía sumando la comisión de su pedido ya cancelado.
+export function estadoComisionPedido(p) {
+  if (!p || !p.vendedor || !p.vendedor.nombre) return "";
+  if (p.vendedor.estado === "pagado") return "pagada";
+  if (pedidoCancelado(p)) return "anulada";
+  return "pendiente";
+}
+// Igual para una cotización sin convertir: queda anulada si el pedido real
+// que tiene detrás (el de origen de una escalada) está cancelado.
+export function estadoComisionCot(c) {
+  if (!c || c.estado === "convertida" || !c.vendedor || !c.vendedor.nombre) return "";
+  if (c.vendedor.estado === "pagado") return "pagada";
+  var pid = pedidoIdDeCotParaTx(c);
+  var ped = pid ? (state.pedidos || []).filter(function (p) { return p.id === pid; })[0] : null;
+  if (ped && pedidoCancelado(ped)) return "anulada";
+  return "pendiente";
+}
 export function calcComisionesPendientes() {
   return state.pedidos.reduce(function (a, p) {
     // Cancelado: la venta no se completó, así que esa comisión ya no se debe.
     // Si alcanzó a PAGARSE, su movimiento sigue en Finanzas — lo que deja de
     // contar es la obligación futura, no la plata que ya salió.
-    if (pedidoCancelado(p)) return a;
-    if (p.vendedor && p.vendedor.nombre && p.vendedor.estado !== "pagado") return a + calcComisionValor(p);
-    return a;
+    return estadoComisionPedido(p) === "pendiente" ? a + calcComisionValor(p) : a;
   }, 0);
 }
 // Comisión definida directamente en una cotización (antes de convertirse en
@@ -1547,31 +1569,48 @@ export function calcComisionValorCot(cot) {
 // calcComisionesPendientes, para no duplicarla.
 export function calcComisionesPendientesCot() {
   return state.cotizaciones.reduce(function (a, c) {
-    if (c.estado === "convertida") return a;
-    if (c.vendedor && c.vendedor.nombre && c.vendedor.estado !== "pagado") return a + calcComisionValorCot(c);
-    return a;
+    return estadoComisionCot(c) === "pendiente" ? a + calcComisionValorCot(c) : a;
   }, 0);
 }
 
-// Resumen de ventas/comisión de UN vendedor puntual (por nombre), para su
-// propio panel "Mis ventas" (ver modules/mis-ventas.js). Mismo criterio que
-// calcComisionesPendientes/Cot para no contar dos veces una cotización ya
-// convertida en pedido: solo se suman las NO convertidas.
-export function calcVentasVendedor(nombre) {
-  var totalVendido = 0, comisionPendiente = 0, comisionPagada = 0;
+// Las filas de "Mis ventas" de UN vendedor (su panel y su PDF, ver
+// modules/mis-ventas.js): sus pedidos y sus cotizaciones aún no convertidas
+// (una convertida ya es su pedido; contarla también la duplicaría).
+// Un pedido cancelado SIGUE apareciendo (es el registro de que existió),
+// marcado, pero no suma como venta; su comisión pendiente queda "anulada"
+// ($0) y la ya pagada se queda como pagada — mismo precedente que el
+// reporte de Pedidos. Vivía copiada a mano en mis-ventas.js sin mirar los
+// cancelados (Hallazgo #56); ahora las filas y los totales salen de acá.
+export function calcFilasVentasVendedor(nombre) {
+  var filas = [];
   state.pedidos.forEach(function (p) {
     if (!p.vendedor || p.vendedor.nombre !== nombre) return;
-    totalVendido += num(p.total);
-    var valor = calcComisionValor(p);
-    if (p.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
+    var estado = estadoComisionPedido(p);
+    filas.push({ tipo: "pedido", id: p.id, cliente: p.cliente, descripcion: p.descripcion, total: num(p.total), cancelado: pedidoCancelado(p), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValor(p), comisionAnulada: estado === "anulada" ? calcComisionValor(p) : 0 });
   });
   state.cotizaciones.forEach(function (c) {
     if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
-    totalVendido += calcCotizacionTotales(c).precioTotal;
-    var valor = calcComisionValorCot(c);
-    if (c.vendedor.estado === "pagado") comisionPagada += valor; else comisionPendiente += valor;
+    var estado = estadoComisionCot(c);
+    filas.push({ tipo: "cotizacion", id: c.id, cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, cancelado: estado === "anulada", estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValorCot(c), comisionAnulada: estado === "anulada" ? calcComisionValorCot(c) : 0 });
   });
-  return { totalVendido: totalVendido, comisionPendiente: comisionPendiente, comisionPagada: comisionPagada };
+  return filas;
+}
+// Cómo se nombra el estado de la comisión de una fila de "Mis ventas" — lo
+// usan el panel y el PDF, así los dos dicen exactamente lo mismo.
+export function etiquetaComisionVendedor(f) {
+  if (f.estadoComision === "anulada") return "Anulada · pedido cancelado";
+  if (f.estadoComision === "pagada") return f.cancelado ? "Pagada · pedido cancelado" : "Pagada";
+  return "Pendiente";
+}
+// Totales de "Mis ventas": la suma de esas mismas filas, así la tabla y los
+// KPIs no pueden separarse. Mismo criterio que calcComisionesPendientes/Cot.
+export function calcVentasVendedor(nombre) {
+  return calcFilasVentasVendedor(nombre).reduce(function (a, f) {
+    if (f.cancelado) a.cancelados++; else a.totalVendido += f.total;
+    if (f.estadoComision === "pendiente") a.comisionPendiente += f.comision;
+    if (f.estadoComision === "pagada") a.comisionPagada += f.comision;
+    return a;
+  }, { totalVendido: 0, comisionPendiente: 0, comisionPagada: 0, cancelados: 0 });
 }
 
 // ---------- consignación (puntos de venta externos con comisión) ----------
@@ -1753,15 +1792,22 @@ export function calcNotificaciones(esAdmin) {
 // en la pestaña Pedidos. "Última entrega" usa fechaEntrega (no hay una
 // fecha de creación guardada en el pedido) — se etiqueta como tal para no
 // insinuar que es la fecha en que se hizo el pedido.
+//
+// Un pedido CANCELADO no cuenta como compra (no se vendió) ni su fecha como
+// una entrega que pasó — antes sumaba en "comprado" y podía salir como
+// "última entrega" una que nunca ocurrió (Hallazgo #56). Se dice aparte
+// cuántos hubo cancelados.
 export function calcHistorialCliente(clienteId) {
   var pedidosCliente = state.pedidos.filter(function (p) { return p.clienteId === clienteId; });
-  var totalComprado = pedidosCliente.reduce(function (a, p) { return a + num(p.total); }, 0);
-  var conFecha = pedidosCliente.filter(function (p) { return p.fechaEntrega; }).sort(function (a, b) { return b.fechaEntrega.localeCompare(a.fechaEntrega); });
+  var vigentes = pedidosCliente.filter(function (p) { return !pedidoCancelado(p); });
+  var totalComprado = vigentes.reduce(function (a, p) { return a + num(p.total); }, 0);
+  var conFecha = vigentes.filter(function (p) { return p.fechaEntrega; }).sort(function (a, b) { return b.fechaEntrega.localeCompare(a.fechaEntrega); });
   return {
-    cantidadPedidos: pedidosCliente.length,
+    cantidadPedidos: vigentes.length,
     totalComprado: totalComprado,
     ultimaEntrega: conFecha.length ? conFecha[0].fechaEntrega : null,
-    esRecurrente: pedidosCliente.length > 1
+    esRecurrente: vigentes.length > 1,
+    cancelados: pedidosCliente.length - vigentes.length
   };
 }
 

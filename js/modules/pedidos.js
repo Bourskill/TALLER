@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, costoRealDePedido, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
+import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
 import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
@@ -1141,6 +1141,16 @@ function renderVendedor(p) {
   var tipo = v.tipo || "porcentaje";
   // Compatibilidad: pedidos antiguos guardaban solo "porcentaje" (sin tipo/valor).
   var etiquetaValor = tipo === "fijo" ? fmt(valor) : (esc(v.porcentaje != null ? v.porcentaje : v.valor) + "% del pedido = " + fmt(valor));
+  // Pedido cancelado con la comisión sin pagar: ya no se debe (ver
+  // estadoComisionPedido en core/calc.js). No se ofrece pagarla, igual que
+  // un cancelado ya no ofrece registrar abonos (Hallazgo #56).
+  if (estadoComisionPedido(p) === "anulada") {
+    return '<div class="cot-col-title">Comisión del vendedor</div>' +
+      '<div class="pedido-comision">' +
+      '<div class="pedido-comision-quien">' + esc(v.nombre) + " · <b>" + etiquetaValor + "</b></div>" +
+      '<span class="badge" title="El pedido se canceló: su comisión pendiente dejó de deberse. Si el pedido se reactiva, vuelve a quedar pendiente.">No se paga · pedido cancelado</span>' +
+      "</div>";
+  }
   return '<div class="cot-col-title">Comisión del vendedor</div>' +
     '<div class="pedido-comision">' +
     '<div class="pedido-comision-quien">' + esc(v.nombre) + " · <b>" + etiquetaValor + "</b></div>" +
@@ -2053,6 +2063,13 @@ export var actions = {
     if (!ped || !ped.vendedor) return;
     var pagando = ped.vendedor.estado !== "pagado";
     var valor = calcComisionValor(ped);
+    // Pagar la comisión de un pedido cancelado crearía un gasto por algo que
+    // ya no se debe (Hallazgo #56). Deshacer un pago que ya existe sí se
+    // permite: corrige un error y no crea plata nueva.
+    if (pagando && pedidoCancelado(ped)) {
+      window.alert("Este pedido está cancelado: su comisión pendiente ya no se debe. Si de verdad se va a pagar, reactiva el pedido primero.");
+      return;
+    }
     if (pagando) {
       if (!window.confirm("¿Marcar como pagada la comisión de " + ped.vendedor.nombre + "?\n\n" +
         "Monto: " + fmt(valor) + "\n\n" +

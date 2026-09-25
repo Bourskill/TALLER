@@ -469,7 +469,9 @@ corregidos en 5 rondas — ver "Registro de cambios" del README.)*
 - **La regla de "comisión pendiente" está copiada a mano en 3-4 lugares
   distintos** de `core/calc.js` en vez de una sola función compartida —
   hoy dan el mismo resultado, pero es el mismo riesgo estructural que
-  "una sola fuente por fórmula" (arriba) pide evitar.
+  "una sola fuente por fórmula" (arriba) pide evitar. **✅ Resuelto en el
+  Hallazgo #56:** eran 6 copias, y una ("Mis ventas") ya se había separado
+  de las demás. Hoy todas usan `estadoComisionPedido`/`estadoComisionCot`.
 - **`origenGastoId`** (modelo viejo de "costo real", reemplazado por
   `compras`) no tiene protección de borrado ni se limpia al eliminar su
   cotización — solo importa si todavía queda algún dato viejo de antes
@@ -3094,6 +3096,67 @@ hace falta.
 - La cuenta de cobro al cliente (pdf.js) arma sus filas desde la
   cotización sin los servicios cobrados, mientras su SUBTOTAL es
   `p.total`.
+
+### 🔴 Hallazgo #56 — la comisión de un pedido cancelado seguía pendiente en "Mis ventas", se podía pagar, y volvía a "Por pagar" por su cotización escalada. ✅ CORREGIDO
+
+Del "Mapa del dinero".
+
+**Qué pasaba.**
+- La regla "la comisión pendiente de un pedido cancelado ya no se debe"
+  estaba copiada a mano en 6 sitios. Este documento ya lo advertía como
+  deuda técnica.
+- "Mis ventas" del vendedor y su PDF no la aplicaban. Un pedido cancelado
+  de $400.000 al 10 % le mostraba $40.000 de comisión pendiente y $400.000
+  vendidos, mientras Pendientes decía $0.
+- En la tarjeta de un pedido cancelado se ofrecía "Marcar comisión como
+  pagada", y eso creaba un gasto real.
+- Una cotización ESCALADA desde un pedido que después se canceló volvía a
+  meter la comisión en "Por pagar", como obligación vencida.
+- Hermano del mismo principio (cancelado ≠ venta): la ficha del cliente
+  sumaba los cancelados en "comprado" y podía mostrar como "última entrega"
+  una que nunca pasó.
+
+**Corrección.**
+- `estadoComisionPedido` / `estadoComisionCot` (core/calc.js) son la ÚNICA
+  regla, con estados "pagada", "pendiente" y "anulada":
+  - lo pagado se queda, porque esa plata salió;
+  - lo pendiente de un cancelado queda "anulada".
+  La usan `calcComisionesPendientes`, `calcComisionesPendientesCot`,
+  `calcResumenPorPagar`, `calcSaldosVendedores` y
+  `calcDetalleComisionesVendedor`.
+- `calcFilasVentasVendedor` pasó a calc.js (antes era una copia en
+  mis-ventas.js), y `calcVentasVendedor` es la suma de esas mismas filas.
+  El cancelado sigue en la lista, marcado, pero no suma como venta.
+  `etiquetaComisionVendedor` le pone el mismo nombre al estado en el panel
+  y en el PDF. El PDF agrega una nota cuando hay cancelados.
+- La tarjeta del pedido dice "No se paga · pedido cancelado".
+  `toggle-comision` y `toggle-comision-cot` no permiten PAGAR una comisión
+  anulada. Deshacer un pago que ya existe sí se permite, porque corrige un
+  error y no crea plata.
+- `calcHistorialCliente` solo cuenta pedidos vigentes y dice aparte
+  cuántos hay cancelados.
+
+**Pruebas:**
+- Cancelado pendiente: Mis ventas en $0, tanto en el panel como en el PDF.
+  El PDF se prueba con un doble de jsPDF.
+- Cancelado ya pagado: sigue pagado.
+- Un vigente y dos cancelados: Mis ventas = Pendientes = su detalle.
+- La tarjeta y la acción de pagar en un cancelado: no se paga.
+- Cotización escalada de un cancelado: "Por pagar" queda "al día" y no se
+  puede pagar.
+- Ficha del cliente: $300.000 y no $700.000.
+- Sin el arreglo, fallan todas.
+
+**Visto en el barrido, fuera de esta corrección (para decidir):**
+- Una cotización escalada NO cancelada cuenta su comisión y su venta
+  ADEMÁS de las de su propio pedido rápido. Pendientes muestra $80.000
+  por una sola venta de $400.000 al 10 %, y se puede pagar dos veces (una
+  desde el pedido y otra desde la cotización). Arreglarlo decide que la
+  comisión de una escalada vive en el pedido. Antes hay que revisar si en
+  los datos reales alguna se pagó desde la cotización.
+- `calcComisionValor` lee `v.porcentaje` antes que `v.valor`, y
+  `calcComisionValorCot` solo lee `v.valor`. Con datos viejos que tengan
+  los dos campos, el mismo vendedor puede dar montos distintos.
 
 ---
 

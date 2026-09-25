@@ -259,6 +259,21 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésima ronda: la comisión de un pedido cancelado ya no se muestra como deuda)
+
+- **"Mis ventas"** del vendedor y su PDF ya no cuentan un pedido cancelado
+  como venta ni su comisión pendiente como deuda. La fila sigue en la
+  lista, marcada "Anulada · pedido cancelado". Si la comisión ya se había
+  pagado, se queda como pagada.
+- En la tarjeta de un pedido cancelado ya no se ofrece pagar la comisión.
+- Una cotización escalada desde un pedido que se canceló ya no vuelve a
+  sumar esa comisión en "Por pagar".
+- La **ficha del cliente** no cuenta los pedidos cancelados como compras;
+  los dice aparte.
+- La regla "comisión pendiente" vive ahora en un solo lugar
+  (`estadoComisionPedido`/`estadoComisionCot`). Antes estaba copiada en 6.
+- Ver CONTABILIDAD.md, Hallazgo #56.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo novena ronda: el mismo pedido ya gana lo mismo en todos los reportes)
 
 - **Productos vendidos** usa el costo real del pedido, igual que el reporte

@@ -2,26 +2,17 @@
 // solo lectura salvo el botón de reporte en PDF. No tiene acceso a Finanzas
 // ni a los datos de otros vendedores — solo lee sus propios pedidos y
 // cotizaciones (filtrados por vendedor.nombre === su vendedorNombre).
+//
+// Las filas y los totales salen de core/calc.js (calcFilasVentasVendedor /
+// calcVentasVendedor), no de una copia propia: la copia que vivía acá no
+// miraba los pedidos cancelados y le mostraba al vendedor comisiones que
+// Pendientes ya daba por anuladas (Hallazgo #56).
 
-import { state } from "../core/store.js";
 import { esc, fmt } from "../core/utils.js";
-import { calcVentasVendedor, calcComisionValor, calcComisionValorCot, calcCotizacionTotales } from "../core/calc.js";
+import { calcVentasVendedor, calcFilasVentasVendedor, etiquetaComisionVendedor } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { getSession } from "../core/auth.js";
 import { generarPDFReporteVendedor } from "../core/pdf.js";
-
-function filasVendedor(nombre) {
-  var filas = [];
-  state.pedidos.forEach(function (p) {
-    if (!p.vendedor || p.vendedor.nombre !== nombre) return;
-    filas.push({ cliente: p.cliente, descripcion: p.descripcion, total: p.total, comision: calcComisionValor(p), pagado: p.vendedor.estado === "pagado" });
-  });
-  state.cotizaciones.forEach(function (c) {
-    if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
-    filas.push({ cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, comision: calcComisionValorCot(c), pagado: c.vendedor.estado === "pagado" });
-  });
-  return filas;
-}
 
 export function render() {
   var session = getSession();
@@ -32,24 +23,26 @@ export function render() {
 
   var r = calcVentasVendedor(nombre);
   var html = '<div class="kpis">' +
-    '<div class="kpi"><div class="kpi-label">Total vendido</div><div class="kpi-value info">' + fmt(r.totalVendido) + '</div><div class="kpi-note">Pedidos y cotizaciones activas a tu nombre</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Total vendido</div><div class="kpi-value info">' + fmt(r.totalVendido) + '</div><div class="kpi-note">Pedidos y cotizaciones activas a tu nombre' + (r.cancelados ? " · " + r.cancelados + (r.cancelados === 1 ? " cancelado, no suma" : " cancelados, no suman") : "") + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Comisión pendiente</div><div class="kpi-value warning">' + fmt(r.comisionPendiente) + '</div><div class="kpi-note">Aún no pagada</div></div>' +
     '<div class="kpi"><div class="kpi-label">Comisión pagada</div><div class="kpi-value success">' + fmt(r.comisionPagada) + '</div><div class="kpi-note">Ya cobrada</div></div>' +
     "</div>";
 
-  var filas = filasVendedor(nombre);
+  var filas = calcFilasVentasVendedor(nombre);
   html += '<div class="card"><div class="section-title small">Mis ventas' +
-    renderHelp("Pedidos y cotizaciones (aún no convertidas en pedido, para no contarlas dos veces) donde apareces como vendedor, con el estado de tu comisión en cada una.") +
+    renderHelp("Pedidos y cotizaciones (aún no convertidas en pedido, para no contarlas dos veces) donde apareces como vendedor, con el estado de tu comisión en cada una. Un pedido cancelado sigue en la lista, pero no suma como venta: si su comisión no se había pagado, quedó anulada; si ya se pagó, se queda como pagada.") +
     "</div>";
   if (filas.length === 0) {
     html += '<div class="empty">Todavía no tienes pedidos ni cotizaciones registrados a tu nombre.</div>';
   } else {
     filas.forEach(function (f) {
-      var tagStyle = f.pagado ? "background:var(--success-soft);color:var(--success-ink);" : "background:var(--warning-soft);color:var(--warning-ink);";
-      html += '<div class="tx-row" style="grid-template-columns:1fr 110px 100px;">' +
-        "<span>" + esc(f.cliente || "—") + " — " + esc(f.descripcion || "") + "</span>" +
-        '<span class="amount">' + fmt(f.comision) + "</span>" +
-        '<span class="tag" style="' + tagStyle + '">' + (f.pagado ? "Pagada" : "Pendiente") + "</span>" +
+      var tagStyle = f.estadoComision === "pagada" ? "background:var(--success-soft);color:var(--success-ink);"
+        : f.estadoComision === "anulada" ? "background:var(--surface-3);color:var(--ink-soft);"
+        : "background:var(--warning-soft);color:var(--warning-ink);";
+      html += '<div class="tx-row" style="grid-template-columns:1fr 110px 170px;">' +
+        "<span>" + esc(f.cliente || "—") + " — " + esc(f.descripcion || "") + (f.cancelado ? ' <span class="badge danger">Cancelado</span>' : "") + "</span>" +
+        '<span class="amount"' + (f.comisionAnulada ? ' title="Hubiera sido ' + fmt(f.comisionAnulada) + '; ya no se debe."' : "") + ">" + fmt(f.comision) + "</span>" +
+        '<span class="tag" style="' + tagStyle + '">' + esc(etiquetaComisionVendedor(f)) + "</span>" +
         "</div>";
     });
   }
@@ -63,6 +56,6 @@ export var actions = {
     var session = getSession();
     var nombre = session && session.vendedorNombre;
     if (!nombre) return;
-    await generarPDFReporteVendedor(nombre, filasVendedor(nombre), calcVentasVendedor(nombre));
+    await generarPDFReporteVendedor(nombre, calcFilasVentasVendedor(nombre), calcVentasVendedor(nombre));
   }
 };

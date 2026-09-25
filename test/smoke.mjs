@@ -7758,6 +7758,108 @@ state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 state.tab = "resumen";
 
+// ---------------------------------------------------------------------
+// Hallazgo #56 — la comisión de un pedido CANCELADO: "Mis ventas" (y su
+// PDF) la seguía mostrando pendiente, se podía pagar, y una cotización
+// escalada de ese pedido la volvía a sumar en "Por pagar".
+// ---------------------------------------------------------------------
+const vendedorAnaMapa = function (estado, extra) { return Object.assign({ nombre: "Ana", tipo: "porcentaje", valor: 10, estado: estado || "pendiente" }, extra || {}); };
+const configPreviaH56 = { gastosFijos: state.config.gastosFijos, nomina: state.config.nomina };
+const deudasPreviasH56 = state.deudas;
+state.config.gastosFijos = []; state.config.nomina = []; state.deudas = [];
+state.cotizaciones = []; state.tx = []; state.txPapelera = []; state.cotSucia = "";
+
+// Un pedido cancelado de $400.000 al 10 %, con la comisión sin pagar.
+state.pedidos = [pedidoMapa("ped-h56-c", "", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pendiente") })];
+assert(mapaCalc.calcComisionesPendientes() === 0, "(punto de partida #56) Pendientes ya no le debe nada a Ana por un pedido cancelado");
+const ventasCancH56 = mapaCalc.calcVentasVendedor("Ana");
+assert(ventasCancH56.totalVendido === 0 && ventasCancH56.comisionPendiente === 0 && ventasCancH56.comisionPagada === 0 && ventasCancH56.cancelados === 1, "#56: \"Mis ventas\" tampoco — total vendido $0 y comisión pendiente $0 (antes $400.000 y $40.000)");
+loginComo("vendedor", "Ana", "ana-mapa@taller.test");
+state.tab = "mis-ventas"; render();
+const textoMisVentasH56 = document.body.textContent;
+assert(textoMisVentasH56.indexOf("Anulada · pedido cancelado") !== -1 && textoMisVentasH56.indexOf(fmtMapa(40000)) === -1, "#56: en el panel del vendedor la fila sigue, marcada \"Anulada · pedido cancelado\", y los $40.000 no aparecen como deuda en ninguna parte");
+
+// El PDF del vendedor dice lo mismo (jsPDF no existe en la prueba: un doble
+// mínimo que registra lo que se dibuja).
+const registroPdfH56 = { textos: [], tablas: [] };
+const jspdfPrevioH56 = window.jspdf;
+window.jspdf = { jsPDF: function () {
+  var guardado = {};
+  var doc = new Proxy(guardado, {
+    get: function (t, k) {
+      if (k in t) return t[k];
+      if (k === "internal") return { pageSize: { getWidth: function () { return 612; }, getHeight: function () { return 792; }, width: 612, height: 792 }, getNumberOfPages: function () { return 1; } };
+      if (k === "autoTable") return function (o) { registroPdfH56.tablas.push(o); t.lastAutoTable = { finalY: 400 }; };
+      if (k === "text") return function (txt) { registroPdfH56.textos.push([].concat(txt).join(" ")); return doc; };
+      if (k === "getTextWidth") return function () { return 10; };
+      if (k === "splitTextToSize") return function (txt) { return [String(txt)]; };
+      return function () { return doc; };
+    },
+    set: function (t, k, v) { t[k] = v; return true; }
+  });
+  return doc;
+} };
+const { actions: misVentasAccionesH56 } = await import("../js/modules/mis-ventas.js");
+try { await misVentasAccionesH56["generar-reporte-vendedor"](); } catch (e) { /* mostrar el PDF en pantalla no aplica acá */ }
+window.jspdf = jspdfPrevioH56;
+const filaPdfH56 = (registroPdfH56.tablas[0] && registroPdfH56.tablas[0].body[0]) || [];
+assert(filaPdfH56[3] === "$0" || String(filaPdfH56[3]).replace(/\s/g, "") === "$0", "#56: en el PDF del vendedor la comisión del pedido cancelado sale en $0 (se lee: " + filaPdfH56[3] + ")");
+assert(filaPdfH56[4] === "Anulada · pedido cancelado" && registroPdfH56.textos.some(function (t) { return t.indexOf("no suma") !== -1; }), "...con el estado \"Anulada · pedido cancelado\" y una nota de que los cancelados no suman");
+loginComo("admin", "", "admin-mapa-test@taller.test");
+
+// Lo pagado se queda: pagada antes de cancelar, sigue pagada.
+state.pedidos = [pedidoMapa("ped-h56-p", "", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pagado") })];
+const ventasPagH56 = mapaCalc.calcVentasVendedor("Ana");
+assert(ventasPagH56.comisionPagada === 40000 && ventasPagH56.totalVendido === 0 && mapaCalc.etiquetaComisionVendedor(mapaCalc.calcFilasVentasVendedor("Ana")[0]) === "Pagada · pedido cancelado", "#56: si la comisión ya se había pagado, se queda como pagada ($40.000) — esa plata sí salió");
+
+// Invariante: "Mis ventas" y Pendientes dicen lo mismo.
+state.pedidos = [
+  pedidoMapa("ped-h56-v", "", 100000, 0, { vendedor: vendedorAnaMapa("pendiente") }),
+  pedidoMapa("ped-h56-p2", "", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pagado") }),
+  pedidoMapa("ped-h56-f", "", 250000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pendiente", { tipo: "fijo", valor: 30000 }) })
+];
+const ventasMixH56 = mapaCalc.calcVentasVendedor("Ana");
+const saldoAnaH56 = mapaCalc.calcSaldosVendedores().filter(function (v) { return v.nombre === "Ana"; })[0];
+const detalleAnaH56 = mapaCalc.calcDetalleComisionesVendedor("Ana").reduce(function (a, i) { return a + i.monto; }, 0);
+assert(ventasMixH56.totalVendido === 100000 && ventasMixH56.comisionPendiente === 10000 && ventasMixH56.comisionPagada === 40000 && ventasMixH56.cancelados === 2, "#56: con un vigente y dos cancelados (uno pagado, uno pendiente), Mis ventas da vendido $100.000, pendiente $10.000 y pagada $40.000");
+assert(saldoAnaH56.monto === ventasMixH56.comisionPendiente && detalleAnaH56 === ventasMixH56.comisionPendiente, "...exactamente lo mismo que Pendientes (total por vendedor y su detalle): una sola regla");
+
+// No se puede pagar la comisión de un pedido cancelado.
+state.pedidos = [pedidoMapa("ped-h56-c", "", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pendiente") })];
+state.tab = "pedidos"; state.pedidosVista = "historial"; state.filtroPedidosVista = ""; state.filtroPedidos = "todos"; state.filtroPedidosSoloSaldo = false; state.buscarPedidos = "";
+state.pedidoPanelAbierto = { "ped-h56-c": true }; render();
+assert(!document.querySelector('[data-action="toggle-comision"][data-id="ped-h56-c"]') && document.body.textContent.indexOf("No se paga · pedido cancelado") !== -1, "#56: la tarjeta de un pedido cancelado ya no ofrece \"Marcar comisión como pagada\"; dice que no se paga");
+const { actions: pedAccionesH56 } = await import("../js/modules/pedidos.js");
+global.confirm = dom.window.confirm = function () { return true; };
+const alertPrevioH56 = window.alert; window.alert = function () {};
+pedAccionesH56["toggle-comision"]({ getAttribute: function () { return "ped-h56-c"; } });
+assert(state.tx.length === 0 && state.pedidos[0].vendedor.estado === "pendiente", "...y aunque se dispare la acción, no crea ningún gasto");
+
+// Cotización escalada desde un pedido que después se canceló.
+state.pedidos = [pedidoMapa("ped-h56-e", "cot-h56-e", 400000, 0, { cancelado: true, vendedor: vendedorAnaMapa("pendiente") })];
+state.cotizaciones = [cotMapa("cot-h56-e", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-h56-e", vendedor: vendedorAnaMapa("pendiente"),
+  referencias: [{ id: "ref-h56", nombre: "Uniforme", imagenUrl: "", cantidadPedida: 1, precioVenta: 400000, insumos: [], detalle: [], estado: "", estadosDef: [] }] })];
+assert(mapaCalc.calcComisionesPendientesCot() === 0 && mapaCalc.calcPorPagar() === 0 && mapaCalc.calcResumenPorPagar().estado === "aldia", "#56: la cotización escalada de un pedido cancelado ya no vuelve a meter su comisión en \"Por pagar\" (antes $40.000 como obligación vencida)");
+cotAccionesMapa["toggle-comision-cot"]({ getAttribute: function () { return "cot-h56-e"; } });
+assert(state.tx.length === 0, "...ni se puede pagar desde la cotización");
+window.alert = alertPrevioH56;
+
+// Ficha del cliente: un cancelado no es una compra.
+state.cotizaciones = [];
+state.pedidos = [
+  pedidoMapa("ped-h56-a", "", 300000, 0, { clienteId: "cli-h56", fechaEntrega: "2026-09-10" }),
+  pedidoMapa("ped-h56-b", "", 400000, 0, { clienteId: "cli-h56", fechaEntrega: "2026-09-20", cancelado: true })
+];
+const histH56 = mapaCalc.calcHistorialCliente("cli-h56");
+assert(histH56.cantidadPedidos === 1 && histH56.totalComprado === 300000 && histH56.ultimaEntrega === "2026-09-10" && histH56.esRecurrente === false && histH56.cancelados === 1, "#56: la ficha del cliente no cuenta el pedido cancelado como compra ($300.000, no $700.000) ni su fecha como la última entrega");
+
+state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = configPreviaH56.nomina; state.deudas = deudasPreviasH56;
+state.pedidoPanelAbierto = {};
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.tab = "resumen";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja
