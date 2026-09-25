@@ -630,13 +630,17 @@ function renderTablaCompras(c, compras, hayProveedor) {
   // combinado es lo que deja ver el sobrecosto/ahorro real del pedido aunque
   // nunca se marque "Sí" en corte/confección hechos en el taller, ni se
   // escriba nada en una línea que de verdad no hizo falta.
-  var resuelto = resumen.compradas + resumen.servicio + resumen.ahorro;
+  // `resueltas` viene de calcResumenCompras: una línea pagada a la que
+  // todavía le falta material (recibo con faltante) NO está resuelta — si
+  // no, "Se ahorró" contaba lo que falta comprar como ahorro (Hallazgo #54).
+  var resuelto = resumen.resueltas;
   var realCombinado = resumen.real + resumen.realServicio;
   var diferencia = realCombinado - resumen.estimado;
   html += '<div class="section-sub" style="margin:10px 0 0;">' +
-    resumen.compradas + " pagado(s) · " + resumen.servicio + " en servicio · " + resumen.ahorro + " ahorrado(s) · " + resumen.pendientes + " pendiente(s)" +
+    resumen.compradas + " pagado(s)" + (resumen.conFaltante ? " (" + resumen.conFaltante + " con faltante)" : "") + " · " + resumen.servicio + " en servicio · " + resumen.ahorro + " ahorrado(s) · " + resumen.pendientes + " pendiente(s)" +
     " · estimado <b>" + fmt(resumen.estimado) + "</b>" +
     (resumen.compradas ? " · pagado <b>" + fmt(resumen.real) + "</b>" : "") +
+    (resumen.conFaltante ? " · falta comprar ≈ <b>" + fmt(resumen.faltante) + "</b>" : "") +
     (resumen.servicio ? " · para apartar (nómina) <b>" + fmt(resumen.realServicio) + "</b>" : "") +
     (resumen.ahorro ? " · ahorrado <b>" + fmt(resumen.ahorrado) + "</b>" : "") +
     "</div>";

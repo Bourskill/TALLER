@@ -2314,6 +2314,43 @@ export function cantidadRealPedido(compra) {
   return num(compra && compra.cantidadReal) - cantidadExcedenteCompra(compra);
 }
 
+// ---------- lo que le falta comprar a una compra de recibo (Hallazgo #54) ----------
+// Cuando un pedido sube su "Cant. real" y la reserva del recibo no alcanza,
+// lo que falta queda en `compra.faltante` y va a otro recibo (decisión del
+// usuario 2026-09-23). Hasta entonces NO es un ahorro: el pedido lo sigue
+// necesitando. Antes el costo real solo sumaba lo ya cubierto, así que
+// faltando 2 m de $10.000 el pedido mostraba "Se ahorró $20.000" y el
+// reporte de Pedidos le subía la ganancia en eso mismo.
+//
+// Nunca entra en costoRealPedido: ese es el monto de los movimientos (lo
+// pagado) y lo que falta no se ha pagado. Solo lo suman las cuentas de
+// estimado contra real (calcCotGastosReales, calcResumenCompras).
+//
+// Un pedido CANCELADO mira hacia adelante: su faltante deja de contar
+// mientras siga cancelado. Se calcula en vivo, sin escribir nada, así que al
+// reactivarlo vuelve solo.
+export function faltanteVigenteCompra(compra, cot) {
+  if (!esMiembroRecibo(compra)) return 0;
+  var f = num(compra.faltante);
+  if (!(f > 0)) return 0;
+  var pid = pedidoIdDeCotParaTx(cot);
+  var ped = pid ? (state.pedidos || []).filter(function (p) { return p.id === pid; })[0] : null;
+  return pedidoCancelado(ped) ? 0 : f;
+}
+// Valor de ese faltante mientras no se compra: al costo unitario ESTIMADO de
+// la línea, el mismo valor que ya tiene cualquier línea "Aún no" y el mismo
+// que Recibos de compra propone como reposición. Así, al registrar la
+// reposición pasa de estimado a real sin contarse dos veces. Si la línea no
+// tiene cantidad estimada, se usa el costo unitario de lo ya comprado.
+export function costoFaltanteCompra(compra, linea, cot) {
+  var f = faltanteVigenteCompra(compra, cot);
+  if (!(f > 0)) return 0;
+  var cantEst = num(linea && linea.cantidadFisica);
+  if (cantEst > 0) return Math.round(num(linea.costoTotal) / cantEst * f);
+  var cantReal = num(compra.cantidadReal);
+  return cantReal > 0 ? Math.round(num(compra.costoReal) / cantReal * f) : 0;
+}
+
 // ---------- reserva de excedente compartida (Compras conjuntas) ----------
 // El excedente de una compra conjunta (ver compra.compartida, escrito en
 // "registrar-compra-conjunta", modules/finanzas.js) es una RESERVA para los
@@ -2429,7 +2466,10 @@ export function calcCotGastosReales(cot) {
     // costoRealPedido, no c.costoReal a secas: si se compró de más y esa
     // parte se separó como excedente (compra de insumo aparte), esa parte
     // no es sobrecosto de ESTE pedido — ver cantidadExcedenteCompra.
-    return a + (costoRealPedido(c) - linea.costoTotal);
+    // Más lo que le falta comprar (compra de recibo con faltante), a su
+    // costo estimado: no es un ahorro, el pedido lo sigue necesitando
+    // (Hallazgo #54).
+    return a + (costoRealPedido(c) + costoFaltanteCompra(c, linea, cot) - linea.costoTotal);
   }, 0);
   var deGastos = ((cot && cot.gastosReales) || []).reduce(function (a, g) { return a + calcCotGastoVariacion(cot, g); }, 0);
   return deCompras + deGastos;
@@ -2443,12 +2483,20 @@ export function calcCotGastosReales(cot) {
 // distinto para la caja del taller.
 export function calcResumenCompras(cot) {
   var lineas = calcListaCompras(cot);
-  var acc = { total: lineas.length, compradas: 0, servicio: 0, ahorro: 0, estimado: 0, real: 0, realServicio: 0, ahorrado: 0, excedente: 0 };
+  // conFaltante/faltante: líneas pagadas a las que todavía les falta
+  // material (compra de recibo con faltante) y lo que eso valdría. Siguen
+  // contando como "pagadas" (sí salió plata), pero NO como resueltas: el
+  // aviso "Se ahorró / Se gastó" solo sale cuando no falta nada (Hallazgo
+  // #54). `resueltas` es la única cuenta de eso; la pantalla no la rehace.
+  var acc = { total: lineas.length, compradas: 0, servicio: 0, ahorro: 0, estimado: 0, real: 0, realServicio: 0, ahorrado: 0, excedente: 0, conFaltante: 0, faltante: 0 };
   lineas.forEach(function (l) {
     acc.estimado += num(l.costoTotal);
     var c = compraDeLinea(cot, l.clave);
     var estado = estadoLineaCompra(cot, l);
-    if (estado === "si") { acc.compradas++; acc.real += costoRealPedido(c); acc.excedente += costoExcedenteCompra(c); }
+    if (estado === "si") {
+      acc.compradas++; acc.real += costoRealPedido(c); acc.excedente += costoExcedenteCompra(c);
+      if (faltanteVigenteCompra(c, cot) > 0) { acc.conFaltante++; acc.faltante += costoFaltanteCompra(c, l, cot); }
+    }
     else if (estado === "servicio") {
       acc.servicio++;
       // Ojo con "||": si de verdad se registró costoReal = 0 (se corrigió una
@@ -2464,6 +2512,7 @@ export function calcResumenCompras(cot) {
     }
   });
   acc.pendientes = acc.total - acc.compradas - acc.servicio - acc.ahorro;
+  acc.resueltas = acc.compradas - acc.conFaltante + acc.servicio + acc.ahorro;
   return acc;
 }
 
@@ -3168,10 +3217,12 @@ export function calcLineasParaRecibo(pedidoIds) {
         if (linea.esServicio) return;
         if (estado === "no") {
           necesita = num(linea.cantidadFisica);
-        } else if (esMiembroRecibo(compra) && num(compra.faltante) > 0) {
-          necesita = num(compra.faltante);
+        } else if (faltanteVigenteCompra(compra, cot) > 0) {
+          // Misma valoración que el costo real del pedido (Hallazgo #54):
+          // una sola fórmula para "cuánto vale lo que falta".
+          necesita = faltanteVigenteCompra(compra, cot);
           esReposicion = true;
-          costoEstimado = num(linea.cantidadFisica) > 0 ? num(linea.costoTotal) / num(linea.cantidadFisica) * necesita : 0;
+          costoEstimado = costoFaltanteCompra(compra, linea, cot);
         } else return;
       }
       if (!mapa[clave]) {
@@ -3275,6 +3326,10 @@ export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) 
 // cada recibo a la reserva: esa plata ya se pagó, no desaparece de la caja.
 // Queda anotado cuánto era (`devueltaPorEliminar`) para volver a tomarlo si
 // el pedido se restaura. Pura: devuelve la cotización nueva.
+//
+// Lo que le faltaba comprar también se anota (`faltanteAntesDeEliminar`):
+// mientras está eliminado no se necesita, pero al restaurarlo sí. Antes se
+// ponía en 0 sin más y se perdía en silencio al restaurar (Hallazgo #54).
 export function devolverPartesPorEliminar(cot, pedidoId) {
   return Object.assign({}, cot, {
     compras: (cot.compras || []).map(function (compra) {
@@ -3283,7 +3338,9 @@ export function devolverPartesPorEliminar(cot, pedidoId) {
         if (!(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
         return Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) } });
       });
-      return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: 0 }));
+      var cambios = { partesRecibo: partes, faltante: 0 };
+      if (num(compra.faltante) > 0) cambios.faltanteAntesDeEliminar = { pedidoId: pedidoId, cantidad: num(compra.faltante) };
+      return totalesDesdePartes(Object.assign({}, compra, cambios));
     })
   });
 }
@@ -3300,6 +3357,9 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
       // reposición pendiente en Recibos de compra, igual que al subir una
       // Cant. real por encima de la reserva.
       var faltanteU = aUnidades(compra.faltante, 2);
+      // Lo que le faltaba comprar cuando se eliminó vuelve a hacer falta.
+      var antes = compra.faltanteAntesDeEliminar;
+      if (antes && antes.pedidoId === pedidoId) faltanteU += aUnidades(antes.cantidad, 2);
       var partes = compra.partesRecibo.map(function (p) {
         var prev = p.devueltaPorEliminar;
         if (!prev || prev.pedidoId !== pedidoId) return p;
@@ -3323,7 +3383,9 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
         delete sinMarca.devueltaPorEliminar;
         return sinMarca;
       });
-      return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, 2) }));
+      var restaurada = Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, 2) });
+      if (antes && antes.pedidoId === pedidoId) delete restaurada.faltanteAntesDeEliminar;
+      return totalesDesdePartes(restaurada);
     })
   });
   return { cot: nueva, faltantes: faltantes };
@@ -3332,6 +3394,11 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
 // Quita un recibo entero de las compras (Anular): cada compra pierde su
 // parte de ESE recibo; si ya no le queda ninguna, vuelve a "Aún no" como
 // si nunca se hubiera comprado. Pura: devuelve las cotizaciones nuevas.
+//
+// Si le quedan partes de OTROS recibos, lo que se quita pasa a su faltante:
+// el pedido lo sigue necesitando, así que vuelve a quedar pendiente como
+// reposición (lo que promete el aviso de Anular). Antes se perdía: la línea
+// desaparecía de lo pendiente y su costo se veía como ahorro (Hallazgo #54).
 export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
   return (cotizaciones || []).map(function (cot) {
     var toca = (cot.compras || []).some(function (c) { return (c.partesRecibo || []).some(function (p) { return p.reciboId === reciboId; }); });
@@ -3340,7 +3407,11 @@ export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
       compras: cot.compras.map(function (compra) {
         var partes = (compra.partesRecibo || []).filter(function (p) { return p.reciboId !== reciboId; });
         if (partes.length === (compra.partesRecibo || []).length) return compra;
-        if (partes.length) return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes }));
+        if (partes.length) {
+          var quitadoU = (compra.partesRecibo || []).filter(function (p) { return p.reciboId === reciboId; })
+            .reduce(function (a, p) { return a + aUnidades(p.cantidad, 2); }, 0);
+          return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(Math.max(0, aUnidades(compra.faltante, 2)) + quitadoU, 2) }));
+        }
         var limpia = Object.assign({}, compra, { estado: "no", cantidadReal: "", costoReal: "", cantidadExcedente: "", fecha: "", faltante: 0, txId: "", excedenteTxId: "" });
         delete limpia.partesRecibo;
         return limpia;

@@ -259,6 +259,18 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (nonagésimo octava ronda: lo que falta comprar ya no se ve como ahorro)
+
+- Cuando a un pedido le falta material porque la reserva de su recibo no
+  alcanzó, lo que falta cuenta a su costo estimado hasta que lo compres.
+  Antes Compras del pedido decía "Se ahorró $X" y el reporte de Pedidos le
+  subía la ganancia en eso mismo. Ahora la línea dice "(1 con faltante) ·
+  falta comprar ≈ $X".
+- **Anular un recibo** devuelve lo que ese recibo cubría a lo que falta
+  comprar, así la línea vuelve a quedar pendiente de reposición.
+- **Eliminar y restaurar un pedido** ya no le borra lo que le faltaba.
+- Ver CONTABILIDAD.md, Hallazgo #54.
+
 ## Registro de cambios — septiembre 2026 (nonagésimo séptima ronda: el estimado completo avisa aunque las compras vengan de un recibo)
 
 Salió del "Mapa del dinero" (revisar de dónde lee cada número, no solo si

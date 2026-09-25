@@ -5855,9 +5855,11 @@ assert(cajaRcF2() === cajaAntesBorrarARcF2, "...y la caja sigue igual al peso");
 // -- Anular el recibo 2: todo vuelve atrás, la caja sube lo que costó --
 const cajaAntesAnularRcF2 = cajaRcF2();
 const montoR2RcF2 = filasDeReciboRcF2(r2RcF2).reduce(function (a, t) { return a + t.monto; }, 0);
+const usadoAntesAnularRcF2 = Number(compraRcF2("cot-rcA-test").cantidadReal || 0) + Number(compraRcF2("cot-rcA-test").faltante || 0);
 click('[data-action="anular-recibo"][data-recibo-id="' + r2RcF2 + '"]');
 assert(filasDeReciboRcF2(r2RcF2).length === 0 && cajaRcF2() === cajaAntesAnularRcF2 + montoR2RcF2, "recibo: anular saca sus filas de Finanzas y la caja sube exacto lo que costó");
 assert(compraRcF2("cot-rcA-test").partesRecibo.length === 1, "...la compra de A se queda solo con su parte del primer recibo");
+assert(Number(compraRcF2("cot-rcA-test").faltante || 0) > 0 && Number(compraRcF2("cot-rcA-test").cantidadReal || 0) + Number(compraRcF2("cot-rcA-test").faltante || 0) === usadoAntesAnularRcF2, "...y lo que ese recibo le daba vuelve a su faltante: lo que el pedido usa no cambia al anular (Hallazgo #54)");
 const filaEnPapeleraRcF2 = state.txPapelera.filter(function (t) { return t.eliminadoConRecibo === r2RcF2; })[0];
 assert(!!filaEnPapeleraRcF2, "...las filas quedan en la papelera, marcadas con su recibo");
 const txAntesRestaurarRcF2 = state.tx.length;
@@ -7614,6 +7616,86 @@ global.confirm = dom.window.confirm = confirmPrevioMapa;
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 // @@FIN-MAPA@@
+
+// ---------------------------------------------------------------------
+// Hallazgo #54 — lo que falta comprar (faltante de un recibo) se veía como
+// ahorro; anular un recibo y eliminar/restaurar el pedido lo borraban.
+// ---------------------------------------------------------------------
+function ajustarMapa(cotId, cantidad) {
+  var r = mapaCalc.ajustarCantidadMiembro(compraMapa(cotId, CLAVE_TELA), cantidad, state.cotizaciones, state.tx);
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    if (c.id !== cotId) return c;
+    return Object.assign({}, c, { compras: c.compras.map(function (x) { return x.clave === CLAVE_TELA ? r.compra : x; }) });
+  });
+  reconciliarTodoMapa();
+  return r;
+}
+function reconciliarTodoMapa() {
+  mapaCalc.calcIdsRecibos(state.cotizaciones, state.tx).forEach(function (rid) {
+    state.tx = mapaCalc.reconciliarTxRecibo(state.tx, rid, state.cotizaciones).tx;
+  });
+}
+const cotMapaPorId = function (id) { return state.cotizaciones.filter(function (c) { return c.id === id; })[0]; };
+
+// Tela a $10.000/m. A necesita 12 m y C 3 m; un recibo de 15 m por $150.000.
+state.pedidos = [pedidoMapa("ped-h54-a", "cot-h54-a", 600000, 120000), pedidoMapa("ped-h54-c", "cot-h54-c", 150000, 30000)];
+state.cotizaciones = [cotMapa("cot-h54-a", "ped-h54-a", 12, 10000), cotMapa("cot-h54-c", "ped-h54-c", 3, 10000)];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+const r1H54 = registrarReciboMapa(["ped-h54-a", "ped-h54-c"], { "tela|m|tela": { cantidadComprada: 15, costoPagado: 150000 } });
+// A baja a 10 (devuelve 2 m), C sube a 5 (se los lleva), A vuelve a 12: la
+// reserva ya está en 0, así que le faltan 2 m.
+ajustarMapa("cot-h54-a", 10); ajustarMapa("cot-h54-c", 5);
+const tomaH54 = ajustarMapa("cot-h54-a", 12);
+assert(tomaH54.faltante === 2 && compraMapa("cot-h54-a", CLAVE_TELA).cantidadReal === 10 && compraMapa("cot-h54-a", CLAVE_TELA).costoReal === 100000, "(punto de partida #54) A tiene 10 m cubiertos ($100.000) y le faltan 2 m");
+assert(mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === 0, "#54: lo que falta comprar no es ahorro — la variación de A es $0 (antes −$20.000)");
+assert(mapaCalc.calcCotResultadoReal(cotMapaPorId("cot-h54-a")).costoTotal === 120000, "...su costo real es $120.000: $100.000 pagados + 2 m por comprar a $10.000");
+const resumenH54 = mapaCalc.calcResumenCompras(cotMapaPorId("cot-h54-a"));
+assert(resumenH54.compradas === 1 && resumenH54.conFaltante === 1 && resumenH54.resueltas === 0 && resumenH54.real === 100000 && resumenH54.faltante === 20000, "...el resumen la cuenta pagada ($100.000) pero NO resuelta, con $20.000 por comprar");
+const filaPedidoH54 = mapaCalc.calcPedidosRango("2026-09-01", "2026-09-30").filter(function (f) { return f.id === "ped-h54-a"; })[0];
+assert(filaPedidoH54.costo === 120000 && filaPedidoH54.ganancia === 480000, "...y el reporte de Pedidos le da costo $120.000 y ganancia $480.000 (antes $100.000 y $500.000)");
+state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+click('[data-action="abrir-cotizacion-editor"][data-id="cot-h54-a"]');
+click('[data-action="set-cot-tab"][data-id="cot-h54-a"][data-val="produccion"]');
+const textoProdH54 = document.body.textContent;
+assert(textoProdH54.indexOf("Se ahorró") === -1 && textoProdH54.indexOf("falta comprar") !== -1 && textoProdH54.indexOf("1 con faltante") !== -1, "#54: en Compras del pedido ya no sale \"Se ahorró\"; dice \"1 con faltante\" y cuánto falta comprar");
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva";
+const reposH54 = mapaCalc.calcLineasParaRecibo(["ped-h54-a"]).filter(function (g) { return g.linea === CLAVE_TELA; })[0];
+assert(reposH54 && reposH54.participantes[0].esReposicion && reposH54.participantes[0].necesita === 2 && reposH54.participantes[0].costoEstimado === 20000, "#54: Recibos de compra propone la reposición con la MISMA valoración (2 m, $20.000)");
+
+// Pedido cancelado: su faltante deja de contar (mira hacia adelante) y
+// vuelve solo al reactivarlo, sin escribir nada en la compra.
+state.pedidos = state.pedidos.map(function (p) { return p.id === "ped-h54-a" ? Object.assign({}, p, { cancelado: true }) : p; });
+assert(mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === -20000 && mapaCalc.calcLineasParaRecibo(["ped-h54-a"]).length === 0, "#54: con el pedido CANCELADO, lo que le faltaba deja de contar y deja de pedirse como reposición");
+state.pedidos = state.pedidos.map(function (p) { return p.id === "ped-h54-a" ? Object.assign({}, p, { cancelado: false }) : p; });
+assert(mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === 0 && compraMapa("cot-h54-a", CLAVE_TELA).faltante === 2, "...y al reactivarlo vuelve solo (el faltante nunca se borró)");
+
+// La reposición cubre el faltante sin contarse dos veces.
+const cajaAntesR2H54 = cajaMapa();
+const r2H54 = registrarReciboMapa(["ped-h54-a"], { "tela|m|tela": { cantidadComprada: 2, costoPagado: 24000 } });
+assert(compraMapa("cot-h54-a", CLAVE_TELA).faltante === 0 && compraMapa("cot-h54-a", CLAVE_TELA).costoReal === 124000 && mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === 4000, "#54: la reposición (2 m a $24.000) reemplaza el estimado: costo real $124.000, se gastaron $4.000 más — nunca $144.000");
+assert(cajaMapa() === cajaAntesR2H54 - 24000 && mapaCalc.verificarRecibo(r2H54, state.cotizaciones, state.tx).length === 0, "...la caja baja exacto $24.000 y el recibo cuadra");
+
+// Anular la reposición devuelve el faltante (antes se perdía).
+state.cotizaciones = mapaCalc.quitarReciboDeCotizaciones(state.cotizaciones, r2H54);
+state.tx = state.tx.filter(function (t) { return t.reciboCompraId !== r2H54; });
+assert(compraMapa("cot-h54-a", CLAVE_TELA).cantidadReal === 10 && compraMapa("cot-h54-a", CLAVE_TELA).faltante === 2 && mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === 0, "#54: anular la reposición devuelve los 2 m al faltante (antes quedaba en 0 y se veía un ahorro de $20.000)");
+assert((mapaCalc.calcLineasParaRecibo(["ped-h54-a"]).filter(function (g) { return g.linea === CLAVE_TELA; })[0] || { participantes: [{}] }).participantes[0].necesita === 2, "...y la línea vuelve a quedar pendiente de reposición, como promete el aviso de Anular");
+assert(cajaMapa() === cajaAntesR2H54, "...con la caja de vuelta exacto donde estaba");
+
+// Eliminar y restaurar el pedido conserva el faltante, con la Sheet de por medio.
+state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-h54-a" ? mapaCalc.devolverPartesPorEliminar(c, "ped-h54-a") : c; });
+reconciliarTodoMapa();
+assert(compraMapa("cot-h54-a", CLAVE_TELA).faltante === 0 && compraMapa("cot-h54-a", CLAVE_TELA).faltanteAntesDeEliminar.cantidad === 2, "#54: al eliminar el pedido, lo que le faltaba queda anotado (no se necesita mientras está eliminado)");
+const rtH54 = await idaYVueltaSheetsMapa(state.tx, state.cotizaciones);
+state.tx = rtH54.tx; state.cotizaciones = rtH54.cotizaciones;
+const retomaH54 = mapaCalc.retomarPartesPorRestaurar(cotMapaPorId("cot-h54-a"), "ped-h54-a", state.cotizaciones, state.tx);
+state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-h54-a" ? retomaH54.cot : c; });
+reconciliarTodoMapa();
+assert(compraMapa("cot-h54-a", CLAVE_TELA).cantidadReal === 10 && compraMapa("cot-h54-a", CLAVE_TELA).faltante === 2 && !compraMapa("cot-h54-a", CLAVE_TELA).faltanteAntesDeEliminar, "#54: al restaurarlo (después de guardar y volver a leer la Sheet) retoma sus 10 m Y vuelve a faltarle 2 m (antes se perdían sin aviso)");
+assert(mapaCalc.verificarRecibo(r1H54, state.cotizaciones, state.tx).length === 0 && mapaCalc.calcCotGastosReales(cotMapaPorId("cot-h54-a")) === 0, "...el recibo sigue cuadrando y la variación vuelve a $0");
+
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver

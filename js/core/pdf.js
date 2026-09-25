@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -984,6 +984,11 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // el bruto de la factura, que inflaría "cuánto se usó aquí".
           var excCant = cantidadExcedenteCompra(compra);
           var notaExc = excCant > 0 ? " (+" + numFmt(excCant) + (c.unidad ? " " + c.unidad : "") + " excedente)" : "";
+          // Lo que le falta comprar (recibo con faltante): se dice aparte,
+          // igual que en pantalla, para que la tabla cuadre con el "Costo
+          // total real" de arriba, que ya lo incluye (Hallazgo #54).
+          var faltaCant = faltanteVigenteCompra(compra, cot);
+          if (faltaCant > 0) notaExc += " (faltan " + numFmt(faltaCant) + (c.unidad ? " " + c.unidad : "") + ")";
           // "Ahorro" no pide cantidad ni costo (por definición es $0, ver
           // renderFilaCompra en modules/cotizaciones.js) — se muestra "—"
           // igual que un servicio, no "0 MT" (que se leería como un dato
@@ -998,7 +1003,8 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           var costoRealTxt = "—";
           if (estado === "si" && num(compra.costoReal)) {
             var excCosto = costoExcedenteCompra(compra);
-            costoRealTxt = money(costoRealPedido(compra)) + (excCosto > 0 ? " (+" + money(excCosto) + " excedente)" : "");
+            costoRealTxt = money(costoRealPedido(compra)) + (excCosto > 0 ? " (+" + money(excCosto) + " excedente)" : "") +
+              (faltaCant > 0 ? " (+≈" + money(costoFaltanteCompra(compra, c, cot)) + " por comprar)" : "");
           } else if (estado === "servicio") {
             var hayCostoReal = compra.costoReal !== "" && compra.costoReal !== undefined && compra.costoReal !== null;
             costoRealTxt = money(hayCostoReal ? compra.costoReal : c.costoTotal) + (hayCostoReal ? " (servicio)" : " (servicio, estimado)");

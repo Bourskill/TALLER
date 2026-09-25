@@ -2970,6 +2970,70 @@ la fase 2 del Recibo (Hallazgo #52).
   `estimadoTxDeCot` con un id ajeno.
 - Sin el arreglo, fallan todas.
 
+### 🔴 Hallazgo #54 — lo que falta comprar se veía como ahorro, y anular un recibo o eliminar y restaurar el pedido lo borraban. ✅ CORREGIDO
+
+También salió del "Mapa del dinero", y también lo causó la fase 2 del
+Recibo.
+
+**Qué pasaba.** Cuando un pedido sube su "Cant. real" y la reserva del
+recibo no alcanza, lo que falta queda en `compra.faltante` y va a otro
+recibo. Pero el costo real solo sumaba lo ya cubierto:
+- Ejemplo: el pedido necesita 12 m ($120.000 estimados), los recibos
+  cubrieron 10 m ($100.000) y faltan 2 m. La app decía "Se ahorró
+  $20.000". El reporte de Pedidos le subía la ganancia en eso mismo, igual
+  que la tarjeta de la cotización y el PDF interno.
+- Hermano 1: **anular** un recibo cuando a la compra le quedaban partes de
+  otros recibos no devolvía lo quitado al faltante. La línea desaparecía de
+  lo pendiente, aunque el aviso de Anular promete que vuelve a quedar
+  pendiente.
+- Hermano 2: **eliminar el pedido** ponía el faltante en 0 y, al
+  **restaurarlo**, no volvía. Se perdía sin aviso.
+
+**Corrección.**
+- `faltanteVigenteCompra` y `costoFaltanteCompra` (core/calc.js) son la
+  única fórmula de "cuánto vale lo que falta". Lo valoran al costo unitario
+  **estimado** de la línea, el mismo valor que ya tiene una línea "Aún no"
+  y el mismo que Recibos de compra propone como reposición. Así, al
+  registrar la reposición, pasa de estimado a real sin contarse dos veces.
+  El faltante de un pedido cancelado deja de contar mientras siga
+  cancelado; se calcula en vivo, así que vuelve solo al reactivarlo.
+- Nunca entra en `costoRealPedido`, que es lo pagado (el monto de los
+  movimientos). Solo lo suman las cuentas de estimado contra real:
+  `calcCotGastosReales`, y de ahí `calcCotResultadoReal`, el reporte de
+  Pedidos, el de ventas por vendedor, la tarjeta y el PDF.
+- `calcResumenCompras` cuenta la línea como pagada, pero NO como resuelta
+  (`resueltas`, `conFaltante`, `faltante`). La pantalla ya no rehace esa
+  cuenta: "Se ahorró / Se gastó" solo sale cuando no falta nada, y la línea
+  de resumen dice "(1 con faltante) · falta comprar ≈ $X". El PDF interno
+  lo muestra igual.
+- `quitarReciboDeCotizaciones`: si a la compra le quedan partes, lo que se
+  quita pasa a su faltante. Lo que el pedido usa no cambia al anular.
+- `devolverPartesPorEliminar` anota `faltanteAntesDeEliminar`, dentro de
+  `compras_json`, sin columna nueva. `retomarPartesPorRestaurar` lo
+  devuelve.
+- `calcLineasParaRecibo` usa la misma valoración.
+
+**Pendiente, para decidir con el dueño:** al registrar un recibo que
+cubre MENOS de lo necesario, hoy se reparte a prorrata y solo se avisa.
+Por la decisión del 2026-09-23, no queda faltante, y eso también se ve
+como ahorro. No se tocó sin su respuesta.
+
+**Pruebas** (tela a $10.000/m; A necesita 12 m, C 3 m; recibo de 15 m):
+- A queda con 10 m cubiertos y 2 por comprar. Resultado: variación $0,
+  costo real $120.000, pagada pero no resuelta, y reporte con costo
+  $120.000 y ganancia $480.000.
+- En pantalla ya no sale "Se ahorró". Recibos de compra propone la
+  reposición con el mismo valor ($20.000).
+- Pedido cancelado: el faltante deja de contar, y vuelve al reactivarlo.
+- Reposición de 2 m a $24.000: costo real $124.000 (nunca $144.000) y la
+  caja baja exacto.
+- Anular la reposición: el faltante vuelve a 2, la línea vuelve a
+  pendiente y la caja vuelve exacto. En la prueba vieja de la fase 2,
+  además, lo que el pedido usa no cambia al anular.
+- Eliminar y restaurar con ida y vuelta por la Sheet de por medio: el
+  faltante se conserva y el recibo cuadra.
+- Sin el arreglo, fallan todas.
+
 ---
 
 ## Próximos pasos
