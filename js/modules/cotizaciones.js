@@ -658,8 +658,16 @@ function renderTablaCompras(c, compras, hayProveedor) {
       (diferencia > 0 ? "Se gastó " + fmt(diferencia) + " más de lo estimado." : "Se ahorró " + fmt(Math.abs(diferencia)) + " frente a lo estimado.") + "</div>";
   }
 
+  // Compras "Sí" que todavía no están en Finanzas (p. ej. marcadas antes
+  // del Hallazgo #58, cuando solo las llevaba el botón): se dice en vez de
+  // dejar que la caja y "pagado" cuenten cosas distintas sin aviso.
+  var sinLlevar = comprasSinLlevarAFinanzas(c);
+  if (sinLlevar.length) {
+    html += '<div class="section-sub" style="margin:6px 0 0;color:var(--warning-ink);">⚠ ' + sinLlevar.length + (sinLlevar.length === 1 ? " compra en «Sí» todavía no está" : " compras en «Sí» todavía no están") + " en Finanzas: " +
+      (estimadoTxDeCot(c, state.tx) ? "este pedido tiene el estimado completo registrado, así que no se llevan solas (contaría el costo dos veces)." : "se llevan solas al pulsar Guardar.") + "</div>";
+  }
   html += '<div class="row-actions" style="margin-top:12px;flex-wrap:wrap;">' +
-    '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra en estado \'Sí\', y borra el de las que ya no lo estén. Las de \'Servicio\' NO generan movimiento: no hubo un pago instantáneo que registrar. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
+    '<button class="btn" data-action="sincronizar-compras-finanzas" data-id="' + c.id + '" title="Crea (o actualiza) un movimiento de gasto en Finanzas por cada compra en estado \'Sí\', y borra el de las que ya no lo estén. Esto se hace solo al pulsar Guardar; el botón sirve para poner al día compras viejas. Las de \'Servicio\' NO generan movimiento: no hubo un pago instantáneo que registrar. Se puede volver a pulsar cuantas veces haga falta: nunca duplica.">Actualizar movimientos financieros</button>' +
     (c.estado === "convertida"
       ? '<button class="btn ghost small" data-action="add-cot-estimado-movimiento" data-id="' + c.id + '" title="Registra el costo total ESTIMADO del pedido como UN solo movimiento en Finanzas. Es una alternativa a llevar las compras reales una por una: registrar los dos contaría el mismo costo dos veces.">' +
         (estimadoTxDeCot(c, state.tx) ? "Actualizar el estimado ya registrado" : "Registrar estimado completo como movimiento") + "</button>"
@@ -2162,28 +2170,9 @@ export var actions = {
         "Si además llevas las compras reales, el costo de este pedido va a contarse DOS veces.\n\n" +
         "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
     }
-    var r = sincronizarComprasFinanzasDe(cot);
-    state.cotizaciones = state.cotizaciones.map(function (c) {
-      return c.id === id ? Object.assign({}, c, { compras: r.compras }) : c;
-    });
-    // Caso "medias" (decisión del usuario 2026-09-23): lo que se compró de
-    // más para UN pedido pasa en el acto a ser un recibo de compra de 1
-    // pedido — su excedente queda como la reserva de ese recibo, el mismo
-    // mecanismo que una compra para varios pedidos (Hallazgo #52, fase 3).
-    // Misma conversión verificada al peso que corre al cargar la app.
-    var promocion = migrarComprasARecibos(state.tx, state.cotizaciones, { soloCotId: id });
-    if (promocion.convertidos.length) {
-      state.tx = promocion.tx;
-      state.cotizaciones = promocion.cotizaciones;
-    }
-    guardarCotizaciones(); persist("tx"); notify();
-    var partes = [];
-    if (promocion.convertidos.length) partes.push(promocion.convertidos.length + " compra(s) con excedente pasaron a ser recibo de compra (lo que sobró queda como su reserva)");
-    if (promocion.saltados.length) partes.push("no se pudo pasar a recibo: " + promocion.saltados[0].motivo);
-    if (r.creados) partes.push(r.creados + " movimiento(s) creado(s)");
-    if (r.actualizados) partes.push(r.actualizados + " actualizado(s)");
-    if (r.borrados) partes.push(r.borrados + " retirado(s)");
-    if (r.huerfanas) partes.push(r.huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
+    var llevado = llevarComprasAFinanzas(id);
+    guardarCotizaciones({ sinLlevarCompras: true }); persist("tx"); notify();
+    var partes = partesLlevarCompras(llevado);
     mostrarToast(partes.length ? "✓ Finanzas al día: " + partes.join(", ") + "." : "Nada que sincronizar — marca alguna compra primero.");
   },
   // ---------- Costos globales del pedido ----------
@@ -2872,6 +2861,11 @@ export function sincronizarComprasFinanzasDe(cot) {
   // un guardado a medias entre Cotizaciones y Movimientos) dejaba el recibo
   // bloqueado para siempre, con un aviso que pedía justo este botón
   // (revisión del Hallazgo #53).
+  // Al guardar, esto corre cada vez (Hallazgo #58): "actualizado" cuenta
+  // solo un movimiento que de verdad cambió, no cada uno que se revisó.
+  function cambiaMovimiento(t, datos) {
+    return Object.keys(datos).some(function (k) { return JSON.stringify(t[k]) !== JSON.stringify(datos[k]); });
+  }
   function propiosPorMarca(campo, clave) {
     return state.tx.filter(function (t) { return t.cotizacionId === cot.id && !t.reciboCompraId && t[campo] === clave; });
   }
@@ -2970,8 +2964,8 @@ export function sincronizarComprasFinanzasDe(cot) {
       var existente = (resultado.txId ? state.tx.filter(function (t) { return t.id === resultado.txId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null) || marcados[0] || null;
       borrados += quitarLista(marcados.filter(function (t) { return t !== existente; }));
       if (existente) {
+        if (cambiaMovimiento(existente, datos)) actualizados++;
         Object.assign(existente, datos);
-        actualizados++;
         if (resultado.txId !== existente.id) resultado = Object.assign({}, resultado, { txId: existente.id });
       } else {
         var txId = uid();
@@ -3022,8 +3016,8 @@ export function sincronizarComprasFinanzasDe(cot) {
       var existenteExc = (resultado.excedenteTxId ? state.tx.filter(function (t) { return t.id === resultado.excedenteTxId && t.cotizacionId === cot.id && !t.reciboCompraId; })[0] : null) || marcadosExc[0] || null;
       borrados += quitarLista(marcadosExc.filter(function (t) { return t !== existenteExc; }));
       if (existenteExc) {
+        if (cambiaMovimiento(existenteExc, datosExc)) actualizados++;
         Object.assign(existenteExc, datosExc);
-        actualizados++;
         if (resultado.excedenteTxId !== existenteExc.id) resultado = Object.assign({}, resultado, { excedenteTxId: existenteExc.id });
       } else {
         var excId = uid();
@@ -3352,7 +3346,53 @@ function tomarSnapshotCotizacion() {
 // transaccional la llama, así que después de registrar un costo real o pagar
 // una comisión no queda un aviso de "sin guardar" colgado por cambios que ya
 // se guardaron.
-function guardarCotizaciones() {
+// Lleva a Finanzas las compras de una cotización: cada compra "Sí" con su
+// movimiento de gasto, retira el de las que ya no lo están, y convierte en
+// recibo lo comprado de más para un solo pedido (caso "medias", Hallazgo
+// #52). Es lo que hacía el botón "Actualizar movimientos financieros"; desde
+// el Hallazgo #58 también corre solo al Guardar la cotización. Idempotente:
+// nunca duplica. Devuelve { r, promocion } o null.
+function llevarComprasAFinanzas(id) {
+  var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
+  if (!cot) return null;
+  var r = sincronizarComprasFinanzasDe(cot);
+  state.cotizaciones = state.cotizaciones.map(function (c) {
+    return c.id === id ? Object.assign({}, c, { compras: r.compras }) : c;
+  });
+  // Caso "medias" (decisión del usuario 2026-09-23): lo que se compró de
+  // más para UN pedido pasa en el acto a ser un recibo de compra de 1
+  // pedido — su excedente queda como la reserva de ese recibo, el mismo
+  // mecanismo que una compra para varios pedidos (Hallazgo #52, fase 3).
+  // Misma conversión verificada al peso que corre al cargar la app.
+  var promocion = migrarComprasARecibos(state.tx, state.cotizaciones, { soloCotId: id });
+  if (promocion.convertidos.length) {
+    state.tx = promocion.tx;
+    state.cotizaciones = promocion.cotizaciones;
+  }
+  return { r: r, promocion: promocion };
+}
+function partesLlevarCompras(llevado) {
+  var partes = [];
+  if (!llevado) return partes;
+  var r = llevado.r, promocion = llevado.promocion;
+  if (promocion.convertidos.length) partes.push(promocion.convertidos.length + " compra(s) con excedente pasaron a ser recibo de compra (lo que sobró queda como su reserva)");
+  if (promocion.saltados.length) partes.push("no se pudo pasar a recibo: " + promocion.saltados[0].motivo);
+  if (r.creados) partes.push(r.creados + " movimiento(s) creado(s)");
+  if (r.actualizados) partes.push(r.actualizados + " actualizado(s)");
+  if (r.borrados) partes.push(r.borrados + " retirado(s)");
+  if (r.huerfanas) partes.push(r.huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
+  return partes;
+}
+// Las compras "Sí" de una cotización que todavía no tienen su movimiento en
+// Finanzas (compra suelta; las de un recibo siempre lo tienen).
+function comprasSinLlevarAFinanzas(cot) {
+  return ((cot && cot.compras) || []).filter(function (c) {
+    if (esMiembroRecibo(c) || estadoCompra(c) !== "si" || !(costoRealPedido(c) > 0)) return false;
+    return comprasEnFinanzas(cot, state.tx, c.clave).sueltas.filter(function (t) { return t.origenCompraClave === c.clave; }).length === 0;
+  });
+}
+
+function guardarCotizaciones(opts) {
   // Si la cotización abierta está en algún Recibo de compra, sus
   // movimientos se dejan al día en el mismo acto (ej. tomó de la reserva:
   // su parte sube, la reserva baja — la caja no cambia). Si algo no
@@ -3367,6 +3407,24 @@ function guardarCotizaciones() {
     });
     if (!okRecibos) return;
   }
+  // Las compras marcadas "Sí" van a Finanzas solas al guardar (decisión del
+  // dueño 2026-09-25, Hallazgo #58). Antes solo iban al pulsar
+  // "Actualizar movimientos financieros": mientras tanto Compras del pedido
+  // decía "pagado $X" y el reporte ya contaba ese costo, pero la Caja, el
+  // Balance y la Ganancia todavía no — y nada lo avisaba. Si el pedido tiene
+  // su costo ESTIMADO completo registrado, no se llevan (contaría el costo
+  // dos veces): se avisa y se deja en manos del botón, que sí pregunta.
+  var avisos = [];
+  if (cotAbierta && !(opts && opts.sinLlevarCompras)) {
+    if (estimadoTxDeCot(cotAbierta, state.tx)) {
+      var pendientes = comprasSinLlevarAFinanzas(cotAbierta);
+      if (pendientes.length) avisos.push("⚠ " + pendientes.length + " compra(s) no se llevaron a Finanzas: este pedido tiene su costo estimado completo registrado. Bórralo en Finanzas, o usa \"Actualizar movimientos financieros\".");
+    } else {
+      var llevado = llevarComprasAFinanzas(cotAbierta.id);
+      var partesLlevado = partesLlevarCompras(llevado);
+      if (partesLlevado.length) { persist("tx"); avisos.push("✓ Finanzas al día: " + partesLlevado.join(", ") + "."); }
+    }
+  }
   persist("cotizaciones");
   state.cotSucia = "";
   tomarSnapshotCotizacion(); // el nuevo punto de retorno es lo recién guardado
@@ -3378,12 +3436,14 @@ function guardarCotizaciones() {
   // escribe nada hasta que se confirma, ver marcarSucia).
   var id = state.cotizacionEditando;
   var cot = id ? state.cotizaciones.filter(function (c) { return c.id === id; })[0] : null;
-  if (!cot) return;
-  var aplicado = sincronizarPedidoDeCotizacion(cot);
-  if (aplicado) {
-    mostrarToast("✓ El pedido " + (aplicado.pedido.numeroOp || "") + " se actualizó con estos cambios: " +
-      aplicado.cantidadCot + " unidad(es) por " + fmt(aplicado.totalCot) + ".");
+  if (cot) {
+    var aplicado = sincronizarPedidoDeCotizacion(cot);
+    if (aplicado) {
+      avisos.push("✓ El pedido " + (aplicado.pedido.numeroOp || "") + " se actualizó con estos cambios: " +
+        aplicado.cantidadCot + " unidad(es) por " + fmt(aplicado.totalCot) + ".");
+    }
   }
+  if (avisos.length) mostrarToast(avisos.join(" "));
 }
 // Baja la fecha de entrega de una cotización a su pedido vinculado (si ya
 // existe). Vive fuera de la acción de guardado porque también corre al

@@ -8127,6 +8127,48 @@ state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = co
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 
+// ---------------------------------------------------------------------
+// Hallazgo #58 — una compra marcada "Sí" va sola a Finanzas al Guardar
+// (decisión del dueño, 2026-09-25). Antes solo con el botón "Actualizar
+// movimientos financieros", y nada avisaba que faltaba.
+// ---------------------------------------------------------------------
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+state.pedidos = [pedidoMapa("ped-h58", "cot-h58", 500000, 100000)];
+state.cotizaciones = [cotMapa("cot-h58", "ped-h58", 10, 10000)];
+const abrirProduccionH58 = function (id) {
+  state.tab = "cotizaciones"; state.cotizacionesVista = "historial"; render();
+  click('[data-action="abrir-cotizacion-editor"][data-id="' + id + '"]');
+  click('[data-action="set-cot-tab"][data-id="' + id + '"][data-val="produccion"]');
+};
+const marcarCompraH58 = function (cotId, compra) {
+  state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cotId ? Object.assign({}, c, { compras: [compra] }) : c; });
+  state.cotSucia = cotId; render();
+};
+abrirProduccionH58("cot-h58");
+marcarCompraH58("cot-h58", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "", fecha: "2026-09-12" });
+assert(cajaMapa() === 0 && document.body.textContent.indexOf("se llevan solas al pulsar Guardar") !== -1, "(punto de partida #58) marcada \"Sí\" y sin guardar: la caja todavía no la cuenta, y Compras del pedido lo dice");
+click('[data-action="guardar-cotizacion"][data-id="cot-h58"]');
+assert(cajaMapa() === -110000 && state.tx.length === 1 && state.tx[0].origenCompraClave === CLAVE_TELA && compraMapa("cot-h58", CLAVE_TELA).txId === state.tx[0].id, "#58: al pulsar Guardar, la compra \"Sí\" ($110.000) ya está en Finanzas — sin tener que pulsar \"Actualizar movimientos\"");
+assert(document.body.textContent.indexOf("todavía no está en Finanzas") === -1, "...y el aviso desaparece");
+cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return "cot-h58"; } }); render();
+assert(state.tx.length === 1 && cajaMapa() === -110000, "#58: guardar otra vez no duplica nada");
+marcarCompraH58("cot-h58", Object.assign({}, compraMapa("cot-h58", CLAVE_TELA), { estado: "no", costoReal: "", cantidadReal: "" }));
+cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return "cot-h58"; } }); render();
+assert(state.tx.length === 0 && cajaMapa() === 0, "#58: y si se desmarca y se guarda, su movimiento se retira");
+
+// Con el costo ESTIMADO completo registrado, no se lleva sola (contaría el
+// costo dos veces): se avisa.
+state.tx = [{ id: "tx-h58-est", tipo: "gasto", fecha: "2026-09-12", concepto: "Estimado completo del pedido", monto: 100000, contraparte: "", pedidoId: "ped-h58", cotizacionId: "cot-h58" }];
+state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === "cot-h58" ? Object.assign({}, c, { estimadoTxId: "tx-h58-est" }) : c; });
+marcarCompraH58("cot-h58", { clave: CLAVE_TELA, estado: "si", cantidadReal: 10, costoReal: 110000, txId: "", fecha: "2026-09-12" });
+cotAccionesMapa["guardar-cotizacion"]({ getAttribute: function () { return "cot-h58"; } }); render();
+assert(state.tx.length === 1 && cajaMapa() === -100000 && document.body.textContent.indexOf("estimado completo registrado") !== -1, "#58: si el pedido tiene su estimado completo registrado, guardar NO lleva la compra (contaría el costo dos veces) y Compras del pedido explica por qué");
+
+state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.cotSucia = ""; state.cotSnapshot = null;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.tab = "resumen";
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

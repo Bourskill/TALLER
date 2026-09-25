@@ -3288,6 +3288,44 @@ desde que el cliente acepta? Respuesta: **desde que el cliente acepta**.
 - `cotizacionAceptada` con una convertida y con una escalada huérfana.
 - Sin el cambio, fallan.
 
+### 🟡 Hallazgo #58 — una compra marcada "Sí" va sola a Finanzas al Guardar. ✅ IMPLEMENTADO (decisión del dueño)
+
+Del "Mapa del dinero" (punto ⑦). Una compra marcada "Sí" solo llegaba a
+la caja al pulsar "Actualizar movimientos financieros". Mientras tanto
+pasaban dos cosas:
+- Compras del pedido decía "pagado $X" y el reporte de Pedidos ya contaba
+  ese costo, que leen de la cotización.
+- La Caja, el Balance y la Ganancia todavía no lo contaban, porque leen
+  los movimientos.
+
+Nada avisaba de esa diferencia. Pregunta al dueño (2026-09-25): ¿aviso, o
+que se lleve sola al guardar? Respuesta: **que se lleve sola**.
+
+**Qué cambia.**
+- `guardarCotizaciones` (el único camino de "Guardar", también Ctrl+S,
+  convertir y aplicar) llama a `llevarComprasAFinanzas`, que antes era el
+  cuerpo del botón, para la cotización abierta. Es idempotente, nunca
+  duplica, y convierte en recibo lo comprado de más para un solo pedido
+  (caso "medias").
+- Si el pedido tiene su costo **estimado completo** registrado, las compras
+  NO se llevan solas, porque el costo se contaría dos veces. Se avisa, y
+  queda en manos del botón, que sí pregunta.
+- "Actualizado" cuenta solo un movimiento que de verdad cambió, no cada uno
+  que se revisó. Así guardar sin cambios no dice nada.
+- Compras del pedido avisa cuando hay compras "Sí" sin su movimiento, por
+  ejemplo las marcadas antes de este cambio. El botón sigue existiendo
+  para ponerlas al día.
+- Al cargar la app no se lleva nada solo, por la regla del Hallazgo #52:
+  al cargar solo se verifica, nunca se reescribe plata.
+
+**Pruebas:**
+- Marcar "Sí" y guardar: la compra ($110.000) queda en Finanzas.
+- Guardar otra vez no duplica.
+- Desmarcar y guardar retira el movimiento.
+- Con el estimado completo registrado no se lleva y se explica por qué.
+- El aviso de compras sin llevar aparece y desaparece.
+- Sin el cambio, fallan.
+
 ---
 
 ## Próximos pasos

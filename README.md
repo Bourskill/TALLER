@@ -259,6 +259,18 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésimo segunda ronda: las compras "Sí" van solas a Finanzas al guardar)
+
+- Al pulsar **Guardar** en una cotización, cada compra marcada "Sí" queda en
+  Finanzas en el acto (y se retira la de las que dejaron de estarlo). Ya no
+  hace falta pulsar "Actualizar movimientos financieros", que sigue ahí
+  para poner al día compras viejas.
+- Si el pedido tiene su costo estimado completo registrado, no se llevan
+  solas (se contaría dos veces) y se explica por qué.
+- Compras del pedido avisa si hay compras "Sí" que todavía no están en
+  Finanzas.
+- Decisión del dueño, 2026-09-25. Ver CONTABILIDAD.md, Hallazgo #58.
+
 ## Registro de cambios — septiembre 2026 (centésimo primera ronda: la comisión se debe desde que el cliente acepta)
 
 - La comisión de una cotización que el cliente todavía no acepta ya no
