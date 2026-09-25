@@ -1011,7 +1011,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // estimado, para no decir "—" cuando la pantalla ya dice cuánto
           // hay que apartar.
           var costoRealTxt = "—";
-          if (estado === "si" && num(compra.costoReal)) {
+          if (estado === "si" && (num(compra.costoReal) || faltaCant > 0)) {
             var excCosto = costoExcedenteCompra(compra);
             costoRealTxt = money(costoRealPedido(compra)) + (excCosto > 0 ? " (+" + money(excCosto) + " excedente)" : "") +
               (faltaCant > 0 ? " (+≈" + money(costoFaltanteCompra(compra, c, cot)) + " por comprar)" : "");

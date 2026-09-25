@@ -3036,10 +3036,37 @@ recibo. Pero el costo real solo sumaba lo ya cubierto:
   devuelve.
 - `calcLineasParaRecibo` usa la misma valoración.
 
-**Pendiente, para decidir con el dueño:** al registrar un recibo que
-cubre MENOS de lo necesario, hoy se reparte a prorrata y solo se avisa.
-Por la decisión del 2026-09-23, no queda faltante, y eso también se ve
-como ahorro. No se tocó sin su respuesta.
+**Revisión independiente (mismo día) — otros cuatro caminos por donde se
+perdía, corregidos:**
+1. **Compra corta.** Un recibo que compra MENOS de lo necesario reparte
+   a prorrata, como siempre, pero ahora lo que no alcanzó a cada pedido
+   queda como su faltante (`calcRepartoLineaRecibo` → `faltanteNuevo`).
+   Antes, un pedido que venía de "Aún no" lo perdía y se veía como ahorro.
+   Si se compró lo suficiente y "Ajustar reparto" le dio menos a alguien,
+   eso es una decisión y no crea faltante. *Esto cambia el comportamiento
+   acordado el 2026-09-23 ("se reparte a prorrata y se avisa"), que sigue
+   igual; solo se guarda lo que falta en vez de olvidarlo. Si de verdad se
+   necesita menos, se baja la Cant. real, que cancela el faltante.*
+2. **Anular el ÚNICO recibo de una compra.** La compra vuelve a "Aún no",
+   pero conserva en `faltante` lo que el pedido usaba por encima del
+   estimado. Recibos de compra lo vuelve a pedir y el costo lo sigue
+   contando: `faltanteVigenteCompra` también mira una compra en "Aún no".
+3. **Anular con el pedido ELIMINADO.** Lo que ese recibo cubría pasa a
+   `faltanteAntesDeEliminar` y vuelve al restaurar.
+4. **Cancelar → "Devolver a la reserva" → Reactivar.** Lo devuelto queda
+   anotado igual que al eliminar, y "Reactivar" lo vuelve a tomar
+   (`retomarRecibosAlRestaurarPedido`), con aviso si otro pedido ya lo usó.
+
+Además:
+- una marca `faltanteAntesDeEliminar` vieja ya no crea un faltante
+  fantasma;
+- el PDF interno dice "por comprar" también cuando lo cubierto es $0.
+
+**Límite conocido:** al anular, lo quitado pasa entero a faltante aunque
+otro recibo del pedido tenga reserva libre. Para usarla, se baja y se
+vuelve a subir la Cant. real.
+
+Pruebas: los 5 caminos. Sin el cambio fallan las 11 comprobaciones.
 
 **Pruebas** (tela a $10.000/m; A necesita 12 m, C 3 m; recibo de 15 m):
 - A queda con 10 m cubiertos y 2 por comprar. Resultado: variación $0,

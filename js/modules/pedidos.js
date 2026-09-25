@@ -2511,6 +2511,12 @@ export var actions = {
     var pedido = state.pedidos.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
     if (!window.confirm("¿Reactivar el pedido " + (pedido.numeroOp || "") + "?\n\nVuelve a contar como pedido activo, su saldo vuelve a por cobrar y se descuenta otra vez el stock que tenía reservado.")) return;
+    // Si mientras estuvo cancelado su parte de un recibo se devolvió a la
+    // reserva ("↩ Devolver a la reserva"), la vuelve a tomar — igual que al
+    // restaurar un pedido eliminado. Antes no hacía nada: el pedido quedaba
+    // sin su material y con costo real $0 (revisión del Hallazgo #54).
+    var retomaRecibos = retomarRecibosAlRestaurarPedido(pedido);
+    if (!retomaRecibos.ok) return;
     var stockReal = [];
     var faltantes = [];
     (pedido.stockConsumido || []).forEach(function (l) {
@@ -2530,6 +2536,11 @@ export var actions = {
     if (faltantes.length) {
       window.alert("Se reactivó el pedido, pero parte del stock que tenía reservado ya se vendió mientras estuvo cancelado:\n\n" +
         faltantes.map(function (f) { return "- " + f.productoNombre + " (" + f.talla + "): faltaron " + f.faltan; }).join("\n"));
+    }
+    if (retomaRecibos.faltantes.length) {
+      window.alert("Se reactivó el pedido, pero otro pedido ya usó parte de lo que tenía en su recibo de compra mientras estuvo cancelado:\n\n" +
+        retomaRecibos.faltantes.map(function (f) { return "- " + f.nombre + ": faltaron " + (f.cantidad ? f.cantidad : fmt(f.costo)); }).join("\n") +
+        "\n\nLo que falta quedó como reposición: cómpralo con un recibo nuevo (Finanzas → Recibos de compra).");
     }
   },
   "set-pedido-obs-generales": function (el) {

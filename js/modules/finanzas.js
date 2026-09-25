@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -196,7 +196,7 @@ function renderLineaRecibo(g, d) {
       html += '<div class="section-sub" style="margin-top:8px;">' + partesTxt.join(" · ") + "</div>";
     }
     if (r.faltan > 0) {
-      html += '<div class="section-sub" style="margin-top:4px;color:var(--warning-ink);">Compraste menos de lo que necesitan: faltan ' + fmtCant(r.faltan, dec) + " " + esc(g.unidad) + ". Se reparte a prorrata.</div>";
+      html += '<div class="section-sub" style="margin-top:4px;color:var(--warning-ink);">Compraste menos de lo que necesitan: faltan ' + fmtCant(r.faltan, dec) + " " + esc(g.unidad) + ". Se reparte a prorrata y lo que falta queda pendiente como reposición de cada pedido.</div>";
     }
     html += '<button class="btn ghost small" style="margin-top:6px;" data-action="toggle-ajustar-recibo" data-clave="' + esc(g.linea) + '">' + (abierta ? "▾" : "▸") + " Ajustar reparto</button>";
     if (abierta) html += renderAjusteRecibo(g, d, r, dec);
@@ -1054,11 +1054,22 @@ export var actions = {
     var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: 0 }, function () {
       state.cotizaciones = state.cotizaciones.map(function (c) {
         if (c.id !== cotId) return c;
+        var pedidoId = pedidoIdDeCotParaTx(c);
         return Object.assign({}, c, {
           compras: (c.compras || []).map(function (compra) {
             if (compra.clave !== clave) return compra;
-            var partes = (compra.partesRecibo || []).map(function (p) { return p.reciboId === reciboId ? Object.assign({}, p, { cantidad: 0, costo: 0 }) : p; });
-            return totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: 0 }));
+            // Lo devuelto queda anotado (la misma marca que al eliminar el
+            // pedido) para que "Reactivar" lo vuelva a tomar. Antes se ponía
+            // en 0 sin más: cancelar → devolver → reactivar dejaba al pedido
+            // sin su material ni su faltante, y su costo real en $0
+            // (revisión del Hallazgo #54).
+            var partes = (compra.partesRecibo || []).map(function (p) {
+              if (p.reciboId !== reciboId || !(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
+              return Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) } });
+            });
+            var devuelta = Object.assign({}, compra, { partesRecibo: partes, faltante: 0 });
+            if (num(compra.faltante) > 0) devuelta.faltanteAntesDeEliminar = { pedidoId: pedidoId, cantidad: num(compra.faltante) };
+            return totalesDesdePartes(devuelta);
           })
         });
       });
