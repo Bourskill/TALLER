@@ -852,10 +852,14 @@ export async function generarPDFReporteVendedor(nombreVendedor, filas, resumen) 
     columnStyles: { 2: { halign: "right" }, 3: { halign: "right" } },
     theme: "grid"
   });
+  var yNota = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : y) + 14;
+  if (resumen.cancelados || resumen.porAceptar) { doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110, 110, 110); }
   if (resumen.cancelados) {
-    var yNota = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : y) + 14;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(110, 110, 110);
     doc.text(resumen.cancelados + (resumen.cancelados === 1 ? " pedido cancelado: no suma" : " pedidos cancelados: no suman") + " en Total vendido; su comisión pendiente quedó anulada.", marginX, yNota);
+    yNota += 12;
+  }
+  if (resumen.porAceptar) {
+    doc.text(resumen.porAceptar + (resumen.porAceptar === 1 ? " cotización por aceptar: no suma" : " cotizaciones por aceptar: no suman") + " todavía; su comisión se debe desde que el cliente acepta.", marginX, yNota);
   }
 
   mostrarPdfEnApp(doc, docNum + "-reporte-" + slugify(nombreVendedor) + ".pdf");
@@ -1078,7 +1082,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     // Mismo estado que la app (estadoComisionCot): una comisión anulada por
     // un pedido cancelado no se imprime como "pendiente" (revisión del #56).
     var estadoCom = estadoComisionCot(cot);
-    doc.text(cot.vendedor.nombre + " — " + etiquetaCom + " = " + money(valorCom) + " (" + (estadoCom === "anulada" ? "anulada, pedido cancelado" : cot.vendedor.estado === "pagado" ? "pagada" : "pendiente") + ")", marginX, y);
+    doc.text(cot.vendedor.nombre + " — " + etiquetaCom + " = " + money(valorCom) + " (" + (estadoCom === "anulada" ? "anulada, pedido cancelado" : estadoCom === "por-aceptar" ? "se debe cuando el cliente acepte" : cot.vendedor.estado === "pagado" ? "pagada" : "pendiente") + ")", marginX, y);
     y += 20;
   }
 

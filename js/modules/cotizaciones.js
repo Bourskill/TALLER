@@ -463,9 +463,11 @@ function renderCotVendedorCompact(c) {
   // Escalada desde un pedido que se canceló: la comisión pendiente quedó
   // anulada (Hallazgo #56) — se dice así y no se ofrece pagarla.
   var anulada = estadoComisionCot(c) === "anulada";
+  // El cliente todavía no acepta: la comisión aún no se debe (Hallazgo #57).
+  var porAceptar = estadoComisionCot(c) === "por-aceptar";
 
   if (!expandido) {
-    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : anulada ? " · anulada (pedido cancelado)" : " · pendiente")) : "Sin vendedor asignado";
+    var resumen = v.nombre ? (esc(v.nombre) + " · " + fmt(valor) + (pagado ? " · pagada" : anulada ? " · anulada (pedido cancelado)" : porAceptar ? " · se debe cuando el cliente acepte" : " · pendiente")) : "Sin vendedor asignado";
     return '<div class="cot-vendedor-compact" data-action="toggle-cot-vendedor" data-id="' + c.id + '">👤 Vendedor: ' + resumen + "</div>";
   }
 
@@ -481,6 +483,8 @@ function renderCotVendedorCompact(c) {
         ? '<span class="badge" title="Esta cotización ya tiene un pedido real — la comisión se paga/deshace desde ahí.">' + (pagado ? "pagada" : "pendiente") + " · ver Pedidos</span>"
         : anulada
         ? '<span class="badge" title="El pedido de esta cotización se canceló: su comisión pendiente dejó de deberse.">anulada · pedido cancelado</span>'
+        : porAceptar
+        ? '<span class="badge" title="La comisión se debe desde que el cliente acepta: cuando esta cotización se convierta en pedido pasa a Por pagar.">se debe cuando el cliente acepte</span>'
         : ('<button class="status-pill ' + (pagado ? "pagado" : "pendiente") + '" data-action="toggle-comision-cot" data-id="' + c.id + '">' + (pagado ? "pagada" : "pendiente") + "</button>" +
           (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-cot-vendedor-fecha" data-id="' + c.id + '" /></label>') : "")))) : "") +
     '<button class="btn ghost small" data-action="toggle-cot-vendedor" data-id="' + c.id + '">Listo</button>' +
@@ -2412,6 +2416,11 @@ export var actions = {
     // ya no se debe (estadoComisionCot, Hallazgo #56). Deshacer sí se puede.
     if (pagando && estadoComisionCot(cot) === "anulada") {
       window.alert("El pedido de esta cotización está cancelado: su comisión pendiente ya no se debe. Si de verdad se va a pagar, reactiva el pedido primero.");
+      return;
+    }
+    // La comisión se debe desde que el cliente acepta (Hallazgo #57).
+    if (pagando && estadoComisionCot(cot) === "por-aceptar") {
+      window.alert("El cliente todavía no acepta esta cotización: la comisión se debe desde que se convierte en pedido.");
       return;
     }
     if (pagando) {

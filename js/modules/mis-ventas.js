@@ -23,21 +23,21 @@ export function render() {
 
   var r = calcVentasVendedor(nombre);
   var html = '<div class="kpis">' +
-    '<div class="kpi"><div class="kpi-label">Total vendido</div><div class="kpi-value info">' + fmt(r.totalVendido) + '</div><div class="kpi-note">Pedidos y cotizaciones activas a tu nombre' + (r.cancelados ? " · " + r.cancelados + (r.cancelados === 1 ? " cancelado, no suma" : " cancelados, no suman") : "") + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Total vendido</div><div class="kpi-value info">' + fmt(r.totalVendido) + '</div><div class="kpi-note">Pedidos y cotizaciones activas a tu nombre' + (r.cancelados ? " · " + r.cancelados + (r.cancelados === 1 ? " cancelado, no suma" : " cancelados, no suman") : "") + (r.porAceptar ? " · " + r.porAceptar + " por aceptar, no " + (r.porAceptar === 1 ? "suma" : "suman") : "") + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Comisión pendiente</div><div class="kpi-value warning">' + fmt(r.comisionPendiente) + '</div><div class="kpi-note">Aún no pagada</div></div>' +
     '<div class="kpi"><div class="kpi-label">Comisión pagada</div><div class="kpi-value success">' + fmt(r.comisionPagada) + '</div><div class="kpi-note">Ya cobrada</div></div>' +
     "</div>";
 
   var filas = calcFilasVentasVendedor(nombre);
   html += '<div class="card"><div class="section-title small">Mis ventas' +
-    renderHelp("Pedidos y cotizaciones (aún no convertidas en pedido, para no contarlas dos veces) donde apareces como vendedor, con el estado de tu comisión en cada una. Un pedido cancelado sigue en la lista, pero no suma como venta: si su comisión no se había pagado, quedó anulada; si ya se pagó, se queda como pagada.") +
+    renderHelp("Pedidos y cotizaciones (aún no convertidas en pedido, para no contarlas dos veces) donde apareces como vendedor, con el estado de tu comisión en cada una. Un pedido cancelado sigue en la lista, pero no suma como venta: si su comisión no se había pagado, quedó anulada; si ya se pagó, se queda como pagada. Una cotización que el cliente todavía no acepta sale \"Por aceptar\": su comisión se debe desde que la acepta.") +
     "</div>";
   if (filas.length === 0) {
     html += '<div class="empty">Todavía no tienes pedidos ni cotizaciones registrados a tu nombre.</div>';
   } else {
     filas.forEach(function (f) {
       var tagStyle = f.estadoComision === "pagada" ? "background:var(--success-soft);color:var(--success-ink);"
-        : f.estadoComision === "anulada" ? "background:var(--surface-3);color:var(--ink-soft);"
+        : (f.estadoComision === "anulada" || f.estadoComision === "por-aceptar") ? "background:var(--surface-3);color:var(--ink-soft);"
         : "background:var(--warning-soft);color:var(--warning-ink);";
       html += '<div class="tx-row" style="grid-template-columns:1fr 110px 170px;">' +
         "<span>" + esc(f.cliente || "—") + " — " + esc(f.descripcion || "") + (f.cancelado ? ' <span class="badge danger">Cancelado</span>' : "") + "</span>" +

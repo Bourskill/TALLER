@@ -786,10 +786,7 @@ function listaEntradasServicio() {
     // pedido real detrás — mismo patrón "truthy pero obsoleto" que el bug
     // hermano ya documentado (desincronizacion_movimientos_pedido_escalado).
     // Auditoría financiera 2026-09-20.
-    if (cot.estado !== "convertida") {
-      if (!cot.pedidoOrigenId) return;
-      if (!state.pedidos.some(function (p) { return p.id === cot.pedidoOrigenId; })) return;
-    }
+    if (!cotizacionAceptada(cot)) return;
     var lineas = calcListaCompras(cot);
     cot.compras.forEach(function (compra) {
       if (estadoCompra(compra) !== "servicio") return;
@@ -1533,6 +1530,18 @@ export function estadoComisionPedido(p) {
   if (pedidoCancelado(p)) return "anulada";
   return "pendiente";
 }
+// ¿El cliente ya aceptó esta cotización? Sí, si ya es un pedido
+// (convertida) o si viene escalada desde un pedido rápido que existe de
+// verdad (pedidoOrigenId). Un borrador sin pedido detrás es solo una
+// propuesta. Es el criterio de los servicios (auditoría 2026-09-20) y, por
+// decisión del dueño (2026-09-25: "desde que el cliente acepta"), también
+// el de las comisiones (Hallazgo #57). Una sola función para los dos.
+export function cotizacionAceptada(c) {
+  if (!c) return false;
+  if (c.estado === "convertida") return true;
+  var pid = pedidoIdDeCotParaTx(c);
+  return !!pid && (state.pedidos || []).some(function (p) { return p.id === pid; });
+}
 // ¿El pedido real que tiene detrás una cotización sin convertir (el de
 // origen de una escalada) está cancelado? Una sola respuesta para el estado
 // de su comisión y para "Mis ventas" — antes la fila de la cotización solo
@@ -1545,10 +1554,16 @@ export function cotSobrePedidoCancelado(c) {
 }
 // Igual para una cotización sin convertir: queda anulada si el pedido real
 // que tiene detrás (el de origen de una escalada) está cancelado.
+//
+// "por-aceptar": el cliente todavía no acepta (cotizacionAceptada). La
+// comisión se debe desde que acepta, así que no cuenta en Por pagar ni en
+// "Obligaciones vencidas", ni se puede pagar todavía (Hallazgo #57). Antes
+// una sola cotización en borrador ya aparecía como obligación vencida.
 export function estadoComisionCot(c) {
   if (!c || c.estado === "convertida" || !c.vendedor || !c.vendedor.nombre) return "";
   if (c.vendedor.estado === "pagado") return "pagada";
   if (cotSobrePedidoCancelado(c)) return "anulada";
+  if (!cotizacionAceptada(c)) return "por-aceptar";
   return "pendiente";
 }
 export function calcComisionesPendientes() {
@@ -1599,7 +1614,7 @@ export function calcFilasVentasVendedor(nombre) {
   state.cotizaciones.forEach(function (c) {
     if (c.estado === "convertida" || !c.vendedor || c.vendedor.nombre !== nombre) return;
     var estado = estadoComisionCot(c);
-    filas.push({ tipo: "cotizacion", id: c.id, pedidoId: pedidoIdDeCotParaTx(c), cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, cancelado: cotSobrePedidoCancelado(c), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValorCot(c), comisionAnulada: estado === "anulada" ? calcComisionValorCot(c) : 0 });
+    filas.push({ tipo: "cotizacion", id: c.id, pedidoId: pedidoIdDeCotParaTx(c), cliente: c.cliente, descripcion: c.descripcion, total: calcCotizacionTotales(c).precioTotal, cancelado: cotSobrePedidoCancelado(c), porAceptar: !cotizacionAceptada(c), estadoComision: estado, comision: estado === "anulada" ? 0 : calcComisionValorCot(c), comisionAnulada: estado === "anulada" ? calcComisionValorCot(c) : 0 });
   });
   return filas;
 }
@@ -1607,6 +1622,7 @@ export function calcFilasVentasVendedor(nombre) {
 // usan el panel y el PDF, así los dos dicen exactamente lo mismo.
 export function etiquetaComisionVendedor(f) {
   if (f.estadoComision === "anulada") return "Anulada · pedido cancelado";
+  if (f.estadoComision === "por-aceptar") return "Por aceptar";
   if (f.estadoComision === "pagada") return f.cancelado ? "Pagada · pedido cancelado" : "Pagada";
   return "Pendiente";
 }
@@ -1616,12 +1632,16 @@ export function etiquetaComisionVendedor(f) {
 // cotización escalada son una sola venta cancelada, no dos.
 export function calcVentasVendedor(nombre) {
   var pedidosCancelados = {};
+  // Una cotización que el cliente todavía no acepta no es una venta: se
+  // lista, pero no suma (Hallazgo #57).
   var r = calcFilasVentasVendedor(nombre).reduce(function (a, f) {
-    if (f.cancelado) pedidosCancelados[f.pedidoId || f.id] = true; else a.totalVendido += f.total;
+    if (f.cancelado) pedidosCancelados[f.pedidoId || f.id] = true;
+    else if (f.porAceptar) a.porAceptar++;
+    else a.totalVendido += f.total;
     if (f.estadoComision === "pendiente") a.comisionPendiente += f.comision;
     if (f.estadoComision === "pagada") a.comisionPagada += f.comision;
     return a;
-  }, { totalVendido: 0, comisionPendiente: 0, comisionPagada: 0, cancelados: 0 });
+  }, { totalVendido: 0, comisionPendiente: 0, comisionPagada: 0, cancelados: 0, porAceptar: 0 });
   r.cancelados = Object.keys(pedidosCancelados).length;
   return r;
 }

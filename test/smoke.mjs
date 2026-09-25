@@ -8088,6 +8088,45 @@ state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 state.tab = "resumen";
 
+// ---------------------------------------------------------------------
+// Hallazgo #57 — la comisión de una cotización se debe desde que el
+// cliente acepta (decisión del dueño, 2026-09-25). Antes una cotización en
+// borrador ya aparecía como obligación vencida.
+// ---------------------------------------------------------------------
+state.config.gastosFijos = []; state.config.nomina = []; state.deudas = [];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+const refUniformeH57 = function (id) { return [{ id: id, nombre: "Uniforme", imagenUrl: "", cantidadPedida: 1, precioVenta: 500000, insumos: [], detalle: [], estado: "", estadosDef: [] }]; };
+// Una cotización en borrador, sin pedido detrás, con vendedora al 10 %.
+state.pedidos = [];
+state.cotizaciones = [cotMapa("cot-h57-b", "", 1, 0, { estado: "borrador", vendedor: vendedorAnaMapa("pendiente"), referencias: refUniformeH57("ref-h57-b") })];
+assert(mapaCalc.estadoComisionCot(state.cotizaciones[0]) === "por-aceptar", "#57: la comisión de una cotización que el cliente todavía no acepta queda \"por aceptar\"");
+assert(mapaCalc.calcPorPagar() === 0 && mapaCalc.calcResumenPorPagar().estado === "aldia" && mapaCalc.calcSaldosVendedores().length === 0, "#57: no cuenta en Por pagar ni como obligación vencida (antes: \"Obligaciones vencidas $50.000\")");
+const ventasBorrH57 = mapaCalc.calcVentasVendedor("Ana");
+assert(ventasBorrH57.totalVendido === 0 && ventasBorrH57.comisionPendiente === 0 && ventasBorrH57.porAceptar === 1 && mapaCalc.etiquetaComisionVendedor(mapaCalc.calcFilasVentasVendedor("Ana")[0]) === "Por aceptar", "#57: en Mis ventas se ve \"Por aceptar\", sin sumar como venta ni como comisión pendiente");
+global.confirm = dom.window.confirm = function () { return true; };
+const alertPrevioH57 = window.alert; window.alert = function () {};
+cotAccionesMapa["toggle-comision-cot"]({ getAttribute: function () { return "cot-h57-b"; } });
+assert(state.tx.length === 0 && state.cotizaciones[0].vendedor.estado === "pendiente", "#57: y todavía no se puede pagar");
+window.alert = alertPrevioH57;
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+
+// En cuanto hay un pedido real detrás (escalada desde un pedido), se debe.
+state.pedidos = [pedidoMapa("ped-h57-e", "cot-h57-b", 500000, 0)];
+state.cotizaciones = [cotMapa("cot-h57-b", "", 1, 0, { estado: "borrador", pedidoOrigenId: "ped-h57-e", vendedor: vendedorAnaMapa("pendiente"), referencias: refUniformeH57("ref-h57-b") })];
+assert(mapaCalc.estadoComisionCot(state.cotizaciones[0]) === "pendiente" && mapaCalc.calcComisionesPendientesCot() === 50000, "#57: con un pedido real detrás (el cliente ya aceptó), la comisión sí cuenta como pendiente ($50.000)");
+
+// Lo ya pagado desde un borrador (antes se podía) se queda como pagado.
+state.pedidos = [];
+state.cotizaciones = [cotMapa("cot-h57-p", "", 1, 0, { estado: "borrador", vendedor: vendedorAnaMapa("pagado"), referencias: refUniformeH57("ref-h57-p") })];
+assert(mapaCalc.estadoComisionCot(state.cotizaciones[0]) === "pagada", "#57: una comisión que ya se había pagado desde un borrador sigue como pagada (esa plata salió)");
+
+// Los servicios usan el MISMO criterio (una sola función).
+assert(mapaCalc.cotizacionAceptada({ estado: "convertida" }) === true && mapaCalc.cotizacionAceptada({ estado: "borrador", pedidoOrigenId: "no-existe" }) === false, "#57: cotizacionAceptada — convertida sí; escalada de un pedido que ya no existe, no");
+
+state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = configPreviaH56.nomina; state.deudas = deudasPreviasH56;
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

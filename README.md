@@ -259,6 +259,15 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésimo primera ronda: la comisión se debe desde que el cliente acepta)
+
+- La comisión de una cotización que el cliente todavía no acepta ya no
+  aparece en "Por pagar" ni como obligación vencida, y todavía no se puede
+  pagar. En "Mis ventas" sale como "Por aceptar". En cuanto la cotización
+  se convierte en pedido (o viene de un pedido real), cuenta como siempre.
+- Lo que ya se hubiera pagado desde un borrador se queda como pagado.
+- Decisión del dueño, 2026-09-25. Ver CONTABILIDAD.md, Hallazgo #57.
+
 ## Registro de cambios — septiembre 2026 (centésima ronda: la comisión de un pedido cancelado ya no se muestra como deuda)
 
 - **"Mis ventas"** del vendedor y su PDF ya no cuentan un pedido cancelado

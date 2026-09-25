@@ -296,6 +296,15 @@ intencional y correcto — se explica en su propia entrada más abajo.
    sus propias compras, lo que realmente hay que girar es menor. Esto es
    estrictamente una pregunta para un contador, no algo que se deba
    decidir en código.
+   *Actualización 2026-09-25 (Mapa del dinero):* el dueño todavía NO
+   factura con IVA; piensa hacerlo más adelante, posiblemente con Siigo.
+   Cuando llegue ese momento hay dos defectos ya identificados que
+   resolver:
+   - `calcIvaCobradoTotal` solo sube: no hay forma de registrar el pago a
+     la DIAN, y registrarlo como gasto lo restaría dos veces de la
+     Ganancia;
+   - la Ganancia de 30 días resta el IVA cobrado de SIEMPRE.
+   Mientras no se facture con IVA, no afectan ningún número.
 3. **Un pedido pagado 100% de contado reconoce toda la "Ganancia" el
    mismo día**, aunque la tela se compre y la confección se pague
    semanas después — es el comportamiento normal de un sistema 100% de
@@ -3242,6 +3251,42 @@ fallan.
 - `calcComisionValor` lee `v.porcentaje` antes que `v.valor`, y
   `calcComisionValorCot` solo lee `v.valor`. Con datos viejos que tengan
   los dos campos, el mismo vendedor puede dar montos distintos.
+
+### 🟡 Hallazgo #57 — la comisión de una cotización se debe desde que el cliente acepta. ✅ IMPLEMENTADO (decisión del dueño)
+
+Del "Mapa del dinero" (punto ③). Una cotización en borrador, que el
+cliente todavía no aceptó, ya sumaba la comisión de su vendedor en "Por
+pagar". Como no tiene fecha de pago, además salía en el Resumen como
+"Obligaciones vencidas": con una sola cotización en borrador de $500.000
+al 10 % se veían $50.000 vencidos. A los servicios ya se les había puesto
+este filtro en la auditoría del 2026-09-20; a las comisiones no.
+Pregunta al dueño (2026-09-25): ¿la comisión se debe desde que se cotiza o
+desde que el cliente acepta? Respuesta: **desde que el cliente acepta**.
+
+**Qué cambia.**
+- `cotizacionAceptada(c)` (core/calc.js) es el único criterio de "el
+  cliente aceptó". Aceptada quiere decir:
+  - ya es pedido (convertida), o
+  - viene escalada desde un pedido que existe de verdad.
+  La usan los servicios (`listaEntradasServicio`, sin cambio de conducta)
+  y las comisiones.
+- `estadoComisionCot` tiene un estado nuevo, **"por-aceptar"**:
+  - no cuenta en "Por pagar" ni en las obligaciones vencidas;
+  - no se puede pagar (la pastilla dice "se debe cuando el cliente
+    acepte");
+  - en "Mis ventas" y su PDF se lista como "Por aceptar", sin sumar como
+    venta ni como comisión pendiente;
+  - el PDF interno lo dice igual.
+- Lo que ya se hubiera pagado desde un borrador se queda como pagado,
+  porque esa plata salió.
+
+**Pruebas:**
+- Borrador: queda "por aceptar", "Por pagar" en $0 y "al día", "Mis
+  ventas" sin sumar, y no se puede pagar.
+- Con un pedido real detrás: la comisión cuenta.
+- Lo ya pagado sigue pagado.
+- `cotizacionAceptada` con una convertida y con una escalada huérfana.
+- Sin el cambio, fallan.
 
 ---
 
