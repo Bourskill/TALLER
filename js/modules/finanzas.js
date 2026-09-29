@@ -137,7 +137,7 @@ function renderFormRecibo(lineas) {
     return html + '<div class="empty" style="margin-top:12px;">Estos pedidos no tienen nada pendiente por comprar.</div>';
   }
   html += '<div class="cot-col-title" style="margin-top:16px;">¿Qué compraste?' +
-    renderHelp('Escribe lo que dice el papel del proveedor: cuánto compraste y cuánto pagaste. Solo entran al recibo las líneas con algo en "Pagué"; las demás se quedan pendientes. Cada pedido recibe lo que necesita y lo que sobre queda como reserva — con "Ajustar reparto" puedes cambiar cuánto le toca a cada uno.') +
+    renderHelp('Escribe lo que dice el papel del proveedor: cuánto compraste y cuánto pagaste. Solo entran al recibo las líneas con algo en "Pagué"; las demás se quedan pendientes. Cada pedido recibe lo que necesita y lo que sobre queda como reserva. Si lo que sobra no sirve (un retazo, desperdicio), escribe en "Sobrante" lo que de verdad queda — 0 si nada: el resto se reparte entre los pedidos como parte de su costo. Con "Ajustar reparto" puedes cambiar a mano cuánto le toca a cada uno.') +
     "</div>";
   var total = 0, enRecibo = 0;
   lineas.forEach(function (g) {
@@ -158,9 +158,15 @@ function renderFormRecibo(lineas) {
   return html;
 }
 
+function escritoRecibo(v) { return v !== undefined && v !== null && v !== ""; }
+
 function renderLineaRecibo(g, d) {
   var dec = g.esProducto ? 0 : 2;
-  var r = num(d.costoPagado) > 0 ? calcRepartoLineaRecibo(g, d) : null;
+  // Se calcula aunque falte "Pagué": `sobra` decide si hay algo que
+  // preguntar en "Sobrante" (la vista previa del reparto sí espera al pago).
+  var calc = calcRepartoLineaRecibo(g, d);
+  var r = num(d.costoPagado) > 0 ? calc : null;
+  var conSobrante = !g.esGlobal && !(calc.faltan > 0) && (calc.sobra > 0 || escritoRecibo(d.sobrante));
   var abierta = !!((state.formCompraConjunta.ajustar || {})[g.linea]);
   var reposicion = g.participantes.some(function (p) { return p.esReposicion; });
   var html = '<div class="card cc-grupo' + (r && r.ok ? " cc-grupo-listo" : "") + '">';
@@ -180,6 +186,11 @@ function renderLineaRecibo(g, d) {
     (g.esGlobal ? "" :
       '<div class="field"><label>Compré (' + esc(g.unidad || "cantidad") + ')</label><input type="number" class="mini-input" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + fmtCant(g.totalNecesita, dec) + '" value="' + esc(d.cantidadComprada || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="cantidadComprada" /></div>') +
     '<div class="field"><label>Pagué</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoPagado || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="costoPagado" /></div>' +
+    (conSobrante
+      ? '<div class="field"><label>Sobrante (' + esc(g.unidad || "cantidad") + ")" +
+        renderHelp("Lo que de verdad queda para usar después: se guarda como reserva del recibo. Si lo que sobra no sirve (un retazo, el final del rollo), escribe 0 o lo que sí sirva: la diferencia es desperdicio y se reparte entre los pedidos como parte de su costo, a prorrata de lo que usa cada uno — todos pagan el mismo precio por " + (g.unidad || "unidad") + ". Vacío = todo lo que sobra queda de reserva.", "right") +
+        '</label><input type="number" class="mini-input" min="0" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + fmtCant(calc.sobra, dec) + '" value="' + esc(escritoRecibo(d.sobrante) ? d.sobrante : "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="sobrante" /></div>'
+      : "") +
     "</div>";
 
   if (r) {
@@ -188,12 +199,16 @@ function renderLineaRecibo(g, d) {
     } else {
       var partesTxt = r.partes.map(function (p, i) {
         var op = soloOp(g.participantes[i].etiqueta);
-        return esc(op) + " " + (g.esGlobal ? "" : fmtCant(p.cantidad, dec) + " " + esc(g.unidad) + " ") + fmt(p.costo);
+        return esc(op) + " " + (g.esGlobal ? "" : fmtCant(p.cantidad, dec) + " " + esc(g.unidad) + " ") + fmt(p.costo) +
+          (p.desperdicio > 0 ? " (" + fmtCant(p.desperdicio, dec) + " de desperdicio)" : "");
       });
       if (r.reserva.cantidad > 0 || r.reserva.costo > 0) {
         partesTxt.push("↺ sobran " + fmtCant(r.reserva.cantidad, dec) + " " + esc(g.unidad) + " " + fmt(r.reserva.costo) + " (reserva)");
       }
       html += '<div class="section-sub" style="margin-top:8px;">' + partesTxt.join(" · ") + "</div>";
+      if (r.desperdicio > 0) {
+        html += '<div class="section-sub" style="margin-top:4px;">✂ ' + fmtCant(r.desperdicio, dec) + " " + esc(g.unidad) + " de desperdicio repartido entre los pedidos: cada uno paga " + fmt(r.totales.costoTotal / r.totales.cantidadTotal) + " por " + esc(g.unidad || "unidad") + (r.reserva.cantidad > 0 ? "" : ", sin reserva") + ".</div>";
+      }
     }
     if (r.faltan > 0) {
       html += '<div class="section-sub" style="margin-top:4px;color:var(--warning-ink);">Compraste menos de lo que necesitan: faltan ' + fmtCant(r.faltan, dec) + " " + esc(g.unidad) + ". Se reparte a prorrata y lo que falta queda pendiente como reposición de cada pedido.</div>";
@@ -209,15 +224,21 @@ function renderLineaRecibo(g, d) {
 // reparto automático es el valor por defecto, cada fila se puede corregir.
 function renderAjusteRecibo(g, d, r, dec) {
   var ovCant = d.cantidadesPorPedido || {}, ovCosto = d.costosPorPedido || {};
+  // Con "Sobrante" escrito, la cantidad de cada pedido ya lleva su parte del
+  // desperdicio: se muestra la final, que es la que se guarda (lo escrito a
+  // mano es solo la base). Editar una fila pasa a reparto a mano con estas
+  // mismas cifras (ver "set-compra-conjunta-cantidad-pedido").
+  var conSobrante = escritoRecibo(d.sobrante);
   var html = '<div class="cc-reparto">';
   html += '<div class="tx-row head" style="grid-template-columns:1fr 110px 110px;"><span>Pedido</span><span class="ins-th-num">' + (g.esGlobal ? "" : "Cantidad") + '</span><span class="ins-th-num">Costo</span></div>';
   g.participantes.forEach(function (p, i) {
     var parte = r.partes[i] || { cantidad: 0, costo: 0 };
     html += '<div class="tx-row" style="grid-template-columns:1fr 110px 110px;">' +
-      '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) + "</span>" +
+      '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) +
+      (parte.desperdicio > 0 ? ' <span class="section-sub" style="margin:0;">· incluye ' + fmtCant(parte.desperdicio, dec) + " de desperdicio</span>" : "") + "</span>" +
       '<span class="mobile-th">Cantidad</span>' +
       (g.esGlobal ? "<span></span>" :
-        '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(ovCant[p.cotId] !== undefined ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
+        '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(!conSobrante && ovCant[p.cotId] !== undefined ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
       '<span class="mobile-th">Costo</span>' +
       (g.esGlobal
         ? '<input type="number" class="mini-input" style="text-align:right;width:100%;" value="' + esc(ovCosto[p.cotId] !== undefined ? ovCosto[p.cotId] : parte.costo) + '" data-action-change="set-costo-compartido-monto" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />'
@@ -904,6 +925,21 @@ export var actions = {
     var clave = el.getAttribute("data-clave"), cotId = el.getAttribute("data-cot");
     var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
     var fila = Object.assign({}, porClave[clave] || {});
+    // Con "Sobrante" escrito, editar una fila pasa a reparto a mano: las
+    // demás se quedan con la cantidad que ya se veía (desperdicio incluido)
+    // y el sobrante vuelve a ser lo que quede. Sin esto, la fila editada
+    // recibiría OTRA VEZ su parte del desperdicio encima de lo que se
+    // escribió, y las demás lo perderían.
+    if (escritoRecibo(fila.sobrante)) {
+      var grupo = calcLineasParaRecibo(state.formCompraConjunta.seleccion || []).filter(function (g) { return g.linea === clave; })[0];
+      var actual = grupo ? calcRepartoLineaRecibo(grupo, fila) : null;
+      if (actual && actual.partes.length) {
+        var fijas = {};
+        actual.partes.forEach(function (p) { fijas[p.cotId] = String(p.cantidad); });
+        fila.cantidadesPorPedido = fijas;
+      }
+      delete fila.sobrante;
+    }
     var cantidadesPorPedido = Object.assign({}, fila.cantidadesPorPedido || {});
     cantidadesPorPedido[cotId] = el.value;
     fila.cantidadesPorPedido = cantidadesPorPedido;

@@ -3373,6 +3373,65 @@ Pruebas: los casos anteriores, que fallan sin el cambio.
 
 ---
 
+### 🟡 Hallazgo #59 — lo que sobra de un recibo no siempre es reserva: puede ser desperdicio de los pedidos. ✅ IMPLEMENTADO (pedido del dueño)
+
+Pedido del dueño (2026-09-28), sobre su pantalla del recibo: tela
+Riquelme, 3 pedidos necesitan 1.60 + 1.20 + 1.20 MT, compró 5 MT y pagó
+$36.000. La app guardaba el metro sobrante como reserva ($7.200). En sus
+palabras: "si la cantidad del sobrante es 0, el desperdicio se reparte de
+forma equivalente o manual entre los pedidos, o sea el sobrecosto ... ya
+que no siempre es un sobrante como tal". Un retazo o el final de un rollo
+no se vuelven a usar. Contarlos como reserva dejaba $7.200 "guardados" que
+en realidad se gastaron, y los pedidos se veían más baratos de lo que
+fueron.
+
+**Qué cambia.**
+- Nuevo campo **"Sobrante"** en cada línea del recibo. Solo aparece cuando
+  sobra algo, y sugiere cuánto sobra. Vacío: todo lo que sobra queda de
+  reserva, como siempre.
+- Si se escribe menos (0 si nada sirve), la diferencia es **desperdicio**:
+  - se suma a los pedidos a prorrata de lo que lleva cada uno. Todos pagan
+    el mismo precio por unidad ($7.200/MT en el ejemplo: 2.00 / 1.50 /
+    1.50 MT = $14.400 / $10.800 / $10.800);
+  - un pedido que se dejó en 0 a mano no recibe desperdicio;
+  - en prendas enteras se reparte en enteros.
+- **A mano:** en "Ajustar reparto", editar una fila deja las demás con la
+  cantidad que ya se veía (desperdicio incluido), y el sobrante pasa a ser
+  lo que quede. Sin ese cuidado, la fila editada recibía desperdicio
+  encima de lo escrito y las demás lo perdían.
+- **Dónde queda.** El desperdicio va dentro de la cantidad de la parte de
+  cada pedido, es decir en su "Cant. real": material que se gastó en ese
+  pedido. Por eso aparece como sobrecosto en su pedido, sin una segunda
+  cifra guardada que se pueda descuadrar. La reserva sigue siendo
+  derivada. "Anular y corregir" vuelve a llenar el formulario con esas
+  cantidades, así que el reparto sale igual.
+- **No aplica** a una compra corta (compró menos de lo necesario), porque
+  no sobra nada. Tampoco a los costos fijos (domicilio), que no tienen
+  cantidad.
+- Un sobrante mayor de lo que sobra, o negativo, no es válido, y el error
+  dice cuánto sobra.
+
+**Por qué "a prorrata" y no "partes iguales".** Es la regla de todos los
+repartos de la app (`repartirProporcional`), y es la que deja el mismo
+precio por metro para todos. En partes iguales, el pedido chico pagaría
+el metro más caro que el grande.
+
+**Pruebas:**
+- el ejemplo del dueño;
+- sobrante parcial (0.3 MT: $2.160 de reserva);
+- sobrante inválido;
+- compra corta;
+- pedido en 0 a mano;
+- prendas enteras;
+- la pantalla (campo, vista previa, tabla, edición a mano);
+- registrar: caja −$36.000 exactos, sin fila de reserva, recibo cuadrado,
+  también tras ida y vuelta por la Sheet;
+- "Anular y corregir".
+
+Sin el cambio, fallan.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

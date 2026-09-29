@@ -8293,6 +8293,120 @@ state.config.gastosFijos = configPreviaH56.gastosFijos; state.config.nomina = co
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
 
+// =====================================================================
+// Desperdicio en un recibo (pedido del usuario 2026-09-28): "si la
+// cantidad del sobrante es 0, el desperdicio se reparte de forma
+// equivalente o manual entre los pedidos, o sea el sobrecosto ... ya que no
+// siempre es un sobrante como tal". Caso de su pantalla: tela Riquelme, 3
+// pedidos necesitan 1.60 + 1.20 + 1.20 MT, compró 5 MT y pagó $36.000.
+// =====================================================================
+const grupoDesp = { linea: "riquelme|mt|tela", nombre: "Riquelme", unidad: "MT", esProducto: false, esGlobal: false, participantes: [
+  { cotId: "d1", pedidoId: "pd1", compraClave: "riquelme|mt|tela", necesita: 1.6 },
+  { cotId: "d2", pedidoId: "pd2", compraClave: "riquelme|mt|tela", necesita: 1.2 },
+  { cotId: "d3", pedidoId: "pd3", compraClave: "riquelme|mt|tela", necesita: 1.2 }
+] };
+const cantsDesp = function (r) { return r.partes.map(function (p) { return p.cantidad; }).join("/"); };
+const costosDesp = function (r) { return r.partes.map(function (p) { return p.costo; }).join("/"); };
+const sumaDesp = function (r) { return r.partes.reduce(function (a, p) { return a + p.costo; }, 0) + r.reserva.costo; };
+
+const sinSobranteDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000 });
+assert(sinSobranteDesp.ok && cantsDesp(sinSobranteDesp) === "1.6/1.2/1.2" && sinSobranteDesp.reserva.cantidad === 1 && sinSobranteDesp.reserva.costo === 7200 && sinSobranteDesp.sobra === 1 && sinSobranteDesp.desperdicio === 0,
+  "desperdicio: sin escribir «Sobrante», todo lo que sobra sigue quedando de reserva (1 MT, $7.200) — nada cambia para quien no lo use");
+const ceroDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000, sobrante: "0" });
+assert(ceroDesp.ok && cantsDesp(ceroDesp) === "2/1.5/1.5" && costosDesp(ceroDesp) === "14400/10800/10800" && ceroDesp.reserva.cantidad === 0 && ceroDesp.reserva.costo === 0 && sumaDesp(ceroDesp) === 36000,
+  "desperdicio: con «Sobrante» 0, el metro que sobra se reparte a prorrata (2.00 / 1.50 / 1.50 MT, $14.400 / $10.800 / $10.800) y no queda reserva — la suma sigue siendo $36.000 exactos");
+assert(ceroDesp.desperdicio === 1 && ceroDesp.partes.map(function (p) { return p.desperdicio; }).join("/") === "0.4/0.3/0.3",
+  "desperdicio: cada parte dice cuánto de lo suyo es desperdicio (0.40 / 0.30 / 0.30), para mostrarlo en la vista previa");
+const parcialDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000, sobrante: "0.3" });
+assert(parcialDesp.ok && parcialDesp.reserva.cantidad === 0.3 && parcialDesp.reserva.costo === 2160 && sumaDesp(parcialDesp) === 36000 &&
+  parcialDesp.partes.every(function (p) { return Math.abs(p.costo - p.cantidad * 7200) <= 1; }),
+  "desperdicio: con «Sobrante» 0.3, queda 0.3 MT de reserva ($2.160) y el resto se reparte; todos pagan el mismo precio por metro ($7.200)");
+const mayorDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000, sobrante: "2" });
+assert(!mayorDesp.ok && mayorDesp.error.indexOf("sobran 1") !== -1, "desperdicio: un «Sobrante» mayor de lo que sobra no es válido y dice cuánto sobra");
+assert(!mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000, sobrante: "-1" }).ok, "desperdicio: un «Sobrante» negativo no es válido");
+const cortaSinDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 3, costoPagado: 27000 });
+const cortaConDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 3, costoPagado: 27000, sobrante: "0" });
+assert(cortaConDesp.ok && JSON.stringify(cortaConDesp.partes) === JSON.stringify(cortaSinDesp.partes) && cortaConDesp.partes.every(function (p) { return p.faltanteNuevo > 0; }),
+  "desperdicio: en una compra corta no sobra nada — «Sobrante» no cambia el reparto y lo que falta sigue quedando como faltante");
+const manoDesp = mapaCalc.calcRepartoLineaRecibo(grupoDesp, { cantidadComprada: 5, costoPagado: 36000, sobrante: "0", cantidadesPorPedido: { d1: "0" } });
+assert(manoDesp.ok && cantsDesp(manoDesp) === "0/2.5/2.5" && !manoDesp.partes[0].desperdicio && sumaDesp(manoDesp) === 36000,
+  "desperdicio: un pedido al que se le dejó en 0 a mano no recibe desperdicio — va a los que sí llevan material");
+const grupoCamisasDesp = { linea: "producto|camisa", nombre: "Camisa", unidad: "UND", esProducto: true, esGlobal: false, participantes: [
+  { cotId: "d1", pedidoId: "pd1", compraClave: "producto|camisa", necesita: 3 }, { cotId: "d2", pedidoId: "pd2", compraClave: "producto|camisa", necesita: 4 }
+] };
+const camisasDesp = mapaCalc.calcRepartoLineaRecibo(grupoCamisasDesp, { cantidadComprada: 9, costoPagado: 90000, sobrante: "0" });
+assert(camisasDesp.ok && camisasDesp.partes.every(function (p) { return Number.isInteger(p.cantidad); }) && camisasDesp.partes[0].cantidad + camisasDesp.partes[1].cantidad === 9 && camisasDesp.reserva.cantidad === 0,
+  "desperdicio: con prendas enteras, el desperdicio también se reparte en enteros");
+
+// Flujo real por la pantalla: escribir, ver la vista previa, registrar.
+const { actions: finAccionesDesp } = await import("../js/modules/finanzas.js");
+function cotDesp(id, pedidoId, prendas) {
+  var c = cotMapa(id, pedidoId, prendas, 7000);
+  c.referencias[0].insumos[0].cantidad = 0.2;
+  return c;
+}
+state.pedidos = [pedidoMapa("ped-dsp-1", "cot-dsp-1", 400000, 100000), pedidoMapa("ped-dsp-2", "cot-dsp-2", 300000, 80000), pedidoMapa("ped-dsp-3", "cot-dsp-3", 300000, 80000)];
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8), cotDesp("cot-dsp-2", "ped-dsp-2", 6), cotDesp("cot-dsp-3", "ped-dsp-3", 6)];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: ["ped-dsp-1", "ped-dsp-2", "ped-dsp-3"], porClave: {}, recibo: { fecha: "2026-09-28", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+render();
+const selDesp = function (campo) { return '[data-action-change="set-compra-conjunta-campo"][data-clave="' + CLAVE_TELA + '"][data-campo="' + campo + '"]'; };
+const tarjetaDesp = function () { return document.querySelector(selDesp("costoPagado")).closest(".cc-grupo").textContent; };
+assert(!document.querySelector(selDesp("sobrante")), "desperdicio: «Sobrante» no aparece mientras no sobre nada (compré = lo que necesitan)");
+setChange(selDesp("cantidadComprada"), "5");
+assert(!!document.querySelector(selDesp("sobrante")) && document.querySelector(selDesp("sobrante")).getAttribute("placeholder") === "1.00", "desperdicio: en cuanto sobra algo aparece «Sobrante», sugiriendo lo que sobra (1.00)");
+setChange(selDesp("costoPagado"), "36000");
+assert(tarjetaDesp().indexOf("sobran 1.00 m $7.200 (reserva)") !== -1, "desperdicio: sin tocar «Sobrante», la vista previa es la de siempre (sobra 1 m de reserva)");
+setChange(selDesp("sobrante"), "0");
+assert(tarjetaDesp().indexOf("OP-ped-dsp-1 2.00 m $14.400 (0.40 de desperdicio)") !== -1 && tarjetaDesp().indexOf("(reserva)") === -1 && tarjetaDesp().indexOf("cada uno paga $7.200 por m") !== -1,
+  "desperdicio: con «Sobrante» 0 la vista previa muestra lo de cada pedido con su desperdicio, ya sin reserva, y el precio por metro igual para todos");
+click('[data-action="toggle-ajustar-recibo"][data-clave="' + CLAVE_TELA + '"]');
+const inputsDesp = function () { return Array.prototype.map.call(document.querySelectorAll('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + CLAVE_TELA + '"]'), function (i) { return i.value; }).join("/"); };
+assert(inputsDesp() === "2.00/1.50/1.50", "desperdicio: «Ajustar reparto» muestra la cantidad FINAL de cada pedido (con su desperdicio), que es la que se guarda");
+
+// Repartirlo a mano: editar una fila deja las demás como se veían.
+const draftAntesManoDesp = JSON.stringify(state.formCompraConjunta.porClave);
+setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + CLAVE_TELA + '"][data-cot="cot-dsp-1"]', "2.2");
+const filaManoDesp = state.formCompraConjunta.porClave[CLAVE_TELA];
+assert(filaManoDesp.sobrante === undefined && filaManoDesp.cantidadesPorPedido["cot-dsp-2"] === "1.5" && filaManoDesp.cantidadesPorPedido["cot-dsp-3"] === "1.5" && filaManoDesp.cantidadesPorPedido["cot-dsp-1"] === "2.2",
+  "desperdicio: al corregir una fila a mano, las demás se quedan con lo que ya se veía (1.50, desperdicio incluido) — antes de este cuidado, la fila editada habría vuelto a recibir desperdicio encima y las demás lo habrían perdido");
+assert(tarjetaDesp().indexOf("Se repartieron 5.2 pero se compraron 5") !== -1, "desperdicio: a mano, si lo repartido pasa de lo comprado, lo dice (2.2 + 1.5 + 1.5 = 5.2)");
+state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: JSON.parse(draftAntesManoDesp), ajustar: {} });
+render();
+
+// Registrar con «Sobrante» 0.
+var alertaDesp = "";
+const alertPrevioDesp = window.alert; window.alert = function (m) { alertaDesp = m; };
+click('[data-action="registrar-recibo-compra"]');
+window.alert = alertPrevioDesp;
+const reciboDesp = (compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
+assert(alertaDesp === "" && !!reciboDesp, "desperdicio: el recibo se registra sin avisos");
+assert(cajaMapa() === -36000 && state.tx.filter(function (t) { return t.reciboCompraRol === "reserva"; }).length === 0,
+  "desperdicio: la caja baja exactamente $36.000 y no queda ninguna fila de reserva en Finanzas");
+assert([1, 2, 3].map(function (n) { var c = compraMapa("cot-dsp-" + n, CLAVE_TELA); return c.cantidadReal + ":" + c.costoReal; }).join("/") === "2:14400/1.5:10800/1.5:10800",
+  "desperdicio: cada pedido queda con su parte y su desperdicio como costo real (2.00 m $14.400, 1.50 m $10.800, 1.50 m $10.800) — el sobrecosto se ve en su pedido");
+assert(mapaCalc.verificarRecibo(reciboDesp, state.cotizaciones, state.tx).length === 0, "desperdicio: el recibo cuadra al peso");
+const vueltaDesp = await idaYVueltaSheetsMapa(state.tx, state.cotizaciones);
+const reciboVueltaDesp = mapaCalc.calcRecibo(reciboDesp, vueltaDesp.cotizaciones, vueltaDesp.tx);
+assert(reciboVueltaDesp.lineas[0].reserva.cantidad === 0 && reciboVueltaDesp.lineas[0].reserva.costo === 0 && reciboVueltaDesp.total === 36000 &&
+  mapaCalc.verificarRecibo(reciboDesp, vueltaDesp.cotizaciones, vueltaDesp.tx).length === 0,
+  "desperdicio: tras ida y vuelta por la Sheet, el recibo sigue sin reserva, con $36.000 y cuadrado");
+
+// "Anular y corregir" vuelve a llenar el formulario con lo registrado: el
+// desperdicio ya va dentro de las cantidades, así que sigue sin reserva.
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+const grupoCorregirDesp = mapaCalc.calcLineasParaRecibo(state.formCompraConjunta.seleccion).filter(function (g) { return g.linea === CLAVE_TELA; })[0];
+const corregirDesp = mapaCalc.calcRepartoLineaRecibo(grupoCorregirDesp, state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(cajaMapa() === 0 && corregirDesp.ok && cantsDesp(corregirDesp) === "2/1.5/1.5" && corregirDesp.reserva.cantidad === 0,
+  "desperdicio: «Anular y corregir» devuelve la plata y deja el formulario con el mismo reparto (2.00 / 1.50 / 1.50, sin reserva)");
+
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.formCompraConjunta = { seleccion: [], porClave: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+
 console.log("\n✅ Todos los checks de humo pasaron.");
 // Salida explícita: la parte de permisos simula una sesión de Google (ver
 // loginComo), así que persist() intenta escribir de verdad en la Sheet y deja

@@ -259,6 +259,17 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésimo tercera ronda: lo que sobra de un recibo puede ser desperdicio)
+
+- Cada línea de un **Recibo de compra** tiene un campo **"Sobrante"**
+  cuando sobra algo. Vacío: lo que sobra queda de reserva, como siempre.
+- Si se escribe menos (0 si nada sirve), la diferencia es desperdicio y se
+  reparte entre los pedidos a prorrata, como parte de su costo. Todos pagan
+  el mismo precio por metro y el sobrecosto se ve en cada pedido.
+- Para repartirlo a mano está "Ajustar reparto". Editar una fila deja las
+  demás como se veían.
+- Pedido del dueño, 2026-09-28. Ver CONTABILIDAD.md, Hallazgo #59.
+
 ## Registro de cambios — septiembre 2026 (centésimo segunda ronda: las compras "Sí" van solas a Finanzas al guardar)
 
 - Al pulsar **Guardar** en una cotización, cada compra marcada "Sí" queda en

@@ -281,7 +281,9 @@ export const state = {
   // papel (fecha, proveedor, N.º, servicios — el formKey de servicios es
   // "formCompraConjunta.recibo") y `ajustar` qué líneas tienen abierta la
   // tabla "Ajustar reparto". porClave[<línea>]: {cantidadComprada,
-  // costoPagado, cantidadesPorPedido, costosPorPedido}.
+  // costoPagado, cantidadesPorPedido, costosPorPedido, sobrante} — sobrante:
+  // lo que de verdad queda de reserva; el resto es desperdicio de los
+  // pedidos (ver calcRepartoLineaRecibo).
   formCompraConjunta: { seleccion: [], porClave: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] }, ajustar: {} },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",

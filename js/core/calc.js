@@ -3228,20 +3228,35 @@ function tomarProporcional(origen, cantidad, dec) {
 // grupo: { linea, nombre, unidad, esProducto, esGlobal, participantes:
 //   [{ cotId, pedidoId, compraClave, necesita, costoEstimado }] }
 // draft: { cantidadComprada, costoPagado, cantidadesPorPedido: {cotId: n},
-//   costosPorPedido: {cotId: n} }
+//   costosPorPedido: {cotId: n}, sobrante }
 // Se escribe el total del PAPEL ("compré 36 m, pagué $360.000" — decisión
 // del usuario 2026-09-23): cada pedido recibe lo que necesita y lo que
 // sobra es la reserva. Si se compró menos de lo necesario, se reparte a
 // prorrata y se avisa cuánto falta. El costo SIGUE a la cantidad final
 // (también con un ajuste a mano), la reserva incluida.
+//
+// Desperdicio (pedido del usuario 2026-09-28: "no siempre es un sobrante
+// como tal"): lo que sobra no siempre sirve para después — un retazo, el
+// final de un rollo. `draft.sobrante` es lo que DE VERDAD queda como
+// reserva; la diferencia con lo que sobra es desperdicio y se suma a los
+// pedidos a prorrata de lo que ya lleva cada uno. Así todos pagan el mismo
+// precio por unidad y el costo del desperdicio queda como sobrecosto de los
+// pedidos que lo causaron. Se guarda como parte de su cantidad (su "Cant.
+// real" lo incluye: es material que se gastó en ese pedido) — no hay una
+// segunda cifra que mantener. Repartirlo a mano es "Ajustar reparto" (ver
+// "set-compra-conjunta-cantidad-pedido" en modules/finanzas.js).
+// Devuelve además `sobra` (lo que queda libre ANTES de ese desperdicio, el
+// máximo que puede quedar de reserva) y `desperdicio`; cada parte lleva su
+// `desperdicio` solo para mostrarlo (aplicarReciboACotizaciones no lo copia).
 export function calcRepartoLineaRecibo(grupo, draft) {
   draft = draft || {};
   var ps = grupo.participantes || [];
-  var res = { ok: false, error: "", partes: [], reserva: { cantidad: 0, costo: 0 }, faltan: 0, totales: null };
+  var res = { ok: false, error: "", partes: [], reserva: { cantidad: 0, costo: 0 }, faltan: 0, totales: null, sobra: 0, desperdicio: 0 };
   var pagado = Math.round(num(draft.costoPagado));
-  if (!(pagado > 0)) { res.error = "Falta escribir cuánto se pagó."; return res; }
+  var sinPagar = !(pagado > 0);
   function escrito(v) { return v !== undefined && v !== null && v !== ""; }
   if (grupo.esGlobal) {
+    if (sinPagar) { res.error = "Falta escribir cuánto se pagó."; return res; }
     var ovCosto = draft.costosPorPedido || {};
     var base = repartirProporcional(pagado, ps.map(function (p) { return p.costoEstimado; }), 0);
     var costos = ps.map(function (p, i) { return escrito(ovCosto[p.cotId]) ? Math.round(num(ovCosto[p.cotId])) : base[i]; });
@@ -3257,7 +3272,7 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   var necesidadesU = ps.map(function (p) { return Math.max(0, aUnidades(p.necesita, dec)); });
   var sumaNecU = necesidadesU.reduce(function (a, u) { return a + u; }, 0);
   var compradaU = escrito(draft.cantidadComprada) ? aUnidades(draft.cantidadComprada, dec) : sumaNecU;
-  if (compradaU <= 0) { res.error = "Falta escribir cuánto se compró."; return res; }
+  if (compradaU <= 0) { res.error = sinPagar ? "Falta escribir cuánto se pagó." : "Falta escribir cuánto se compró."; return res; }
   var cantidadesU;
   if (compradaU >= sumaNecU) {
     cantidadesU = necesidadesU.slice();
@@ -3270,8 +3285,6 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   var asignadoU = cantidadesU.reduce(function (a, u) { return a + u; }, 0);
   if (cantidadesU.some(function (u) { return u < 0; })) res.error = "Ningún pedido puede quedar con una cantidad negativa.";
   else if (asignadoU > compradaU) res.error = "Se repartieron " + deUnidades(asignadoU, dec) + " pero se compraron " + deUnidades(compradaU, dec) + ".";
-  var reservaU = Math.max(0, compradaU - asignadoU);
-  var costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
   // Si se compró MENOS de lo que se necesitaba, lo que no alcanzó a cada
   // pedido queda como su faltante (va a otro recibo). Antes solo se avisaba
   // y, al registrar, un pedido que venía de "Aún no" quedaba sin faltante:
@@ -3279,9 +3292,32 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   // compró lo suficiente y "Ajustar reparto" le dio menos a alguien, eso es
   // una decisión, no un faltante.
   var compraCorta = compradaU < sumaNecU;
+  var sobraU = Math.max(0, compradaU - asignadoU);
+  res.sobra = deUnidades(sobraU, dec);
+  // El desperdicio (ver arriba). En una compra corta no sobra nada que
+  // desperdiciar: ahí `sobrante` no aplica.
+  var desperdicioU = ps.map(function () { return 0; });
+  if (!res.error && !compraCorta && escrito(draft.sobrante)) {
+    var quedaU = aUnidades(draft.sobrante, dec);
+    if (quedaU < 0) res.error = "El sobrante no puede ser negativo.";
+    else if (quedaU > sobraU) res.error = "Con este reparto sobran " + deUnidades(sobraU, dec) + (grupo.unidad ? " " + grupo.unidad : "") + ": el sobrante no puede ser mayor.";
+    else if (quedaU < sobraU) {
+      // A prorrata de lo que ya lleva cada uno (con los ajustes a mano); un
+      // pedido al que se le dejó en 0 no recibe desperdicio. Si todos están
+      // en 0, a prorrata de lo que necesitan.
+      var pesosU = cantidadesU.some(function (u) { return u > 0; }) ? cantidadesU : necesidadesU;
+      desperdicioU = repartirProporcional(deUnidades(sobraU - quedaU, dec), pesosU, dec).map(function (x) { return aUnidades(x, dec); });
+      cantidadesU = cantidadesU.map(function (u, i) { return u + desperdicioU[i]; });
+      res.desperdicio = deUnidades(sobraU - quedaU, dec);
+    }
+  }
+  var reservaU = Math.max(0, compradaU - cantidadesU.reduce(function (a, u) { return a + u; }, 0));
+  if (sinPagar) { res.error = "Falta escribir cuánto se pagó."; return res; }
+  var costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
   res.partes = ps.map(function (p, i) {
     var parte = { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: deUnidades(cantidadesU[i], dec), costo: costosLinea[i] };
     if (compraCorta) parte.faltanteNuevo = deUnidades(Math.max(0, necesidadesU[i] - cantidadesU[i]), dec);
+    if (desperdicioU[i] > 0) parte.desperdicio = deUnidades(desperdicioU[i], dec);
     return parte;
   });
   res.reserva = { cantidad: deUnidades(reservaU, dec), costo: costosLinea[ps.length] };
