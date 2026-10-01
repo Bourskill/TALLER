@@ -273,10 +273,7 @@ export const state = {
   // "Registrar esta compra" — `porClave[clave]` = {cantidadTotal, costoTotal,
   // proveedorId, servicios}. `servicios`: [{nombre, monto}] — mismo shape y
   // mismo componente compartido (renderAsignarServicios) que formTx/
-  // formNominaPago; como acá el borrador vive indexado por insumo (no es un
-  // solo objeto plano), las acciones genéricas de "Asignar a servicio(s)"
-  // (core/dom.js) lo direccionan con un `data-form-destino` de path punteado:
-  // "formCompraConjunta.porClave.<clave>" (ver resolverFormDestino).
+  // formNominaPago (ver abajo cómo se direcciona cada línea).
   // Desde el Recibo de compra (Hallazgo #52): `recibo` guarda los datos del
   // papel (fecha, proveedor, N.º) y `ajustar` qué líneas tienen abierta la
   // tabla "Ajustar reparto". porClave[<línea>]: {cantidadComprada,

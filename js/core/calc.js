@@ -1038,9 +1038,16 @@ export function calcAbonosPendientesPorPedido(desde, hasta) {
 //   2. Lo asignado en total no puede pasar del monto del propio pago —
 //      asignar de más no tendría a dónde ir.
 export function validarServiciosAsignados(filas, montoTotal) {
+  // Una fila con monto pero sin servicio elegido no se descarta en silencio
+  // (la pantalla ya la mostraba como "cubierta"): se pide elegirlo.
+  var sinNombre = (filas || []).filter(function (f) { return f && !f.nombre && Math.round(num(f.monto)) > 0; })[0];
+  if (sinNombre) return { ok: false, error: "Elige el servicio de la fila de " + fmt(Math.round(num(sinNombre.monto))) + " (o quítala).", limpias: null };
+  // Pesos enteros: lo que se valida es exactamente lo que después se
+  // reparte entre las filas (repartirServiciosEnFilasRecibo redondea). Con
+  // decimales, "22500.5" pasaba la tolerancia y descontaba $1 de más.
   var limpias = (filas || [])
-    .filter(function (f) { return f.nombre && num(f.monto) > 0; })
-    .map(function (f) { return { nombre: f.nombre, monto: num(f.monto) }; }); // normaliza a número antes de guardar
+    .filter(function (f) { return f && f.nombre && Math.round(num(f.monto)) > 0; })
+    .map(function (f) { return { nombre: f.nombre, monto: Math.round(num(f.monto)) }; });
   if (!limpias.length) return { ok: true, error: null, limpias: [] };
   var disponibles = calcServiciosDisponibles();
   // Comprometido POR NOMBRE, acumulado fila a fila — no alcanza con
@@ -2988,7 +2995,8 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
         }
         L.partes.push({
           cotId: cot.id, pedidoId: pedidoIdDeCotParaTx(cot), compraClave: compra.clave,
-          descripcion: cot.descripcion || "", cantidad: num(p.cantidad), costo: Math.round(num(p.costo))
+          descripcion: cot.descripcion || "", cantidad: num(p.cantidad), costo: Math.round(num(p.costo)),
+          desperdicio: num(p.desperdicio)
         });
       });
     });
@@ -3012,7 +3020,11 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
     }
     L.totales.cantidadTotal = deUnidades(aUnidades(L.totales.cantidadTotal, 2) + aUnidades(t.cantidad, 2), 2);
     L.totales.costoTotal = Math.round(num(L.totales.costoTotal)) + Math.round(num(t.monto));
+    // Lo que descontaban de servicios sus filas (ver abajo, "servicios").
+    L.serviciosFilas = L.serviciosFilas || {};
+    (t.serviciosDescuento || []).forEach(function (s) { L.serviciosFilas[s.nombre] = (L.serviciosFilas[s.nombre] || 0) + Math.round(num(s.monto)); });
   });
+  var cabeceraDePartes = !!cabecera;
   if (!cabecera) {
     // Recibo sin ningún pedido vivo: lo que se sabe del papel sale de sus
     // propias filas — los servicios, sumados por nombre Y por línea, así
@@ -3032,6 +3044,7 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
       servicios: ordenServ.map(function (k) { return servicios[k]; })
     };
   }
+  var hayServiciosGenerales = (cabecera.servicios || []).some(function (s) { return !s.linea; });
   var total = 0, pedidoIds = [];
   var lineasOut = orden.map(function (k) {
     var L = lineas[k];
@@ -3050,12 +3063,25 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
       problemas.push("Lo repartido en \"" + (L.totales.nombre || k) + "\" es más de lo que se compró (la reserva quedaría negativa).");
     }
     total += Math.round(num(L.totales.costoTotal));
+    // Servicios de ESTA línea (Hallazgo #60): los de sus totales (copiados
+    // solo en las partes de la línea) y los que traen `linea` en la
+    // cabecera (formato del primer día del #60). Una línea congelada en un
+    // recibo que sigue vivo ya no tiene partes que los traigan: salen de
+    // sus filas — salvo que el recibo tenga servicios para el recibo entero
+    // (recibo viejo: ahí lo de sus filas es parte de ese reparto general).
+    var servicios = (L.totales.servicios || []).concat((cabecera.servicios || []).filter(function (s) { return s.linea === k; }));
+    if (L.congelada && cabeceraDePartes && !servicios.length && !hayServiciosGenerales && L.serviciosFilas) {
+      servicios = Object.keys(L.serviciosFilas).map(function (n) { return { nombre: n, monto: L.serviciosFilas[n] }; });
+    }
+    var servLineaTotal = servicios.reduce(function (a, s) { return a + Math.round(num(s.monto)); }, 0);
+    if (servLineaTotal > Math.round(num(L.totales.costoTotal))) {
+      problemas.push("Lo asignado a servicios en \"" + (L.totales.nombre || k) + "\" (" + fmt(servLineaTotal) + ") es más de lo que se pagó por esa línea.");
+    }
     return {
       linea: k, nombre: L.totales.nombre || "", unidad: L.totales.unidad || "",
       esProducto: !!L.totales.esProducto, esGlobal: !!L.totales.esGlobal, congelada: L.congelada,
       cantidadTotal: num(L.totales.cantidadTotal), costoTotal: Math.round(num(L.totales.costoTotal)),
-      partes: L.partes, reserva: reserva,
-      servicios: (cabecera.servicios || []).filter(function (s) { return s.linea === k; })
+      partes: L.partes, reserva: reserva, servicios: servicios
     };
   });
   return { id: reciboId, cabecera: cabecera, lineas: lineasOut, total: total, pedidoIds: pedidoIds, problemas: problemas };
@@ -3124,17 +3150,13 @@ export function calcFilasRecibo(reciboId, cotizaciones, tx) {
   // `linea`, asignados al recibo entero) y lo que no quepa en su línea, se
   // reparten después entre todas las filas, igual que siempre: un recibo
   // viejo queda idéntico.
-  var globales = [];
-  var porLinea = {}, ordenLineas = [];
-  (cab.servicios || []).forEach(function (s) {
-    if (!s.linea) { globales.push(s); return; }
-    if (!porLinea[s.linea]) { porLinea[s.linea] = []; ordenLineas.push(s.linea); }
-    porLinea[s.linea].push(s);
-  });
+  var lineasConocidas = r.lineas.map(function (L) { return L.linea; });
+  var globales = (cab.servicios || []).filter(function (s) { return !s.linea || lineasConocidas.indexOf(s.linea) === -1; });
   var sinLugar = [];
-  ordenLineas.forEach(function (linea) {
-    var suyas = filas.filter(function (f) { return f.reciboCompraLinea === linea; });
-    sinLugar = sinLugar.concat(repartirServiciosEnFilasRecibo(suyas, porLinea[linea]));
+  r.lineas.forEach(function (L) {
+    if (!(L.servicios || []).length) return;
+    var suyas = filas.filter(function (f) { return f.reciboCompraLinea === L.linea; });
+    sinLugar = sinLugar.concat(repartirServiciosEnFilasRecibo(suyas, L.servicios));
   });
   repartirServiciosEnFilasRecibo(filas, globales.concat(sinLugar));
   return { recibo: r, filas: filas };
@@ -3272,15 +3294,24 @@ function tomarProporcional(origen, cantidad, dec) {
 // como tal"): lo que sobra no siempre sirve para después — un retazo, el
 // final de un rollo. `draft.sobrante` es lo que DE VERDAD queda como
 // reserva; la diferencia con lo que sobra es desperdicio y se suma a los
-// pedidos a prorrata de lo que ya lleva cada uno. Así todos pagan el mismo
-// precio por unidad y el costo del desperdicio queda como sobrecosto de los
-// pedidos que lo causaron. Se guarda como parte de su cantidad (su "Cant.
-// real" lo incluye: es material que se gastó en ese pedido) — no hay una
-// segunda cifra que mantener. Repartirlo a mano es "Ajustar reparto" (ver
-// "set-compra-conjunta-cantidad-pedido" en modules/finanzas.js).
-// Devuelve además `sobra` (lo que queda libre ANTES de ese desperdicio, el
-// máximo que puede quedar de reserva) y `desperdicio`; cada parte lleva su
-// `desperdicio` solo para mostrarlo (aplicarReciboACotizaciones no lo copia).
+// pedidos. Así el costo del desperdicio queda como sobrecosto de los
+// pedidos que lo causaron. Va dentro de la cantidad de su parte (su "Cant.
+// real" lo incluye: es material que se gastó en ese pedido).
+// - Las filas escritas a mano en "Ajustar reparto" quedan FIJAS; el
+//   desperdicio se reparte entre las demás, a prorrata de lo que necesitan
+//   (el mismo precio por unidad para todas). Si todas están a mano, las
+//   cantidades y el sobrante tienen que cuadrar (revisión del #59: antes,
+//   editar una fila borraba el sobrante escrito y lo que quedaba volvía a
+//   ser reserva).
+// - Cada parte lleva `desperdicio`: cuánto de SU cantidad es desperdicio
+//   (con sobrante escrito, todo lo que lleva por encima de lo que necesita).
+//   Es una cifra CONTENIDA en la cantidad, no un segundo total: se guarda
+//   (aplicarReciboACotizaciones) para que anular el recibo, devolver la
+//   parte o bajar la Cant. real no lo tomen por material que el pedido
+//   necesita (revisión del #59: anular dejaba el desperdicio como faltante
+//   y sobrecosto fantasma).
+// Devuelve además `sobra` (lo que queda libre ANTES del desperdicio, el
+// máximo que puede quedar de reserva) y `desperdicio` (total de la línea).
 export function calcRepartoLineaRecibo(grupo, draft) {
   draft = draft || {};
   var ps = grupo.participantes || [];
@@ -3314,7 +3345,8 @@ export function calcRepartoLineaRecibo(grupo, draft) {
     res.faltan = deUnidades(sumaNecU - compradaU, dec);
   }
   var ovCant = draft.cantidadesPorPedido || {};
-  cantidadesU = ps.map(function (p, i) { return escrito(ovCant[p.cotId]) ? aUnidades(ovCant[p.cotId], dec) : cantidadesU[i]; });
+  var aMano = ps.map(function (p) { return escrito(ovCant[p.cotId]); });
+  cantidadesU = ps.map(function (p, i) { return aMano[i] ? aUnidades(ovCant[p.cotId], dec) : cantidadesU[i]; });
   var asignadoU = cantidadesU.reduce(function (a, u) { return a + u; }, 0);
   if (cantidadesU.some(function (u) { return u < 0; })) res.error = "Ningún pedido puede quedar con una cantidad negativa.";
   else if (asignadoU > compradaU) res.error = "Se repartieron " + deUnidades(asignadoU, dec) + " pero se compraron " + deUnidades(compradaU, dec) + ".";
@@ -3332,16 +3364,25 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   var desperdicioU = ps.map(function () { return 0; });
   if (!res.error && !compraCorta && escrito(draft.sobrante)) {
     var quedaU = aUnidades(draft.sobrante, dec);
+    var unidadTxt = grupo.unidad ? " " + grupo.unidad : "";
+    var autos = [];
+    ps.forEach(function (p, i) { if (!aMano[i]) autos.push(i); });
     if (quedaU < 0) res.error = "El sobrante no puede ser negativo.";
-    else if (quedaU > sobraU) res.error = "Con este reparto sobran " + deUnidades(sobraU, dec) + (grupo.unidad ? " " + grupo.unidad : "") + ": el sobrante no puede ser mayor.";
-    else if (quedaU < sobraU) {
-      // A prorrata de lo que ya lleva cada uno (con los ajustes a mano); un
-      // pedido al que se le dejó en 0 no recibe desperdicio. Si todos están
-      // en 0, a prorrata de lo que necesitan.
-      var pesosU = cantidadesU.some(function (u) { return u > 0; }) ? cantidadesU : necesidadesU;
-      desperdicioU = repartirProporcional(deUnidades(sobraU - quedaU, dec), pesosU, dec).map(function (x) { return aUnidades(x, dec); });
-      cantidadesU = cantidadesU.map(function (u, i) { return u + desperdicioU[i]; });
-      res.desperdicio = deUnidades(sobraU - quedaU, dec);
+    else if (quedaU > sobraU) res.error = "Con este reparto sobran " + deUnidades(sobraU, dec) + unidadTxt + ": el sobrante no puede ser mayor.";
+    else if (quedaU < sobraU && !autos.length) {
+      res.error = "Con estas cantidades sobran " + deUnidades(sobraU, dec) + unidadTxt + ", pero en \"Sobrante\" escribiste " + deUnidades(quedaU, dec) + ". Corrige una de las dos.";
+    } else if (quedaU < sobraU) {
+      // Entre las filas que no están a mano, a prorrata de lo que llevan
+      // (si todas llevan 0, de lo que necesitan; si eso también es 0,
+      // parejo).
+      var pesosU = autos.map(function (i) { return cantidadesU[i]; });
+      if (!pesosU.some(function (u) { return u > 0; })) pesosU = autos.map(function (i) { return necesidadesU[i]; });
+      var extrasU = repartirProporcional(deUnidades(sobraU - quedaU, dec), pesosU, dec).map(function (x) { return aUnidades(x, dec); });
+      autos.forEach(function (i, k) { cantidadesU[i] += extrasU[k]; });
+    }
+    if (!res.error) {
+      desperdicioU = cantidadesU.map(function (u, i) { return Math.max(0, u - necesidadesU[i]); });
+      res.desperdicio = deUnidades(desperdicioU.reduce(function (a, u) { return a + u; }, 0), dec);
     }
   }
   var reservaU = Math.max(0, compradaU - cantidadesU.reduce(function (a, u) { return a + u; }, 0));
@@ -3513,6 +3554,13 @@ export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) 
       devuelto.costo += dev.costo;
     });
   }
+  // El desperdicio de una parte nunca pasa de su cantidad: al bajar, lo que
+  // vuelve a la reserva es primero material útil (Hallazgo #59).
+  partes.forEach(function (p) {
+    if (!(num(p.desperdicio) > 0)) return;
+    if (num(p.desperdicio) > num(p.cantidad)) p.desperdicio = num(p.cantidad);
+    if (!(num(p.desperdicio) > 0)) delete p.desperdicio;
+  });
   var nueva = totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, dec) }));
   return { compra: nueva, tomado: tomado, devuelto: devuelto, faltante: deUnidades(faltanteU, dec), unidad: (reservas[0] && reservas[0].unidad) || "" };
 }
@@ -3529,10 +3577,7 @@ export function devolverPartesPorEliminar(cot, pedidoId) {
   return Object.assign({}, cot, {
     compras: (cot.compras || []).map(function (compra) {
       if (!esMiembroRecibo(compra)) return compra;
-      var partes = compra.partesRecibo.map(function (p) {
-        if (!(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
-        return Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) } });
-      });
+      var partes = compra.partesRecibo.map(function (p) { return devolverParte(p, pedidoId); });
       var cambios = { partesRecibo: partes, faltante: 0 };
       if (num(compra.faltante) > 0) cambios.faltanteAntesDeEliminar = { pedidoId: pedidoId, cantidad: num(compra.faltante) };
       var devuelta = Object.assign({}, compra, cambios);
@@ -3540,6 +3585,22 @@ export function devolverPartesPorEliminar(cot, pedidoId) {
       return totalesDesdePartes(devuelta);
     })
   });
+}
+
+// Una parte que vuelve entera a la reserva (pedido eliminado o cancelado):
+// queda en 0 con lo que tenía anotado en `devueltaPorEliminar`, también su
+// desperdicio, para que "Reactivar"/restaurar lo devuelva igual y anular el
+// recibo no lo cuente como material que el pedido necesita. La reserva sí
+// recibe esa cantidad entera, desperdicio incluido (límite conocido, ver
+// CONTABILIDAD #59). La comparten devolverPartesPorEliminar y
+// "devolver-parte-recibo" (modules/finanzas.js).
+export function devolverParte(p, pedidoId) {
+  if (!(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
+  var devuelta = { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) };
+  if (num(p.desperdicio) > 0) devuelta.desperdicio = num(p.desperdicio);
+  var nueva = Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: devuelta });
+  delete nueva.desperdicio;
+  return nueva;
 }
 
 // Al restaurar ese pedido, vuelve a tomar lo que tenía — hasta donde la
@@ -3578,6 +3639,9 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
         }
         var sinMarca = Object.assign({}, p, { cantidad: toma.cantidad, costo: toma.costo });
         delete sinMarca.devueltaPorEliminar;
+        // Su desperdicio vuelve con ella (nunca más que lo que retomó).
+        var desp = Math.min(num(prev.desperdicio), num(toma.cantidad));
+        if (desp > 0) sinMarca.desperdicio = desp;
         return sinMarca;
       });
       var restaurada = Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, 2) });
@@ -3607,6 +3671,9 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
 // Límite conocido: lo quitado pasa entero a faltante aunque otro recibo del
 // pedido tenga reserva libre; para usarla, bajar y volver a subir la Cant.
 // real (ajustarCantidadMiembro toma primero de la reserva).
+// El DESPERDICIO de las partes quitadas (Hallazgo #59) no es material que el
+// pedido necesite: no pasa a faltante ni cuenta como uso por encima del
+// estimado (revisión del #59: dejaba faltante y sobrecosto fantasma).
 export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
   return (cotizaciones || []).map(function (cot) {
     var toca = (cot.compras || []).some(function (c) { return (c.partesRecibo || []).some(function (p) { return p.reciboId === reciboId; }); });
@@ -3617,11 +3684,13 @@ export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
         var partes = (compra.partesRecibo || []).filter(function (p) { return p.reciboId !== reciboId; });
         if (partes.length === (compra.partesRecibo || []).length) return compra;
         var quitadas = (compra.partesRecibo || []).filter(function (p) { return p.reciboId === reciboId; });
-        var quitadoU = quitadas.reduce(function (a, p) { return a + aUnidades(p.cantidad, 2); }, 0);
+        var quitadoU = quitadas.reduce(function (a, p) { return a + aUnidades(p.cantidad, 2) - Math.min(aUnidades(p.desperdicio, 2), aUnidades(p.cantidad, 2)); }, 0);
         var devueltoU = 0, devueltoPedido = "";
         quitadas.forEach(function (p) {
-          if (p.devueltaPorEliminar) { devueltoU += aUnidades(p.devueltaPorEliminar.cantidad, 2); devueltoPedido = p.devueltaPorEliminar.pedidoId; }
+          var d = p.devueltaPorEliminar;
+          if (d) { devueltoU += aUnidades(d.cantidad, 2) - Math.min(aUnidades(d.desperdicio, 2), aUnidades(d.cantidad, 2)); devueltoPedido = d.pedidoId; }
         });
+        var desperdicioQuitadoU = quitadas.reduce(function (a, p) { return a + Math.min(aUnidades(p.desperdicio, 2), aUnidades(p.cantidad, 2)); }, 0);
         var antes = compra.faltanteAntesDeEliminar;
         if (partes.length) {
           var queda = Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(Math.max(0, aUnidades(compra.faltante, 2)) + quitadoU, 2) });
@@ -3634,7 +3703,7 @@ export function quitarReciboDeCotizaciones(cotizaciones, reciboId) {
         // Lo que el pedido usaba (cubierto + faltante, también lo devuelto si
         // está eliminado) contra el estimado de la línea.
         var linea = lineas.filter(function (l) { return l.clave === compra.clave; })[0];
-        var usadoU = aUnidades(compra.cantidadReal, 2) + Math.max(0, aUnidades(compra.faltante, 2)) + devueltoU +
+        var usadoU = aUnidades(compra.cantidadReal, 2) - desperdicioQuitadoU + Math.max(0, aUnidades(compra.faltante, 2)) + devueltoU +
           (antes ? aUnidades(antes.cantidad, 2) : 0) +
           partes.reduce(function (a, p) { return a + (p.devueltaPorEliminar ? aUnidades(p.devueltaPorEliminar.cantidad, 2) : 0); }, 0);
         var extraU = linea && !lineaSinCantidad(linea) ? Math.max(0, usadoU - aUnidades(linea.cantidadFisica, 2)) : 0;
@@ -3840,10 +3909,10 @@ export function aplicarReciboACotizaciones(cotizaciones, reciboId, cabecera, rep
   var porCot = {};
   (repartos || []).forEach(function (x) {
     x.reparto.partes.forEach(function (p) {
-      (porCot[p.cotId] = porCot[p.cotId] || []).push({
-        compraClave: p.compraClave, faltanteNuevo: p.faltanteNuevo,
-        parte: { reciboId: reciboId, linea: x.grupo.linea, cantidad: p.cantidad, costo: p.costo, recibo: cabecera, totalesLinea: x.reparto.totales }
-      });
+      var parte = { reciboId: reciboId, linea: x.grupo.linea, cantidad: p.cantidad, costo: p.costo, recibo: cabecera, totalesLinea: x.reparto.totales };
+      // Cuánto de su cantidad es desperdicio (Hallazgo #59): solo si hay.
+      if (num(p.desperdicio) > 0) parte.desperdicio = num(p.desperdicio);
+      (porCot[p.cotId] = porCot[p.cotId] || []).push({ compraClave: p.compraClave, faltanteNuevo: p.faltanteNuevo, parte: parte });
     });
   });
   return (cotizaciones || []).map(function (cot) {

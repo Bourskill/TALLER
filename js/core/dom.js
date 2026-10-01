@@ -517,10 +517,15 @@ var FORM_STATE_KEY = { tx: "formTx", pend: "formPend", cliente: "formCliente", e
 // qué fila/línea/insumo operar) — alcanza para volver a encontrar EXACTAMENTE
 // ese campo entre sus hermanos después de reconstruir el HTML, sin necesitar
 // ponerle un id a cada uno de los cientos de campos de la app.
+// data-clave y data-form-clave: las líneas del Recibo de compra repiten los
+// mismos campos (Compré, Pagué, Sobrante, el monto de cada servicio) y solo
+// se distinguen por la clave de su línea — sin ellas, con 2 líneas o más el
+// foco caía en el inicio de la página (revisión del Hallazgo #60).
 var ATRIBUTOS_IDENTIDAD_FOCO = [
   "data-campo", "data-field", "data-form", "data-action-change", "data-role",
   "data-linea", "data-id", "data-cot", "data-ref", "data-ins", "data-idx",
-  "data-insumo", "data-pedido", "data-venta", "data-resource"
+  "data-insumo", "data-pedido", "data-venta", "data-resource",
+  "data-clave", "data-form-clave"
 ];
 function selectorEstableParaFoco(el) {
   if (!el || el.nodeType !== 1 || el === document.body || !el.tagName) return null;

@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -170,13 +170,19 @@ function renderFormRecibo(lineas) {
     '<span class="amount neg">' + fmt(total) + "</span></div>";
   if ((rec.servicios || []).length) {
     // Borrador de antes del Hallazgo #60: servicios para el recibo entero.
-    html += renderAsignarServicios({ formKey: "formCompraConjunta.recibo", filas: rec.servicios, monto: total });
-  } else if (total > 0) {
+    // "Disponible" descuenta lo que ya toman las líneas.
+    var tomadoLineas = {};
+    Object.keys(tomadoPorLinea).forEach(function (linea) {
+      Object.keys(tomadoPorLinea[linea]).forEach(function (n) { tomadoLineas[n] = (tomadoLineas[n] || 0) + tomadoPorLinea[linea][n]; });
+    });
+    html += renderAsignarServicios({ formKey: "formCompraConjunta.recibo", filas: rec.servicios, monto: total, comprometidoOtros: tomadoLineas });
+  }
+  if (total > 0) {
     var falta = Math.max(0, total - cubierto);
     html += '<div class="section-sub" style="margin-top:6px;">' +
       (cubierto ? "Cubierto por servicios: <b>" + fmt(cubierto) + "</b> · " : "") +
       'Sale de Ganancia: <b style="color:' + (falta > 0 ? "var(--warning-ink)" : "var(--ink)") + ';">' + fmt(falta) + "</b>" +
-      (cubierto ? "" : " — cada línea tiene su propio \"Asignar a servicio(s)\".") +
+      (cubierto || !calcServiciosDisponibles().length ? "" : " — cada línea tiene su propio \"Asignar a servicio(s)\".") +
       "</div>";
   }
   html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-recibo-compra">Registrar recibo' + (total > 0 ? " (" + fmt(total) + ")" : "") + "</button></div>";
@@ -191,7 +197,8 @@ function escritoRecibo(v) { return v !== undefined && v !== null && v !== ""; }
 function serviciosPorNombre(filas) {
   var res = {};
   (filas || []).forEach(function (f) {
-    if (f && f.nombre && num(f.monto) > 0) res[f.nombre] = (res[f.nombre] || 0) + num(f.monto);
+    var m = Math.round(num(f && f.monto));
+    if (f && f.nombre && m > 0) res[f.nombre] = (res[f.nombre] || 0) + m;
   });
   return res;
 }
@@ -270,11 +277,9 @@ function renderLineaRecibo(g, d, otros) {
 // reparto automático es el valor por defecto, cada fila se puede corregir.
 function renderAjusteRecibo(g, d, r, dec) {
   var ovCant = d.cantidadesPorPedido || {}, ovCosto = d.costosPorPedido || {};
-  // Con "Sobrante" escrito, la cantidad de cada pedido ya lleva su parte del
-  // desperdicio: se muestra la final, que es la que se guarda (lo escrito a
-  // mano es solo la base). Editar una fila pasa a reparto a mano con estas
-  // mismas cifras (ver "set-compra-conjunta-cantidad-pedido").
-  var conSobrante = escritoRecibo(d.sobrante);
+  // Una fila escrita a mano muestra lo escrito (queda fija); las demás, su
+  // cantidad final, desperdicio incluido — la que se guarda (ver
+  // calcRepartoLineaRecibo).
   var html = '<div class="cc-reparto">';
   html += '<div class="tx-row head" style="grid-template-columns:1fr 110px 110px;"><span>Pedido</span><span class="ins-th-num">' + (g.esGlobal ? "" : "Cantidad") + '</span><span class="ins-th-num">Costo</span></div>';
   g.participantes.forEach(function (p, i) {
@@ -284,7 +289,7 @@ function renderAjusteRecibo(g, d, r, dec) {
       (parte.desperdicio > 0 ? ' <span class="section-sub" style="margin:0;">· incluye ' + fmtCant(parte.desperdicio, dec) + " de desperdicio</span>" : "") + "</span>" +
       '<span class="mobile-th">Cantidad</span>' +
       (g.esGlobal ? "<span></span>" :
-        '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(!conSobrante && ovCant[p.cotId] !== undefined ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
+        '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(escritoRecibo(ovCant[p.cotId]) ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
       '<span class="mobile-th">Costo</span>' +
       (g.esGlobal
         ? '<input type="number" class="mini-input" style="text-align:right;width:100%;" value="' + esc(ovCosto[p.cotId] !== undefined ? ovCosto[p.cotId] : parte.costo) + '" data-action-change="set-costo-compartido-monto" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />'
@@ -400,8 +405,10 @@ function renderTarjetaRecibo(reciboId) {
         html += '<div class="section-sub" style="margin:2px 0 0 12px;">' + (L.esGlobal ? "Sin asignar" : "↺ Reserva " + fmtCant(L.reserva.cantidad, dec) + " " + esc(L.unidad)) + " · " + fmt(L.reserva.costo) + "</div>";
       }
     });
-    if ((cab.servicios || []).length) {
-      html += '<div class="section-sub" style="margin-top:8px;">📋 Pagado con: ' + sumarServiciosPorNombre(cab.servicios).map(function (s) { return esc(s.nombre) + " " + fmt(s.monto); }).join(", ") + "</div>";
+    var pagadoCon = sumarServiciosPorNombre((cab.servicios || []).filter(function (s) { return !s.linea; })
+      .concat([].concat.apply([], r.lineas.map(function (L) { return L.servicios || []; }))));
+    if (pagadoCon.length) {
+      html += '<div class="section-sub" style="margin-top:8px;">📋 Pagado con: ' + pagadoCon.map(function (s) { return esc(s.nombre) + " " + fmt(s.monto); }).join(", ") + "</div>";
     }
     html += '<div class="section-sub" style="margin-top:8px;">' + fmt(pagado - enReserva) + " en pedidos + " + fmt(enReserva) + " en reserva = <b>" + fmt(pagado) + " pagados</b></div>";
     if (problemas.length) {
@@ -985,21 +992,10 @@ export var actions = {
     var clave = el.getAttribute("data-clave"), cotId = el.getAttribute("data-cot");
     var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
     var fila = Object.assign({}, porClave[clave] || {});
-    // Con "Sobrante" escrito, editar una fila pasa a reparto a mano: las
-    // demás se quedan con la cantidad que ya se veía (desperdicio incluido)
-    // y el sobrante vuelve a ser lo que quede. Sin esto, la fila editada
-    // recibiría OTRA VEZ su parte del desperdicio encima de lo que se
-    // escribió, y las demás lo perderían.
-    if (escritoRecibo(fila.sobrante)) {
-      var grupo = calcLineasParaRecibo(state.formCompraConjunta.seleccion || []).filter(function (g) { return g.linea === clave; })[0];
-      var actual = grupo ? calcRepartoLineaRecibo(grupo, fila) : null;
-      if (actual && actual.partes.length) {
-        var fijas = {};
-        actual.partes.forEach(function (p) { fijas[p.cotId] = String(p.cantidad); });
-        fila.cantidadesPorPedido = fijas;
-      }
-      delete fila.sobrante;
-    }
+    // El "Sobrante" escrito se respeta: la fila editada queda fija y el
+    // desperdicio se reparte entre las demás (ver calcRepartoLineaRecibo).
+    // Antes se borraba el sobrante y lo que quedaba volvía a ser reserva
+    // (revisión del Hallazgo #59).
     var cantidadesPorPedido = Object.assign({}, fila.cantidadesPorPedido || {});
     cantidadesPorPedido[cotId] = el.value;
     fila.cantidadesPorPedido = cantidadesPorPedido;
@@ -1058,12 +1054,13 @@ export var actions = {
     // ella) y, juntas, ningún servicio por encima de lo que tiene — dos
     // líneas pueden tomar del mismo (Hallazgo #60). Un borrador viejo con
     // servicios para el recibo entero entra igual, sin línea.
-    var serviciosRecibo = [], quienTomaServicio = {};
+    var serviciosRecibo = [], quienTomaServicio = {}, serviciosDeLinea = [];
     for (var j = 0; j < repartos.length; j++) {
       var deLinea = validarServiciosAsignados((draft[repartos[j].grupo.linea] || {}).servicios, repartos[j].reparto.totales.costoTotal);
       if (!deLinea.ok) { window.alert(repartos[j].grupo.nombre + ": " + deLinea.error); return; }
+      serviciosDeLinea.push(deLinea.limpias);
       deLinea.limpias.forEach(function (s) {
-        serviciosRecibo.push({ nombre: s.nombre, monto: s.monto, linea: repartos[j].grupo.linea });
+        serviciosRecibo.push(s);
         (quienTomaServicio[s.nombre] = quienTomaServicio[s.nombre] || []).push(repartos[j].grupo.nombre + " " + fmt(s.monto));
       });
     }
@@ -1086,6 +1083,13 @@ export var actions = {
     }
     var validacion = validarServiciosAsignados(serviciosRecibo, total);
     if (!validacion.ok) { window.alert(validacion.error); return; }
+    // Los de cada línea van en los TOTALES de su línea, que se copian solo
+    // en las partes de esa línea; en la cabecera (copiada en TODAS las
+    // partes) crecían como líneas × partes y podían llenar la celda
+    // compras_json (límite de 50.000 caracteres, Hallazgo #42).
+    repartos.forEach(function (x, k) {
+      if (serviciosDeLinea[k].length) x.reparto = Object.assign({}, x.reparto, { totales: Object.assign({}, x.reparto.totales, { servicios: serviciosDeLinea[k] }) });
+    });
     // Una compra que todavía tiene un movimiento viejo propio en Finanzas
     // (ej. se pasó a "Aún no" sin pulsar "Actualizar movimientos") contaría
     // esa plata dos veces si entra a un recibo — mejor pedir que se ponga al
@@ -1122,7 +1126,7 @@ export var actions = {
 
     var etiquetas = [];
     repartos.forEach(function (x) { x.grupo.participantes.forEach(function (p) { if (etiquetas.indexOf(p.etiqueta) === -1) etiquetas.push(p.etiqueta); }); });
-    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: serviciosRecibo, etiquetas: etiquetas };
+    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: validacionRecibo.limpias, etiquetas: etiquetas };
     var reciboId = uid();
     var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: -total }, function () {
       state.cotizaciones = aplicarReciboACotizaciones(state.cotizaciones, reciboId, cabecera, repartos);
@@ -1190,8 +1194,7 @@ export var actions = {
             // sin su material ni su faltante, y su costo real en $0
             // (revisión del Hallazgo #54).
             var partes = (compra.partesRecibo || []).map(function (p) {
-              if (p.reciboId !== reciboId || !(num(p.cantidad) > 0 || num(p.costo) > 0)) return p;
-              return Object.assign({}, p, { cantidad: 0, costo: 0, devueltaPorEliminar: { pedidoId: pedidoId, cantidad: num(p.cantidad), costo: Math.round(num(p.costo)) } });
+              return p.reciboId === reciboId ? devolverParte(p, pedidoId) : p;
             });
             var devuelta = Object.assign({}, compra, { partesRecibo: partes, faltante: 0 });
             if (num(compra.faltante) > 0) devuelta.faltanteAntesDeEliminar = { pedidoId: pedidoId, cantidad: num(compra.faltante) };
@@ -1234,10 +1237,17 @@ function anularRecibo(reciboId, corregir) {
   var filas = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
   var pagado = filas.reduce(function (a, t) { return a + num(t.monto); }, 0);
   var cab = r.cabecera || {};
+  var conServicios = filas.some(function (t) { return (t.serviciosDescuento || []).length; });
+  // Un recibo a medio llenar se perdería al rellenar el formulario con este.
+  var aMedias = Object.keys((state.formCompraConjunta || {}).porClave || {}).filter(function (k) {
+    var d = state.formCompraConjunta.porClave[k] || {};
+    return String(d.costoPagado || "").trim() || String(d.cantidadComprada || "").trim();
+  }).length;
   if (!window.confirm("¿Anular este recibo de compra (" + fmt(pagado) + ")?\n\n" +
     "Sus " + filas.length + " movimiento(s) salen de Finanzas (quedan en la papelera) y la caja vuelve a subir " + fmt(pagado) + ". Las compras de sus pedidos vuelven a quedar pendientes." +
-    ((cab.servicios || []).length ? "\n\nLa plata que se había tomado de servicios vuelve a quedar disponible." : "") +
-    (corregir ? "\n\nEl formulario queda lleno con sus datos para registrarlo de nuevo, corregido." : ""))) return;
+    (conServicios ? "\n\nLa plata que se había tomado de servicios vuelve a quedar disponible." : "") +
+    (corregir ? "\n\nEl formulario queda lleno con sus datos para registrarlo de nuevo, corregido." : "") +
+    (corregir && aMedias ? "\n\nOjo: el recibo que estabas llenando (" + aMedias + " línea" + (aMedias === 1 ? "" : "s") + ") se descarta." : ""))) return;
   var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: pagado }, function () {
     state.cotizaciones = quitarReciboDeCotizaciones(state.cotizaciones, reciboId);
     var ids = filas.map(function (t) { return t.id; });
@@ -1271,7 +1281,15 @@ function anularRecibo(reciboId, corregir) {
       } else {
         d.cantidadComprada = String(L.cantidadTotal);
         d.cantidadesPorPedido = {};
-        L.partes.forEach(function (p) { d.cantidadesPorPedido[p.cotId] = String(p.cantidad); });
+        // Con desperdicio (Hallazgo #59): vuelve el "Sobrante" que quedó y
+        // las partes con desperdicio se dejan automáticas, para poder
+        // cambiar el sobrante y que el desperdicio se reparta de nuevo. Fijas
+        // con su cantidad, el sobrante ya no se podía cambiar.
+        var conDesperdicio = L.partes.some(function (p) { return p.desperdicio > 0; });
+        if (conDesperdicio) d.sobrante = String(L.reserva.cantidad);
+        L.partes.forEach(function (p) {
+          if (!(conDesperdicio && p.desperdicio > 0)) d.cantidadesPorPedido[p.cotId] = String(p.cantidad);
+        });
       }
       porClave[L.linea] = d;
     });

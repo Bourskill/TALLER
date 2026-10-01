@@ -122,9 +122,10 @@ contabilidad de caja para negocio pequeño.
 - Un `tx` creado a mano solo puede ser `ingreso`, `gasto` o `nómina`
   (`comisión` existe como tipo pero no es creable a mano — nace solo de
   las acciones de comisión). (`finanzas.js:8-11`)
-- "Asignar a servicio(s)" solo aplica a `gasto`/`nómina` manuales y a
-  pagar nómina — **NO** a marcar un gasto fijo pagado ni a pagar una
-  deuda (ver hallazgo de "duda de negocio" más abajo).
+- "Asignar a servicio(s)" solo aplica a `gasto`/`nómina` manuales, a
+  pagar nómina y a cada línea de un Recibo de compra (Hallazgo #60) —
+  **NO** a marcar un gasto fijo pagado ni a pagar una deuda (ver hallazgo
+  de "duda de negocio" más abajo).
 - Borrar = mover a papelera, nunca destruir. Solo "eliminar definitivo"
   (desde la Papelera, con confirmación) borra para siempre.
 - Un `tx` con marca de origen vigente no se puede borrar suelto — el
@@ -2764,7 +2765,8 @@ quita el resguardo.
 - por cada línea se escribe "Compré" y "Pagué". La vista previa y lo que se
   guarda salen de la misma función (`calcRepartoLineaRecibo`);
 - "Ajustar reparto ▸" deja corregir la parte de cada pedido;
-- los servicios se asignan una vez, a todo el recibo.
+- los servicios se asignan una vez, a todo el recibo (reemplazado por el
+  Hallazgo #60: desde el 2026-09-30 se asignan por línea).
 
 Antes de registrar se revisa:
 - si alguna compra todavía tiene un movimiento viejo propio en Finanzas.
@@ -3430,6 +3432,50 @@ el metro más caro que el grande.
 
 Sin el cambio, fallan.
 
+**Revisión independiente (2026-09-30) — lo que el #59 dejaba mal,
+corregido:**
+1. **🔴 "Anular recibo" convertía el desperdicio en faltante fantasma.**
+   El desperdicio iba dentro de la cantidad de cada parte sin ninguna
+   marca, y anular lo tomaba como "lo que el pedido usaba por encima del
+   estimado". En el ejemplo, sin haber comprado nada, quedaban:
+   - faltante 0.4 / 0.3 / 0.3;
+   - $7.000 de sobrecosto en los pedidos;
+   - y la siguiente compra justa avisaba "faltan 1 m".
+   Lo mismo al anular una reposición (faltaba 1.0 en vez de 0.5).
+   Ahora cada parte guarda `desperdicio`: cuánto de SU cantidad es
+   desperdicio. Es una cifra contenida en la cantidad, no un segundo
+   total. `quitarReciboDeCotizaciones` lo resta antes de calcular faltante
+   o extra.
+2. **Editar una fila en "Ajustar reparto" borraba el Sobrante escrito**,
+   y lo que quedaba volvía a ser reserva. Ahora:
+   - las filas escritas a mano quedan fijas;
+   - el desperdicio se reparte entre las demás, a prorrata de lo que
+     necesitan;
+   - si todas están a mano y no cuadran con el Sobrante, sale un error
+     que lo dice;
+   - un Sobrante inválido ya no desaparece al editar una fila.
+3. **"Anular y corregir" no dejaba cambiar el Sobrante**: volvía con las
+   cantidades fijas, desperdicio adentro. Ahora vuelve el Sobrante y las
+   partes con desperdicio quedan automáticas.
+4. **Producción** muestra "✂ X de desperdicio" junto a la fila, y la Cant.
+   real lo dice al pasar el mouse. Así nadie la "corrige" creyendo que
+   pasó de lo que se usó.
+5. **Bajar la Cant. real, devolver la parte de un pedido cancelado o
+   eliminado, y restaurarlo** cuidan el desperdicio de la parte. Nunca
+   queda mayor que su cantidad, se anota con lo devuelto
+   (`devolverParte`) y vuelve al restaurar.
+
+**Límite conocido, por decidir con el dueño.** Al devolver a la reserva
+la parte de un pedido cancelado o eliminado, su desperdicio vuelve como
+cantidad a la reserva. Son metros que físicamente ya no sirven, y otro
+pedido que los "tome" paga por ellos. Hoy pasa solo si se cancela un
+pedido después de un recibo con desperdicio.
+
+**Detalle aceptado.** En prendas enteras, con empate en el reparto, la
+prenda de desperdicio se la lleva el primer pedido de la lista. La suma
+y el precio por unidad son exactos. Si se quiere otro reparto, se cambia
+a mano en "Ajustar reparto".
+
 ---
 
 ### 🟡 Hallazgo #60 — "Asignar a servicio(s)" en cada línea del recibo, no una sola vez para todo el papel. ✅ IMPLEMENTADO (pedido del dueño)
@@ -3445,9 +3491,10 @@ descontando también de las filas de la tela.
 
 **Qué cambia.**
 - Cada línea pagada del recibo tiene su propio "Asignar a servicio(s)".
-  Se guarda como `cabecera.servicios[] = {nombre, monto, linea}`, la misma
-  cabecera copiada en cada parte, así que sobrevive aunque una línea se
-  quede sin pedidos vivos.
+  Se guarda en los totales de su línea (`totalesLinea.servicios`), que se
+  copian solo en las partes de esa línea. El primer día se guardaba en
+  `cabecera.servicios[]` con `linea` (ver la revisión, punto 1). Ese
+  formato se sigue leyendo.
 - `calcFilasRecibo` reparte lo de cada línea solo entre las filas de esa
   línea (parte y reserva), por capacidad.
 - Un servicio sin `linea` (recibo de antes, migración F3, o un borrador
@@ -3471,13 +3518,14 @@ descontando también de las filas de la tela.
   La tarjeta del recibo en Finanzas dice en cada línea con qué se pagó
   (📋 Medias $22.500).
 
-**Bug latente corregido en el camino.** El componente compartido
-direccionaba el borrador con un path separado por puntos
-("formCompraConjunta.porClave.<clave>"). La clave de una línea lleva el
-nombre del insumo, así que "Medias cal. 9" se partía en dos y el botón no
-hacía nada. Ahora la clave va aparte, en `data-form-clave`
-(`resolverFormDestino(formKey, clave)` en core/dom.js). Sin `clave` todo
-sigue igual (formTx, formNominaPago).
+**Un problema que se evitó.** El componente compartido direccionaba el
+borrador con un path separado por puntos. La clave de una línea lleva el
+nombre del insumo, así que con el path "formCompraConjunta.porClave.<clave>",
+"Medias cal. 9" se habría partido en dos y el botón no haría nada. Ningún
+código usaba todavía ese path con una clave, así que nadie se lo topó,
+pero el diseño por línea lo necesitaba. La clave va aparte, en
+`data-form-clave` (`resolverFormDestino(formKey, clave)` en core/dom.js).
+Sin `clave` todo sigue igual (formTx, formNominaPago).
 
 **Pruebas:**
 - un selector por línea, sin ninguno general;
@@ -3497,6 +3545,40 @@ sigue igual (formTx, formNominaPago).
 Sin el cambio, las de comportamiento nuevo fallan. Las de recibo viejo y
 borrador viejo pasan en las dos versiones, a propósito: son las que
 cuidan que nada de antes cambie.
+
+**Revisión independiente (2026-09-30) — corregido:**
+1. **La cabecera crecía como líneas × partes.** Los servicios de TODAS
+   las líneas iban en la cabecera, que se copia en cada parte de cada
+   compra. Medido: con 20 líneas con servicio, la celda `compras_json` de
+   una cotización llegaba a unos 46.000 de los 50.000 caracteres
+   permitidos (Hallazgo #42). Ahora van en los totales de su línea.
+   - Una línea que se queda sin pedidos vivos en un recibo que sigue vivo
+     recupera sus servicios desde sus filas, salvo en un recibo viejo con
+     servicios para el recibo entero.
+2. **Montos con decimales.** "22500.5" pasaba la tolerancia de +0.5, se
+   descontaba $1 de más y ese peso caía en otra línea. Ahora
+   `validarServiciosAsignados` trabaja en pesos enteros. Si lo de una
+   línea no cabe en ella (dato dañado), `calcRecibo` lo marca como
+   problema.
+3. **Una fila con monto pero sin servicio** se mostraba "cubierta" y al
+   registrar se descartaba en silencio. Ahora no cuenta como cubierta y
+   se pide elegir el servicio. Esto aplica también a gasto y nómina.
+4. **El foco** caía al inicio de la página con 2+ líneas. Se agregaron
+   `data-clave` y `data-form-clave` a los atributos con que se reencuentra
+   el campo. Esto arregla también Compré, Pagué y Sobrante, que venían
+   así desde el #52.
+5. **Menores:**
+   - "Anular y corregir" avisa que descarta el recibo que se estaba
+     llenando;
+   - el total ya no menciona un control que no existe cuando no hay
+     servicios;
+   - el selector de un borrador viejo descuenta lo de las líneas;
+   - la prueba de "recibo viejo idéntico" compara ahora con varios
+     servicios contra el algoritmo viejo copiado tal cual.
+
+Verificado por un revisor: los recibos ya guardados dan las mismas
+filas que antes, vivos, con una línea congelada y con todas congeladas.
+`verificarRecibo` no marca descuadres nuevos en lo ya guardado.
 
 ---
 

@@ -792,11 +792,15 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
   var dec = linea.esProducto ? 0 : 2;
   var faltante = num(compra.faltante);
   var usado = num(compra.cantidadReal) + faltante;
+  // Cuánto de lo suyo es desperdicio (Hallazgo #59): se avisa, para que
+  // nadie "corrija" la Cant. real creyendo que pasó de lo que se usó.
+  var desperdicio = (compra.partesRecibo || []).reduce(function (a, p) { return a + num(p.desperdicio); }, 0);
   var recibosIds = [];
   (compra.partesRecibo || []).forEach(function (p) { if (recibosIds.indexOf(p.reciboId) === -1) recibosIds.push(p.reciboId); });
   var chipRecibo = ' <button class="tag" style="cursor:pointer;border:none;" data-action="ver-recibo" data-recibo-id="' + esc(recibosIds[0]) + '" title="Ver el recibo de compra en Finanzas">🧾 ' + (recibosIds.length > 1 ? recibosIds.length + " recibos" : "Recibo") + "</button>" +
     (libres > 0 ? ' <span class="tag" title="Libres en la reserva de su recibo: si este pedido necesita más, sube Cant. real y se toma de ahí.">↺ ' + libres.toFixed(dec) + " libres</span>" : "") +
-    (faltante > 0 ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="La reserva no alcanzó: esto falta comprar — regístralo en un recibo nuevo (Finanzas → Recibos de compra).">faltan ' + faltante.toFixed(dec) + "</span>" : "");
+    (faltante > 0 ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="La reserva no alcanzó: esto falta comprar — regístralo en un recibo nuevo (Finanzas → Recibos de compra).">faltan ' + faltante.toFixed(dec) + "</span>" : "") +
+    (desperdicio > 0 ? ' <span class="tag" title="Lo que sobró de la compra no servía y se repartió como desperdicio: va incluido en Cant. real y en su costo.">✂ ' + desperdicio.toFixed(dec) + " de desperdicio</span>" : "");
   var html = '<div class="tx-row" style="grid-template-columns:' + COMPRA_COLS + ';">' +
     '<span class="mobile-th">Qué comprar</span><span>' + (linea.esGlobal ? "🌐 " : (linea.esProducto ? "📦 " : "")) + esc(linea.nombre) + chipRecibo + "</span>" +
     '<span class="mobile-th">Para / a quién</span><span>' + paraQuien + "</span>" +
@@ -805,7 +809,7 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
     '<span class="mobile-th">Cant. real</span>' +
     (lineaSinCantidad(linea) || linea.esServicio
       ? '<span class="amount" style="color:var(--ink-faint);">—</span>'
-      : '<input type="number" class="mini-input" style="width:100%" ' + (linea.esProducto ? 'step="1" ' : "") + 'value="' + esc(usado) + '"' + attrs + ' data-campo="cantidadReal" title="Cuánto usa de verdad este pedido. Si sube, se toma de la reserva del recibo; si baja, vuelve a la reserva." />') +
+      : '<input type="number" class="mini-input" style="width:100%" ' + (linea.esProducto ? 'step="1" ' : "") + 'value="' + esc(usado) + '"' + attrs + ' data-campo="cantidadReal" title="' + esc("Cuánto usa de verdad este pedido" + (desperdicio > 0 ? ", incluidos " + desperdicio.toFixed(dec) + " de desperdicio" : "") + ". Si sube, se toma de la reserva del recibo; si baja, vuelve a la reserva.") + '" />') +
     '<span class="mobile-th">Costo real</span><span class="amount" title="Lo que le toca a este pedido del recibo de compra">' + fmt(compra.costoReal) + "</span>" +
     '<span class="mobile-th">Estado</span><span style="display:flex;gap:6px;align-items:center;">' +
     '<span class="tag" title="Comprado con un recibo de compra: se corrige desde el recibo (Finanzas → Recibos de compra).">Sí · 🧾</span>' +

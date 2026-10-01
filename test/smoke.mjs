@@ -8367,13 +8367,30 @@ click('[data-action="toggle-ajustar-recibo"][data-clave="' + CLAVE_TELA + '"]');
 const inputsDesp = function () { return Array.prototype.map.call(document.querySelectorAll('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + CLAVE_TELA + '"]'), function (i) { return i.value; }).join("/"); };
 assert(inputsDesp() === "2.00/1.50/1.50", "desperdicio: «Ajustar reparto» muestra la cantidad FINAL de cada pedido (con su desperdicio), que es la que se guarda");
 
-// Repartirlo a mano: editar una fila deja las demás como se veían.
+// Repartirlo a mano: la fila editada queda FIJA, el «Sobrante» escrito se
+// respeta y el resto del desperdicio va a las demás (revisión del #59:
+// antes, editar una fila borraba el sobrante y lo que quedaba volvía a ser
+// reserva — un retazo que no sirve, contado como material guardado).
+const selCantDesp = function (cotId) { return '[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + CLAVE_TELA + '"][data-cot="' + cotId + '"]'; };
+const grupoDespVivo = function () { return mapaCalc.calcLineasParaRecibo(state.formCompraConjunta.seleccion).filter(function (g) { return g.linea === CLAVE_TELA; })[0]; };
 const draftAntesManoDesp = JSON.stringify(state.formCompraConjunta.porClave);
-setChange('[data-action-change="set-compra-conjunta-cantidad-pedido"][data-clave="' + CLAVE_TELA + '"][data-cot="cot-dsp-1"]', "2.2");
+setChange(selCantDesp("cot-dsp-1"), "2.2");
 const filaManoDesp = state.formCompraConjunta.porClave[CLAVE_TELA];
-assert(filaManoDesp.sobrante === undefined && filaManoDesp.cantidadesPorPedido["cot-dsp-2"] === "1.5" && filaManoDesp.cantidadesPorPedido["cot-dsp-3"] === "1.5" && filaManoDesp.cantidadesPorPedido["cot-dsp-1"] === "2.2",
-  "desperdicio: al corregir una fila a mano, las demás se quedan con lo que ya se veía (1.50, desperdicio incluido) — antes de este cuidado, la fila editada habría vuelto a recibir desperdicio encima y las demás lo habrían perdido");
-assert(tarjetaDesp().indexOf("Se repartieron 5.2 pero se compraron 5") !== -1, "desperdicio: a mano, si lo repartido pasa de lo comprado, lo dice (2.2 + 1.5 + 1.5 = 5.2)");
+const repManoDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), filaManoDesp);
+assert(filaManoDesp.sobrante === "0" && JSON.stringify(filaManoDesp.cantidadesPorPedido) === JSON.stringify({ "cot-dsp-1": "2.2" }) &&
+  repManoDesp.ok && cantsDesp(repManoDesp) === "2.2/1.4/1.4" && repManoDesp.reserva.cantidad === 0 && sumaDesp(repManoDesp) === 36000,
+  "revisión #59: al corregir una fila a mano, el «Sobrante» 0 se respeta — esa fila queda en 2.2 y el resto del desperdicio va a las otras (1.4 / 1.4), sin reserva");
+assert(inputsDesp() === "2.2/1.40/1.40", "revisión #59: la tabla muestra lo escrito a mano y, en las demás filas, su cantidad final");
+assert(repManoDesp.partes.map(function (p) { return p.desperdicio; }).join("/") === "0.6/0.2/0.2",
+  "revisión #59: cada parte sabe cuánto de lo suyo es desperdicio — también la escrita a mano (2.2 − 1.6 = 0.6)");
+setChange(selCantDesp("cot-dsp-2"), "1.4");
+setChange(selCantDesp("cot-dsp-3"), "1.2");
+assert(tarjetaDesp().indexOf("Con estas cantidades sobran 0.2 m") !== -1 && state.formCompraConjunta.porClave[CLAVE_TELA].sobrante === "0",
+  "revisión #59: con todas las filas a mano, si cantidades y «Sobrante» no cuadran (sobran 0.2, se escribió 0) lo dice, en vez de inventar una reserva");
+setChange(selDesp("sobrante"), "3");
+setChange(selCantDesp("cot-dsp-1"), "1.7");
+assert(state.formCompraConjunta.porClave[CLAVE_TELA].sobrante === "3" && tarjetaDesp().indexOf("el sobrante no puede ser mayor") !== -1,
+  "revisión #59: un «Sobrante» inválido no desaparece al editar una fila: sigue escrito, con su error, hasta corregirlo");
 state.formCompraConjunta = Object.assign({}, state.formCompraConjunta, { porClave: JSON.parse(draftAntesManoDesp), ajustar: {} });
 render();
 
@@ -8394,16 +8411,91 @@ const reciboVueltaDesp = mapaCalc.calcRecibo(reciboDesp, vueltaDesp.cotizaciones
 assert(reciboVueltaDesp.lineas[0].reserva.cantidad === 0 && reciboVueltaDesp.lineas[0].reserva.costo === 0 && reciboVueltaDesp.total === 36000 &&
   mapaCalc.verificarRecibo(reciboDesp, vueltaDesp.cotizaciones, vueltaDesp.tx).length === 0,
   "desperdicio: tras ida y vuelta por la Sheet, el recibo sigue sin reserva, con $36.000 y cuadrado");
+const partesVueltaDesp = vueltaDesp.cotizaciones.map(function (c) {
+  var x = (c.compras || []).filter(function (k) { return k.clave === CLAVE_TELA; })[0];
+  return x && x.partesRecibo ? x.partesRecibo[0].desperdicio : null;
+}).filter(function (d) { return d !== null; });
+assert(partesVueltaDesp.join("/") === "0.4/0.3/0.3", "revisión #59: el desperdicio de cada parte queda guardado y sobrevive la ida y vuelta por la Sheet");
+abrirProduccionH58("cot-dsp-1");
+assert(document.getElementById("app").textContent.indexOf("✂ 0.40 de desperdicio") !== -1,
+  "revisión #59: Producción avisa que la Cant. real (2.00) incluye 0.40 de desperdicio — para que nadie la «corrija» a 1.60 creyendo que está mal");
+click('[data-action="cerrar-cotizacion-editor"]');
 
-// "Anular y corregir" vuelve a llenar el formulario con lo registrado: el
-// desperdicio ya va dentro de las cantidades, así que sigue sin reserva.
+// "Anular y corregir": vuelve el «Sobrante» y las partes con desperdicio
+// quedan automáticas, así se puede cambiar el sobrante (antes quedaban
+// fijas con su desperdicio adentro y el campo ni aparecía).
 global.confirm = dom.window.confirm = function () { return true; };
 finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboDesp; } });
 global.confirm = dom.window.confirm = confirmPrevioMapa;
-const grupoCorregirDesp = mapaCalc.calcLineasParaRecibo(state.formCompraConjunta.seleccion).filter(function (g) { return g.linea === CLAVE_TELA; })[0];
-const corregirDesp = mapaCalc.calcRepartoLineaRecibo(grupoCorregirDesp, state.formCompraConjunta.porClave[CLAVE_TELA]);
-assert(cajaMapa() === 0 && corregirDesp.ok && cantsDesp(corregirDesp) === "2/1.5/1.5" && corregirDesp.reserva.cantidad === 0,
-  "desperdicio: «Anular y corregir» devuelve la plata y deja el formulario con el mismo reparto (2.00 / 1.50 / 1.50, sin reserva)");
+const filaCorregirDesp = state.formCompraConjunta.porClave[CLAVE_TELA];
+const corregirDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), filaCorregirDesp);
+assert(cajaMapa() === 0 && filaCorregirDesp.sobrante === "0" && Object.keys(filaCorregirDesp.cantidadesPorPedido).length === 0 &&
+  corregirDesp.ok && cantsDesp(corregirDesp) === "2/1.5/1.5" && corregirDesp.reserva.cantidad === 0,
+  "desperdicio: «Anular y corregir» devuelve la plata y deja el formulario con el mismo reparto (2.00 / 1.50 / 1.50, sin reserva), con el «Sobrante» 0 escrito");
+const corregir03Desp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), Object.assign({}, filaCorregirDesp, { sobrante: "0.3" }));
+assert(corregir03Desp.ok && corregir03Desp.reserva.cantidad === 0.3,
+  "revisión #59: ...y ahí sí se puede cambiar el sobrante (0.3 m que sí sirven quedan de reserva)");
+assert([1, 2, 3].every(function (n) { var c = compraMapa("cot-dsp-" + n, CLAVE_TELA); return c.estado === "no" && !(Number(c.faltante) > 0); }) &&
+  grupoDespVivo().participantes.map(function (p) { return Math.round(p.necesita * 100) / 100; }).join("/") === "1.6/1.2/1.2",
+  "revisión #59: anular deja cada compra pendiente con lo que de verdad necesita (1.6 / 1.2 / 1.2) — el desperdicio no se convierte en faltante");
+
+// "Anular recibo" a secas, con desperdicio: sin faltante ni sobrecosto
+// fantasma (revisión del #59 — antes quedaban 0.4 / 0.3 / 0.3 de faltante y
+// $7.000 de sobrecosto en los pedidos sin haber comprado nada).
+const PEDS_DESP = ["ped-dsp-1", "ped-dsp-2", "ped-dsp-3"];
+const draftCeroDesp = {}; draftCeroDesp[CLAVE_TELA] = { cantidadComprada: 5, costoPagado: 36000, sobrante: "0" };
+const reiniciarDesp = function () {
+  state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8), cotDesp("cot-dsp-2", "ped-dsp-2", 6), cotDesp("cot-dsp-3", "ped-dsp-3", 6)];
+  state.tx = []; state.txPapelera = [];
+};
+const necesitaDesp = function () {
+  return mapaCalc.calcLineasParaRecibo(PEDS_DESP).filter(function (g) { return g.linea === CLAVE_TELA; })[0].participantes
+    .map(function (p) { return Math.round(p.necesita * 100) / 100; }).join("/");
+};
+reiniciarDesp();
+const reciboSimpleDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-recibo"]({ getAttribute: function () { return reciboSimpleDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(cajaMapa() === 0 && [1, 2, 3].every(function (n) { var c = compraMapa("cot-dsp-" + n, CLAVE_TELA); return c.estado === "no" && !(Number(c.faltante) > 0); }) && necesitaDesp() === "1.6/1.2/1.2",
+  "revisión #59: «Anular recibo» a secas no deja el desperdicio como faltante ni como sobrecosto: cada pedido vuelve a necesitar 1.6 / 1.2 / 1.2 (antes 2.0 / 1.5 / 1.5)");
+
+// Reposición con desperdicio: anularla devuelve solo lo que de verdad faltaba.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8)];
+const draftR1Desp = {}; draftR1Desp[CLAVE_TELA] = { cantidadComprada: 1.6, costoPagado: 11200 };
+registrarReciboMapa(["ped-dsp-1"], draftR1Desp, "2026-09-20");
+ajustarMapa("cot-dsp-1", 2.1);
+assert(Number(compraMapa("cot-dsp-1", CLAVE_TELA).faltante) === 0.5, "(reposición) el pedido sube su Cant. real a 2.1: faltan 0.5");
+const draftR2Desp = {}; draftR2Desp[CLAVE_TELA] = { cantidadComprada: 1, costoPagado: 7200, sobrante: "0" };
+const reciboR2Desp = registrarReciboMapa(["ped-dsp-1"], draftR2Desp, "2026-09-22");
+const compraR2Desp = compraMapa("cot-dsp-1", CLAVE_TELA);
+assert(compraR2Desp.cantidadReal === 2.6 && !(Number(compraR2Desp.faltante) > 0) && compraR2Desp.partesRecibo[1].desperdicio === 0.5,
+  "(reposición) compra 1 m con Sobrante 0: cubre los 0.5 que faltaban y 0.5 son desperdicio (Cant. real 2.6, sin faltante)");
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-recibo"]({ getAttribute: function () { return reciboR2Desp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(Number(compraMapa("cot-dsp-1", CLAVE_TELA).faltante) === 0.5,
+  "revisión #59: anular esa reposición vuelve a dejar faltando 0.5 — no 1.0 con el desperdicio adentro");
+
+// Cancelar → devolver a la reserva → reactivar, y bajar la Cant. real: el
+// desperdicio va y vuelve con su parte y nunca pasa de su cantidad.
+reiniciarDesp();
+const reciboDevDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+const reemplazarCotDesp = function (cot) { state.cotizaciones = state.cotizaciones.map(function (c) { return c.id === cot.id ? cot : c; }); reconciliarTodoMapa(); };
+reemplazarCotDesp(mapaCalc.devolverPartesPorEliminar(cotMapaPorId("cot-dsp-1"), "ped-dsp-1"));
+const parteDevDesp = compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0];
+assert(parteDevDesp.cantidad === 0 && !parteDevDesp.desperdicio && parteDevDesp.devueltaPorEliminar.desperdicio === 0.4 &&
+  mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
+  "revisión #59: al devolver la parte de un pedido eliminado, su desperdicio queda anotado con lo devuelto");
+reemplazarCotDesp(mapaCalc.retomarPartesPorRestaurar(cotMapaPorId("cot-dsp-1"), "ped-dsp-1", state.cotizaciones, state.tx).cot);
+const parteRetDesp = compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0];
+assert(parteRetDesp.cantidad === 2 && parteRetDesp.desperdicio === 0.4 && mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
+  "revisión #59: al restaurarlo, la parte vuelve con su desperdicio (2.00 m, 0.40 de desperdicio)");
+ajustarMapa("cot-dsp-1", 0.3);
+assert(compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0].desperdicio === 0.3 && mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
+  "revisión #59: al bajar la Cant. real a 0.3, el desperdicio de la parte nunca queda mayor que su cantidad");
+
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
@@ -8493,9 +8585,12 @@ const servDeLineaH60 = function (tx, linea) {
 assert(servDeLineaH60(state.tx, LINEA_MED_H60) === JSON.stringify({ Medias: 22500 }) && servDeLineaH60(state.tx, CLAVE_TELA) === JSON.stringify({ Corte: 10000 }),
   "#60: los movimientos de las medias descuentan solo de \"Medias\" ($22.500) y los de la tela solo de \"Corte\" ($10.000) — antes se repartían entre todas las filas del recibo");
 assert(dispH60("Medias") === 17500 && dispH60("Corte") === 20000, "#60: a los servicios les queda $17.500 (Medias) y $20.000 (Corte)");
+const parteH60 = function (linea) { return compraMapa("cot-h60-a", linea).partesRecibo[0]; };
 assert(mapaCalc.verificarRecibo(reciboH60, state.cotizaciones, state.tx).length === 0 &&
-  mapaCalc.calcRecibo(reciboH60, state.cotizaciones, state.tx).cabecera.servicios.every(function (s) { return !!s.linea; }),
-  "#60: el recibo cuadra al peso y cada servicio quedó guardado con su línea");
+  (parteH60(CLAVE_TELA).recibo.servicios || []).length === 0 &&
+  JSON.stringify(parteH60(LINEA_MED_H60).totalesLinea.servicios) === JSON.stringify([{ nombre: "Medias", monto: 22500 }]) &&
+  JSON.stringify(parteH60(CLAVE_TELA).totalesLinea.servicios) === JSON.stringify([{ nombre: "Corte", monto: 10000 }]),
+  "#60: el recibo cuadra al peso y cada servicio quedó en los totales de SU línea — no en la cabecera, que se copia en todas las partes (revisión del #60: crecía como líneas × partes y podía llenar la celda de 50.000 caracteres)");
 render();
 assert(document.getElementById("app").textContent.indexOf("📋 Medias $22.500") !== -1, "#60: la tarjeta del recibo dice en la línea de medias con qué servicio se pagó");
 
@@ -8531,14 +8626,36 @@ const lineasViejoH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a"]);
 const repartosViejoH60 = lineasViejoH60.map(function (g) {
   return { grupo: g, reparto: mapaCalc.calcRepartoLineaRecibo(g, { costoPagado: g.linea === CLAVE_TELA ? 100000 : 22500 }) };
 });
-state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-viejo", { fecha: "2026-09-20", proveedorId: "", numero: "", servicios: [{ nombre: "Corte", monto: 10000 }], etiquetas: [] }, repartosViejoH60);
+const serviciosViejoH60 = [{ nombre: "Corte", monto: 100000 }, { nombre: "Medias", monto: 20000 }, { nombre: "Corte", monto: 1501 }];
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-viejo", { fecha: "2026-09-20", proveedorId: "", numero: "", servicios: serviciosViejoH60, etiquetas: [] }, repartosViejoH60);
 const filasViejoH60 = mapaCalc.calcFilasRecibo("rc-h60-viejo", state.cotizaciones, []).filas;
-// El algoritmo de antes, copiado tal cual, para comparar.
+// repartirServiciosEnFilasRecibo de ANTES del #60 (commit fd2b0ae), copiada
+// tal cual: con varios servicios, la capacidad del segundo depende de lo que
+// tomó el primero — justo lo que hay que comprobar que no cambió.
+function repartirViejoH60(filas, servicios) {
+  var orden = filas.map(function (f) { return Object.assign({}, f); }).sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  var usado = orden.map(function () { return 0; });
+  orden.forEach(function (f) { f.serviciosDescuento = []; });
+  (servicios || []).forEach(function (s) {
+    var monto = Math.round(Number(s.monto) || 0);
+    if (monto <= 0) return;
+    var capacidades = orden.map(function (f, i) { return Math.max(0, Math.round(Number(f.monto) || 0) - usado[i]); });
+    var capacidadTotal = capacidades.reduce(function (a, c) { return a + c; }, 0);
+    if (capacidadTotal <= 0) return;
+    var partes = mapaCalc.repartirProporcional(Math.min(monto, capacidadTotal), capacidades, 0);
+    partes.forEach(function (m, i) {
+      if (m <= 0) return;
+      usado[i] += m;
+      orden[i].serviciosDescuento.push({ nombre: s.nombre, monto: m });
+    });
+  });
+  return orden;
+}
+const esperadoViejoH60 = repartirViejoH60(filasViejoH60, serviciosViejoH60);
 const ordenViejoH60 = filasViejoH60.slice().sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-const esperadoViejoH60 = mapaCalc.repartirProporcional(10000, ordenViejoH60.map(function (f) { return f.monto; }), 0);
-assert(ordenViejoH60.every(function (f, i) { return JSON.stringify(f.serviciosDescuento) === JSON.stringify(esperadoViejoH60[i] > 0 ? [{ nombre: "Corte", monto: esperadoViejoH60[i] }] : []); }) &&
-  ordenViejoH60.filter(function (f) { return f.serviciosDescuento.length; }).length === 2,
-  "#60: un recibo viejo (servicio para el recibo entero) se reparte exactamente como antes, entre las filas de todas sus líneas");
+assert(ordenViejoH60.length === 2 && ordenViejoH60.every(function (f, i) { return JSON.stringify(f.serviciosDescuento) === JSON.stringify(esperadoViejoH60[i].serviciosDescuento); }) &&
+  ordenViejoH60.every(function (f) { return f.serviciosDescuento.length >= 2; }),
+  "#60: un recibo viejo (servicios para el recibo entero, varios y uno repetido) se reparte EXACTAMENTE como con el algoritmo de antes, entre las filas de todas sus líneas");
 
 // Un borrador de antes del #60, con servicios para el recibo entero: se ve
 // y se registra igual.
@@ -8551,6 +8668,116 @@ click('[data-action="registrar-recibo-compra"]');
 const reciboLegadoH60 = (compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
 assert(!!reciboLegadoH60 && dispH60("Corte") === 25000 && mapaCalc.verificarRecibo(reciboLegadoH60, state.cotizaciones, state.tx).length === 0,
   "#60: ...y se registran: Corte queda con $25.000 y el recibo cuadra");
+
+// --- Revisión del #60 ---
+// "Anular y corregir" avisa que se descarta el recibo que se estaba llenando.
+state.formCompraConjunta = { seleccion: ["ped-h60-a"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+state.formCompraConjunta.porClave[LINEA_MED_H60] = { costoPagado: "22500" };
+var confirmH60 = "";
+global.confirm = dom.window.confirm = function (m) { confirmH60 = m; return false; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboLegadoH60; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(confirmH60.indexOf("el recibo que estabas llenando (1 línea) se descarta") !== -1 && cajaMapa() === -100000,
+  "revisión #60: «Anular y corregir» avisa que se descarta el recibo que se estaba llenando (antes lo borraba sin decir nada)");
+
+// Una fila con monto pero sin servicio elegido no cuenta como cubierta y no
+// se descarta en silencio al registrar.
+state.tx = [];
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+state.formCompraConjunta = { seleccion: ["ped-h60-a"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000", servicios: [{ nombre: "", monto: "5000" }] };
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+assert(totalH60().indexOf("Cubierto por servicios") === -1 && totalH60().indexOf("Sale de Ganancia: $100.000") !== -1 &&
+  document.querySelector(campoH60(CLAVE_TELA, "costoPagado")).closest(".cc-grupo").textContent.indexOf("Cubierto por servicios") === -1,
+  "revisión #60: una fila sin servicio elegido no se muestra como cubierta (ni en la línea ni en el total)");
+alertaH60 = "";
+window.alert = function (m) { alertaH60 = m; };
+click('[data-action="registrar-recibo-compra"]');
+assert(state.tx.length === 0 && alertaH60.indexOf("Elige el servicio de la fila de $5.000") !== -1,
+  "revisión #60: ...y al registrar pide elegirlo, en vez de descartarla y sacar esa plata de Ganancia sin avisar");
+// Montos con decimales: se validan en pesos enteros (lo que de verdad se reparte).
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000" };
+state.formCompraConjunta.porClave[LINEA_MED_H60] = { costoPagado: "22500", servicios: [{ nombre: "Medias", monto: "22500.5" }] };
+alertaH60 = "";
+click('[data-action="registrar-recibo-compra"]');
+window.alert = alertPrevioH60;
+assert(state.tx.length === 0 && alertaH60.indexOf("Medias cal. 9:") === 0 && alertaH60.indexOf("$22.501") !== -1,
+  "revisión #60: $22.500,5 de servicio en una línea de $22.500 no pasa (antes pasaba por la tolerancia, descontaba $1 de más y lo cargaba a otra línea)");
+
+// El foco se queda en el campo editado con dos líneas que tienen servicio.
+state.tx = [];
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+state.formCompraConjunta.porClave[LINEA_MED_H60] = { costoPagado: "22500", servicios: [{ nombre: "Medias", monto: "" }] };
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000", servicios: [{ nombre: "Corte", monto: "" }] };
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+const montoTelaH60 = document.querySelector('input[data-action-change="set-fila-servicio-monto"]' + destH60(CLAVE_TELA) + '[data-idx="0"]');
+montoTelaH60.focus();
+montoTelaH60.value = "10000";
+montoTelaH60.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+const activoH60 = document.activeElement;
+assert(activoH60 && activoH60 !== document.body && activoH60.getAttribute("data-form-clave") === CLAVE_TELA && activoH60.getAttribute("data-action-change") === "set-fila-servicio-monto",
+  "revisión #60: con dos líneas con servicio, el foco se queda en el monto que se editó (antes caía al inicio de la página)");
+
+// Sin ningún servicio acumulado, el total no menciona un control que no existe.
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a")];
+state.formCompraConjunta.porClave = {};
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000" };
+render();
+assert(totalH60().indexOf("Sale de Ganancia: $100.000") !== -1 && totalH60().indexOf("cada línea tiene su propio") === -1,
+  "revisión #60: sin servicios acumulados, el total no habla de un \"Asignar a servicio(s)\" que ninguna línea muestra");
+
+// Una línea que se queda sin pedidos vivos en un recibo que sigue vivo
+// conserva lo que descontaba de su servicio (formato nuevo: los servicios
+// viven en los totales de la línea, y sus partes ya no existen).
+const cotSoloMediasH60 = cotMapa("cot-h60-b", "ped-h60-b", 4, 0);
+cotSoloMediasH60.referencias[0].insumos = [cotH60("x", "y").referencias[0].insumos[1]];
+state.pedidos = [pedidoMapa("ped-h60-a", "cot-h60-a", 500000, 100000), pedidoMapa("ped-h60-b", "cot-h60-b", 200000, 9000), pedidoMapa("ped-h60-s", "cot-h60-s", 300000, 0)];
+state.cotizaciones = [cotMapa("cot-h60-a", "ped-h60-a", 10, 10000), cotSoloMediasH60, cotServH60];
+state.tx = [];
+const repartosCongH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"]).map(function (g) {
+  var r = mapaCalc.calcRepartoLineaRecibo(g, { costoPagado: g.linea === CLAVE_TELA ? 100000 : 9000 });
+  if (g.linea !== CLAVE_TELA) r = Object.assign({}, r, { totales: Object.assign({}, r.totales, { servicios: [{ nombre: "Medias", monto: 9000 }] }) });
+  return { grupo: g, reparto: r };
+});
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-cong", { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [], etiquetas: [] }, repartosCongH60);
+state.tx = mapaCalc.reconciliarTxRecibo(state.tx, "rc-h60-cong", state.cotizaciones).tx;
+const servRecH60 = function (tx, rid) {
+  var s = {};
+  tx.filter(function (t) { return t.reciboCompraId === rid; }).forEach(function (t) {
+    (t.serviciosDescuento || []).forEach(function (d) { var k = t.reciboCompraLinea + " :: " + d.nombre; s[k] = (s[k] || 0) + d.monto; });
+  });
+  return JSON.stringify(s);
+};
+const antesCongH60 = servRecH60(state.tx, "rc-h60-cong");
+const cotsSinBH60 = state.cotizaciones.filter(function (c) { return c.id !== "cot-h60-b"; });
+const txSinBH60 = mapaCalc.reconciliarTxRecibo(state.tx, "rc-h60-cong", cotsSinBH60).tx;
+assert(antesCongH60 === JSON.stringify((function () { var o = {}; o[LINEA_MED_H60 + " :: Medias"] = 9000; return o; })()) &&
+  antesCongH60 === JSON.stringify(mapaCalc.calcRecibo("rc-h60-cong", state.cotizaciones, state.tx).lineas.reduce(function (o, L) { (L.servicios || []).forEach(function (sv) { o[L.linea + " :: " + sv.nombre] = sv.monto; }); return o; }, {})) &&
+  servRecH60(txSinBH60, "rc-h60-cong") === antesCongH60 && !mapaCalc.reconciliarTxRecibo(txSinBH60, "rc-h60-cong", cotsSinBH60).hayCambios,
+  "revisión #60: si una línea se queda sin pedidos vivos (se borró su cotización) mientras el recibo sigue vivo, conserva lo que descontaba de \"Medias\" y queda estable");
+
+// Formato del primer día del #60 (servicio con `linea` en la cabecera):
+// se sigue leyendo igual.
+state.cotizaciones = [cotMapa("cot-h60-a", "ped-h60-a", 10, 10000), cotSoloMediasH60, cotServH60];
+const repartosCabH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"]).map(function (g) {
+  return { grupo: g, reparto: mapaCalc.calcRepartoLineaRecibo(g, { costoPagado: g.linea === CLAVE_TELA ? 100000 : 9000 }) };
+});
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-cab", { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [{ nombre: "Medias", monto: 9000, linea: LINEA_MED_H60 }], etiquetas: [] }, repartosCabH60);
+const filasCabH60 = mapaCalc.calcFilasRecibo("rc-h60-cab", state.cotizaciones, []).filas;
+assert(servRecH60(filasCabH60, "rc-h60-cab") === JSON.stringify((function () { var o = {}; o[LINEA_MED_H60 + " :: Medias"] = 9000; return o; })()),
+  "revisión #60: un recibo registrado con el formato del primer día (servicio con su línea en la cabecera) sigue descontando solo de su línea");
+
+// Si lo asignado a servicios en una línea pasa de lo que se pagó por ella
+// (dato dañado), verificarRecibo lo dice en vez de moverlo en silencio.
+state.cotizaciones = [cotMapa("cot-h60-a", "ped-h60-a", 10, 10000), cotSoloMediasH60, cotServH60];
+const repartosMalH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"]).map(function (g) {
+  var r = mapaCalc.calcRepartoLineaRecibo(g, { costoPagado: g.linea === CLAVE_TELA ? 100000 : 9000 });
+  if (g.linea !== CLAVE_TELA) r = Object.assign({}, r, { totales: Object.assign({}, r.totales, { servicios: [{ nombre: "Medias", monto: 12000 }] }) });
+  return { grupo: g, reparto: r };
+});
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-mal", { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [], etiquetas: [] }, repartosMalH60);
+assert(mapaCalc.verificarRecibo("rc-h60-mal", state.cotizaciones, mapaCalc.reconciliarTxRecibo([], "rc-h60-mal", state.cotizaciones).tx).some(function (pr) { return pr.indexOf("es más de lo que se pagó por esa línea") !== -1; }),
+  "revisión #60: una línea con más servicios que lo que se pagó por ella sale como problema del recibo");
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;

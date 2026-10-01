@@ -664,7 +664,9 @@ export function renderAsignarServicios(opts) {
   var destinoAttrs = 'data-form-destino="' + opts.formKey + '"' + (opts.formClave ? ' data-form-clave="' + esc(opts.formClave) + '"' : "");
   if (!disponibles.length && !filas.length) return "";
   var montoTotal = num(opts.monto) || 0;
-  var cubierto = filas.reduce(function (a, f) { return a + (num(f.monto) || 0); }, 0);
+  // Solo cuenta lo que de verdad se va a descontar: una fila sin servicio
+  // elegido no cubre nada (al guardar se pide elegirlo).
+  var cubierto = filas.reduce(function (a, f) { return a + (f.nombre ? Math.round(num(f.monto)) || 0 : 0); }, 0);
   var falta = Math.max(0, montoTotal - cubierto);
 
   var html = '<div class="field wide"><label>Asignar a servicio(s) (opcional)' +

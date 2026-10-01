@@ -259,6 +259,24 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésimo quinta ronda: revisión independiente del desperdicio y los servicios por línea)
+
+- **Anular un recibo con desperdicio** ya no deja un faltante ni un
+  sobrecosto falsos en los pedidos. Cada parte guarda cuánto de lo suyo
+  es desperdicio.
+- En "Ajustar reparto", **editar una fila ya no borra el "Sobrante"**
+  escrito: esa fila queda fija y el desperdicio se reparte entre las
+  demás.
+- **"Anular y corregir"** vuelve con el Sobrante, para poder cambiarlo, y
+  avisa si descarta un recibo que se estaba llenando.
+- **Producción** dice cuánto de la Cant. real es desperdicio.
+- **Servicios por línea:**
+  - se guardan solo en su línea, para no llenar la celda de la Sheet;
+  - los montos van en pesos enteros;
+  - una fila sin servicio elegido avisa en vez de descartarse;
+  - el foco ya no salta al inicio con 2 o más líneas.
+- Ver CONTABILIDAD.md, Hallazgos #59 y #60 (revisión independiente).
+
 ## Registro de cambios — septiembre 2026 (centésimo cuarta ronda: cada insumo del recibo se paga con su propio servicio)
 
 - En un **Recibo de compra**, cada línea (cada insumo) tiene su propio
