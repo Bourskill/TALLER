@@ -646,9 +646,22 @@ export function renderExploradorInsumos(opts) {
 // disponible, ver validarServiciosAsignados en core/calc.js); lo que no se
 // cubra acá sale de "Ganancia" — el único monto que sí puede quedar
 // negativo — así que no hace falta "agotar" nada para poder guardar.
+//
+// Tercer uso, el Recibo de compra: un selector por LÍNEA del recibo (pedido
+// del usuario 2026-09-30: "ya está pero general para el recibo, quiero que
+// esté para cada insumo" — Hallazgo #60). Para eso:
+// - `opts.formClave`: la clave de la línea dentro de `opts.formKey`
+//   (va aparte del path, ver resolverFormDestino en core/dom.js);
+// - `opts.comprometidoOtros` {nombre: monto}: lo que OTRAS líneas del mismo
+//   recibo ya tomaron de cada servicio, para que "disponible" diga lo que de
+//   verdad queda (la validación al registrar suma todas las líneas igual).
 export function renderAsignarServicios(opts) {
-  var disponibles = calcServiciosDisponibles();
+  var otros = opts.comprometidoOtros || {};
+  var disponibles = calcServiciosDisponibles().map(function (s) {
+    return Object.assign({}, s, { disponible: s.disponible - (num(otros[s.nombre]) || 0) });
+  });
   var filas = opts.filas || [];
+  var destinoAttrs = 'data-form-destino="' + opts.formKey + '"' + (opts.formClave ? ' data-form-clave="' + esc(opts.formClave) + '"' : "");
   if (!disponibles.length && !filas.length) return "";
   var montoTotal = num(opts.monto) || 0;
   var cubierto = filas.reduce(function (a, f) { return a + (num(f.monto) || 0); }, 0);
@@ -662,10 +675,10 @@ export function renderAsignarServicios(opts) {
     html += '<div class="empty" style="padding:6px 0;">Aún no hay plata acumulada en ningún servicio.</div>';
   } else {
     filas.forEach(function (fila, idx) {
-      html += renderFilaAsignacionServicio(opts.formKey, idx, fila, disponibles);
+      html += renderFilaAsignacionServicio(destinoAttrs, idx, fila, disponibles);
     });
     if (filas.length < disponibles.length) {
-      html += '<button type="button" class="btn ghost small" data-action="agregar-fila-servicio" data-form-destino="' + opts.formKey + '">+ Agregar servicio</button>';
+      html += '<button type="button" class="btn ghost small" data-action="agregar-fila-servicio" ' + destinoAttrs + ">+ Agregar servicio</button>";
     }
   }
 
@@ -676,17 +689,19 @@ export function renderAsignarServicios(opts) {
   return html;
 }
 
-function renderFilaAsignacionServicio(formKey, idx, fila, disponibles) {
+// `destinoAttrs`: data-form-destino (y data-form-clave si hace falta) ya
+// armados — ver renderAsignarServicios.
+function renderFilaAsignacionServicio(destinoAttrs, idx, fila, disponibles) {
   return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
-    '<select class="mini-input" style="flex:1;" data-action-change="set-fila-servicio-nombre" data-form-destino="' + formKey + '" data-idx="' + idx + '">' +
+    '<select class="mini-input" style="flex:1;" data-action-change="set-fila-servicio-nombre" ' + destinoAttrs + ' data-idx="' + idx + '">' +
     '<option value="">Elegir servicio…</option>' +
     disponibles.map(function (s) {
       return '<option value="' + esc(s.nombre) + '" ' + (fila.nombre === s.nombre ? "selected" : "") + ">" + esc(s.nombre) + " — disponible " + fmt(s.disponible) + "</option>";
     }).join("") +
     "</select>" +
-    '<input type="number" class="mini-input" style="width:130px;" placeholder="Monto" value="' + esc(fila.monto) + '" data-action-change="set-fila-servicio-monto" data-form-destino="' + formKey + '" data-idx="' + idx + '" />' +
+    '<input type="number" class="mini-input" style="width:130px;" placeholder="Monto" value="' + esc(fila.monto) + '" data-action-change="set-fila-servicio-monto" ' + destinoAttrs + ' data-idx="' + idx + '" />' +
     (fila.nombre ? '<button type="button" class="btn ghost small" data-action="abrir-historial-servicio" data-nombre="' + esc(fila.nombre) + '" title="Ver historial de entradas y salidas">🕘</button>' : "") +
-    '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" data-form-destino="' + formKey + '" data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
+    '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" ' + destinoAttrs + ' data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
     "</div>";
 }
 

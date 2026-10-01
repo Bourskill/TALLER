@@ -259,6 +259,19 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — septiembre 2026 (centésimo cuarta ronda: cada insumo del recibo se paga con su propio servicio)
+
+- En un **Recibo de compra**, cada línea (cada insumo) tiene su propio
+  "Asignar a servicio(s)". Por ejemplo, las medias se pagan con el
+  servicio "Medias" y la tela con "Corte", y cada una descuenta solo de
+  sus movimientos. Antes era una sola asignación para todo el recibo,
+  repartida entre todas sus filas.
+- Cada línea muestra cuánto queda en cada servicio después de lo que ya
+  tomaron las demás. Si entre todas se pasan, el aviso dice cuáles.
+- La tarjeta del recibo en Finanzas dice con qué se pagó cada línea.
+- Los recibos ya registrados no cambian.
+- Pedido del dueño, 2026-09-30. Ver CONTABILIDAD.md, Hallazgo #60.
+
 ## Registro de cambios — septiembre 2026 (centésimo tercera ronda: lo que sobra de un recibo puede ser desperdicio)
 
 - Cada línea de un **Recibo de compra** tiene un campo **"Sobrante"**

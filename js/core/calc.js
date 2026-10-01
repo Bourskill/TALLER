@@ -3015,15 +3015,21 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
   });
   if (!cabecera) {
     // Recibo sin ningún pedido vivo: lo que se sabe del papel sale de sus
-    // propias filas (los servicios, sumados por nombre).
-    var servicios = {};
+    // propias filas — los servicios, sumados por nombre Y por línea, así
+    // cada línea conserva exactamente lo que ya descontaba (Hallazgo #60;
+    // sumados solo por nombre, se volvían a repartir entre todas).
+    var servicios = {}, ordenServ = [];
     filas.forEach(function (t) {
-      (t.serviciosDescuento || []).forEach(function (s) { servicios[s.nombre] = (servicios[s.nombre] || 0) + Math.round(num(s.monto)); });
+      (t.serviciosDescuento || []).forEach(function (s) {
+        var k = JSON.stringify([s.nombre, t.reciboCompraLinea]);
+        if (!servicios[k]) { servicios[k] = { nombre: s.nombre, monto: 0, linea: t.reciboCompraLinea }; ordenServ.push(k); }
+        servicios[k].monto += Math.round(num(s.monto));
+      });
     });
     cabecera = {
       fecha: primeraFila ? primeraFila.fecha : "", proveedorId: primeraFila ? (primeraFila.proveedorId || "") : "",
       contraparte: primeraFila ? (primeraFila.contraparte || "") : "", numero: "", etiquetas: [],
-      servicios: Object.keys(servicios).map(function (n) { return { nombre: n, monto: servicios[n] }; })
+      servicios: ordenServ.map(function (k) { return servicios[k]; })
     };
   }
   var total = 0, pedidoIds = [];
@@ -3048,7 +3054,8 @@ export function calcRecibo(reciboId, cotizaciones, tx) {
       linea: k, nombre: L.totales.nombre || "", unidad: L.totales.unidad || "",
       esProducto: !!L.totales.esProducto, esGlobal: !!L.totales.esGlobal, congelada: L.congelada,
       cantidadTotal: num(L.totales.cantidadTotal), costoTotal: Math.round(num(L.totales.costoTotal)),
-      partes: L.partes, reserva: reserva
+      partes: L.partes, reserva: reserva,
+      servicios: (cabecera.servicios || []).filter(function (s) { return s.linea === k; })
     };
   });
   return { id: reciboId, cabecera: cabecera, lineas: lineasOut, total: total, pedidoIds: pedidoIds, problemas: problemas };
@@ -3092,7 +3099,7 @@ export function calcFilasRecibo(reciboId, cotizaciones, tx) {
         pedidoId: p.pedidoId, cotizacionId: p.cotId, esInsumo: "1",
         proveedorId: cab.proveedorId || "", insumoNombre: L.nombre,
         cantidad: L.esGlobal ? 0 : p.cantidad, unidad: L.unidad,
-        origenCompraClave: p.compraClave,
+        origenCompraClave: p.compraClave, serviciosDescuento: [],
         reciboCompraId: reciboId, reciboCompraRol: "parte", reciboCompraLinea: L.linea
       });
     });
@@ -3106,38 +3113,64 @@ export function calcFilasRecibo(reciboId, cotizaciones, tx) {
         monto: Math.max(0, L.reserva.costo), contraparte: contraparte, fecha: fecha,
         pedidoId: "", cotizacionId: "", esInsumo: "1",
         proveedorId: cab.proveedorId || "", insumoNombre: L.nombre,
-        cantidad: L.esGlobal ? 0 : L.reserva.cantidad, unidad: L.unidad,
+        cantidad: L.esGlobal ? 0 : L.reserva.cantidad, unidad: L.unidad, serviciosDescuento: [],
         reciboCompraId: reciboId, reciboCompraRol: "reserva", reciboCompraLinea: L.linea
       });
     }
   });
-  repartirServiciosEnFilasRecibo(filas, cab.servicios || []);
+  // Servicios POR LÍNEA (los que traen `linea`, Hallazgo #60): solo sobre
+  // las filas de esa línea — "Medias" pagadas con el servicio "Medias" no
+  // descuentan nada de las filas de la tela. Los de un recibo viejo (sin
+  // `linea`, asignados al recibo entero) y lo que no quepa en su línea, se
+  // reparten después entre todas las filas, igual que siempre: un recibo
+  // viejo queda idéntico.
+  var globales = [];
+  var porLinea = {}, ordenLineas = [];
+  (cab.servicios || []).forEach(function (s) {
+    if (!s.linea) { globales.push(s); return; }
+    if (!porLinea[s.linea]) { porLinea[s.linea] = []; ordenLineas.push(s.linea); }
+    porLinea[s.linea].push(s);
+  });
+  var sinLugar = [];
+  ordenLineas.forEach(function (linea) {
+    var suyas = filas.filter(function (f) { return f.reciboCompraLinea === linea; });
+    sinLugar = sinLugar.concat(repartirServiciosEnFilasRecibo(suyas, porLinea[linea]));
+  });
+  repartirServiciosEnFilasRecibo(filas, globales.concat(sinLugar));
   return { recibo: r, filas: filas };
 }
 
-// La plata de un servicio asignada al recibo (se asigna UNA vez, al recibo
-// entero) se reparte entre sus filas "por capacidad": cada servicio se
-// reparte proporcional a lo que a cada fila todavía le queda sin cubrir, así
+// La plata de un servicio asignada a un recibo (o a una línea suya) se
+// reparte entre esas filas "por capacidad": cada servicio se reparte
+// proporcional a lo que a cada fila todavía le queda sin cubrir, así
 // ninguna fila descuenta más que su propio monto y la suma por servicio da
 // exacta. Corrige lo que pasaba en Compras conjuntas (el descuento de un
 // pedido podía superar su monto y el excedente nunca llevaba ninguno).
+// Suma a lo que cada fila ya trae (una fila puede recibir primero lo de su
+// línea y después lo del recibo entero) y devuelve lo que no cupo
+// [{nombre, monto}], para no perder plata en silencio.
 function repartirServiciosEnFilasRecibo(filas, servicios) {
   var orden = filas.slice().sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-  var usado = orden.map(function () { return 0; });
-  orden.forEach(function (f) { f.serviciosDescuento = []; });
+  var usado = orden.map(function (f) {
+    return (f.serviciosDescuento || []).reduce(function (a, d) { return a + Math.round(num(d.monto)); }, 0);
+  });
+  var sinLugar = [];
   (servicios || []).forEach(function (s) {
     var monto = Math.round(num(s.monto));
     if (monto <= 0) return;
     var capacidades = orden.map(function (f, i) { return Math.max(0, Math.round(num(f.monto)) - usado[i]); });
     var capacidadTotal = capacidades.reduce(function (a, c) { return a + c; }, 0);
-    if (capacidadTotal <= 0) return;
-    var partes = repartirProporcional(Math.min(monto, capacidadTotal), capacidades, 0);
+    var aPoner = Math.min(monto, capacidadTotal);
+    if (monto > aPoner) sinLugar.push({ nombre: s.nombre, monto: monto - aPoner });
+    if (aPoner <= 0) return;
+    var partes = repartirProporcional(aPoner, capacidades, 0);
     partes.forEach(function (m, i) {
       if (m <= 0) return;
       usado[i] += m;
-      orden[i].serviciosDescuento.push({ nombre: s.nombre, monto: m });
+      orden[i].serviciosDescuento = (orden[i].serviciosDescuento || []).concat([{ nombre: s.nombre, monto: m }]);
     });
   });
+  return sinLugar;
 }
 
 function claveNaturalFilaRecibo(t) {

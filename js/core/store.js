@@ -278,12 +278,15 @@ export const state = {
   // (core/dom.js) lo direccionan con un `data-form-destino` de path punteado:
   // "formCompraConjunta.porClave.<clave>" (ver resolverFormDestino).
   // Desde el Recibo de compra (Hallazgo #52): `recibo` guarda los datos del
-  // papel (fecha, proveedor, N.º, servicios — el formKey de servicios es
-  // "formCompraConjunta.recibo") y `ajustar` qué líneas tienen abierta la
+  // papel (fecha, proveedor, N.º) y `ajustar` qué líneas tienen abierta la
   // tabla "Ajustar reparto". porClave[<línea>]: {cantidadComprada,
-  // costoPagado, cantidadesPorPedido, costosPorPedido, sobrante} — sobrante:
-  // lo que de verdad queda de reserva; el resto es desperdicio de los
-  // pedidos (ver calcRepartoLineaRecibo).
+  // costoPagado, cantidadesPorPedido, costosPorPedido, sobrante, servicios}
+  // — sobrante: lo que de verdad queda de reserva; el resto es desperdicio
+  // de los pedidos (ver calcRepartoLineaRecibo). servicios: con qué
+  // servicio(s) se paga ESA línea (Hallazgo #60) — formKey
+  // "formCompraConjunta.porClave" + data-form-clave=<línea>, porque la
+  // clave puede llevar puntos. `recibo.servicios` (para el recibo entero)
+  // solo queda en un borrador de antes del #60.
   formCompraConjunta: { seleccion: [], porClave: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] }, ajustar: {} },
   formPedido: {
     clienteId: "", cliente: "", tipoCliente: "propio", abono: "", fechaEntrega: "",

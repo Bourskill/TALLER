@@ -3432,6 +3432,74 @@ Sin el cambio, fallan.
 
 ---
 
+### 🟡 Hallazgo #60 — "Asignar a servicio(s)" en cada línea del recibo, no una sola vez para todo el papel. ✅ IMPLEMENTADO (pedido del dueño)
+
+Pedido del dueño (2026-09-30), sobre la línea "Medias - Poliester" de un
+recibo: "el dinero que se usa es muy general, quiero poder usar el dinero
+también [de] los servicios", y al preguntarle: "ya está pero general para
+el recibo, entonces quiero que esté para cada insumo". Ya existía una sola
+asignación para el recibo entero, al pie, y solo aparecía después de
+escribir "Pagué". Esa plata se repartía entre TODAS las filas del recibo
+por capacidad. Pagar las medias con el servicio "Medias" terminaba
+descontando también de las filas de la tela.
+
+**Qué cambia.**
+- Cada línea pagada del recibo tiene su propio "Asignar a servicio(s)".
+  Se guarda como `cabecera.servicios[] = {nombre, monto, linea}`, la misma
+  cabecera copiada en cada parte, así que sobrevive aunque una línea se
+  quede sin pedidos vivos.
+- `calcFilasRecibo` reparte lo de cada línea solo entre las filas de esa
+  línea (parte y reserva), por capacidad.
+- Un servicio sin `linea` (recibo de antes, migración F3, o un borrador
+  viejo) se reparte entre todas las filas, **exactamente como antes**. Hay
+  una prueba que compara contra el algoritmo viejo copiado tal cual. Lo
+  que no cupiera en su línea pasa a ese reparto general en vez de perderse
+  en silencio.
+- **Validación al registrar:**
+  - por línea: no más que lo que se pagó por ella, y el aviso nombra la
+    línea;
+  - entre todas: un mismo servicio no puede pasar de lo que tiene. El aviso
+    dice cuánto tiene y qué líneas lo piden.
+  - El selector de cada línea muestra como "disponible" lo que le dejan las
+    demás líneas.
+- **Recibo sin ningún pedido vivo:** sus servicios se reconstruyen desde
+  sus filas sumados por nombre Y por línea. Antes se sumaban solo por
+  nombre y se volvían a repartir entre todas.
+- **"Anular y corregir"** vuelve a llenar cada línea con lo que de verdad
+  descontaban sus filas. Esto vale también para un recibo viejo.
+- El total del recibo resume "Cubierto por servicios / Sale de Ganancia".
+  La tarjeta del recibo en Finanzas dice en cada línea con qué se pagó
+  (📋 Medias $22.500).
+
+**Bug latente corregido en el camino.** El componente compartido
+direccionaba el borrador con un path separado por puntos
+("formCompraConjunta.porClave.<clave>"). La clave de una línea lleva el
+nombre del insumo, así que "Medias cal. 9" se partía en dos y el botón no
+hacía nada. Ahora la clave va aparte, en `data-form-clave`
+(`resolverFormDestino(formKey, clave)` en core/dom.js). Sin `clave` todo
+sigue igual (formTx, formNominaPago).
+
+**Pruebas:**
+- un selector por línea, sin ninguno general;
+- clave con punto;
+- "disponible" descontando las otras líneas;
+- resumen del total;
+- dos líneas que se pasan del mismo servicio;
+- una línea que pide más de lo que pagó;
+- registrar: cada línea descuenta solo de su servicio y el recibo cuadra;
+- tarjeta en Finanzas;
+- ida y vuelta por la Sheet;
+- sin pedidos vivos;
+- "Anular y corregir";
+- recibo viejo idéntico;
+- borrador viejo.
+
+Sin el cambio, las de comportamiento nuevo fallan. Las de recibo viejo y
+borrador viejo pasan en las dos versiones, a propósito: son las que
+cuidan que nada de antes cambie.
+
+---
+
 ## Próximos pasos
 
 Esto es un mapa, no una lista de tareas ya aprobadas. Los 9 riesgos de la

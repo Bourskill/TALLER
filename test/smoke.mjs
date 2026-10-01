@@ -5445,8 +5445,9 @@ assert(document.getElementById("app").textContent.indexOf("3.00 libres") !== -1,
 assert(!document.querySelector('select[data-action-change="set-cot-compra"][data-cot="cot-conjA-test"][data-clave="' + grupoTelaTest.clave + '"][data-campo="estado"]'), "el estado de esa compra ya no se cambia acá (lo manda el recibo): no hay selector");
 click('[data-action="cerrar-cotizacion-editor"]');
 
-// -- el recibo también puede descontarse de un servicio ya acumulado — UNA
-// sola asignación para todo el papel, repartida entre sus filas por
+// -- el recibo también puede descontarse de un servicio ya acumulado —
+// desde el Hallazgo #60 (2026-09-30, "quiero que esté para cada insumo"),
+// una asignación POR LÍNEA, repartida entre las filas de esa línea por
 // capacidad (ninguna fila descuenta más que su monto).
 const { calcServiciosDisponibles: calcServDispConjTest } = await import("../js/core/calc.js");
 var cotAFreshConjTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
@@ -5463,13 +5464,14 @@ assert(!!grupoHiloTest && !calcLineasParaRecibo(state.formCompraConjunta.selecci
 assert(!document.querySelector('[data-action-change="set-fila-servicio-nombre"]'), "sin nada pagado todavía, no aparece \"Asignar a servicio(s)\"");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.linea + '"][data-campo="cantidadComprada"]', "30");
 setChange('[data-action-change="set-compra-conjunta-campo"][data-clave="' + grupoHiloTest.linea + '"][data-campo="costoPagado"]', "60000");
-assert(!!document.querySelector('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.recibo"]'), "con algo pagado, aparece \"Asignar a servicio(s)\" para TODO el recibo");
+const destHiloTest = '[data-form-destino="formCompraConjunta.porClave"][data-form-clave="' + grupoHiloTest.linea + '"]';
+assert(!!document.querySelector('[data-action="agregar-fila-servicio"]' + destHiloTest) && !document.querySelector('[data-form-destino="formCompraConjunta.recibo"]'), "con algo pagado, aparece \"Asignar a servicio(s)\" en la LÍNEA del hilo — ya no uno solo para todo el recibo (Hallazgo #60)");
 
 // -- primero, un intento que pide más de lo disponible: se bloquea y no toca nada --
-click('[data-action="agregar-fila-servicio"][data-form-destino="formCompraConjunta.recibo"]');
-assert(state.formCompraConjunta.recibo.servicios.length === 1, "agregar-fila-servicio funciona con el path anidado formCompraConjunta.recibo");
-setChange('select[data-action-change="set-fila-servicio-nombre"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "servicio-test-conj");
-setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "999999");
+click('[data-action="agregar-fila-servicio"]' + destHiloTest);
+assert(((state.formCompraConjunta.porClave[grupoHiloTest.linea] || {}).servicios || []).length === 1, "agregar-fila-servicio escribe en el borrador de ESA línea (formCompraConjunta.porClave + data-form-clave)");
+setChange('select[data-action-change="set-fila-servicio-nombre"]' + destHiloTest + '[data-idx="0"]', "servicio-test-conj");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destHiloTest + '[data-idx="0"]', "999999");
 var txAntesDelRechazoConjTest = state.tx.length;
 var alertaOriginalConjTest = global.alert;
 var alertaCapturadaConjTest = "";
@@ -5480,7 +5482,7 @@ assert(state.tx.length === txAntesDelRechazoConjTest, "pedir más de lo disponib
 assert(alertaCapturadaConjTest.indexOf("servicio-test-conj") !== -1, "...y avisa cuál servicio no alcanza, igual que en Registrar gasto/nómina");
 
 // -- ahora un monto que sí cabe --
-setChange('input[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.recibo"][data-idx="0"]', "30000");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destHiloTest + '[data-idx="0"]', "30000");
 click('[data-action="registrar-recibo-compra"]');
 var cotATrasHiloTest = state.cotizaciones.filter(function (c) { return c.id === "cot-conjA-test"; })[0];
 var compraHiloATest = cotATrasHiloTest.compras.filter(function (c) { return c.clave === grupoHiloTest.linea; })[0];
@@ -5489,9 +5491,9 @@ var filasHiloTest = state.tx.filter(function (t) { return t.reciboCompraId === r
 var txHiloATest = filasHiloTest.filter(function (t) { return t.cotizacionId === "cot-conjA-test"; })[0];
 var txHiloBTest = filasHiloTest.filter(function (t) { return t.cotizacionId === "cot-conjB-test"; })[0];
 assert(filasHiloTest.length === 2 && txHiloATest.monto === 20000 && txHiloBTest.monto === 40000, "el costo (60.000) se reparte 1/3-2/3: 20.000 y 40.000, sin reserva (se compró justo lo necesario)");
-assert(txHiloATest.serviciosDescuento[0].monto === 10000 && txHiloBTest.serviciosDescuento[0].monto === 20000, "los 30.000 del servicio se reparten por capacidad: 10.000 y 20.000");
+assert(((txHiloATest.serviciosDescuento || [])[0] || {}).monto === 10000 && ((txHiloBTest.serviciosDescuento || [])[0] || {}).monto === 20000, "los 30.000 del servicio se reparten por capacidad: 10.000 y 20.000");
 assert(calcServDispConjTest().filter(function (s) { return s.nombre === "servicio-test-conj"; })[0].disponible === 20000, "el servicio queda con 20.000 disponibles (50.000 − 30.000)");
-assert(state.formCompraConjunta.recibo.servicios.length === 0, "tras registrar, los datos del recibo (servicios incluidos) se limpian para el siguiente");
+assert(!state.formCompraConjunta.porClave[grupoHiloTest.linea] && state.formCompraConjunta.recibo.servicios.length === 0, "tras registrar, la línea (con sus servicios) y los datos del recibo se limpian para el siguiente");
 
 state.pedidos = pedidosPreviosConjuntaTest; state.cotizaciones = cotizacionesPreviasConjuntaTest; state.tx = txPreviosConjuntaTest;
 state.cotizacionEditando = ""; state.cotizacionesVista = "nueva"; state.finanzasVista = "nuevo";
@@ -8402,6 +8404,153 @@ const grupoCorregirDesp = mapaCalc.calcLineasParaRecibo(state.formCompraConjunta
 const corregirDesp = mapaCalc.calcRepartoLineaRecibo(grupoCorregirDesp, state.formCompraConjunta.porClave[CLAVE_TELA]);
 assert(cajaMapa() === 0 && corregirDesp.ok && cantsDesp(corregirDesp) === "2/1.5/1.5" && corregirDesp.reserva.cantidad === 0,
   "desperdicio: «Anular y corregir» devuelve la plata y deja el formulario con el mismo reparto (2.00 / 1.50 / 1.50, sin reserva)");
+
+state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
+state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;
+state.formCompraConjunta = { seleccion: [], porClave: {}, recibo: { fecha: "", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+
+// =====================================================================
+// Hallazgo #60 — servicios POR LÍNEA en el recibo (pedido del usuario
+// 2026-09-30, sobre la línea "Medias - Poliester": "ya está pero general
+// para el recibo, entonces quiero que esté para cada insumo").
+// Caso: OP de 10 camisetas — tela (10 m, $100.000) y "Medias cal. 9" (un
+// punto en el nombre, a propósito) — y otro pedido ya vendido con los
+// servicios "Medias" ($40.000) y "Corte" ($30.000) acumulados.
+// =====================================================================
+function cotH60(id, pedidoId) {
+  var c = cotMapa(id, pedidoId, 10, 10000);
+  c.referencias[0].insumos.push({ id: "med-" + id, nombre: "Medias cal. 9", unidad: "UND", costo: 2250, tipo: "producto_comprado", cantidad: 1, categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } });
+  return c;
+}
+const cotServH60 = cotMapa("cot-h60-s", "ped-h60-s", 10, 0);
+cotServH60.referencias[0].insumos = [
+  { id: "ms-h60", nombre: "Medias", unidad: "UND", costo: 4000, tipo: "producto_comprado", cantidad: 1, categoriaId: "", consumoPropio: true, esServicio: false, enlace: { categorias: [], insumos: [] } },
+  { id: "cs-h60", nombre: "Corte", unidad: "servicio", costo: 3000, tipo: "mano_obra", cantidad: 1, categoriaId: "", consumoPropio: true, esServicio: true, enlace: { categorias: [], insumos: [] } }
+];
+cotServH60.compras = mapaCalc.calcListaCompras(cotServH60).map(function (l) { return { clave: l.clave, estado: "servicio", costoReal: l.nombre === "Medias" ? 40000 : 30000 }; });
+state.pedidos = [pedidoMapa("ped-h60-a", "cot-h60-a", 500000, 122500), pedidoMapa("ped-h60-s", "cot-h60-s", 300000, 0)];
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+state.tx = []; state.txPapelera = []; state.cotSucia = "";
+const dispH60 = function (nombre) { return (mapaCalc.calcServiciosDisponibles().filter(function (s) { return s.nombre === nombre; })[0] || { disponible: 0 }).disponible; };
+assert(dispH60("Medias") === 40000 && dispH60("Corte") === 30000, "(punto de partida #60) hay $40.000 en el servicio Medias y $30.000 en Corte");
+
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: ["ped-h60-a"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+render();
+const lineasH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a"]);
+const LINEA_MED_H60 = lineasH60.filter(function (g) { return g.nombre === "Medias cal. 9"; })[0].linea;
+assert(LINEA_MED_H60.indexOf(".") !== -1, "(la clave de la línea de medias lleva un punto: \"" + LINEA_MED_H60 + "\")");
+const campoH60 = function (linea, campo) { return '[data-action-change="set-compra-conjunta-campo"][data-clave="' + linea + '"][data-campo="' + campo + '"]'; };
+const destH60 = function (linea) { return '[data-form-destino="formCompraConjunta.porClave"][data-form-clave="' + linea + '"]'; };
+assert(!document.querySelector('[data-action="agregar-fila-servicio"]'), "#60: sin nada pagado, ninguna línea ofrece servicios todavía");
+setChange(campoH60(LINEA_MED_H60, "costoPagado"), "22500");
+setChange(campoH60(CLAVE_TELA, "costoPagado"), "100000");
+assert(!!document.querySelector('[data-action="agregar-fila-servicio"]' + destH60(LINEA_MED_H60)) && !!document.querySelector('[data-action="agregar-fila-servicio"]' + destH60(CLAVE_TELA)) &&
+  !document.querySelector('[data-form-destino="formCompraConjunta.recibo"]'),
+  "#60: cada línea pagada tiene su propio \"Asignar a servicio(s)\" — ya no uno general para el recibo");
+click('[data-action="agregar-fila-servicio"]' + destH60(LINEA_MED_H60));
+assert((state.formCompraConjunta.porClave[LINEA_MED_H60].servicios || []).length === 1,
+  "#60: el botón funciona aunque la clave de la línea lleve un punto (va en data-form-clave, aparte del path) — con el path punteado de antes, \"medias cal. 9\" se partía en dos y el botón no hacía nada");
+setChange('select[data-action-change="set-fila-servicio-nombre"]' + destH60(LINEA_MED_H60) + '[data-idx="0"]', "Medias");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destH60(LINEA_MED_H60) + '[data-idx="0"]', "22500");
+click('[data-action="agregar-fila-servicio"]' + destH60(CLAVE_TELA));
+const opcionMediasTelaH60 = Array.prototype.filter.call(document.querySelectorAll('select[data-action-change="set-fila-servicio-nombre"]' + destH60(CLAVE_TELA) + ' option'), function (o) { return o.value === "Medias"; })[0];
+assert(!!opcionMediasTelaH60 && opcionMediasTelaH60.textContent.indexOf("disponible $17.500") !== -1,
+  "#60: en la línea de la tela, \"Medias\" dice lo que le dejan las demás líneas ($40.000 − $22.500 = $17.500)");
+const totalH60 = function () { var cards = document.querySelectorAll(".cc-grupo"); return cards[cards.length - 1].textContent; };
+assert(totalH60().indexOf("Cubierto por servicios: $22.500") !== -1 && totalH60().indexOf("Sale de Ganancia: $100.000") !== -1,
+  "#60: el total del recibo suma lo que cubren las líneas ($22.500) y lo que sale de Ganancia ($100.000)");
+
+// Dos líneas tomando del mismo servicio por encima de lo que tiene: no se registra.
+setChange('select[data-action-change="set-fila-servicio-nombre"]' + destH60(CLAVE_TELA) + '[data-idx="0"]', "Medias");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destH60(CLAVE_TELA) + '[data-idx="0"]', "20000");
+var alertaH60 = "";
+const alertPrevioH60 = window.alert; window.alert = function (m) { alertaH60 = m; };
+click('[data-action="registrar-recibo-compra"]');
+assert(state.tx.length === 0 && alertaH60.indexOf('"Medias" tiene $40.000 disponible') === 0 && alertaH60.indexOf("Medias cal. 9 $22.500") !== -1 && alertaH60.indexOf("Tela $20.000") !== -1,
+  "#60: dos líneas que juntas piden $42.500 de \"Medias\" (tiene $40.000) no se registran, y el aviso dice cuánto tiene y qué líneas lo están tomando");
+// Una línea no puede tomar de servicios más de lo que se pagó por ella.
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destH60(LINEA_MED_H60) + '[data-idx="0"]', "30000");
+setChange('select[data-action-change="set-fila-servicio-nombre"]' + destH60(CLAVE_TELA) + '[data-idx="0"]', "Corte");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destH60(CLAVE_TELA) + '[data-idx="0"]', "10000");
+alertaH60 = "";
+click('[data-action="registrar-recibo-compra"]');
+assert(state.tx.length === 0 && alertaH60.indexOf("Medias cal. 9:") === 0 && alertaH60.indexOf("22.500") !== -1,
+  "#60: una línea de $22.500 no puede tomar $30.000 de servicios — el aviso nombra la línea");
+setChange('input[data-action-change="set-fila-servicio-monto"]' + destH60(LINEA_MED_H60) + '[data-idx="0"]', "22500");
+alertaH60 = "";
+click('[data-action="registrar-recibo-compra"]');
+window.alert = alertPrevioH60;
+const reciboH60 = (compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
+assert(alertaH60 === "" && !!reciboH60 && cajaMapa() === -122500, "#60: con montos válidos el recibo se registra ($122.500 de la caja)");
+const servDeLineaH60 = function (tx, linea) {
+  var s = {};
+  tx.filter(function (t) { return t.reciboCompraId === reciboH60 && t.reciboCompraLinea === linea; }).forEach(function (t) {
+    (t.serviciosDescuento || []).forEach(function (d) { s[d.nombre] = (s[d.nombre] || 0) + d.monto; });
+  });
+  return JSON.stringify(s);
+};
+assert(servDeLineaH60(state.tx, LINEA_MED_H60) === JSON.stringify({ Medias: 22500 }) && servDeLineaH60(state.tx, CLAVE_TELA) === JSON.stringify({ Corte: 10000 }),
+  "#60: los movimientos de las medias descuentan solo de \"Medias\" ($22.500) y los de la tela solo de \"Corte\" ($10.000) — antes se repartían entre todas las filas del recibo");
+assert(dispH60("Medias") === 17500 && dispH60("Corte") === 20000, "#60: a los servicios les queda $17.500 (Medias) y $20.000 (Corte)");
+assert(mapaCalc.verificarRecibo(reciboH60, state.cotizaciones, state.tx).length === 0 &&
+  mapaCalc.calcRecibo(reciboH60, state.cotizaciones, state.tx).cabecera.servicios.every(function (s) { return !!s.linea; }),
+  "#60: el recibo cuadra al peso y cada servicio quedó guardado con su línea");
+render();
+assert(document.getElementById("app").textContent.indexOf("📋 Medias $22.500") !== -1, "#60: la tarjeta del recibo dice en la línea de medias con qué servicio se pagó");
+
+// Ida y vuelta por la Sheet.
+const vueltaH60 = await idaYVueltaSheetsMapa(state.tx, state.cotizaciones);
+assert(mapaCalc.verificarRecibo(reciboH60, vueltaH60.cotizaciones, vueltaH60.tx).length === 0 &&
+  servDeLineaH60(vueltaH60.tx, LINEA_MED_H60) === JSON.stringify({ Medias: 22500 }) && servDeLineaH60(vueltaH60.tx, CLAVE_TELA) === JSON.stringify({ Corte: 10000 }),
+  "#60: tras ida y vuelta por la Sheet, el recibo sigue cuadrado y cada línea con su servicio");
+
+// Recibo sin ningún pedido vivo (se borraron sus cotizaciones): cada línea
+// conserva lo que descontaba.
+const cotsSinH60 = state.cotizaciones.filter(function (c) { return c.id !== "cot-h60-a"; });
+const txSinH60 = mapaCalc.reconciliarTxRecibo(state.tx, reciboH60, cotsSinH60).tx;
+assert(servDeLineaH60(txSinH60, LINEA_MED_H60) === JSON.stringify({ Medias: 22500 }) && servDeLineaH60(txSinH60, CLAVE_TELA) === JSON.stringify({ Corte: 10000 }) &&
+  !mapaCalc.reconciliarTxRecibo(txSinH60, reciboH60, cotsSinH60).hayCambios,
+  "#60: sin ningún pedido vivo, cada línea conserva su servicio (reconstruido por línea desde sus filas) y queda estable");
+
+// "Anular y corregir": cada línea vuelve con su servicio.
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboH60; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+const porClaveH60 = state.formCompraConjunta.porClave;
+assert(cajaMapa() === 0 && dispH60("Medias") === 40000 &&
+  JSON.stringify((porClaveH60[LINEA_MED_H60] || {}).servicios) === JSON.stringify([{ nombre: "Medias", monto: "22500" }]) &&
+  JSON.stringify((porClaveH60[CLAVE_TELA] || {}).servicios) === JSON.stringify([{ nombre: "Corte", monto: "10000" }]),
+  "#60: «Anular y corregir» devuelve la plata a los servicios y deja cada línea con el suyo para registrar de nuevo");
+
+// Un recibo VIEJO (servicios del recibo entero, sin línea) se reparte igual
+// que siempre: por capacidad entre TODAS sus filas.
+state.tx = [];
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+const lineasViejoH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a"]);
+const repartosViejoH60 = lineasViejoH60.map(function (g) {
+  return { grupo: g, reparto: mapaCalc.calcRepartoLineaRecibo(g, { costoPagado: g.linea === CLAVE_TELA ? 100000 : 22500 }) };
+});
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-viejo", { fecha: "2026-09-20", proveedorId: "", numero: "", servicios: [{ nombre: "Corte", monto: 10000 }], etiquetas: [] }, repartosViejoH60);
+const filasViejoH60 = mapaCalc.calcFilasRecibo("rc-h60-viejo", state.cotizaciones, []).filas;
+// El algoritmo de antes, copiado tal cual, para comparar.
+const ordenViejoH60 = filasViejoH60.slice().sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+const esperadoViejoH60 = mapaCalc.repartirProporcional(10000, ordenViejoH60.map(function (f) { return f.monto; }), 0);
+assert(ordenViejoH60.every(function (f, i) { return JSON.stringify(f.serviciosDescuento) === JSON.stringify(esperadoViejoH60[i] > 0 ? [{ nombre: "Corte", monto: esperadoViejoH60[i] }] : []); }) &&
+  ordenViejoH60.filter(function (f) { return f.serviciosDescuento.length; }).length === 2,
+  "#60: un recibo viejo (servicio para el recibo entero) se reparte exactamente como antes, entre las filas de todas sus líneas");
+
+// Un borrador de antes del #60, con servicios para el recibo entero: se ve
+// y se registra igual.
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+state.formCompraConjunta = { seleccion: ["ped-h60-a"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [{ nombre: "Corte", monto: "5000" }] }, ajustar: {} };
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000" };
+render();
+assert(!!document.querySelector('[data-action-change="set-fila-servicio-monto"][data-form-destino="formCompraConjunta.recibo"]'), "#60: un borrador viejo con servicios para el recibo entero los sigue mostrando (para poder quitarlos)");
+click('[data-action="registrar-recibo-compra"]');
+const reciboLegadoH60 = (compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
+assert(!!reciboLegadoH60 && dispH60("Corte") === 25000 && mapaCalc.verificarRecibo(reciboLegadoH60, state.cotizaciones, state.tx).length === 0,
+  "#60: ...y se registran: Corte queda con $25.000 y el recibo cuadra");
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;

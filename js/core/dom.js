@@ -127,18 +127,20 @@ function irAPestana(key) {
 }
 
 // Resuelve `data-form-destino` contra `state`: una clave plana ("formTx",
-// "formNominaPago") o un path punteado ("formCompraConjunta.porClave.<clave>",
-// para Compras conjuntas — ver renderFilaGrupoCompraConjunta en
-// modules/finanzas.js) que apunta a un borrador anidado, indexado por
-// insumo. Con una sola clave se comporta exactamente igual que `state[key]`
-// de antes — nada cambia para "formTx"/"formNominaPago".
-function resolverFormDestino(formKey) {
+// "formNominaPago") o un path punteado ("formCompraConjunta.porClave") que
+// apunta a un borrador anidado. `clave` (el `data-form-clave` del elemento)
+// es el último paso, aparte del path: la clave de una línea del Recibo de
+// compra lleva el NOMBRE del insumo ("hilo cal. 40|cono|hilo"), y un punto
+// en ese nombre partía el path en dos y el botón no hacía nada (Hallazgo
+// #60). Sin `clave` se comporta exactamente igual que antes.
+function resolverFormDestino(formKey, clave) {
   var partes = String(formKey || "").split(".");
   var obj = state;
   for (var i = 0; i < partes.length; i++) {
     if (!obj) return null;
     obj = obj[partes[i]];
   }
+  if (obj && clave !== null && clave !== undefined && clave !== "") obj = obj[clave];
   return obj || null;
 }
 
@@ -319,28 +321,29 @@ var coreActions = {
   // finanzas.js ni en pendientes.js) porque las usan varios lugares:
   // `data-form-destino` dice sobre cuál borrador de `state` actuar (ej.
   // "formTx", "formNominaPago", o un path anidado como
-  // "formCompraConjunta.porClave.<clave>" para Compras conjuntas, donde el
-  // borrador vive indexado por insumo — ver resolverFormDestino abajo), así
+  // "formCompraConjunta.porClave" + `data-form-clave` para cada línea del
+  // Recibo de compra, donde el borrador vive indexado por insumo — ver
+  // resolverFormDestino arriba), así
   // ningún módulo necesita conocer los detalles de los otros. El monto de
   // cada fila NO se topa acá a lo disponible del servicio elegido — eso se
   // revisa una sola vez, al guardar de verdad (ver validarServiciosAsignados
   // en core/calc.js), para no pelear con el usuario mientras todavía está
   // escribiendo.
   "agregar-fila-servicio": function (el) {
-    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"), el.getAttribute("data-form-clave"));
     if (!destino) return;
     destino.servicios = (destino.servicios || []).concat([{ nombre: "", monto: "" }]);
     notify();
   },
   "quitar-fila-servicio": function (el) {
-    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"), el.getAttribute("data-form-clave"));
     var idx = Number(el.getAttribute("data-idx"));
     if (!destino || !destino.servicios) return;
     destino.servicios = destino.servicios.filter(function (_, i) { return i !== idx; });
     notify();
   },
   "set-fila-servicio-nombre": function (el) {
-    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"), el.getAttribute("data-form-clave"));
     var idx = Number(el.getAttribute("data-idx"));
     var fila = destino && destino.servicios && destino.servicios[idx];
     if (!fila) return;
@@ -348,7 +351,7 @@ var coreActions = {
     notify();
   },
   "set-fila-servicio-monto": function (el) {
-    var destino = resolverFormDestino(el.getAttribute("data-form-destino"));
+    var destino = resolverFormDestino(el.getAttribute("data-form-destino"), el.getAttribute("data-form-clave"));
     var idx = Number(el.getAttribute("data-idx"));
     var fila = destino && destino.servicios && destino.servicios[idx];
     if (!fila) return;

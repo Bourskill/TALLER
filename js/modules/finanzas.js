@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -104,9 +104,10 @@ function soloOp(etiqueta) { return String(etiqueta || "").split(" · ")[0]; }
 
 // El borrador puede venir de antes del recibo (un borrador guardado de
 // Compras conjuntas, o un reset con solo {seleccion, porClave}): sin
-// `recibo`, "Asignar a servicio(s)" no tendría dónde escribir (su
-// data-form-destino es "formCompraConjunta.recibo", ver
-// resolverFormDestino en core/dom.js).
+// `recibo` no habría dónde escribir los datos del papel. `recibo.servicios`
+// es lo de antes del Hallazgo #60 (servicios para el recibo entero): ahora
+// cada línea lleva los suyos en porClave[<línea>].servicios, pero un
+// borrador viejo que todavía los traiga se sigue mostrando y registrando.
 function formReciboCompleto() {
   var f = state.formCompraConjunta || {};
   return Object.assign({ seleccion: [], porClave: {}, ajustar: {} }, f, {
@@ -139,19 +140,44 @@ function renderFormRecibo(lineas) {
   html += '<div class="cot-col-title" style="margin-top:16px;">¿Qué compraste?' +
     renderHelp('Escribe lo que dice el papel del proveedor: cuánto compraste y cuánto pagaste. Solo entran al recibo las líneas con algo en "Pagué"; las demás se quedan pendientes. Cada pedido recibe lo que necesita y lo que sobre queda como reserva. Si lo que sobra no sirve (un retazo, desperdicio), escribe en "Sobrante" lo que de verdad queda — 0 si nada: el resto se reparte entre los pedidos como parte de su costo. Con "Ajustar reparto" puedes cambiar a mano cuánto le toca a cada uno.') +
     "</div>";
-  var total = 0, enRecibo = 0;
+  // Lo que cada línea (y un borrador viejo, a nivel recibo) ya tomó de cada
+  // servicio: cada línea muestra como "disponible" lo que le dejan las demás.
+  var tomadoPorLinea = {};
   lineas.forEach(function (g) {
     var d = draft[g.linea] || {};
-    html += renderLineaRecibo(g, d);
-    if (num(d.costoPagado) > 0) { total += Math.round(num(d.costoPagado)); enRecibo++; }
+    if (num(d.costoPagado) > 0) tomadoPorLinea[g.linea] = serviciosPorNombre(d.servicios);
   });
+  var tomadoRecibo = serviciosPorNombre(rec.servicios);
+  var total = 0, enRecibo = 0, cubierto = 0;
+  lineas.forEach(function (g) {
+    var d = draft[g.linea] || {};
+    var otros = Object.assign({}, tomadoRecibo);
+    Object.keys(tomadoPorLinea).forEach(function (linea) {
+      if (linea === g.linea) return;
+      Object.keys(tomadoPorLinea[linea]).forEach(function (n) { otros[n] = (otros[n] || 0) + tomadoPorLinea[linea][n]; });
+    });
+    html += renderLineaRecibo(g, d, otros);
+    if (num(d.costoPagado) > 0) {
+      total += Math.round(num(d.costoPagado)); enRecibo++;
+      Object.keys(tomadoPorLinea[g.linea]).forEach(function (n) { cubierto += tomadoPorLinea[g.linea][n]; });
+    }
+  });
+  Object.keys(tomadoRecibo).forEach(function (n) { cubierto += tomadoRecibo[n]; });
 
   html += '<div class="card cc-grupo" style="margin-top:12px;">';
   html += '<div class="cc-grupo-head"><div class="cc-grupo-titulo"><b>Total del recibo</b>' +
     (enRecibo ? '<span class="tag">' + enRecibo + " línea" + (enRecibo === 1 ? "" : "s") + "</span>" : "") + "</div>" +
     '<span class="amount neg">' + fmt(total) + "</span></div>";
-  if (total > 0) {
-    html += renderAsignarServicios({ formKey: "formCompraConjunta.recibo", filas: rec.servicios || [], monto: total });
+  if ((rec.servicios || []).length) {
+    // Borrador de antes del Hallazgo #60: servicios para el recibo entero.
+    html += renderAsignarServicios({ formKey: "formCompraConjunta.recibo", filas: rec.servicios, monto: total });
+  } else if (total > 0) {
+    var falta = Math.max(0, total - cubierto);
+    html += '<div class="section-sub" style="margin-top:6px;">' +
+      (cubierto ? "Cubierto por servicios: <b>" + fmt(cubierto) + "</b> · " : "") +
+      'Sale de Ganancia: <b style="color:' + (falta > 0 ? "var(--warning-ink)" : "var(--ink)") + ';">' + fmt(falta) + "</b>" +
+      (cubierto ? "" : " — cada línea tiene su propio \"Asignar a servicio(s)\".") +
+      "</div>";
   }
   html += '<div class="row-actions" style="margin-top:var(--sp-3);"><button class="btn" data-action="registrar-recibo-compra">Registrar recibo' + (total > 0 ? " (" + fmt(total) + ")" : "") + "</button></div>";
   html += "</div>";
@@ -160,7 +186,19 @@ function renderFormRecibo(lineas) {
 
 function escritoRecibo(v) { return v !== undefined && v !== null && v !== ""; }
 
-function renderLineaRecibo(g, d) {
+// {nombre: monto} de unas filas de "Asignar a servicio(s)" — solo las que
+// ya tienen servicio y monto (las que se registrarían).
+function serviciosPorNombre(filas) {
+  var res = {};
+  (filas || []).forEach(function (f) {
+    if (f && f.nombre && num(f.monto) > 0) res[f.nombre] = (res[f.nombre] || 0) + num(f.monto);
+  });
+  return res;
+}
+
+// `otros`: lo que las demás líneas del recibo ya tomaron de cada servicio
+// (ver renderFormRecibo).
+function renderLineaRecibo(g, d, otros) {
   var dec = g.esProducto ? 0 : 2;
   // Se calcula aunque falte "Pagué": `sobra` decide si hay algo que
   // preguntar en "Sobrante" (la vista previa del reparto sí espera al pago).
@@ -213,6 +251,14 @@ function renderLineaRecibo(g, d) {
     if (r.faltan > 0) {
       html += '<div class="section-sub" style="margin-top:4px;color:var(--warning-ink);">Compraste menos de lo que necesitan: faltan ' + fmtCant(r.faltan, dec) + " " + esc(g.unidad) + ". Se reparte a prorrata y lo que falta queda pendiente como reposición de cada pedido.</div>";
     }
+    // Con qué servicio(s) se paga ESTA línea (pedido del usuario
+    // 2026-09-30: "ya está pero general para el recibo, quiero que esté para
+    // cada insumo" — Hallazgo #60). La clave de la línea va en
+    // data-form-clave, aparte del path: puede llevar puntos.
+    html += '<div style="margin-top:8px;">' + renderAsignarServicios({
+      formKey: "formCompraConjunta.porClave", formClave: g.linea,
+      filas: d.servicios || [], monto: Math.round(num(d.costoPagado)), comprometidoOtros: otros || {}
+    }) + "</div>";
     html += '<button class="btn ghost small" style="margin-top:6px;" data-action="toggle-ajustar-recibo" data-clave="' + esc(g.linea) + '">' + (abierta ? "▾" : "▸") + " Ajustar reparto</button>";
     if (abierta) html += renderAjusteRecibo(g, d, r, dec);
   }
@@ -264,6 +310,17 @@ function renderUltimosRecibos() {
       "</div>";
   });
   return html + "</div>";
+}
+
+// [{nombre, monto}] sumados por nombre — un recibo guarda los servicios
+// por línea (Hallazgo #60), el total del papel los muestra juntos.
+function sumarServiciosPorNombre(servicios) {
+  var orden = [], suma = {};
+  (servicios || []).forEach(function (s) {
+    if (!(s.nombre in suma)) { suma[s.nombre] = 0; orden.push(s.nombre); }
+    suma[s.nombre] += Math.round(num(s.monto));
+  });
+  return orden.map(function (n) { return { nombre: n, monto: suma[n] }; });
 }
 
 function nombreProveedorRecibo(r) {
@@ -325,7 +382,10 @@ function renderTarjetaRecibo(reciboId) {
   if (abierto) {
     r.lineas.forEach(function (L) {
       var dec = L.esProducto ? 0 : 2;
-      html += '<div style="margin-top:10px;"><b>' + esc(L.nombre) + "</b> · " + (L.esGlobal ? "" : fmtCant(L.cantidadTotal, dec) + " " + esc(L.unidad) + " · ") + fmt(L.costoTotal) + (L.congelada ? ' <span class="tag" title="Ya no queda ningún pedido vivo en esta línea: lo pagado quedó como reserva.">sin pedidos</span>' : "") + "</div>";
+      var servLinea = sumarServiciosPorNombre(L.servicios);
+      html += '<div style="margin-top:10px;"><b>' + esc(L.nombre) + "</b> · " + (L.esGlobal ? "" : fmtCant(L.cantidadTotal, dec) + " " + esc(L.unidad) + " · ") + fmt(L.costoTotal) + (L.congelada ? ' <span class="tag" title="Ya no queda ningún pedido vivo en esta línea: lo pagado quedó como reserva.">sin pedidos</span>' : "") +
+        (servLinea.length ? ' <span class="tag" title="Pagado con: ' + esc(servLinea.map(function (s) { return s.nombre + " " + fmt(s.monto); }).join(", ")) + '">📋 ' + esc(servLinea.map(function (s) { return s.nombre + " " + fmt(s.monto); }).join(", ")) + "</span>" : "") +
+        "</div>";
       L.partes.forEach(function (p) {
         var ped = pedidoPorId(p.pedidoId);
         var cancelado = ped && pedidoCancelado(ped);
@@ -341,7 +401,7 @@ function renderTarjetaRecibo(reciboId) {
       }
     });
     if ((cab.servicios || []).length) {
-      html += '<div class="section-sub" style="margin-top:8px;">📋 Pagado con: ' + cab.servicios.map(function (s) { return esc(s.nombre) + " " + fmt(s.monto); }).join(", ") + "</div>";
+      html += '<div class="section-sub" style="margin-top:8px;">📋 Pagado con: ' + sumarServiciosPorNombre(cab.servicios).map(function (s) { return esc(s.nombre) + " " + fmt(s.monto); }).join(", ") + "</div>";
     }
     html += '<div class="section-sub" style="margin-top:8px;">' + fmt(pagado - enReserva) + " en pedidos + " + fmt(enReserva) + " en reserva = <b>" + fmt(pagado) + " pagados</b></div>";
     if (problemas.length) {
@@ -994,7 +1054,37 @@ export var actions = {
     }
     var total = repartos.reduce(function (a, x) { return a + x.reparto.totales.costoTotal; }, 0);
     var rec = f.recibo || {};
-    var validacion = validarServiciosAsignados(rec.servicios, total);
+    // Servicios: cada línea con los suyos (no más que lo que se pagó por
+    // ella) y, juntas, ningún servicio por encima de lo que tiene — dos
+    // líneas pueden tomar del mismo (Hallazgo #60). Un borrador viejo con
+    // servicios para el recibo entero entra igual, sin línea.
+    var serviciosRecibo = [], quienTomaServicio = {};
+    for (var j = 0; j < repartos.length; j++) {
+      var deLinea = validarServiciosAsignados((draft[repartos[j].grupo.linea] || {}).servicios, repartos[j].reparto.totales.costoTotal);
+      if (!deLinea.ok) { window.alert(repartos[j].grupo.nombre + ": " + deLinea.error); return; }
+      deLinea.limpias.forEach(function (s) {
+        serviciosRecibo.push({ nombre: s.nombre, monto: s.monto, linea: repartos[j].grupo.linea });
+        (quienTomaServicio[s.nombre] = quienTomaServicio[s.nombre] || []).push(repartos[j].grupo.nombre + " " + fmt(s.monto));
+      });
+    }
+    var validacionRecibo = validarServiciosAsignados(rec.servicios, total);
+    if (!validacionRecibo.ok) { window.alert(validacionRecibo.error); return; }
+    validacionRecibo.limpias.forEach(function (s) { (quienTomaServicio[s.nombre] = quienTomaServicio[s.nombre] || []).push("todo el recibo " + fmt(s.monto)); });
+    serviciosRecibo = serviciosRecibo.concat(validacionRecibo.limpias);
+    // Cada línea por separado cabe, pero entre todas pueden pasarse del
+    // mismo servicio: el aviso dice cuáles lo están tomando.
+    var disponiblesAhora = calcServiciosDisponibles();
+    var pasado = Object.keys(quienTomaServicio).filter(function (n) {
+      var d = disponiblesAhora.filter(function (x) { return x.nombre === n; })[0];
+      var pedido = serviciosRecibo.filter(function (x) { return x.nombre === n; }).reduce(function (a, x) { return a + num(x.monto); }, 0);
+      return pedido > (d ? d.disponible : 0) + 0.5;
+    })[0];
+    if (pasado) {
+      var dispPasado = disponiblesAhora.filter(function (x) { return x.nombre === pasado; })[0];
+      window.alert('"' + pasado + '" tiene ' + fmt(dispPasado ? dispPasado.disponible : 0) + " disponible, pero en este recibo se le pide más: " + quienTomaServicio[pasado].join(", ") + ".");
+      return;
+    }
+    var validacion = validarServiciosAsignados(serviciosRecibo, total);
     if (!validacion.ok) { window.alert(validacion.error); return; }
     // Una compra que todavía tiene un movimiento viejo propio en Finanzas
     // (ej. se pasó a "Aún no" sin pulsar "Actualizar movimientos") contaría
@@ -1032,7 +1122,7 @@ export var actions = {
 
     var etiquetas = [];
     repartos.forEach(function (x) { x.grupo.participantes.forEach(function (p) { if (etiquetas.indexOf(p.etiqueta) === -1) etiquetas.push(p.etiqueta); }); });
-    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: validacion.limpias, etiquetas: etiquetas };
+    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: serviciosRecibo, etiquetas: etiquetas };
     var reciboId = uid();
     var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: -total }, function () {
       state.cotizaciones = aplicarReciboACotizaciones(state.cotizaciones, reciboId, cabecera, repartos);
@@ -1164,6 +1254,17 @@ function anularRecibo(reciboId, corregir) {
     r.lineas.forEach(function (L) {
       if (!L.partes.length) return;
       var d = { costoPagado: String(L.costoTotal) };
+      // Lo que descontaban sus filas, sumado por servicio: exacto también
+      // para un recibo viejo (servicios del recibo entero, repartidos).
+      var servFilas = {}, ordenServ = [];
+      filas.forEach(function (t) {
+        if (t.reciboCompraLinea !== L.linea) return;
+        (t.serviciosDescuento || []).forEach(function (s) {
+          if (!(s.nombre in servFilas)) { servFilas[s.nombre] = 0; ordenServ.push(s.nombre); }
+          servFilas[s.nombre] += Math.round(num(s.monto));
+        });
+      });
+      d.servicios = ordenServ.filter(function (n) { return servFilas[n] > 0; }).map(function (n) { return { nombre: n, monto: String(servFilas[n]) }; });
       if (L.esGlobal) {
         d.costosPorPedido = {};
         L.partes.forEach(function (p) { d.costosPorPedido[p.cotId] = String(p.costo); });
@@ -1177,7 +1278,7 @@ function anularRecibo(reciboId, corregir) {
     state.formCompraConjunta = {
       seleccion: r.pedidoIds.filter(function (pid) { return state.pedidos.some(function (p) { return p.id === pid; }); }),
       porClave: porClave, ajustar: {},
-      recibo: { fecha: cab.fecha || "", proveedorId: cab.proveedorId || "", numero: cab.numero || "", servicios: (cab.servicios || []).map(function (s) { return { nombre: s.nombre, monto: String(s.monto) }; }) }
+      recibo: { fecha: cab.fecha || "", proveedorId: cab.proveedorId || "", numero: cab.numero || "", servicios: [] }
     };
     state.finanzasVista = "conjuntas";
   }
