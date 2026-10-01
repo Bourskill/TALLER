@@ -3457,19 +3457,48 @@ corregido:**
 3. **"Anular y corregir" no dejaba cambiar el Sobrante**: volvía con las
    cantidades fijas, desperdicio adentro. Ahora vuelve el Sobrante y las
    partes con desperdicio quedan automáticas.
-4. **Producción** muestra "✂ X de desperdicio" junto a la fila, y la Cant.
-   real lo dice al pasar el mouse. Así nadie la "corrige" creyendo que
-   pasó de lo que se usó.
-5. **Bajar la Cant. real, devolver la parte de un pedido cancelado o
-   eliminado, y restaurarlo** cuidan el desperdicio de la parte. Nunca
-   queda mayor que su cantidad, se anota con lo devuelto
-   (`devolverParte`) y vuelve al restaurar.
+4. **Producción** muestra el desperdicio junto a la fila (ver la segunda
+   revisión: la Cant. real ya no lo incluye).
+5. **Devolver la parte de un pedido cancelado o eliminado, y
+   restaurarlo,** cuidan el desperdicio de la parte: se anota con lo
+   devuelto (`devolverParte`) y vuelve al restaurar.
+
+**Segunda revisión (2026-10-01) — lo que quedaba, corregido:**
+1. **"Cant. real" de Producción = lo que el pedido USA.** El desperdicio
+   va aparte ("✂ + 0.40 de desperdicio"): queda fijo en su parte y su
+   costo sí entra en Costo real. Antes la Cant. real lo incluía, y bajarla
+   tenía dos salidas, las dos malas, que dos revisores encontraron por
+   lados opuestos:
+   - mandaba retazo a la reserva como si sirviera;
+   - o dejaba la parte "toda desperdicio" con lo que el pedido de verdad
+     usa, y al anular la reposición se perdía un faltante real.
+   `ajustarCantidadMiembro` ahora solo mueve material útil.
+2. **Restaurar un pedido cuando otro ya se llevó la reserva** dejaba su
+   desperdicio como faltante (pedía 2.0 en vez de 1.6). Ahora lo retomado
+   cubre primero lo que usa, y lo que falta es solo material útil.
+3. **"Anular y corregir" vuelve con el reparto EXACTO** que se registró,
+   con las menos filas fijas posibles (`cantidadesParaCorregir`). Antes:
+   - un recibo con una fila a mano volvía repartido distinto ($1.440 de
+     un pedido a otros);
+   - uno sin desperdicio volvía con todas las filas fijas, y escribir
+     "Sobrante" daba error por cantidades que nadie escribió.
+4. **"Sobrante" se ve mientras se haya comprado más de lo que se
+   necesita**, aunque todo esté repartido a mano. Con algo escrito, lo
+   que un pedido lleve por encima de lo que necesita cuenta como su
+   desperdicio: así se reparte "a mano", como pidió el dueño. Vacío, lo
+   de más es uso del pedido, como siempre. La ayuda del campo lo dice.
 
 **Límite conocido, por decidir con el dueño.** Al devolver a la reserva
 la parte de un pedido cancelado o eliminado, su desperdicio vuelve como
 cantidad a la reserva. Son metros que físicamente ya no sirven, y otro
 pedido que los "tome" paga por ellos. Hoy pasa solo si se cancela un
 pedido después de un recibo con desperdicio.
+
+**Datos de la ventana 28-sep → 30-sep.** Un recibo registrado con
+"Sobrante" antes de 83c018d tiene el desperdicio dentro de la cantidad,
+sin marca. Si se anula, vuelve el faltante fantasma, y Producción no
+muestra el ✂. No se repara solo, porque al cargar nunca se reescribe
+plata (#52). Hay que preguntarle al dueño si registró alguno.
 
 **Detalle aceptado.** En prendas enteras, con empate en el reparto, la
 prenda de desperdicio se la lleva el primer pedido de la lista. La suma
@@ -3579,6 +3608,19 @@ cuidan que nada de antes cambie.
 Verificado por un revisor: los recibos ya guardados dan las mismas
 filas que antes, vivos, con una línea congelada y con todas congeladas.
 `verificarRecibo` no marca descuadres nuevos en lo ya guardado.
+
+**Segunda revisión (2026-10-01) — corregido:**
+1. **Recibo mixto.** Un borrador viejo (servicio para el recibo entero)
+   junto con servicios por línea dejaba la cabecera con un servicio
+   general. Si después una línea se quedaba sin pedidos vivos, su
+   servicio se perdía en silencio, porque con un general no se
+   reconstruía desde sus filas. Ahora lo del borrador viejo se reparte
+   entre las líneas al registrar, y un recibo nuevo nunca mezcla los dos.
+2. **Foco tras "+ Agregar servicio".** Caía en el ✕ de la fila nueva, y un
+   segundo Enter la borraba. Los dos botones llevan ahora su propio
+   `data-role`.
+3. **Selector inválido.** Un valor raro en `data-clave`, por ejemplo un
+   salto de línea en el nombre de un insumo, ya no puede romper el render.
 
 ---
 

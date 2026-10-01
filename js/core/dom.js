@@ -556,7 +556,11 @@ function selectorEstableParaFoco(el) {
   // ACÁ, contra el DOM todavía viejo (antes de reconstruirlo): si el
   // selector ya matchea más de un elemento ahora mismo, restaurar por él
   // después sería apostar a cuál de los dos aparece primero.
-  var candidatos = document.querySelectorAll(selector);
+  // Un valor raro (ej. un salto de línea en el nombre de un insumo, que va
+  // en data-clave) haría inválido el selector: se deja pasar sin restaurar
+  // en vez de romper el render.
+  var candidatos;
+  try { candidatos = document.querySelectorAll(selector); } catch (e) { return null; }
   if (candidatos.length !== 1) return null;
   return selector;
 }

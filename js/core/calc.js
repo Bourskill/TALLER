@@ -3295,8 +3295,12 @@ function tomarProporcional(origen, cantidad, dec) {
 // final de un rollo. `draft.sobrante` es lo que DE VERDAD queda como
 // reserva; la diferencia con lo que sobra es desperdicio y se suma a los
 // pedidos. Así el costo del desperdicio queda como sobrecosto de los
-// pedidos que lo causaron. Va dentro de la cantidad de su parte (su "Cant.
-// real" lo incluye: es material que se gastó en ese pedido).
+// pedidos que lo causaron. Va dentro de la cantidad y el costo de su parte;
+// la "Cant. real" de Producción muestra lo que el pedido USA, con el
+// desperdicio aparte (ver ajustarCantidadMiembro).
+// Con "Sobrante" escrito, todo lo que una parte lleve por encima de lo que
+// necesita cuenta como desperdicio — también lo repartido a mano (así se
+// reparte "a mano"); vacío, lo de más es uso del pedido, como siempre.
 // - Las filas escritas a mano en "Ajustar reparto" quedan FIJAS; el
 //   desperdicio se reparte entre las demás, a prorrata de lo que necesitan
 //   (el mismo precio por unidad para todas). Si todas están a mano, las
@@ -3359,6 +3363,11 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   var compraCorta = compradaU < sumaNecU;
   var sobraU = Math.max(0, compradaU - asignadoU);
   res.sobra = deUnidades(sobraU, dec);
+  // Lo comprado por encima de lo que se necesita, repartido o no: mientras
+  // haya algo, "Sobrante" se muestra — también si todo se repartió a mano
+  // (segunda revisión del #59: el campo desaparecía y ya no había cómo
+  // decir que eso era desperdicio).
+  res.extra = deUnidades(Math.max(0, compradaU - sumaNecU), dec);
   // El desperdicio (ver arriba). En una compra corta no sobra nada que
   // desperdiciar: ahí `sobrante` no aplica.
   var desperdicioU = ps.map(function () { return 0; });
@@ -3510,10 +3519,18 @@ export function reservasDeCompra(compra, cotizaciones, tx) {
 //   reserva, empezando por el recibo más nuevo.
 // La caja no cambia nunca: la plata ya se pagó, solo cambia a quién le toca.
 // Pura: devuelve la compra nueva y cuánto se movió.
+//
+// `nuevaCantidad` es lo que el pedido USA, sin su desperdicio (Hallazgo
+// #59): el desperdicio de cada parte queda fijo, con su costo, y lo que se
+// mueve es solo material útil. Así bajar la Cant. real nunca manda retazo a
+// la reserva como si sirviera, ni deja la parte "toda desperdicio" con lo
+// que el pedido de verdad usa (segunda revisión del #59: dos revisores lo
+// encontraron por lados opuestos).
 export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) {
   var partes = (compra.partesRecibo || []).map(function (p) { return Object.assign({}, p); });
   var dec = decimalesLineaRecibo(partes[0] && partes[0].totalesLinea);
-  var cubiertoU = partes.reduce(function (a, p) { return a + aUnidades(p.cantidad, dec); }, 0);
+  function desperdicioU(p) { return Math.min(aUnidades(p.desperdicio, dec), aUnidades(p.cantidad, dec)); }
+  var cubiertoU = partes.reduce(function (a, p) { return a + aUnidades(p.cantidad, dec) - desperdicioU(p); }, 0);
   var faltanteU = Math.max(0, aUnidades(compra.faltante, dec));
   var deltaU = Math.max(0, aUnidades(nuevaCantidad, dec)) - (cubiertoU + faltanteU);
   var tomado = { cantidad: 0, costo: 0 }, devuelto = { cantidad: 0, costo: 0 };
@@ -3544,7 +3561,10 @@ export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) 
     reservas.slice().reverse().forEach(function (r) {
       if (porBajarU <= 0) return;
       var p = parteDe(r);
-      var dev = calcDevolucionParte(p, deUnidades(porBajarU, dec), dec);
+      // Solo lo útil de la parte puede volver (su desperdicio se queda).
+      var utilU = aUnidades(p.cantidad, dec) - desperdicioU(p);
+      if (utilU <= 0) return;
+      var dev = calcDevolucionParte(p, deUnidades(Math.min(porBajarU, utilU), dec), dec);
       var devU = aUnidades(dev.cantidad, dec);
       if (devU <= 0) return;
       p.cantidad = deUnidades(aUnidades(p.cantidad, dec) - devU, dec);
@@ -3554,13 +3574,6 @@ export function ajustarCantidadMiembro(compra, nuevaCantidad, cotizaciones, tx) 
       devuelto.costo += dev.costo;
     });
   }
-  // El desperdicio de una parte nunca pasa de su cantidad: al bajar, lo que
-  // vuelve a la reserva es primero material útil (Hallazgo #59).
-  partes.forEach(function (p) {
-    if (!(num(p.desperdicio) > 0)) return;
-    if (num(p.desperdicio) > num(p.cantidad)) p.desperdicio = num(p.cantidad);
-    if (!(num(p.desperdicio) > 0)) delete p.desperdicio;
-  });
   var nueva = totalesDesdePartes(Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, dec) }));
   return { compra: nueva, tomado: tomado, devuelto: devuelto, faltante: deUnidades(faltanteU, dec), unidad: (reservas[0] && reservas[0].unidad) || "" };
 }
@@ -3624,24 +3637,30 @@ export function retomarPartesPorRestaurar(cot, pedidoId, cotizaciones, tx) {
         var r = calcRecibo(p.reciboId, cotizaciones, tx);
         var L = r.lineas.filter(function (x) { return x.linea === p.linea; })[0];
         var reserva = L ? L.reserva : { cantidad: 0, costo: 0 };
-        var toma;
+        var toma, despRetomadoU = 0;
         if (L && L.esGlobal) {
           toma = { cantidad: 0, costo: Math.max(0, Math.min(prev.costo, reserva.costo)) };
           if (toma.costo < prev.costo) faltantes.push({ nombre: L.nombre, cantidad: 0, costo: prev.costo - toma.costo });
         } else {
           var dec = decimalesLineaRecibo(p.totalesLinea);
           toma = calcTomaReserva(reserva, prev.cantidad, dec);
-          if (aUnidades(toma.cantidad, dec) < aUnidades(prev.cantidad, dec)) {
-            var faltaU = aUnidades(prev.cantidad, dec) - aUnidades(toma.cantidad, dec);
+          // Lo retomado cubre primero lo que el pedido usa; el desperdicio
+          // solo con lo que sobre. Lo que falte es solo material útil — el
+          // desperdicio que no volvió no se vuelve a comprar (segunda
+          // revisión del #59: quedaba como faltante fantasma).
+          var prevDespU = Math.min(aUnidades(prev.desperdicio, dec), aUnidades(prev.cantidad, dec));
+          var prevUtilU = aUnidades(prev.cantidad, dec) - prevDespU;
+          var tomaUtilU = Math.min(aUnidades(toma.cantidad, dec), prevUtilU);
+          despRetomadoU = aUnidades(toma.cantidad, dec) - tomaUtilU;
+          if (tomaUtilU < prevUtilU) {
+            var faltaU = prevUtilU - tomaUtilU;
             faltantes.push({ nombre: (L && L.nombre) || p.linea, cantidad: deUnidades(faltaU, dec), costo: 0 });
             faltanteU += aUnidades(deUnidades(faltaU, dec), 2);
           }
         }
         var sinMarca = Object.assign({}, p, { cantidad: toma.cantidad, costo: toma.costo });
         delete sinMarca.devueltaPorEliminar;
-        // Su desperdicio vuelve con ella (nunca más que lo que retomó).
-        var desp = Math.min(num(prev.desperdicio), num(toma.cantidad));
-        if (desp > 0) sinMarca.desperdicio = desp;
+        if (despRetomadoU > 0) sinMarca.desperdicio = deUnidades(despRetomadoU, decimalesLineaRecibo(p.totalesLinea));
         return sinMarca;
       });
       var restaurada = Object.assign({}, compra, { partesRecibo: partes, faltante: deUnidades(faltanteU, 2) });

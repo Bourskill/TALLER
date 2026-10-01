@@ -259,6 +259,22 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésimo sexta ronda: segunda revisión del desperdicio y los servicios por línea)
+
+- En **Producción**, la Cant. real de una compra de recibo es lo que el
+  pedido USA. El desperdicio se muestra aparte ("✂ + 0.40") y su costo va
+  en Costo real. Subir o bajar la Cant. real mueve solo material útil.
+- **Restaurar un pedido** cuando ya no queda reserva pide solo lo que usa,
+  no su desperdicio.
+- **"Anular y corregir"** vuelve con el reparto exacto que se registró,
+  también uno hecho a mano.
+- **"Sobrante"** se ve aunque todo esté repartido a mano. Con algo
+  escrito, lo que un pedido lleva de más es su desperdicio.
+- **Un borrador viejo con servicios para el recibo entero** se reparte
+  entre las líneas al registrar, así ninguna línea pierde su servicio.
+- Tras "+ Agregar servicio", el foco ya no cae en el ✕ de la fila nueva.
+- Ver CONTABILIDAD.md, Hallazgos #59 y #60 (segunda revisión).
+
 ## Registro de cambios — septiembre 2026 (centésimo quinta ronda: revisión independiente del desperdicio y los servicios por línea)
 
 - **Anular un recibo con desperdicio** ya no deja un faltante ni un

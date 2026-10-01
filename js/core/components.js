@@ -680,7 +680,7 @@ export function renderAsignarServicios(opts) {
       html += renderFilaAsignacionServicio(destinoAttrs, idx, fila, disponibles);
     });
     if (filas.length < disponibles.length) {
-      html += '<button type="button" class="btn ghost small" data-action="agregar-fila-servicio" ' + destinoAttrs + ">+ Agregar servicio</button>";
+      html += '<button type="button" class="btn ghost small" data-action="agregar-fila-servicio" data-role="agregar-servicio" ' + destinoAttrs + ">+ Agregar servicio</button>";
     }
   }
 
@@ -703,7 +703,7 @@ function renderFilaAsignacionServicio(destinoAttrs, idx, fila, disponibles) {
     "</select>" +
     '<input type="number" class="mini-input" style="width:130px;" placeholder="Monto" value="' + esc(fila.monto) + '" data-action-change="set-fila-servicio-monto" ' + destinoAttrs + ' data-idx="' + idx + '" />' +
     (fila.nombre ? '<button type="button" class="btn ghost small" data-action="abrir-historial-servicio" data-nombre="' + esc(fila.nombre) + '" title="Ver historial de entradas y salidas">🕘</button>' : "") +
-    '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" ' + destinoAttrs + ' data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
+    '<button type="button" class="btn danger small" data-action="quitar-fila-servicio" data-role="quitar-servicio" ' + destinoAttrs + ' data-idx="' + idx + '" aria-label="Quitar">✕</button>' +
     "</div>";
 }
 

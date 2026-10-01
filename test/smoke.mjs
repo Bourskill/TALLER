@@ -8417,8 +8417,9 @@ const partesVueltaDesp = vueltaDesp.cotizaciones.map(function (c) {
 }).filter(function (d) { return d !== null; });
 assert(partesVueltaDesp.join("/") === "0.4/0.3/0.3", "revisión #59: el desperdicio de cada parte queda guardado y sobrevive la ida y vuelta por la Sheet");
 abrirProduccionH58("cot-dsp-1");
-assert(document.getElementById("app").textContent.indexOf("✂ 0.40 de desperdicio") !== -1,
-  "revisión #59: Producción avisa que la Cant. real (2.00) incluye 0.40 de desperdicio — para que nadie la «corrija» a 1.60 creyendo que está mal");
+const inputCantRealDesp = document.querySelector('[data-action-change="set-cot-compra"][data-cot="cot-dsp-1"][data-clave="' + CLAVE_TELA + '"][data-campo="cantidadReal"]');
+assert(document.getElementById("app").textContent.indexOf("✂ + 0.40 de desperdicio") !== -1 && !!inputCantRealDesp && Number(inputCantRealDesp.value) === 1.6,
+  "revisión #59: Producción muestra en Cant. real lo que el pedido usa (1.60) y aparte «✂ + 0.40 de desperdicio» — su costo sí va en Costo real");
 click('[data-action="cerrar-cotizacion-editor"]');
 
 // "Anular y corregir": vuelve el «Sobrante» y las partes con desperdicio
@@ -8493,8 +8494,78 @@ const parteRetDesp = compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0];
 assert(parteRetDesp.cantidad === 2 && parteRetDesp.desperdicio === 0.4 && mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
   "revisión #59: al restaurarlo, la parte vuelve con su desperdicio (2.00 m, 0.40 de desperdicio)");
 ajustarMapa("cot-dsp-1", 0.3);
-assert(compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0].desperdicio === 0.3 && mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
-  "revisión #59: al bajar la Cant. real a 0.3, el desperdicio de la parte nunca queda mayor que su cantidad");
+const parteBajadaDesp = compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[0];
+assert(parteBajadaDesp.cantidad === 0.7 && parteBajadaDesp.desperdicio === 0.4 && mapaCalc.verificarRecibo(reciboDevDesp, state.cotizaciones, state.tx).length === 0,
+  "revisión #59: bajar la Cant. real a 0.3 (lo que usa) devuelve a la reserva solo material útil: la parte queda en 0.3 útil + 0.4 de desperdicio, que no se mueve");
+
+// --- Segunda revisión del #59 ---
+// Restaurar cuando otro pedido ya se llevó la reserva: lo que falta es solo
+// lo que el pedido usa, no su desperdicio.
+reiniciarDesp();
+registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+reemplazarCotDesp(mapaCalc.devolverPartesPorEliminar(cotMapaPorId("cot-dsp-1"), "ped-dsp-1"));
+ajustarMapa("cot-dsp-2", 3.2);
+const restDesp = mapaCalc.retomarPartesPorRestaurar(cotMapaPorId("cot-dsp-1"), "ped-dsp-1", state.cotizaciones, state.tx);
+const compraRestDesp = restDesp.cot.compras.filter(function (x) { return x.clave === CLAVE_TELA; })[0];
+assert(Number(compraRestDesp.faltante) === 1.6 && restDesp.faltantes[0].cantidad === 1.6,
+  "revisión 2 #59: si al restaurar ya no queda reserva, faltan 1.6 (lo que el pedido usa) — no 2.0 con el desperdicio adentro");
+
+// Reposición con desperdicio, y bajar después la Cant. real: lo que vuelve
+// es útil y el desperdicio se queda.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8)];
+registrarReciboMapa(["ped-dsp-1"], draftR1Desp, "2026-09-20");
+ajustarMapa("cot-dsp-1", 2.1);
+const reciboRepDesp = registrarReciboMapa(["ped-dsp-1"], draftR2Desp, "2026-09-22");
+ajustarMapa("cot-dsp-1", 2.1);
+assert(compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[1].cantidad === 1 && compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[1].desperdicio === 0.5,
+  "revisión 2 #59: dejar la Cant. real en 2.1 (lo que usa) no mueve nada — antes devolvía 0.5 útiles y la parte quedaba toda desperdicio");
+ajustarMapa("cot-dsp-1", 1.8);
+const parteRepDesp = compraMapa("cot-dsp-1", CLAVE_TELA).partesRecibo[1];
+const reservaRepDesp = mapaCalc.calcRecibo(reciboRepDesp, state.cotizaciones, state.tx).lineas[0].reserva;
+assert(parteRepDesp.cantidad === 0.7 && parteRepDesp.desperdicio === 0.5 && reservaRepDesp.cantidad === 0.3,
+  "revisión 2 #59: bajarla a 1.8 devuelve 0.3 útiles a la reserva y el desperdicio (0.5) se queda — antes iba retazo a la reserva como si sirviera");
+
+// Repartir el desperdicio A MANO, sin haber escrito «Sobrante» antes: el
+// campo sigue a la vista y con 0 queda marcado.
+reiniciarDesp();
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta = { seleccion: PEDS_DESP.slice(), porClave: {}, recibo: { fecha: "2026-09-28", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+state.formCompraConjunta.porClave[CLAVE_TELA] = { cantidadComprada: "5", costoPagado: "36000", cantidadesPorPedido: { "cot-dsp-1": "2", "cot-dsp-2": "1.5", "cot-dsp-3": "1.5" } };
+state.formCompraConjunta.ajustar[CLAVE_TELA] = true;
+render();
+assert(!!document.querySelector(selDesp("sobrante")),
+  "revisión 2 #59: con todo repartido a mano (2 / 1.5 / 1.5), «Sobrante» sigue a la vista — antes desaparecía y ya no había cómo decir que eso era desperdicio");
+setChange(selDesp("sobrante"), "0");
+const repManoTodoDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(repManoTodoDesp.ok && repManoTodoDesp.partes.map(function (p) { return p.desperdicio; }).join("/") === "0.4/0.3/0.3",
+  "revisión 2 #59: ...y con «Sobrante» 0, lo repartido a mano por encima de lo que cada uno necesita queda marcado como su desperdicio");
+
+// "Anular y corregir" de un recibo hecho a mano con desperdicio: el
+// formulario da EXACTAMENTE lo registrado.
+const draftManoDesp = {}; draftManoDesp[CLAVE_TELA] = { cantidadComprada: 5, costoPagado: 36000, sobrante: "0", cantidadesPorPedido: { "cot-dsp-1": "2.2" } };
+reiniciarDesp();
+const reciboManoDesp = registrarReciboMapa(PEDS_DESP, draftManoDesp, "2026-09-28");
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboManoDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+const repCorregirManoDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(repCorregirManoDesp.ok && cantsDesp(repCorregirManoDesp) === "2.2/1.4/1.4" && costosDesp(repCorregirManoDesp) === "15840/10080/10080",
+  "revisión 2 #59: «Anular y corregir» de un recibo con una fila a mano (2.2) vuelve con el mismo reparto (2.2 / 1.4 / 1.4) — antes la soltaba y $1.440 cambiaban de pedido");
+
+// "Anular y corregir" de un recibo SIN desperdicio: vuelve todo automático,
+// así se puede escribir «Sobrante» 0 sin un error por cantidades que nadie
+// escribió.
+const draftSinSobDesp = {}; draftSinSobDesp[CLAVE_TELA] = { cantidadComprada: 5, costoPagado: 36000 };
+reiniciarDesp();
+const reciboSinSobDesp = registrarReciboMapa(PEDS_DESP, draftSinSobDesp, "2026-09-28");
+global.confirm = dom.window.confirm = function () { return true; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboSinSobDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+const filaSinSobDesp = state.formCompraConjunta.porClave[CLAVE_TELA];
+const repSinSobDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), Object.assign({}, filaSinSobDesp, { sobrante: "0" }));
+assert(Object.keys(filaSinSobDesp.cantidadesPorPedido).length === 0 && repSinSobDesp.ok && cantsDesp(repSinSobDesp) === "2/1.5/1.5",
+  "revisión 2 #59: «Anular y corregir» de un recibo sin desperdicio vuelve sin filas fijas: escribir «Sobrante» 0 reparte el metro como desperdicio (2 / 1.5 / 1.5)");
 
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
@@ -8668,6 +8739,9 @@ click('[data-action="registrar-recibo-compra"]');
 const reciboLegadoH60 = (compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
 assert(!!reciboLegadoH60 && dispH60("Corte") === 25000 && mapaCalc.verificarRecibo(reciboLegadoH60, state.cotizaciones, state.tx).length === 0,
   "#60: ...y se registran: Corte queda con $25.000 y el recibo cuadra");
+assert((compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo[0].recibo.servicios || []).length === 0 &&
+  JSON.stringify(compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo[0].totalesLinea.servicios) === JSON.stringify([{ nombre: "Corte", monto: 5000 }]),
+  "revisión 2 #60: lo del borrador viejo se guarda en la línea, no como servicio general — un recibo nuevo nunca mezcla los dos");
 
 // --- Revisión del #60 ---
 // "Anular y corregir" avisa que se descarta el recibo que se estaba llenando.
@@ -8718,6 +8792,16 @@ const activoH60 = document.activeElement;
 assert(activoH60 && activoH60 !== document.body && activoH60.getAttribute("data-form-clave") === CLAVE_TELA && activoH60.getAttribute("data-action-change") === "set-fila-servicio-monto",
   "revisión #60: con dos líneas con servicio, el foco se queda en el monto que se editó (antes caía al inicio de la página)");
 
+// Tras "+ Agregar servicio", el foco sigue en ese botón — no en el ✕ de la
+// fila nueva (un segundo Enter la borraba).
+state.formCompraConjunta.porClave[CLAVE_TELA].servicios = [];
+render();
+const agregarTelaH60 = document.querySelector('[data-action="agregar-fila-servicio"]' + destH60(CLAVE_TELA));
+agregarTelaH60.focus();
+agregarTelaH60.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+assert(document.activeElement && document.activeElement.getAttribute("data-action") === "agregar-fila-servicio" && document.activeElement.getAttribute("data-form-clave") === CLAVE_TELA,
+  "revisión 2 #60: tras «+ Agregar servicio», el foco sigue en ese botón y no en el ✕ de la fila nueva");
+
 // Sin ningún servicio acumulado, el total no menciona un control que no existe.
 state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a")];
 state.formCompraConjunta.porClave = {};
@@ -8755,6 +8839,27 @@ assert(antesCongH60 === JSON.stringify((function () { var o = {}; o[LINEA_MED_H6
   antesCongH60 === JSON.stringify(mapaCalc.calcRecibo("rc-h60-cong", state.cotizaciones, state.tx).lineas.reduce(function (o, L) { (L.servicios || []).forEach(function (sv) { o[L.linea + " :: " + sv.nombre] = sv.monto; }); return o; }, {})) &&
   servRecH60(txSinBH60, "rc-h60-cong") === antesCongH60 && !mapaCalc.reconciliarTxRecibo(txSinBH60, "rc-h60-cong", cotsSinBH60).hayCambios,
   "revisión #60: si una línea se queda sin pedidos vivos (se borró su cotización) mientras el recibo sigue vivo, conserva lo que descontaba de \"Medias\" y queda estable");
+
+// Borrador viejo (servicio para el recibo entero) + servicio de una línea,
+// y después una línea se queda sin pedidos vivos: no se pierde nada.
+state.cotizaciones = [cotMapa("cot-h60-a", "ped-h60-a", 10, 10000), cotSoloMediasH60, cotServH60];
+state.tx = [];
+state.formCompraConjunta = { seleccion: ["ped-h60-a", "ped-h60-b"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [{ nombre: "Medias", monto: "3000" }] }, ajustar: {} };
+state.formCompraConjunta.porClave[CLAVE_TELA] = { costoPagado: "100000" };
+state.formCompraConjunta.porClave[LINEA_MED_H60] = { costoPagado: "9000", servicios: [{ nombre: "Corte", monto: "5000" }] };
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+click('[data-action="registrar-recibo-compra"]');
+const reciboMixtoH60 = (compraMapa("cot-h60-a", CLAVE_TELA).partesRecibo || [{}])[0].reciboId;
+const sumaServTx = function (tx) {
+  var o = {}; tx.forEach(function (t) { (t.serviciosDescuento || []).forEach(function (d) { o[d.nombre] = (o[d.nombre] || 0) + d.monto; }); });
+  var ordenado = {}; Object.keys(o).sort().forEach(function (k) { ordenado[k] = o[k]; });
+  return JSON.stringify(ordenado);
+};
+const antesMixtoH60 = sumaServTx(state.tx);
+const cotsSinMediasH60 = state.cotizaciones.filter(function (c) { return c.id !== "cot-h60-b"; });
+const txSinMediasH60 = mapaCalc.reconciliarTxRecibo(state.tx, reciboMixtoH60, cotsSinMediasH60).tx;
+assert(!!reciboMixtoH60 && antesMixtoH60 === JSON.stringify({ Corte: 5000, Medias: 3000 }) && sumaServTx(txSinMediasH60) === antesMixtoH60,
+  "revisión 2 #60: con un borrador viejo y servicios por línea, si una línea se queda sin pedidos vivos, lo descontado de cada servicio no cambia (antes se perdían en silencio)");
 
 // Formato del primer día del #60 (servicio con `linea` en la cabecera):
 // se sigue leyendo igual.

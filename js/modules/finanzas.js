@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -211,7 +211,7 @@ function renderLineaRecibo(g, d, otros) {
   // preguntar en "Sobrante" (la vista previa del reparto sí espera al pago).
   var calc = calcRepartoLineaRecibo(g, d);
   var r = num(d.costoPagado) > 0 ? calc : null;
-  var conSobrante = !g.esGlobal && !(calc.faltan > 0) && (calc.sobra > 0 || escritoRecibo(d.sobrante));
+  var conSobrante = !g.esGlobal && !(calc.faltan > 0) && (calc.extra > 0 || calc.sobra > 0 || escritoRecibo(d.sobrante));
   var abierta = !!((state.formCompraConjunta.ajustar || {})[g.linea]);
   var reposicion = g.participantes.some(function (p) { return p.esReposicion; });
   var html = '<div class="card cc-grupo' + (r && r.ok ? " cc-grupo-listo" : "") + '">';
@@ -233,7 +233,7 @@ function renderLineaRecibo(g, d, otros) {
     '<div class="field"><label>Pagué</label><input type="number" class="mini-input" placeholder="' + Math.round(g.totalCostoEstimado) + '" value="' + esc(d.costoPagado || "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="costoPagado" /></div>' +
     (conSobrante
       ? '<div class="field"><label>Sobrante (' + esc(g.unidad || "cantidad") + ")" +
-        renderHelp("Lo que de verdad queda para usar después: se guarda como reserva del recibo. Si lo que sobra no sirve (un retazo, el final del rollo), escribe 0 o lo que sí sirva: la diferencia es desperdicio y se reparte entre los pedidos como parte de su costo, a prorrata de lo que usa cada uno — todos pagan el mismo precio por " + (g.unidad || "unidad") + ". Vacío = todo lo que sobra queda de reserva.", "right") +
+        renderHelp("Lo que de verdad queda para usar después: se guarda como reserva del recibo. Si lo que sobra no sirve (un retazo, el final del rollo), escribe 0 o lo que sí sirva: la diferencia es desperdicio y se reparte entre los pedidos como parte de su costo, a prorrata de lo que usa cada uno — todos pagan el mismo precio por " + (g.unidad || "unidad") + ". Para repartirlo a mano, cambia las cantidades en \"Ajustar reparto\": con algo escrito aquí, lo que un pedido lleve por encima de lo que necesita cuenta como su desperdicio. Vacío = todo lo que sobra queda de reserva.", "right") +
         '</label><input type="number" class="mini-input" min="0" ' + (g.esProducto ? 'step="1" ' : "") + 'placeholder="' + fmtCant(calc.sobra, dec) + '" value="' + esc(escritoRecibo(d.sobrante) ? d.sobrante : "") + '" data-action-change="set-compra-conjunta-campo" data-clave="' + esc(g.linea) + '" data-campo="sobrante" /></div>'
       : "") +
     "</div>";
@@ -1083,6 +1083,24 @@ export var actions = {
     }
     var validacion = validarServiciosAsignados(serviciosRecibo, total);
     if (!validacion.ok) { window.alert(validacion.error); return; }
+    // Lo del borrador viejo (para el recibo entero) se reparte entre las
+    // líneas por lo que a cada una le queda sin cubrir, como antes entre las
+    // filas: un recibo nuevo nunca mezcla servicios generales con servicios
+    // por línea (segunda revisión del #60: en un recibo mixto, una línea que
+    // se quedaba sin pedidos vivos perdía su servicio en silencio).
+    var capacidadLineas = repartos.map(function (x, k) {
+      return x.reparto.totales.costoTotal - serviciosDeLinea[k].reduce(function (a, sv) { return a + sv.monto; }, 0);
+    });
+    validacionRecibo.limpias.forEach(function (sv) {
+      var cap = capacidadLineas.reduce(function (a, c) { return a + Math.max(0, c); }, 0);
+      var poner = Math.min(sv.monto, cap);
+      if (poner <= 0) return;
+      repartirProporcional(poner, capacidadLineas.map(function (c) { return Math.max(0, c); }), 0).forEach(function (m, k) {
+        if (m <= 0) return;
+        serviciosDeLinea[k] = serviciosDeLinea[k].concat([{ nombre: sv.nombre, monto: m }]);
+        capacidadLineas[k] -= m;
+      });
+    });
     // Los de cada línea van en los TOTALES de su línea, que se copian solo
     // en las partes de esa línea; en la cabecera (copiada en TODAS las
     // partes) crecían como líneas × partes y podían llenar la celda
@@ -1126,7 +1144,7 @@ export var actions = {
 
     var etiquetas = [];
     repartos.forEach(function (x) { x.grupo.participantes.forEach(function (p) { if (etiquetas.indexOf(p.etiqueta) === -1) etiquetas.push(p.etiqueta); }); });
-    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: validacionRecibo.limpias, etiquetas: etiquetas };
+    var cabecera = { fecha: rec.fecha || todayStr(), proveedorId: rec.proveedorId || "", numero: String(rec.numero || "").trim(), servicios: [], etiquetas: etiquetas };
     var reciboId = uid();
     var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: -total }, function () {
       state.cotizaciones = aplicarReciboACotizaciones(state.cotizaciones, reciboId, cabecera, repartos);
@@ -1232,6 +1250,40 @@ function irARecibo(reciboId) {
   }, 60);
 }
 
+// Las filas a mano con que "Anular y corregir" vuelve a llenar una línea:
+// las MENOS posibles, pero el reparto tiene que salir idéntico a lo que se
+// registró (segunda revisión del #59: fijar todas no dejaba usar
+// "Sobrante"; soltar las que tenían desperdicio cambiaba el reparto de un
+// recibo hecho a mano). Se prueba en orden: (1) todo automático, (2) fijas
+// solo las que no salen iguales, (3) todas fijas — con el sobrante igual a
+// la reserva, esto último siempre cuadra. Un pedido que no estaba en el
+// recibo queda en 0.
+function cantidadesParaCorregir(L, d, grupo) {
+  var registrada = {};
+  L.partes.forEach(function (p) { registrada[p.cotId] = num(p.cantidad); });
+  var base = {};
+  ((grupo && grupo.participantes) || []).forEach(function (pp) { if (!(pp.cotId in registrada)) base[pp.cotId] = "0"; });
+  var dec = L.esProducto ? 0 : 2;
+  function distintas(ov) {
+    if (!grupo) return null;
+    var rr = calcRepartoLineaRecibo(grupo, Object.assign({}, d, { costoPagado: d.costoPagado, cantidadesPorPedido: ov }));
+    if (!rr.ok) return null;
+    return rr.partes.filter(function (p) { return (p.cotId in registrada) && num(p.cantidad).toFixed(dec) !== num(registrada[p.cotId]).toFixed(dec); })
+      .map(function (p) { return p.cotId; });
+  }
+  var d1 = distintas(base);
+  if (d1 && !d1.length) return base;
+  if (d1) {
+    var conFijas = Object.assign({}, base);
+    d1.forEach(function (id) { conFijas[id] = String(registrada[id]); });
+    var d2 = distintas(conFijas);
+    if (d2 && !d2.length) return conFijas;
+  }
+  var todas = Object.assign({}, base);
+  L.partes.forEach(function (p) { todas[p.cotId] = String(p.cantidad); });
+  return todas;
+}
+
 function anularRecibo(reciboId, corregir) {
   var r = calcRecibo(reciboId, state.cotizaciones, state.tx);
   var filas = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
@@ -1261,6 +1313,8 @@ function anularRecibo(reciboId, corregir) {
     // Nunca se copian ids que apunten hacia afuera (el del recibo anulado,
     // los de sus movimientos): el recibo corregido es uno nuevo.
     var porClave = {};
+    var seleccionCorregir = r.pedidoIds.filter(function (pid) { return state.pedidos.some(function (p) { return p.id === pid; }); });
+    var gruposCorregir = calcLineasParaRecibo(seleccionCorregir);
     r.lineas.forEach(function (L) {
       if (!L.partes.length) return;
       var d = { costoPagado: String(L.costoTotal) };
@@ -1280,21 +1334,14 @@ function anularRecibo(reciboId, corregir) {
         L.partes.forEach(function (p) { d.costosPorPedido[p.cotId] = String(p.costo); });
       } else {
         d.cantidadComprada = String(L.cantidadTotal);
-        d.cantidadesPorPedido = {};
-        // Con desperdicio (Hallazgo #59): vuelve el "Sobrante" que quedó y
-        // las partes con desperdicio se dejan automáticas, para poder
-        // cambiar el sobrante y que el desperdicio se reparta de nuevo. Fijas
-        // con su cantidad, el sobrante ya no se podía cambiar.
-        var conDesperdicio = L.partes.some(function (p) { return p.desperdicio > 0; });
-        if (conDesperdicio) d.sobrante = String(L.reserva.cantidad);
-        L.partes.forEach(function (p) {
-          if (!(conDesperdicio && p.desperdicio > 0)) d.cantidadesPorPedido[p.cotId] = String(p.cantidad);
-        });
+        // Con desperdicio (Hallazgo #59) vuelve el "Sobrante" que quedó.
+        if (L.partes.some(function (p) { return p.desperdicio > 0; })) d.sobrante = String(L.reserva.cantidad);
+        d.cantidadesPorPedido = cantidadesParaCorregir(L, d, gruposCorregir.filter(function (g) { return g.linea === L.linea; })[0]);
       }
       porClave[L.linea] = d;
     });
     state.formCompraConjunta = {
-      seleccion: r.pedidoIds.filter(function (pid) { return state.pedidos.some(function (p) { return p.id === pid; }); }),
+      seleccion: seleccionCorregir,
       porClave: porClave, ajustar: {},
       recibo: { fecha: cab.fecha || "", proveedorId: cab.proveedorId || "", numero: cab.numero || "", servicios: [] }
     };
