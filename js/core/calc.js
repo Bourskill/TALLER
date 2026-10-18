@@ -3343,6 +3343,7 @@ export function calcRepartoLineaRecibo(grupo, draft) {
     if (costos.some(function (c) { return c < 0; })) res.error = "Ningún pedido puede quedar con un costo negativo.";
     else if (suma !== pagado) res.error = "El reparto suma " + fmt(suma) + " pero se pagó " + fmt(pagado) + ".";
     res.partes = ps.map(function (p, i) { return { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: 0, costo: costos[i] }; });
+    if (!res.error && !costos.some(function (c) { return c > 0; })) res.error = errorNadieSeLleva(grupo.nombre);
     res.totales = { nombre: grupo.nombre, unidad: "", esProducto: false, esGlobal: true, cantidadTotal: 0, costoTotal: pagado };
     res.ok = !res.error;
     return res;
@@ -3440,9 +3441,15 @@ export function calcRepartoLineaRecibo(grupo, draft) {
       costosLinea.push(repartidos[libres.length]);
     }
   }
+  // Si ningún pedido se lleva nada, el recibo no tendría dónde quedar (vive
+  // en las partes de sus pedidos): antes la vista previa lo daba por bueno y
+  // al registrar salía "la caja se movería $0" (cuarta revisión del #59).
+  if (!res.error && !cantidadesU.some(function (u) { return u > 0; })) res.error = errorNadieSeLleva(grupo.nombre);
   res.partes = ps.map(function (p, i) {
     var parte = { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: deUnidades(cantidadesU[i], dec), costo: costosLinea[i] };
-    if (compraCorta) parte.faltanteNuevo = deUnidades(Math.max(0, necesidadesU[i] - cantidadesU[i]), dec);
+    // Lo que falta es material útil: el desperdicio de la parte no cubre
+    // nada de lo que el pedido necesita (cuarta revisión del #59).
+    if (compraCorta) parte.faltanteNuevo = deUnidades(Math.max(0, necesidadesU[i] - (cantidadesU[i] - Math.min(desperdicioU[i], cantidadesU[i]))), dec);
     if (desperdicioU[i] > 0) parte.desperdicio = deUnidades(desperdicioU[i], dec);
     return parte;
   });
@@ -3450,6 +3457,10 @@ export function calcRepartoLineaRecibo(grupo, draft) {
   res.totales = { nombre: grupo.nombre, unidad: grupo.unidad || "", esProducto: !!grupo.esProducto, esGlobal: false, cantidadTotal: deUnidades(compradaU, dec), costoTotal: pagado };
   res.ok = !res.error;
   return res;
+}
+
+function errorNadieSeLleva(nombre) {
+  return "En \"" + (nombre || "esta línea") + "\" ningún pedido se lleva nada: un recibo necesita al menos un pedido con algo (lo que sobre queda de reserva).";
 }
 
 // Una línea de la lista de compras que en un recibo va SIN cantidad: un

@@ -3524,6 +3524,44 @@ de AHORA de los pedidos, y no podía decir todo lo que había cambiado.
    dos.
 5. Una reposición descuenta del faltante solo su parte útil.
 
+**Cuarta revisión (2026-10-18) — corregido:**
+1. **Un costo fijo escondido no seguía a lo que el dueño corrige.** Tras
+   "Anular y corregir", cambiar "Pagué" dejaba la fila fija con el precio
+   viejo, y los demás cargaban la diferencia: $1.120 en el ejemplo, y
+   además la vista previa decía "todos pagan $8.000/m". Ahora:
+   - cambiar Pagué o Compré borra los costos fijos y vuelve a prorrata;
+     el desperdicio de la fila sigue, porque es cantidad y no precio;
+   - editar una fila borra su costo y su desperdicio fijos;
+   - "Ajustar reparto" marca la fila que trae "costo como estaba";
+   - el precio por metro parejo solo se anuncia cuando de verdad lo es.
+2. **Con más de 6 pedidos** se fijaban todas las filas con costo aunque
+   nada hubiera cambiado. Ahora se prueba primero todo automático y
+   después solo las que no salen iguales. Con pocos pedidos se busca el
+   conjunto más chico, primero fijando solo cantidades.
+3. **Una línea donde ningún pedido se lleva nada** (todo en reserva) no se
+   puede registrar, porque el recibo vive en las partes de sus pedidos.
+   Antes la vista previa la daba por buena y al registrar salía "la caja
+   se movería $0", y "Anular y corregir" la anulaba sin aviso. Ahora la
+   vista previa lo dice, y la simulación también.
+4. **La simulación revisa más cosas:**
+   - la reserva de cada línea (a dónde iría la plata);
+   - un pedido que dejaría de estar comprado;
+   - un pedido cancelado que se quedó con su parte;
+   - un insumo que ya no está en la cotización;
+   - que los servicios de cada línea todavía alcancen (sin las filas de
+     este recibo).
+   El aviso nombra a cada pedido y dice el porqué, con unidades.
+5. **Domicilio pagado por un solo pedido:** el otro queda en $0 al
+   corregir. Antes recibía su parte del estimado, el reparto no sumaba y
+   salía un aviso falso.
+6. **Compra corta con desperdicio fijo:** el faltante descuenta solo lo
+   útil.
+
+**Límite conocido.** Dos costos globales con el mismo nombre y con
+cantidad en una misma cotización caen en la misma fila del formulario
+(la clave es la cotización). La simulación lo avisa ("costo $30.000 →
+$15.000"), pero se corrige a mano.
+
 **Datos de la ventana 28-sep → 30-sep.** Un recibo registrado con
 "Sobrante" antes de 83c018d tiene el desperdicio dentro de la cantidad,
 sin marca. Si se anula, vuelve el faltante fantasma, y Producción no

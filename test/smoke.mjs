@@ -8615,7 +8615,7 @@ const draftCortaDesp = {}; draftCortaDesp[CLAVE_TELA] = { cantidadComprada: 1.2,
 const reciboCortaDesp = registrarReciboMapa(["ped-dsp-1"], draftCortaDesp, "2026-09-28");
 ajustarMapa("cot-dsp-1", 0.6);
 const msgCortaDesp = corregirRev3Desp(reciboCortaDesp);
-assert(msgCortaDesp.indexOf("NO quedaría igual") !== -1 && msgCortaDesp.indexOf("faltan 0.00 → 1.00") !== -1,
+assert(msgCortaDesp.indexOf("NO quedaría igual") !== -1 && msgCortaDesp.indexOf("faltan 0.00 m → 1.00 m") !== -1,
   "revisión 3 #59: si volver a registrarlo cambiaría el faltante de un pedido (0 → 1.00), el aviso de «Anular y corregir» lo dice antes de anular");
 // Un insumo que se quitó de una cotización: su parte ya no volvería.
 reiniciarDesp();
@@ -8625,7 +8625,7 @@ state.cotizaciones = state.cotizaciones.map(function (c) {
   return Object.assign({}, c, { referencias: c.referencias.map(function (rf) { return Object.assign({}, rf, { insumos: [] }); }) });
 });
 const msgQuitadoDesp = corregirRev3Desp(reciboQuitadoDesp);
-assert(msgQuitadoDesp.indexOf("NO quedaría igual") !== -1 && msgQuitadoDesp.indexOf("costo $10.800 → $0") !== -1,
+assert(msgQuitadoDesp.indexOf("NO quedaría igual") !== -1 && msgQuitadoDesp.indexOf("ya no tiene este insumo en su cotización — su parte ($10.800) no volvería") !== -1,
   "revisión 3 #59: si un pedido ya no tiene ese insumo, el aviso dice que su parte ($10.800) no volvería — antes esa plata cambiaba de pedido o desaparecía sin aviso");
 // Un pedido cancelado que ya devolvió su parte a la reserva.
 reiniciarDesp();
@@ -8678,6 +8678,95 @@ const filaPdfDesp = [].concat.apply([], tablasPdfDesp.map(function (o) { return 
   .filter(function (f) { return f.indexOf("desperdicio") !== -1; })[0] || "";
 assert(/1[.,]6 m \(\+0[.,]4 m desperdicio\)/.test(filaPdfDesp),
   "revisión 3 #59: el PDF interno muestra Cant. real 1,6 m (+0,4 m desperdicio), igual que Producción — antes decía 2 m y parecía sobreconsumo (" + filaPdfDesp + ")");
+
+// --- Cuarta revisión del #59 ---
+// (a) Tras "Anular y corregir", corregir «Pagué» vuelve a repartir el costo
+// a prorrata: el costo fijo del papel viejo deja de valer.
+reiniciarDesp();
+const reciboPagueDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+ajustarMapa("cot-dsp-1", 1.0);
+corregirRev3Desp(reciboPagueDesp);
+state.tab = "finanzas"; state.finanzasVista = "conjuntas";
+state.formCompraConjunta.ajustar = {}; state.formCompraConjunta.ajustar[CLAVE_TELA] = true;
+render();
+assert(document.querySelector(selDesp("costoPagado")).closest(".cc-grupo").textContent.indexOf("costo como estaba") !== -1,
+  "revisión 4 #59: en «Ajustar reparto» se ve qué fila trae el costo como estaba en el recibo anulado");
+setChange(selDesp("costoPagado"), "40000");
+const repPagueDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(repPagueDesp.ok && partesTxtDesp(repPagueDesp) === "1.4/11200/0.4 1.5/12000/0.3 1.5/12000/0.3" && repPagueDesp.reserva.costo === 4800,
+  "revisión 4 #59: tras corregir «Pagué» a $40.000, todos pagan $8.000 por metro (1.4 m $11.200) y el desperdicio sigue — antes la fila fija se quedaba con el precio viejo ($10.080) y los demás cargaban la diferencia");
+
+// (b) Con más de 6 pedidos y nada cambiado: ninguna fila fija.
+reiniciarDesp();
+const PEDS7_DESP = [], cots7Desp = [], peds7Desp = [];
+for (var i7 = 1; i7 <= 7; i7++) {
+  cots7Desp.push(cotDesp("cot-d7-" + i7, "ped-d7-" + i7, 8));
+  peds7Desp.push(pedidoMapa("ped-d7-" + i7, "cot-d7-" + i7, 300000, 80000));
+  PEDS7_DESP.push("ped-d7-" + i7);
+}
+const pedidosPrevios7Desp = state.pedidos;
+state.pedidos = state.pedidos.concat(peds7Desp);
+state.cotizaciones = cots7Desp;
+const draft7Desp = {}; draft7Desp[CLAVE_TELA] = { cantidadComprada: 12, costoPagado: 86400 };
+const recibo7Desp = registrarReciboMapa(PEDS7_DESP, draft7Desp, "2026-09-28");
+const msg7Desp = corregirRev3Desp(recibo7Desp);
+assert(msg7Desp.indexOf("NO quedaría igual") === -1 && Object.keys(state.formCompraConjunta.porClave[CLAVE_TELA].cantidadesPorPedido).length === 0,
+  "revisión 4 #59: un recibo de 7 pedidos que no cambió vuelve sin filas fijas (antes las 7 quedaban fijas, con costo, y corregir «Pagué» no les llegaba)");
+state.pedidos = pedidosPrevios7Desp;
+
+// (c) Una línea en la que nadie se lleva nada no se puede registrar, y
+// "Anular y corregir" lo avisa en vez de anular en silencio.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8)];
+const draftNadieDesp = {}; draftNadieDesp[CLAVE_TELA] = { cantidadComprada: 3, costoPagado: 21000, cantidadesPorPedido: { "cot-dsp-1": "0" } };
+const repNadieDesp = mapaCalc.calcRepartoLineaRecibo(mapaCalc.calcLineasParaRecibo(["ped-dsp-1"])[0], draftNadieDesp[CLAVE_TELA]);
+assert(!repNadieDesp.ok && repNadieDesp.error.indexOf("ningún pedido se lleva nada") !== -1,
+  "revisión 4 #59: si en una línea ningún pedido se lleva nada, la vista previa lo dice (antes la daba por buena y al registrar salía «la caja se movería $0»)");
+const draftDosDesp = {}; draftDosDesp[CLAVE_TELA] = { cantidadComprada: 2, costoPagado: 14000 };
+const reciboTodoReservaDesp = registrarReciboMapa(["ped-dsp-1"], draftDosDesp, "2026-09-28");
+ajustarMapa("cot-dsp-1", 0);
+var confirmTodoReservaDesp = "";
+global.confirm = dom.window.confirm = function (m) { confirmTodoReservaDesp = m; return false; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboTodoReservaDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(confirmTodoReservaDesp.indexOf("ningún pedido se lleva nada") !== -1 && cajaMapa() === -14000,
+  "revisión 4 #59: si todo quedó de reserva, «Anular y corregir» avisa que no se podría volver a registrar (y al cancelar, no se anula nada)");
+
+// (d) Un pedido que bajó su Cant. real a 0: el aviso dice que dejaría de
+// estar comprado.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8), cotDesp("cot-dsp-2", "ped-dsp-2", 6)];
+const draftCeroUnoDesp = {}; draftCeroUnoDesp[CLAVE_TELA] = { cantidadComprada: 3, costoPagado: 21000 };
+const reciboCeroUnoDesp = registrarReciboMapa(["ped-dsp-1", "ped-dsp-2"], draftCeroUnoDesp, "2026-09-28");
+ajustarMapa("cot-dsp-2", 0);
+var confirmCeroUnoDesp = "";
+global.confirm = dom.window.confirm = function (m) { confirmCeroUnoDesp = m; return false; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboCeroUnoDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(confirmCeroUnoDesp.indexOf("dejaría de estar comprada") !== -1,
+  "revisión 4 #59: si un pedido dejó su Cant. real en 0, el aviso dice que dejaría de estar comprado y volvería a quedar pendiente");
+
+// (e) Un pedido cancelado que se quedó con su parte: el aviso lo dice.
+reiniciarDesp();
+const reciboCancDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+const pedidosPreviosCancDesp = state.pedidos;
+state.pedidos = state.pedidos.map(function (pd) { return pd.id === "ped-dsp-3" ? Object.assign({}, pd, { cancelado: true }) : pd; });
+var confirmCancDesp = "";
+global.confirm = dom.window.confirm = function (m) { confirmCancDesp = m; return false; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboCancDesp; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+state.pedidos = pedidosPreviosCancDesp;
+assert(confirmCancDesp.indexOf("el pedido está cancelado") !== -1 && confirmCancDesp.indexOf("$10.800") !== -1,
+  "revisión 4 #59: si un pedido cancelado se quedó con su parte, el aviso dice que no entraría al recibo corregido y cuánto ($10.800)");
+
+// (f) Compra corta con desperdicio fijo: lo que falta es solo lo útil.
+const grupoCortaDespFijo = { linea: "x", nombre: "Tela", unidad: "m", esProducto: false, esGlobal: false, participantes: [
+  { cotId: "d1", pedidoId: "pd1", compraClave: "x", necesita: 1.6 }, { cotId: "d2", pedidoId: "pd2", compraClave: "x", necesita: 2.5 }, { cotId: "d3", pedidoId: "pd3", compraClave: "x", necesita: 1.2 }
+] };
+const repCortaDespFijo = mapaCalc.calcRepartoLineaRecibo(grupoCortaDespFijo, { cantidadComprada: 5, costoPagado: 36000,
+  cantidadesPorPedido: { d1: "2", d2: "1.5", d3: "1.5" }, desperdicioPorPedido: { d1: "0.4", d2: "0.3", d3: "0.3" } });
+assert(repCortaDespFijo.ok && repCortaDespFijo.partes.map(function (q) { return q.faltanteNuevo; }).join("/") === "0/1.3/0",
+  "revisión 4 #59: en una compra corta con desperdicio, lo que falta descuenta solo lo útil (a quien necesita 2.5 y tiene 1.5 con 0.3 de desperdicio le faltan 1.3, no 1.0)");
 
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
@@ -8995,6 +9084,54 @@ const repartosMalH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"])
 state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-mal", { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [], etiquetas: [] }, repartosMalH60);
 assert(mapaCalc.verificarRecibo("rc-h60-mal", state.cotizaciones, mapaCalc.reconciliarTxRecibo([], "rc-h60-mal", state.cotizaciones).tx).some(function (pr) { return pr.indexOf("es más de lo que se pagó por esa línea") !== -1; }),
   "revisión #60: una línea con más servicios que lo que se pagó por ella sale como problema del recibo");
+
+// --- Cuarta revisión ---
+// Domicilio (costo fijo) que un pedido no pagó en este papel: "Anular y
+// corregir" no inventa un aviso ni deja un formulario que no suma.
+const cotDomH60 = function (id, pedidoId, costo) {
+  var c = cotMapa(id, pedidoId, 10, 10000);
+  c.costosGlobales = [{ id: "dom-" + id, nombre: "Domicilio", costo: costo, proveedorId: "", esServicio: true }];
+  return c;
+};
+state.pedidos = [pedidoMapa("ped-h60-a", "cot-h60-a", 500000, 100000), pedidoMapa("ped-h60-b", "cot-h60-b", 200000, 9000), pedidoMapa("ped-h60-s", "cot-h60-s", 300000, 0)];
+state.cotizaciones = [cotDomH60("cot-h60-a", "ped-h60-a", 6000), cotDomH60("cot-h60-b", "ped-h60-b", 6000), cotServH60];
+state.tx = [];
+const lineasDomH60 = mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"]);
+const lineaDomH60 = lineasDomH60.filter(function (g) { return g.esGlobal; })[0];
+const repartosDomH60 = lineasDomH60.map(function (g) {
+  return { grupo: g, reparto: mapaCalc.calcRepartoLineaRecibo(g, g.esGlobal ? { costoPagado: 12000, costosPorPedido: { "cot-h60-a": "12000", "cot-h60-b": "0" } } : { costoPagado: 200000 }) };
+});
+assert(!!lineaDomH60 && repartosDomH60.every(function (x) { return x.reparto.ok; }), "(punto de partida) el domicilio entero ($12.000) va a un solo pedido");
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-h60-dom", { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [], etiquetas: [] }, repartosDomH60);
+state.tx = mapaCalc.reconciliarTxRecibo(state.tx, "rc-h60-dom", state.cotizaciones).tx;
+var confirmDomH60 = "";
+global.confirm = dom.window.confirm = function (m) { confirmDomH60 = m; return true; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return "rc-h60-dom"; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+const repDomCorregidoH60 = mapaCalc.calcRepartoLineaRecibo(mapaCalc.calcLineasParaRecibo(["ped-h60-a", "ped-h60-b"]).filter(function (g) { return g.esGlobal; })[0], state.formCompraConjunta.porClave[lineaDomH60.linea]);
+assert(confirmDomH60.indexOf("NO quedaría igual") === -1 && repDomCorregidoH60.ok && repDomCorregidoH60.partes.map(function (q) { return q.costo; }).join("/") === "12000/0",
+  "revisión 4 #60: un domicilio que solo pagó un pedido vuelve igual al corregir ($12.000 / $0), sin aviso falso — antes el otro pedido recibía su parte del estimado y no sumaba");
+
+// Si un servicio que pagó una línea ya no alcanza (se corrigió su
+// acumulado), "Anular y corregir" lo avisa antes de anular.
+state.pedidos = [pedidoMapa("ped-h60-a", "cot-h60-a", 500000, 100000), pedidoMapa("ped-h60-s", "cot-h60-s", 300000, 0)];
+state.cotizaciones = [cotH60("cot-h60-a", "ped-h60-a"), cotServH60];
+state.tx = [];
+state.formCompraConjunta = { seleccion: ["ped-h60-a"], porClave: {}, recibo: { fecha: "2026-09-30", proveedorId: "", numero: "", servicios: [] }, ajustar: {} };
+state.formCompraConjunta.porClave[LINEA_MED_H60] = { costoPagado: "22500", servicios: [{ nombre: "Medias", monto: "22500" }] };
+state.tab = "finanzas"; state.finanzasVista = "conjuntas"; render();
+click('[data-action="registrar-recibo-compra"]');
+const reciboServH60 = (compraMapa("cot-h60-a", LINEA_MED_H60).partesRecibo || [{}])[0].reciboId;
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  if (c.id !== "cot-h60-s") return c;
+  return Object.assign({}, c, { compras: c.compras.map(function (x) { return x.costoReal === 40000 ? Object.assign({}, x, { costoReal: 10000 }) : x; }) });
+});
+var confirmServH60 = "";
+global.confirm = dom.window.confirm = function (m) { confirmServH60 = m; return false; };
+finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboServH60; } });
+global.confirm = dom.window.confirm = confirmPrevioMapa;
+assert(!!reciboServH60 && confirmServH60.indexOf("NO quedaría igual") !== -1 && confirmServH60.indexOf("Medias") !== -1 && confirmServH60.indexOf("$10.000") !== -1,
+  "revisión 4 #60: si el servicio que pagó una línea ya no alcanza (Medias quedó en $10.000), el aviso lo dice antes de anular — antes el recibo se anulaba y el corregido no se podía registrar");
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;

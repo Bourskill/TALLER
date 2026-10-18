@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional, desperdicioCompra, esMiembroRecibo } from "../core/calc.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional, desperdicioCompra, esMiembroRecibo, calcListaCompras } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 
@@ -252,7 +252,10 @@ function renderLineaRecibo(g, d, otros) {
       }
       html += '<div class="section-sub" style="margin-top:8px;">' + partesTxt.join(" · ") + "</div>";
       if (r.desperdicio > 0) {
-        html += '<div class="section-sub" style="margin-top:4px;">✂ ' + fmtCant(r.desperdicio, dec) + " " + esc(g.unidad) + " de desperdicio repartido entre los pedidos: cada uno paga " + fmt(r.totales.costoTotal / r.totales.cantidadTotal) + " por " + esc(g.unidad || "unidad") + (r.reserva.cantidad > 0 ? "" : ", sin reserva") + ".</div>";
+        var costosFijos = "desperdicioPorPedido" in d && Object.keys(d.costosPorPedido || {}).some(function (k) { return escritoRecibo(d.costosPorPedido[k]); });
+        html += '<div class="section-sub" style="margin-top:4px;">✂ ' + fmtCant(r.desperdicio, dec) + " " + esc(g.unidad) + " de desperdicio repartido entre los pedidos" +
+          (costosFijos ? "" : ": cada uno paga " + fmt(r.totales.costoTotal / r.totales.cantidadTotal) + " por " + esc(g.unidad || "unidad")) +
+          (r.reserva.cantidad > 0 ? "" : ", sin reserva") + ".</div>";
       }
     }
     if (r.faltan > 0) {
@@ -286,7 +289,10 @@ function renderAjusteRecibo(g, d, r, dec) {
     var parte = r.partes[i] || { cantidad: 0, costo: 0 };
     html += '<div class="tx-row" style="grid-template-columns:1fr 110px 110px;">' +
       '<span class="mobile-th">Pedido</span><span>' + esc(p.etiqueta) +
-      (parte.desperdicio > 0 ? ' <span class="section-sub" style="margin:0;">· incluye ' + fmtCant(parte.desperdicio, dec) + " de desperdicio</span>" : "") + "</span>" +
+      (parte.desperdicio > 0 ? ' <span class="section-sub" style="margin:0;">· incluye ' + fmtCant(parte.desperdicio, dec) + " de desperdicio</span>" : "") +
+      (!g.esGlobal && "desperdicioPorPedido" in d && escritoRecibo((d.costosPorPedido || {})[p.cotId])
+        ? ' <span class="section-sub" style="margin:0;" title="Costo y desperdicio como estaban en el recibo anulado. Si cambias esta cantidad, Pagué o Compré, se vuelve a repartir a prorrata.">· costo como estaba</span>' : "") +
+      "</span>" +
       '<span class="mobile-th">Cantidad</span>' +
       (g.esGlobal ? "<span></span>" :
         '<input type="number" class="mini-input" style="text-align:right;width:100%;" ' + (g.esProducto ? 'step="1" ' : "") + 'value="' + esc(escritoRecibo(ovCant[p.cotId]) ? ovCant[p.cotId] : fmtCant(parte.cantidad, dec)) + '" data-action-change="set-compra-conjunta-cantidad-pedido" data-clave="' + esc(g.linea) + '" data-cot="' + esc(p.cotId) + '" />') +
@@ -979,6 +985,14 @@ export var actions = {
     var clave = el.getAttribute("data-clave"), campo = el.getAttribute("data-campo");
     var porClave = Object.assign({}, state.formCompraConjunta.porClave || {});
     var fila = Object.assign({}, porClave[clave] || {});
+    // Los costos fijos que deja "Anular y corregir" son los de ESE papel: si
+    // cambia lo pagado o lo comprado, ya no valen y el costo vuelve a
+    // repartirse a prorrata (cuarta revisión del #59: si no, un pedido se
+    // quedaba con el precio viejo y los demás cargaban la diferencia). El
+    // desperdicio de las filas fijas sí sigue: es cantidad, no precio.
+    if ((campo === "costoPagado" || campo === "cantidadComprada") && "desperdicioPorPedido" in fila) {
+      fila.costosPorPedido = {};
+    }
     fila[campo] = el.value;
     porClave[clave] = fila;
     state.formCompraConjunta = Object.assign({}, formReciboCompleto(), { porClave: porClave });
@@ -996,6 +1010,13 @@ export var actions = {
     // desperdicio se reparte entre las demás (ver calcRepartoLineaRecibo).
     // Antes se borraba el sobrante y lo que quedaba volvía a ser reserva
     // (revisión del Hallazgo #59).
+    // Lo mismo con la fila que se edita: su costo y desperdicio fijos (de
+    // "Anular y corregir") dejan de valer.
+    if ("desperdicioPorPedido" in fila) {
+      var costosFila = Object.assign({}, fila.costosPorPedido || {}), despFila = Object.assign({}, fila.desperdicioPorPedido || {});
+      delete costosFila[cotId]; delete despFila[cotId];
+      fila.costosPorPedido = costosFila; fila.desperdicioPorPedido = despFila;
+    }
     var cantidadesPorPedido = Object.assign({}, fila.cantidadesPorPedido || {});
     cantidadesPorPedido[cotId] = el.value;
     fila.cantidadesPorPedido = cantidadesPorPedido;
@@ -1267,36 +1288,57 @@ function filasParaCorregir(L, d, grupo) {
   var dec = L.esProducto ? 0 : 2;
   var fuera = {};
   ((grupo && grupo.participantes) || []).forEach(function (pp) { if (!(pp.cotId in reg)) fuera[pp.cotId] = "0"; });
-  function armar(fijas) {
+  // conExactos: además de la cantidad, el costo y el desperdicio de cada
+  // fila fija. Solo se usan si sin ellos no sale igual (cuarta revisión del
+  // #59: un costo fijo escondido no sigue a lo que el dueño corrija).
+  function armar(fijas, conExactos) {
     var cant = Object.assign({}, fuera), costo = {}, desp = {};
     fijas.forEach(function (id) {
-      cant[id] = String(reg[id].cantidad); costo[id] = String(reg[id].costo); desp[id] = String(reg[id].desperdicio || 0);
+      cant[id] = String(reg[id].cantidad);
+      if (conExactos) { costo[id] = String(reg[id].costo); desp[id] = String(reg[id].desperdicio || 0); }
     });
     return { cantidadesPorPedido: cant, costosPorPedido: costo, desperdicioPorPedido: desp };
   }
-  function igual(ov) {
-    if (!grupo) return false;
+  function probar(ov) {
+    if (!grupo) return null;
     var rr = calcRepartoLineaRecibo(grupo, Object.assign({}, d, ov));
-    if (!rr.ok) return false;
-    return L.partes.every(function (p) {
+    if (!rr.ok) return null;
+    return L.partes.filter(function (p) {
       var q = rr.partes.filter(function (x) { return x.cotId === p.cotId; })[0];
-      if (!q) return !(num(p.cantidad) > 0 || num(p.costo) > 0);
-      return num(q.cantidad).toFixed(dec) === num(p.cantidad).toFixed(dec) &&
+      if (!q) return num(p.cantidad) > 0 || num(p.costo) > 0;
+      return !(num(q.cantidad).toFixed(dec) === num(p.cantidad).toFixed(dec) &&
         Math.round(num(q.costo)) === Math.round(num(p.costo)) &&
-        num(q.desperdicio).toFixed(dec) === num(p.desperdicio).toFixed(dec);
-    });
+        num(q.desperdicio).toFixed(dec) === num(p.desperdicio).toFixed(dec));
+    }).map(function (p) { return p.cotId; });
   }
+  // Con pocos pedidos: el conjunto MÁS CHICO de filas fijas que reproduzca
+  // todo, primero fijando solo cantidades y después también costo y
+  // desperdicio. Con muchos (más de 6, no se prueban todas las
+  // combinaciones): todo automático, después fijas solo las que no salen
+  // iguales. Si nada de eso alcanza, todas con todo — siempre cuadra.
   if (ids.length <= 6) {
-    for (var k = 0; k <= ids.length; k++) {
-      for (var mask = 0; mask < (1 << ids.length); mask++) {
-        var fijas = ids.filter(function (id, i) { return mask & (1 << i); });
-        if (fijas.length !== k) continue;
-        var ov = armar(fijas);
-        if (igual(ov)) return ov;
+    var modos = [false, true];
+    for (var m = 0; m < modos.length; m++) {
+      for (var k = 0; k <= ids.length; k++) {
+        for (var mask = 0; mask < (1 << ids.length); mask++) {
+          var fijas = ids.filter(function (id, i) { return mask & (1 << i); });
+          if (fijas.length !== k) continue;
+          var ov = armar(fijas, modos[m]), dif = probar(ov);
+          if (dif && !dif.length) return ov;
+        }
       }
     }
+  } else {
+    var distintas = probar(armar([], false));
+    if (distintas && !distintas.length) return armar([], false);
+    if (distintas) {
+      var soloCant = armar(distintas, false), d2 = probar(soloCant);
+      if (d2 && !d2.length) return soloCant;
+      var exactas = armar(distintas, true), d3 = probar(exactas);
+      if (d3 && !d3.length) return exactas;
+    }
   }
-  return armar(ids);
+  return armar(ids, true);
 }
 
 // El formulario de "Anular y corregir" (también lo usa la simulación de
@@ -1323,14 +1365,19 @@ function armarFormCorregir(r, filas) {
       });
     });
     d.servicios = ordenServ.filter(function (n) { return servFilas[n] > 0; }).map(function (n) { return { nombre: n, monto: String(servFilas[n]) }; });
+    var grupoL = grupos.filter(function (g) { return g.linea === L.linea; })[0];
     if (L.esGlobal) {
       d.costosPorPedido = {};
+      // Un pedido de la línea que no pagó en este papel queda en 0 (si no,
+      // le tocaría su parte del estimado y el reparto ya no sumaría lo
+      // pagado — cuarta revisión del #59).
+      ((grupoL && grupoL.participantes) || []).forEach(function (pp) { d.costosPorPedido[pp.cotId] = "0"; });
       L.partes.forEach(function (p) { d.costosPorPedido[p.cotId] = String(p.costo); });
     } else {
       d.cantidadComprada = String(L.cantidadTotal);
       // Con desperdicio (Hallazgo #59) vuelve el "Sobrante" que quedó.
       if (L.partes.some(function (p) { return p.desperdicio > 0; })) d.sobrante = String(L.reserva.cantidad);
-      Object.assign(d, filasParaCorregir(L, d, grupos.filter(function (g) { return g.linea === L.linea; })[0]));
+      Object.assign(d, filasParaCorregir(L, d, grupoL));
     }
     porClave[L.linea] = d;
   });
@@ -1345,48 +1392,100 @@ function armarFormCorregir(r, filas) {
 // cotización (tercera revisión del #59 — antes eso se perdía o se movía de
 // pedido sin ningún aviso). Pura respecto al estado: lo deja como estaba.
 function diferenciasAlCorregir(reciboId) {
-  var antes = state.cotizaciones;
-  var r = calcRecibo(reciboId, antes, state.tx);
-  var filas = state.tx.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
+  var antes = state.cotizaciones, txAntes = state.tx;
+  var r = calcRecibo(reciboId, antes, txAntes);
+  var filas = txAntes.filter(function (t) { return esFilaRecibo(t) && t.reciboCompraId === reciboId; });
   var difs = [];
+  function cant(x, L) { return num(x).toFixed(L && L.esProducto ? 0 : 2) + (L && L.unidad ? " " + L.unidad : ""); }
   try {
     state.cotizaciones = quitarReciboDeCotizaciones(antes, reciboId);
+    // Sin las filas de este recibo: lo que tendrían los servicios al volver
+    // a registrarlo.
+    state.tx = txAntes.filter(function (t) { return filas.indexOf(t) === -1; });
     var form = armarFormCorregir(r, filas);
     var grupos = calcLineasParaRecibo(form.seleccion);
-    var repartos = [];
+    var repartos = [], lineasConError = {}, yaAvisadas = {};
+    var quienEs = function (cot, pedidoId) {
+      var ped = pedidoPorId(pedidoId || pedidoIdDeCotParaTx(cot || {}));
+      return { ped: ped, nombre: ped ? (ped.numeroOp || "OP-????") : ((cot && cot.descripcion) || "Pedido eliminado") };
+    };
     r.lineas.forEach(function (L) {
       if (!(L.costoTotal > 0)) return;
       var g = grupos.filter(function (x) { return x.linea === L.linea; })[0];
       var d = form.porClave[L.linea];
-      if (!g || !d) { difs.push("\"" + L.nombre + "\" (" + fmt(L.costoTotal) + "): ya ningún pedido la tiene pendiente — no se podría volver a registrar."); return; }
+      // Cada pedido con parte que ya no entraría a la línea, con el porqué
+      // (aunque la línea entera tampoco se pueda rehacer).
+      L.partes.forEach(function (p) {
+        if (!(num(p.cantidad) > 0 || num(p.costo) > 0)) return;
+        if (g && g.participantes.some(function (pp) { return pp.cotId === p.cotId; })) return;
+        var cot = antes.filter(function (c) { return c.id === p.cotId; })[0];
+        var q = quienEs(cot, p.pedidoId);
+        var sigue = cot && calcListaCompras(cot).some(function (l) { return l.clave === p.compraClave; });
+        var donde = q.nombre + " · " + L.nombre;
+        yaAvisadas[p.cotId + "|" + p.compraClave] = true;
+        if (q.ped && pedidoCancelado(q.ped)) difs.push(donde + ": el pedido está cancelado y no entra al recibo corregido — su parte (" + fmt(p.costo) + ") no volvería a él. Reactívalo antes de corregir si quieres que la conserve.");
+        else if (!sigue) difs.push(donde + ": ya no tiene este insumo en su cotización — su parte (" + fmt(p.costo) + ") no volvería a este pedido.");
+        else difs.push(donde + ": no entra al recibo corregido — su parte (" + fmt(p.costo) + ") no volvería a este pedido.");
+      });
+      if (!g || !d) { lineasConError[L.linea] = true; difs.push("\"" + L.nombre + "\" (" + fmt(L.costoTotal) + "): ya ningún pedido la tiene pendiente — no se podría volver a registrar."); return; }
       var rr = calcRepartoLineaRecibo(g, d);
-      if (!rr.ok) { difs.push("\"" + L.nombre + "\": " + rr.error); return; }
+      if (!rr.ok) { lineasConError[L.linea] = true; difs.push("\"" + L.nombre + "\" (" + fmt(L.costoTotal) + "): " + rr.error); return; }
+      var sv = validarServiciosAsignados(d.servicios, L.costoTotal);
+      if (!sv.ok) difs.push("\"" + L.nombre + "\": " + sv.error);
       repartos.push({ grupo: g, reparto: rr });
     });
+    var todosServ = [];
+    Object.keys(form.porClave).forEach(function (k) { todosServ = todosServ.concat(form.porClave[k].servicios || []); });
+    var svTodos = validarServiciosAsignados(todosServ, r.total);
+    if (!svTodos.ok) difs.push("Servicios: " + svTodos.error);
     var despues = aplicarReciboACotizaciones(state.cotizaciones, "__corregir__", r.cabecera || {}, repartos);
+    // Por línea: a dónde iría la plata que cambia de lugar.
+    var rDespues = calcRecibo("__corregir__", despues, []);
+    r.lineas.forEach(function (L) {
+      if (lineasConError[L.linea]) return;
+      var LD = rDespues.lineas.filter(function (x) { return x.linea === L.linea; })[0];
+      var resD = LD ? LD.reserva : { cantidad: 0, costo: 0 };
+      if (Math.round(resD.costo) !== Math.round(L.reserva.costo) || cant(resD.cantidad, L) !== cant(L.reserva.cantidad, L)) {
+        difs.push("\"" + L.nombre + "\": la reserva del recibo pasaría de " + (L.esGlobal ? "" : cant(L.reserva.cantidad, L) + " ") + fmt(L.reserva.costo) + " a " + (L.esGlobal ? "" : cant(resD.cantidad, L) + " ") + fmt(resD.costo) + ".");
+      }
+    });
     antes.forEach(function (cot) {
       (cot.compras || []).forEach(function (compra) {
         var suyas = (compra.partesRecibo || []).filter(function (p) { return p.reciboId === reciboId; });
         if (!suyas.length) return;
+        if (yaAvisadas[cot.id + "|" + compra.clave]) return;
+        var L = r.lineas.filter(function (x) { return x.linea === suyas[0].linea; })[0];
+        if (L && lineasConError[L.linea]) return;
         var ped = pedidoPorId(pedidoIdDeCotParaTx(cot));
         var quien = ped ? (ped.numeroOp || "OP-????") : (cot.descripcion || "Pedido eliminado");
-        var L = r.lineas.filter(function (x) { return x.linea === suyas[0].linea; })[0];
         var donde = quien + " · " + ((L && L.nombre) || compra.clave);
         if (suyas.some(function (p) { return p.devueltaPorEliminar; })) {
           difs.push(donde + ": lo que devolvió a la reserva (pedido cancelado o eliminado) ya no se podría retomar al reactivarlo.");
           return;
         }
+        var suParte = suyas.reduce(function (a, p) { return a + num(p.costo); }, 0);
+        if (ped && pedidoCancelado(ped) && suParte > 0) {
+          difs.push(donde + ": el pedido está cancelado y no entra al recibo corregido — su parte (" + fmt(suParte) + ") pasaría a la reserva. Reactívalo antes de corregir si quieres que la conserve.");
+          return;
+        }
         var cotD = despues.filter(function (c) { return c.id === cot.id; })[0];
         var cD = cotD ? (cotD.compras || []).filter(function (c) { return c.clave === compra.clave; })[0] : null;
+        if (!(cD && esMiembroRecibo(cD))) {
+          var sigueEnCot = cotD && calcListaCompras(cotD).some(function (l) { return l.clave === compra.clave; });
+          difs.push(donde + (sigueEnCot
+            ? ": su parte (" + fmt(suParte) + ") no volvería — dejaría de estar comprada y quedaría pendiente por comprar."
+            : ": ya no tiene este insumo en su cotización — su parte (" + fmt(suParte) + ") no volvería a este pedido."));
+          return;
+        }
         var cambios = [];
-        var costoA = Math.round(num(compra.costoReal)), costoD = cD && esMiembroRecibo(cD) ? Math.round(num(cD.costoReal)) : 0;
+        var costoA = Math.round(num(compra.costoReal)), costoD = Math.round(num(cD.costoReal));
         if (costoA !== costoD) cambios.push("costo " + fmt(costoA) + " → " + fmt(costoD));
-        var cantA = num(compra.cantidadReal) - desperdicioCompra(compra), cantD = cD && esMiembroRecibo(cD) ? num(cD.cantidadReal) - desperdicioCompra(cD) : 0;
-        if (cantA.toFixed(2) !== cantD.toFixed(2)) cambios.push("usa " + cantA.toFixed(2) + " → " + cantD.toFixed(2));
-        var despA = desperdicioCompra(compra), despD = cD ? desperdicioCompra(cD) : 0;
-        if (despA.toFixed(2) !== despD.toFixed(2)) cambios.push("desperdicio " + despA.toFixed(2) + " → " + despD.toFixed(2));
-        var falA = num(compra.faltante), falD = cD ? num(cD.faltante) : 0;
-        if (falA.toFixed(2) !== falD.toFixed(2)) cambios.push("faltan " + falA.toFixed(2) + " → " + falD.toFixed(2));
+        var cantA = num(compra.cantidadReal) - desperdicioCompra(compra), cantD = num(cD.cantidadReal) - desperdicioCompra(cD);
+        if (cant(cantA, L) !== cant(cantD, L)) cambios.push("usa " + cant(cantA, L) + " → " + cant(cantD, L));
+        var despA = desperdicioCompra(compra), despD = desperdicioCompra(cD);
+        if (cant(despA, L) !== cant(despD, L)) cambios.push("desperdicio " + cant(despA, L) + " → " + cant(despD, L));
+        var falA = num(compra.faltante), falD = num(cD.faltante);
+        if (cant(falA, L) !== cant(falD, L)) cambios.push("faltan " + cant(falA, L) + " → " + cant(falD, L));
         if (cambios.length) difs.push(donde + ": " + cambios.join(", ") + ".");
       });
     });
@@ -1394,6 +1493,7 @@ function diferenciasAlCorregir(reciboId) {
     difs.push("No se pudo comprobar si quedaría igual (" + (e && e.message) + ").");
   } finally {
     state.cotizaciones = antes;
+    state.tx = txAntes;
   }
   return difs;
 }
@@ -1414,7 +1514,7 @@ function anularRecibo(reciboId, corregir) {
     "Sus " + filas.length + " movimiento(s) salen de Finanzas (quedan en la papelera) y la caja vuelve a subir " + fmt(pagado) + ". Las compras de sus pedidos vuelven a quedar pendientes." +
     (conServicios ? "\n\nLa plata que se había tomado de servicios vuelve a quedar disponible." : "") +
     (corregir ? "\n\nEl formulario queda lleno con sus datos para registrarlo de nuevo, corregido." : "") +
-    (difs.length ? "\n\n⚠ Algo cambió después de registrarlo: vuelto a registrar tal cual, NO quedaría igual:\n• " + difs.slice(0, 8).join("\n• ") +
+    (difs.length ? "\n\n⚠ Vuelto a registrar tal cual, esto NO quedaría igual:\n• " + difs.slice(0, 8).join("\n• ") +
       (difs.length > 8 ? "\n• … y " + (difs.length - 8) + " más." : "") + "\nRevisa esas líneas en el formulario antes de registrar." : "") +
     (corregir && aMedias ? "\n\nOjo: el recibo que estabas llenando (" + aMedias + " línea" + (aMedias === 1 ? "" : "s") + ") se descarta." : ""))) return;
   var ok = ejecutarAccionRecibo({ recibos: [reciboId], deltaCaja: pagado }, function () {

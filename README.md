@@ -259,6 +259,22 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésimo octava ronda: cuarta revisión de "Anular y corregir")
+
+- Tras "Anular y corregir", **cambiar "Pagué" o "Compré" vuelve a repartir
+  el costo parejo**. Antes, una fila podía quedarse con el precio viejo.
+  "Ajustar reparto" marca qué fila trae el costo "como estaba".
+- Con muchos pedidos (más de 6), un recibo que no cambió vuelve sin filas
+  fijas.
+- **Una línea donde ningún pedido se lleva nada** avisa en la vista
+  previa, en vez de fallar al registrar.
+- El aviso de "Anular y corregir" ahora también cubre:
+  - a dónde iría la plata de la reserva;
+  - un pedido cancelado que se quedó con su parte;
+  - un pedido que dejaría de estar comprado;
+  - un servicio que ya no alcanza.
+- Ver CONTABILIDAD.md, Hallazgo #59 (cuarta revisión).
+
 ## Registro de cambios — octubre 2026 (centésimo séptima ronda: "Anular y corregir" vuelve igual, o avisa qué cambiaría)
 
 - **"Anular y corregir"** vuelve con el reparto al peso: cantidad, costo y
