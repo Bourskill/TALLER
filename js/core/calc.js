@@ -2934,6 +2934,17 @@ export function esMiembroRecibo(compra) {
   return !!(compra && (compra.partesRecibo || []).length);
 }
 
+// Cuánto de lo que una compra tiene en sus recibos es desperdicio (Hallazgo
+// #59). "Cant. real" de esa compra en pantalla y en el PDF = cantidadReal
+// menos esto (lo que el pedido USA); el costo del desperdicio sí sigue en
+// su costo real.
+export function desperdicioCompra(compra) {
+  var u = ((compra && compra.partesRecibo) || []).reduce(function (a, p) {
+    return a + Math.min(aUnidades(p.desperdicio, 2), aUnidades(p.cantidad, 2));
+  }, 0);
+  return deUnidades(u, 2);
+}
+
 // Una prenda comprada entera (`esProducto`) se cuenta en enteros; el resto
 // (metros de tela, hilo...) con 2 decimales — mismo criterio que Compras
 // conjuntas (Hallazgo #43). Las cuentas se hacen en UNIDADES enteras
@@ -3391,12 +3402,44 @@ export function calcRepartoLineaRecibo(grupo, draft) {
     }
     if (!res.error) {
       desperdicioU = cantidadesU.map(function (u, i) { return Math.max(0, u - necesidadesU[i]); });
-      res.desperdicio = deUnidades(desperdicioU.reduce(function (a, u) { return a + u; }, 0), dec);
     }
+  }
+  // Una fila a mano puede traer también su desperdicio y su costo exactos
+  // (`desperdicioPorPedido`, `costosPorPedido`): solo los usa "Anular y
+  // corregir", para volver a dar al peso lo que se registró aunque la Cant.
+  // real o los costos hayan cambiado después (tercera revisión del #59).
+  var ovDesp = draft.desperdicioPorPedido || {}, ovCostoQ = draft.costosPorPedido || {};
+  if (!res.error) {
+    ps.forEach(function (p, i) {
+      if (aMano[i] && escrito(ovDesp[p.cotId])) desperdicioU[i] = Math.max(0, Math.min(aUnidades(ovDesp[p.cotId], dec), cantidadesU[i]));
+    });
+    if (desperdicioU.some(function (u) { return u > 0; })) res.desperdicio = deUnidades(desperdicioU.reduce(function (a, u) { return a + u; }, 0), dec);
   }
   var reservaU = Math.max(0, compradaU - cantidadesU.reduce(function (a, u) { return a + u; }, 0));
   if (sinPagar) { res.error = "Falta escribir cuánto se pagó."; return res; }
-  var costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
+  var costoFijo = ps.map(function (p, i) { return aMano[i] && escrito(ovCostoQ[p.cotId]) ? Math.round(num(ovCostoQ[p.cotId])) : null; });
+  var costosLinea;
+  if (!costoFijo.some(function (c) { return c !== null; })) {
+    costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
+  } else {
+    // Las filas con costo fijo se quedan con él; el resto de lo pagado, a
+    // prorrata de la cantidad entre las demás y la reserva.
+    var fijoTotal = costoFijo.reduce(function (a, c) { return a + (c || 0); }, 0);
+    var libres = [];
+    ps.forEach(function (p, i) { if (costoFijo[i] === null) libres.push(i); });
+    var pesosLibres = libres.map(function (i) { return cantidadesU[i]; }).concat([reservaU]);
+    var resto = pagado - fijoTotal;
+    if (costoFijo.some(function (c) { return c !== null && c < 0; }) || resto < 0 ||
+      (resto > 0 && !pesosLibres.some(function (u) { return u > 0; }))) {
+      if (!res.error) res.error = "Los costos de cada pedido suman " + fmt(fijoTotal) + " pero se pagó " + fmt(pagado) + ".";
+      costosLinea = repartirProporcional(pagado, cantidadesU.concat([reservaU]), 0);
+    } else {
+      var repartidos = repartirProporcional(resto, pesosLibres, 0);
+      costosLinea = ps.map(function (p, i) { return costoFijo[i]; });
+      libres.forEach(function (i, k) { costosLinea[i] = repartidos[k]; });
+      costosLinea.push(repartidos[libres.length]);
+    }
+  }
   res.partes = ps.map(function (p, i) {
     var parte = { cotId: p.cotId, pedidoId: p.pedidoId, compraClave: p.compraClave, cantidad: deUnidades(cantidadesU[i], dec), costo: costosLinea[i] };
     if (compraCorta) parte.faltanteNuevo = deUnidades(Math.max(0, necesidadesU[i] - cantidadesU[i]), dec);
@@ -3928,6 +3971,11 @@ export function aplicarReciboACotizaciones(cotizaciones, reciboId, cabecera, rep
   var porCot = {};
   (repartos || []).forEach(function (x) {
     x.reparto.partes.forEach(function (p) {
+      // Una parte en 0 (un pedido al que se le dejó en 0, o uno que no
+      // estaba en el recibo al corregirlo) no es una compra: su compra
+      // sigue pendiente. Antes quedaba "Sí" por $0 — un ahorro falso (tercera
+      // revisión del #59).
+      if (!(num(p.cantidad) > 0) && !(Math.round(num(p.costo)) > 0)) return;
       var parte = { reciboId: reciboId, linea: x.grupo.linea, cantidad: p.cantidad, costo: p.costo, recibo: cabecera, totalesLinea: x.reparto.totales };
       // Cuánto de su cantidad es desperdicio (Hallazgo #59): solo si hay.
       if (num(p.desperdicio) > 0) parte.desperdicio = num(p.desperdicio);
@@ -3945,8 +3993,11 @@ export function aplicarReciboACotizaciones(cotizaciones, reciboId, cabecera, rep
       // Compra corta: lo que no alcanzó (calcRepartoLineaRecibo). Si no, una
       // reposición descuenta lo que llegó de su faltante; una compra que
       // venía de "Aún no" queda cubierta.
+      // (Lo que cubre una reposición es su parte ÚTIL: su desperdicio no
+      // tapa nada de lo que faltaba.)
+      var utilParteU = aUnidades(n.parte.cantidad, 2) - Math.min(aUnidades(n.parte.desperdicio, 2), aUnidades(n.parte.cantidad, 2));
       var faltanteU = n.faltanteNuevo !== undefined ? aUnidades(n.faltanteNuevo, 2)
-        : (esMiembroRecibo(base) ? Math.max(0, aUnidades(base.faltante, 2) - aUnidades(n.parte.cantidad, 2)) : 0);
+        : (esMiembroRecibo(base) ? Math.max(0, aUnidades(base.faltante, 2) - utilParteU) : 0);
       var nueva = Object.assign({}, base, {
         estado: "si", partesRecibo: (base.partesRecibo || []).concat([n.parte]),
         cantidadExcedente: "", excedenteTxId: "", txId: "",

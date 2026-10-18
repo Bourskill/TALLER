@@ -259,6 +259,20 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésimo séptima ronda: "Anular y corregir" vuelve igual, o avisa qué cambiaría)
+
+- **"Anular y corregir"** vuelve con el reparto al peso: cantidad, costo y
+  desperdicio de cada pedido. Esto vale aunque una Cant. real haya
+  cambiado después de registrar.
+- Si algo cambió y volver a registrarlo NO quedaría igual, el aviso lo
+  dice antes de anular, pedido por pedido y con plata. Por ejemplo, un
+  faltante distinto, un insumo que ya no está en la cotización o un pedido
+  cancelado que devolvió su parte.
+- Un pedido dejado en 0 en el reparto ya no queda "Sí" por $0.
+- El **PDF interno** muestra la Cant. real sin el desperdicio y lo dice
+  aparte, igual que Producción.
+- Ver CONTABILIDAD.md, Hallazgo #59 (tercera revisión).
+
 ## Registro de cambios — octubre 2026 (centésimo sexta ronda: segunda revisión del desperdicio y los servicios por línea)
 
 - En **Producción**, la Cant. real de una compra de recibo es lo que el

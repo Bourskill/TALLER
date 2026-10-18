@@ -3494,6 +3494,36 @@ cantidad a la reserva. Son metros que físicamente ya no sirven, y otro
 pedido que los "tome" paga por ellos. Hoy pasa solo si se cancela un
 pedido después de un recibo con desperdicio.
 
+**Tercera revisión (2026-10-18) — "Anular y corregir" cuando algo cambió
+después de registrar, corregido:** el formulario se arma desde el estado
+de AHORA de los pedidos, y no podía decir todo lo que había cambiado.
+1. **Las filas fijas llevan su costo y su desperdicio exactos**
+   (`costosPorPedido` y `desperdicioPorPedido` en líneas con cantidad;
+   solo los usa "Anular y corregir").
+   - `filasParaCorregir` busca el conjunto MÁS CHICO de filas fijas que
+     reproduce cantidad, costo y desperdicio de cada pedido.
+   - Así vuelven al peso un recibo con una Cant. real bajada y uno
+     convertido desde lo viejo con costos de la caja. Antes pasaban $1.657
+     de un pedido a otro.
+   - Con una sola fila a mano, solo se fija esa y el Sobrante se puede
+     seguir cambiando.
+2. **Antes de anular se SIMULA volver a registrarlo** sin tocar nada
+   (`diferenciasAlCorregir`). Lo que no saldría igual se dice en el aviso,
+   pedido por pedido y con plata. Por ejemplo:
+   - un faltante que cambiaría;
+   - un insumo que se quitó de la cotización ("costo $10.800 → $0");
+   - un pedido cancelado que ya devolvió su parte;
+   - una línea que ya ningún pedido tiene pendiente.
+   Antes eso cambiaba de pedido o desaparecía sin aviso.
+3. **Una parte en 0 no es una compra.** Un pedido dejado en 0, o uno que no
+   estaba en el recibo al corregirlo, sigue pendiente. Antes quedaba "Sí"
+   por $0, un ahorro falso.
+4. **El PDF interno** muestra en Cant. real lo que el pedido usa, con
+   "(+0,4 m desperdicio)" aparte, igual que Producción. Antes decía 2 m y
+   parecía sobreconsumo. Una sola función, `desperdicioCompra`, para los
+   dos.
+5. Una reposición descuenta del faltante solo su parte útil.
+
 **Datos de la ventana 28-sep → 30-sep.** Un recibo registrado con
 "Sobrante" antes de 83c018d tiene el desperdicio dentro de la cantidad,
 sin marca. Si se anula, vuelve el faltante fantasma, y Producción no

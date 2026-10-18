@@ -8567,6 +8567,118 @@ const repSinSobDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), Object.as
 assert(Object.keys(filaSinSobDesp.cantidadesPorPedido).length === 0 && repSinSobDesp.ok && cantsDesp(repSinSobDesp) === "2/1.5/1.5",
   "revisión 2 #59: «Anular y corregir» de un recibo sin desperdicio vuelve sin filas fijas: escribir «Sobrante» 0 reparte el metro como desperdicio (2 / 1.5 / 1.5)");
 
+// --- Tercera revisión del #59: "Anular y corregir" cuando algo cambió
+// después de registrar, y una parte en 0. ---
+const corregirRev3Desp = function (reciboId) {
+  var msg = "";
+  global.confirm = dom.window.confirm = function (m) { msg = m; return true; };
+  finAccionesDesp["anular-corregir-recibo"]({ getAttribute: function () { return reciboId; } });
+  global.confirm = dom.window.confirm = confirmPrevioMapa;
+  return msg;
+};
+const partesTxtDesp = function (r) { return r.partes.map(function (q) { return q.cantidad + "/" + q.costo + "/" + (q.desperdicio || 0); }).join(" "); };
+
+// (a) Un pedido dejado en 0 no queda «Sí» por $0.
+reiniciarDesp();
+const draftCeroP3Desp = {}; draftCeroP3Desp[CLAVE_TELA] = { cantidadComprada: 4, costoPagado: 28000, cantidadesPorPedido: { "cot-dsp-3": "0" } };
+registrarReciboMapa(PEDS_DESP, draftCeroP3Desp, "2026-09-28");
+const compraCeroDesp = compraMapa("cot-dsp-3", CLAVE_TELA);
+assert(!compraCeroDesp || (compraCeroDesp.estado !== "si" && !(compraCeroDesp.partesRecibo || []).length),
+  "revisión 3 #59: un pedido dejado en 0 en el reparto no queda «Sí» por $0 (un ahorro falso) — su compra sigue pendiente");
+
+// (b) Con UNA fila escrita a mano, el formulario corregido fija solo esa
+// (las demás salen solas) y el «Sobrante» se puede seguir cambiando.
+reiniciarDesp();
+const draftUnaManoDesp = {}; draftUnaManoDesp[CLAVE_TELA] = { cantidadComprada: 5, costoPagado: 36000, sobrante: "0", cantidadesPorPedido: { "cot-dsp-1": "1.6" } };
+const reciboUnaManoDesp = registrarReciboMapa(PEDS_DESP, draftUnaManoDesp, "2026-09-28");
+const msgUnaManoDesp = corregirRev3Desp(reciboUnaManoDesp);
+const filaUnaManoDesp = state.formCompraConjunta.porClave[CLAVE_TELA];
+assert(msgUnaManoDesp.indexOf("NO quedaría igual") === -1 && JSON.stringify(Object.keys(filaUnaManoDesp.cantidadesPorPedido)) === JSON.stringify(["cot-dsp-1"]) &&
+  mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), Object.assign({}, filaUnaManoDesp, { sobrante: "0.5" })).ok,
+  "revisión 3 #59: con una sola fila a mano, «Anular y corregir» fija solo esa y el «Sobrante» se puede cambiar (antes fijaba todas y daba error)");
+
+// (c) Después de bajar una Cant. real: vuelve EXACTO, desperdicio incluido.
+reiniciarDesp();
+const reciboBajaDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+ajustarMapa("cot-dsp-1", 1.0);
+const msgBajaDesp = corregirRev3Desp(reciboBajaDesp);
+const repBajaDesp = mapaCalc.calcRepartoLineaRecibo(grupoDespVivo(), state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(msgBajaDesp.indexOf("NO quedaría igual") === -1 && repBajaDesp.ok &&
+  partesTxtDesp(repBajaDesp) === "1.4/10080/0.4 1.5/10800/0.3 1.5/10800/0.3" && repBajaDesp.reserva.cantidad === 0.6 && repBajaDesp.reserva.costo === 4320,
+  "revisión 3 #59: tras bajar una Cant. real a 1.0, «Anular y corregir» vuelve con el reparto exacto — 1.4 m (0.4 de desperdicio) $10.080 — sin perder el desperdicio");
+
+// (d) Lo que NO se puede rehacer igual se avisa, con plata.
+// Compra corta que después se usó menos: el faltante cambiaría.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8)];
+const draftCortaDesp = {}; draftCortaDesp[CLAVE_TELA] = { cantidadComprada: 1.2, costoPagado: 8400 };
+const reciboCortaDesp = registrarReciboMapa(["ped-dsp-1"], draftCortaDesp, "2026-09-28");
+ajustarMapa("cot-dsp-1", 0.6);
+const msgCortaDesp = corregirRev3Desp(reciboCortaDesp);
+assert(msgCortaDesp.indexOf("NO quedaría igual") !== -1 && msgCortaDesp.indexOf("faltan 0.00 → 1.00") !== -1,
+  "revisión 3 #59: si volver a registrarlo cambiaría el faltante de un pedido (0 → 1.00), el aviso de «Anular y corregir» lo dice antes de anular");
+// Un insumo que se quitó de una cotización: su parte ya no volvería.
+reiniciarDesp();
+const reciboQuitadoDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+state.cotizaciones = state.cotizaciones.map(function (c) {
+  if (c.id !== "cot-dsp-3") return c;
+  return Object.assign({}, c, { referencias: c.referencias.map(function (rf) { return Object.assign({}, rf, { insumos: [] }); }) });
+});
+const msgQuitadoDesp = corregirRev3Desp(reciboQuitadoDesp);
+assert(msgQuitadoDesp.indexOf("NO quedaría igual") !== -1 && msgQuitadoDesp.indexOf("costo $10.800 → $0") !== -1,
+  "revisión 3 #59: si un pedido ya no tiene ese insumo, el aviso dice que su parte ($10.800) no volvería — antes esa plata cambiaba de pedido o desaparecía sin aviso");
+// Un pedido cancelado que ya devolvió su parte a la reserva.
+reiniciarDesp();
+const reciboCanceladoDesp = registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+reemplazarCotDesp(mapaCalc.devolverPartesPorEliminar(cotMapaPorId("cot-dsp-3"), "ped-dsp-3"));
+const msgCanceladoDesp = corregirRev3Desp(reciboCanceladoDesp);
+assert(msgCanceladoDesp.indexOf("NO quedaría igual") !== -1 && msgCanceladoDesp.indexOf("ya no se podría retomar") !== -1,
+  "revisión 3 #59: si un pedido ya devolvió su parte a la reserva, el aviso dice que no se podría retomar al reactivarlo");
+
+// (e) Costos que no siguen a la cantidad (recibos convertidos desde lo
+// viejo, con los montos de la caja): vuelven al peso.
+reiniciarDesp();
+state.cotizaciones = [cotDesp("cot-dsp-1", "ped-dsp-1", 8), cotDesp("cot-dsp-2", "ped-dsp-2", 6)];
+const grupoF3Desp = mapaCalc.calcLineasParaRecibo(["ped-dsp-1", "ped-dsp-2"]).filter(function (g) { return g.linea === CLAVE_TELA; })[0];
+const totalesF3Desp = { nombre: "Tela", unidad: "m", esProducto: false, esGlobal: false, cantidadTotal: 2.8, costoTotal: 21600 };
+state.cotizaciones = mapaCalc.aplicarReciboACotizaciones(state.cotizaciones, "rc-f3-desp", { fecha: "2026-09-10", proveedorId: "", numero: "", servicios: [], etiquetas: [] }, [{
+  grupo: grupoF3Desp,
+  reparto: { partes: [{ cotId: "cot-dsp-1", pedidoId: "ped-dsp-1", compraClave: CLAVE_TELA, cantidad: 1.6, costo: 14000 }, { cotId: "cot-dsp-2", pedidoId: "ped-dsp-2", compraClave: CLAVE_TELA, cantidad: 1.2, costo: 7600 }], totales: totalesF3Desp }
+}]);
+state.tx = mapaCalc.reconciliarTxRecibo(state.tx, "rc-f3-desp", state.cotizaciones).tx;
+const msgF3Desp = corregirRev3Desp("rc-f3-desp");
+const repF3Desp = mapaCalc.calcRepartoLineaRecibo(mapaCalc.calcLineasParaRecibo(["ped-dsp-1", "ped-dsp-2"]).filter(function (g) { return g.linea === CLAVE_TELA; })[0], state.formCompraConjunta.porClave[CLAVE_TELA]);
+assert(msgF3Desp.indexOf("NO quedaría igual") === -1 && repF3Desp.ok && repF3Desp.partes.map(function (q) { return q.costo; }).join("/") === "14000/7600",
+  "revisión 3 #59: un recibo con costos que no siguen a la cantidad ($14.000 / $7.600) vuelve al peso al corregirlo — antes se repartía a prorrata y pasaban $1.657 de un pedido a otro");
+
+// (f) El PDF interno dice lo mismo que Producción: lo que usa, y el
+// desperdicio aparte.
+reiniciarDesp();
+registrarReciboMapa(PEDS_DESP, draftCeroDesp, "2026-09-28");
+const tablasPdfDesp = [];
+const jspdfPrevioDesp = window.jspdf;
+window.jspdf = { jsPDF: function () {
+  var guardado = {};
+  var doc = new Proxy(guardado, {
+    get: function (t, k) {
+      if (k in t) return t[k];
+      if (k === "internal") return { pageSize: { getWidth: function () { return 612; }, getHeight: function () { return 792; }, width: 612, height: 792 }, getNumberOfPages: function () { return 1; } };
+      if (k === "autoTable") return function (o) { tablasPdfDesp.push(o); t.lastAutoTable = { finalY: 400 }; };
+      if (k === "getTextWidth") return function () { return 10; };
+      if (k === "splitTextToSize") return function (txt) { return [String(txt)]; };
+      return function () { return doc; };
+    },
+    set: function (t, k, v) { t[k] = v; return true; }
+  });
+  return doc;
+} };
+try { await pdfInternoH56b(cotMapaPorId("cot-dsp-1"), { compras: true }); } catch (e) { /* mostrar el PDF en pantalla no aplica acá */ }
+window.jspdf = jspdfPrevioDesp;
+const filaPdfDesp = [].concat.apply([], tablasPdfDesp.map(function (o) { return o.body || []; })).map(function (f) { return [].concat(f).map(function (c) { return typeof c === "object" && c ? c.content : c; }).join(" | "); })
+  .filter(function (f) { return f.indexOf("desperdicio") !== -1; })[0] || "";
+assert(/1[.,]6 m \(\+0[.,]4 m desperdicio\)/.test(filaPdfDesp),
+  "revisión 3 #59: el PDF interno muestra Cant. real 1,6 m (+0,4 m desperdicio), igual que Producción — antes decía 2 m y parecía sobreconsumo (" + filaPdfDesp + ")");
+
 
 state.pedidos = previoMapa.pedidos; state.cotizaciones = previoMapa.cotizaciones; state.tx = previoMapa.tx;
 state.txPapelera = previoMapa.txPapelera; state.pedidosPapelera = previoMapa.pedidosPapelera; state.cotSucia = previoMapa.cotSucia;

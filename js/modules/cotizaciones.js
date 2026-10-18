@@ -1,6 +1,6 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
 import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -794,7 +794,7 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
   // "Cant. real" = lo que el pedido USA. El desperdicio de sus partes
   // (Hallazgo #59) va aparte: fijo, con su costo incluido en "Costo real"
   // (ver ajustarCantidadMiembro).
-  var desperdicio = (compra.partesRecibo || []).reduce(function (a, p) { return a + Math.min(num(p.desperdicio), num(p.cantidad)); }, 0);
+  var desperdicio = desperdicioCompra(compra);
   var usado = Math.round((num(compra.cantidadReal) - desperdicio + faltante) * 100) / 100;
   var recibosIds = [];
   (compra.partesRecibo || []).forEach(function (p) { if (recibosIds.indexOf(p.reciboId) === -1) recibosIds.push(p.reciboId); });
@@ -824,7 +824,8 @@ function renderFilaCompraRecibo(c, linea, compra, abierta, attrs, estimadoCant, 
       var cab = r.cabecera || {};
       var prov = cab.proveedorId ? clienteById(cab.proveedorId) : null;
       html += '<div class="section-sub" style="margin:0 0 6px;flex-basis:100%;">🧾 Recibo del ' + esc(cab.fecha || "") + (prov ? " · " + esc(prov.nombre) : "") +
-        " · su parte: " + (lineaSinCantidad(linea) ? "" : num(p.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(p.costo) +
+        " · su parte: " + (lineaSinCantidad(linea) ? "" : (num(p.cantidad) - Math.min(num(p.desperdicio), num(p.cantidad))).toFixed(dec) + " " + esc(linea.unidad || "") + " " +
+          (num(p.desperdicio) > 0 ? "+ " + Math.min(num(p.desperdicio), num(p.cantidad)).toFixed(dec) + " de desperdicio " : "")) + fmt(p.costo) +
         (L && (L.reserva.cantidad > 0 || L.reserva.costo > 0) ? " · reserva libre: " + (lineaSinCantidad(linea) ? "" : num(L.reserva.cantidad).toFixed(dec) + " " + esc(linea.unidad || "") + " ") + fmt(L.reserva.costo) : "") +
         ' <button class="btn ghost small" data-action="ver-recibo" data-recibo-id="' + esc(p.reciboId) + '">Ver recibo</button></div>';
     });

@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -1003,12 +1003,18 @@ export async function generarPDFInternoCotizacion(cot, opts) {
           // total real" de arriba, que ya lo incluye (Hallazgo #54).
           var faltaCant = faltanteVigenteCompra(compra, cot);
           if (faltaCant > 0) notaExc += " (faltan " + numFmt(faltaCant) + (c.unidad ? " " + c.unidad : "") + ")";
+          // El desperdicio de un recibo (Hallazgo #59) va aparte, igual que
+          // en Producción: "Cant. real" es lo que el pedido USA. Si no, un
+          // retazo se lee como sobreconsumo y podría inflar el consumo
+          // estimado de la próxima cotización (tercera revisión del #59).
+          var despCant = desperdicioCompra(compra);
+          if (despCant > 0) notaExc += " (+" + numFmt(despCant) + (c.unidad ? " " + c.unidad : "") + " desperdicio)";
           // "Ahorro" no pide cantidad ni costo (por definición es $0, ver
           // renderFilaCompra en modules/cotizaciones.js) — se muestra "—"
           // igual que un servicio, no "0 MT" (que se leería como un dato
           // real escrito, no como "no hizo falta").
           var cantReal = (c.esServicio || estado === "ahorro") ? "—" :
-            (hayCantReal ? numFmt(cantidadRealPedido(compra)) + (c.unidad ? " " + c.unidad : "") + notaExc : cantEst);
+            (hayCantReal ? numFmt(Math.round((cantidadRealPedido(compra) - despCant) * 100) / 100) + (c.unidad ? " " + c.unidad : "") + notaExc : cantEst);
           // Una línea de servicio SIN costoReal escrito (nadie la tocó
           // todavía) igual cuenta como costo real en el resumen en pantalla
           // (ver calcResumenCompras) — acá se muestra igual, con el
