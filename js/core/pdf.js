@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, calcMontoDescuento, calcDesglosePedido, calcPrecioServicio, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcIvaDeBase, calcMontoDescuento, calcDesglosePedido, calcPrecioServicio, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -404,7 +404,9 @@ export async function generarPDFCotizacion(cot, opts) {
   // cotizaciones.js: casilla + porcentaje). Si no está activo, no se cobra.
   var ivaActivo = !!(cot.iva && cot.iva.activo);
   var ivaPct = ivaActivo ? num(cot.iva.porcentaje) : 0;
-  var ivaMonto = ivaActivo ? totales.precioTotal * (ivaPct / 100) : 0;
+  // El IVA sale de la ÚNICA fórmula (calcIvaDeBase, a pesos enteros): antes cada
+  // PDF lo calculaba por su cuenta y podía imprimir centavos que la app no cobra.
+  var ivaMonto = calcIvaDeBase(totales.precioTotal, cot.iva);
   var totalConIva = totales.precioTotal + ivaMonto;
 
   var finalY = doc.lastAutoTable.finalY + 26;
@@ -1488,7 +1490,7 @@ export async function generarPDFCuentaCobro(p, opts) {
   var ivaPct = ivaActivo ? num(p.iva.porcentaje) : 0;
   var subtotal = num(p.total);
   var desglosePdf = calcDesglosePedido(p);
-  var ivaMonto = ivaActivo ? subtotal * (ivaPct / 100) : 0;
+  var ivaMonto = calcIvaDeBase(subtotal, p.iva); // misma fórmula (y pesos enteros) que calcIvaPedido
   var totalConIva = subtotal + ivaMonto;
   // El saldo sale de calcSaldoPedido, que YA cobra con IVA (ver la sección
   // "IVA" de core/calc.js). Antes ese cálculo era total - abono SIN IVA

@@ -1,7 +1,9 @@
 // Descuentos (Hallazgo #61): por ítem y por toda la orden, en cotizaciones y
 // pedidos. Cubre los cálculos (core/calc.js), la conversión cotización →
 // pedido, los formularios, el editor de un pedido ya creado y lo que se
-// imprime en los PDFs.
+// imprime en los PDFs. También el redondeo a pesos enteros del IVA y la
+// comisión (Hallazgo #62), que va aquí porque los descuentos hacen que los
+// totales dejen de ser redondos.
 //
 // Se corre solo, aparte de smoke.mjs:   node test/descuentos.mjs
 //
@@ -490,6 +492,99 @@ ok(hay("$114.000"), "el TOTAL es $114.000");
   _resetCacheParaPruebas();
 }
 
+// ======================= 5. Pesos enteros (Hallazgo #62) =======================
+// El IVA y la comisión por % no pueden dejar centavos: el banco solo ve pesos,
+// y una fracción dejaba un "saldo fantasma" en pedidos ya pagados por completo.
+{
+  console.log("== IVA a pesos enteros: una sola fórmula");
+  igual(calc.redondearPesos(16071.375), 16071, "16.071,375 -> 16.071");
+  igual(calc.redondearPesos(16071.525), 16072, "16.071,525 -> 16.072");
+  igual(Object.is(calc.redondearPesos(-0.4), 0), true, "una fracción negativa pequeña es 0, no -0");
+  igual(calc.calcIvaDeBase(133333, { activo: true, porcentaje: 19 }), 25333, "19% de 133.333 = 25.333 (no 25.333,27)");
+  igual(calc.calcIvaDeBase(356250, { activo: true, porcentaje: 19 }), 67688, "un medio peso exacto (67.687,5) sube: 67.688");
+  igual(calc.calcIvaDeBase(100001, { activo: true, porcentaje: 19 }), 19000, "19% de 100.001 = 19.000");
+  igual(calc.calcIvaDeBase(1000000, { activo: true, porcentaje: 19 }), 190000, "los totales redondos dan lo mismo de siempre");
+  igual(calc.calcIvaDeBase(1000000, { activo: false, porcentaje: 19 }), 0, "con el IVA apagado es 0");
+  igual(calc.calcIvaDeBase(1000000, null), 0, "sin objeto de IVA es 0");
+
+  console.log("== un pedido pagado completo con el monto redondeado queda en CERO (sin saldo fantasma)");
+  for (const total of [133333, 100001, 356250, 104500, 99999, 250001]) {
+    const p = { id: "z" + total, total, abono: 0, iva: { activo: true, porcentaje: 19 } };
+    const aPagar = calc.calcTotalConIvaPedido(p);
+    igual(Number.isInteger(aPagar), true, "total " + total + ": lo que se le factura es un entero (" + aPagar + ")");
+    p.abono = aPagar;
+    igual(calc.calcSaldoPedido(p), 0, "total " + total + ": pagando " + aPagar + " el saldo es 0");
+    state.pedidos = [p];
+    igual(calc.calcPorCobrar(), 0, "total " + total + ": no queda nada en 'Por cobrar'");
+    igual(calc.listaDeudores().length, 0, "total " + total + ": no aparece como deudor");
+    igual(calc.listaSaldosAFavorClientes().length, 0, "total " + total + ": tampoco como saldo a favor");
+  }
+  {
+    // El caso que reportó el análisis: el cliente transfiere el valor redondeado.
+    const p = { id: "caso", total: 133333, abono: 158666, iva: { activo: true, porcentaje: 19 } };
+    igual(calc.calcSaldoPedido(p), 0, "133.333 + IVA: transfiere 158.666 y el saldo es 0 (antes quedaba 0,27)");
+    p.abono = 158665;
+    igual(calc.calcSaldoPedido(p), 1, "y si faltó un peso, falta exactamente 1");
+  }
+  {
+    const p = { id: "iv", total: 133333, abono: 79333, iva: { activo: true, porcentaje: 19 } };
+    igual(Number.isInteger(calc.calcIvaCobrado(p)), true, "el IVA cobrado (proporcional a lo pagado) también es entero");
+    p.abono = 158666;
+    igual(calc.calcIvaCobrado(p), 25333, "pagado todo, el IVA cobrado es el IVA de la factura");
+  }
+
+  console.log("== la comisión por % es en pesos enteros");
+  const vend = (valor, tipo) => ({ nombre: "Ana", tipo: tipo || "porcentaje", valor: valor, estado: "pendiente" });
+  igual(calc.calcComisionValor({ id: "c1", total: 214285, vendedor: vend(7.5), lineas: [] }), 16071, "7,5% de 214.285 = 16.071 (no 16.071,375)");
+  igual(calc.calcComisionValor({ id: "c2", total: 214287, vendedor: vend(7.5), lineas: [] }), 16072, "7,5% de 214.287 = 16.072 (16.071,525 sube)");
+  igual(calc.calcComisionValor({ id: "c3", total: 200000, vendedor: vend(10), lineas: [] }), 20000, "un total redondo da lo mismo de siempre");
+  igual(calc.calcComisionValor({ id: "c4", total: 214285, vendedor: vend(25000, "fijo"), lineas: [] }), 25000, "una comisión fija se respeta tal cual");
+  igual(calc.calcComisionValor({ id: "c5", total: 214285, vendedor: null, lineas: [] }), 0, "sin vendedor es 0");
+  {
+    // Con descuento el total deja de ser redondo: la comisión sigue en pesos enteros.
+    const lineas = [{ cantidad: 3, precioUnitario: 33333, costoUnitario: 0 }];
+    const desc = { tipo: "porcentaje", valor: 7 };
+    const total = calc.calcTotalesLineasPedido(lineas, desc).precioTotal;
+    const comision = calc.calcComisionValor({ id: "c6", total, lineas, descuento: desc, vendedor: vend(8.5) });
+    igual(Number.isInteger(total), true, "un descuento % deja un total entero (" + total + ")");
+    igual(Number.isInteger(comision), true, "y la comisión sobre él también (" + comision + ")");
+  }
+  {
+    const cot = { id: "cc", referencias: [{ id: "r", nombre: "x", cantidadPedida: 3, precioVenta: 71429, insumos: [], detalle: [] }], serviciosCobrados: [], costosGlobales: [], vendedor: vend(7.5) };
+    igual(Number.isInteger(calc.calcComisionValorCot(cot)), true, "la comisión de una cotización también es entera (" + calc.calcComisionValorCot(cot) + ")");
+    igual(calc.calcComisionValorCot(cot), Math.round(214287 * 7.5 / 100), "y es el % de las prendas, redondeado");
+  }
+  {
+    const consig = { comisionTipo: "porcentaje", comisionValor: 7.5 };
+    igual(calc.calcConsignacionComision(consig, 3, 214285), 16071, "la comisión de una venta en consignación: 7,5% de 214.285 = 16.071");
+    igual(calc.calcConsignacionComision({ comisionTipo: "fijo", comisionValor: 2500 }, 3, 214285), 7500, "la fija por unidad no cambia");
+  }
+
+  console.log("== los PDF imprimen el MISMO IVA que la app (pesos enteros)");
+  state.pedidos = []; state.cotizaciones = [];
+  {
+    const cot = { id: "pc", cliente: "Club", descripcion: "x", estado: "borrador", fecha: "2026-10-29", pedidoId: "", codigoPublico: "AB12",
+      referencias: [{ id: "r1", nombre: "Camiseta", cantidadPedida: 1, precioVenta: 133333, insumos: [], detalle: [] }],
+      serviciosCobrados: [], costosGlobales: [], compras: [], gastosReales: [], iva: { activo: true, porcentaje: 19 } };
+    impreso.length = 0; tablas.length = 0;
+    await pdf.generarPDFCotizacion(cot, { enviarPorCorreo: true });
+    ok(hay("$25.333"), "la cotización imprime el IVA entero ($25.333)");
+    ok(hay("$158.666"), "y el TOTAL entero ($158.666)");
+    ok(!hay("25.333,2") && !hay("158.666,2"), "sin centavos");
+  }
+  {
+    const p = { id: "pcc", cliente: "Ana", total: 356250, abono: 423938, abonos: [], numeroOp: "OP-1", descripcion: "x", cantidad: "1", codigoPublico: "ZZ99",
+      iva: { activo: true, porcentaje: 19 }, lineas: [{ id: "l", productoNombre: "Gorra", cantidad: 1, precioUnitario: 356250 }] };
+    state.pedidos = [p];
+    impreso.length = 0; tablas.length = 0;
+    await pdf.generarPDFCuentaCobro(p, { enviarPorCorreo: true });
+    ok(hay("$67.688"), "la cuenta de cobro imprime el IVA redondeado ($67.688)");
+    ok(hay("$423.938"), "y el TOTAL ($423.938)");
+    ok(hay("PAGADO COMPLETO"), "y con 423.938 abonados dice PAGADO COMPLETO (la app y el PDF coinciden)");
+  }
+  state.pedidos = [];
+}
+
 console.log("");
-console.log(fallos ? "X " + fallos + " de " + pruebas + " pruebas FALLARON" : "OK " + pruebas + " pruebas de descuentos");
+console.log(fallos ? "X " + fallos + " de " + pruebas + " pruebas FALLARON" : "OK " + pruebas + " pruebas de descuentos y redondeo");
 process.exit(fallos ? 1 : 0);

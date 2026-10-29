@@ -259,6 +259,22 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésima décima ronda: el IVA y la comisión en pesos enteros)
+
+- **Un pedido pagado completo ya no se queda con "saldo".** El IVA se calculaba
+  con centavos: $133.333 + IVA daba $158.666,27, el cliente pagaba $158.666 y
+  quedaba un saldo de 27 centavos que se mostraba como "$0" pero contaba como
+  deuda en "Por cobrar", en el filtro "Con saldo pendiente" y en la lista de
+  deudores.
+- **Todo monto calculado que termina siendo plata va en pesos enteros:** el IVA,
+  la comisión por % (pedido, cotización y consignación) y el saldo. Una comisión
+  fija se respeta tal cual.
+- **Una sola fórmula del IVA** (`calcIvaDeBase`): la cuenta de cobro y la
+  cotización en PDF ya no la calculan por su cuenta.
+- No cambia ningún dato guardado: el IVA y el saldo se calculan al leer.
+- Sin tocar (decisión de negocio pendiente): nómina semanal/quincenal, cuotas de
+  deuda y gastos fijos prorrateados. Ver CONTABILIDAD.md, Hallazgo #62.
+
 ## Registro de cambios — octubre 2026 (centésimo novena ronda: descuentos por ítem y a toda la orden)
 
 - **Descuentos** en cotizaciones, pedidos rápidos y pedidos ya creados:

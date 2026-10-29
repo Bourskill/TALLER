@@ -642,10 +642,29 @@ export function movimientosGeneradosPorPedido(pedidoId) {
 // completa dejaba el pedido en saldo NEGATIVO, y la app anunciaba un "saldo a
 // favor del cliente" de exactamente el IVA — plata que en realidad hay que
 // girarle a la DIAN. El KPI "Por cobrar" también quedaba corto por ese 19%.
-export function calcIvaPedido(p) {
-  var iva = p && p.iva;
+// ---------- Pesos enteros (Hallazgo #62) ----------
+// El peso no tiene centavos: ningún banco ni ningún cliente mueve $16.071,375.
+// Todo monto que se CALCULA y que termina siendo plata (IVA, comisión) se
+// redondea acá, a pesos enteros, y en UN solo sitio — antes el IVA se
+// calculaba sin redondear en calc.js y otra vez, a mano, en dos PDF. Un pedido
+// de $133.333 con IVA daba $158.666,27: el cliente pagaba $158.666 y quedaba
+// un "saldo" de 27 centavos que la pantalla mostraba como "Falta por cobrar
+// $0" pero que seguía contando como deuda en "Por cobrar".
+//
+// Se multiplica ANTES de dividir (base * pct / 100): con % enteros el producto
+// es un entero exacto, así un medio peso exacto ($67.687,5) nunca cae en
+// $67.687,4999… por el error de coma flotante, y siempre sube ($67.688).
+export function redondearPesos(n) {
+  return Math.round(num(n)) + 0; // "+ 0": Math.round(-0.4) es -0, que se imprimiría "-0"
+}
+// IVA de una base, según el { activo, porcentaje } de un pedido o cotización.
+// ÚNICA fórmula del IVA: pedidos, cuenta de cobro y cotización pasan por acá.
+export function calcIvaDeBase(base, iva) {
   if (!iva || !iva.activo) return 0;
-  return num(p.total) * (num(iva.porcentaje) / 100);
+  return redondearPesos(num(base) * num(iva.porcentaje) / 100);
+}
+export function calcIvaPedido(p) {
+  return calcIvaDeBase(p && p.total, p && p.iva);
 }
 // Lo que dice la cuenta de cobro: es el número contra el que se cobra.
 export function calcTotalConIvaPedido(p) {
@@ -653,7 +672,10 @@ export function calcTotalConIvaPedido(p) {
 }
 
 export function calcSaldoPedido(p) {
-  return calcTotalConIvaPedido(p) - num(p && p.abono);
+  // En pesos enteros (Hallazgo #62): una fracción de peso no se puede cobrar ni
+  // devolver, y dejarla viva hacía que un pedido pagado por completo siguiera
+  // apareciendo con saldo. Sale cero cuando el cliente pagó la factura redondeada.
+  return redondearPesos(calcTotalConIvaPedido(p) - num(p && p.abono));
 }
 
 // Del dinero YA cobrado de un pedido, cuánto es IVA. Proporcional: si te
@@ -663,7 +685,7 @@ export function calcIvaCobrado(p) {
   var conIva = calcTotalConIvaPedido(p);
   if (conIva <= 0) return 0;
   var proporcion = Math.min(1, Math.max(0, num(p && p.abono) / conIva));
-  return calcIvaPedido(p) * proporcion;
+  return redondearPesos(calcIvaPedido(p) * proporcion);
 }
 
 // IVA cobrado en TODA la app: plata que está en la caja pero es del Estado.
@@ -1525,7 +1547,9 @@ export function calcComisionValor(p) {
   var tipo = v.tipo || "porcentaje";
   if (tipo === "fijo") return num(v.valor);
   var pct = v.porcentaje != null ? num(v.porcentaje) : num(v.valor);
-  return calcBaseComision(p) * (pct / 100);
+  // A pesos enteros (Hallazgo #62): este número es el monto del movimiento que
+  // se crea al pagar la comisión, y el banco solo ve pesos.
+  return redondearPesos(calcBaseComision(p) * pct / 100);
 }
 // ---------- estado de una comisión: UNA sola regla (Hallazgo #56) ----------
 // "pagada" | "pendiente" | "anulada" | "" (sin vendedor).
@@ -1606,7 +1630,7 @@ export function calcComisionValorCot(cot) {
   var tipo = v.tipo || "porcentaje";
   if (tipo === "fijo") return num(v.valor);
   var totales = calcCotizacionTotales(cot);
-  return totales.precioPrendas * (num(v.valor) / 100);
+  return redondearPesos(totales.precioPrendas * num(v.valor) / 100); // pesos enteros, igual que calcComisionValor
 }
 // Solo cuenta cotizaciones aún NO convertidas: una vez convertida, la comisión
 // vive en el pedido resultante (se copia al convertir) y ya se cuenta en
@@ -1734,7 +1758,7 @@ export function calcConsignacionDisponiblePorTalla(p) {
 export function calcConsignacionComision(consignacion, cantidad, montoTotal) {
   var tipo = consignacion.comisionTipo || "porcentaje";
   if (tipo === "fijo") return num(consignacion.comisionValor) * cantidad;
-  return num(montoTotal) * (num(consignacion.comisionValor) / 100);
+  return redondearPesos(num(montoTotal) * num(consignacion.comisionValor) / 100); // pesos enteros (Hallazgo #62)
 }
 export function calcComisionesConsignacionPendientes() {
   return state.pedidos.reduce(function (a, p) {

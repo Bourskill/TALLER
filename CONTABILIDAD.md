@@ -68,9 +68,9 @@ contabilidad de caja para negocio pequeño.
 
 | Qué | Regla | Dónde |
 |---|---|---|
-| IVA de un pedido | `p.total * (iva.porcentaje/100)` si `iva.activo`, si no `0`. Sobre la base, nunca sobre el total con IVA. | `calc.js:501` `calcIvaPedido` |
+| IVA de un pedido | `redondearPesos(p.total * iva.porcentaje / 100)` si `iva.activo`, si no `0`. **A pesos enteros** (Hallazgo #62). Sobre la base, nunca sobre el total con IVA. Una sola fórmula (`calcIvaDeBase`): la usan el pedido, la cuenta de cobro y la cotización. | `calc.js` `calcIvaDeBase`, `calcIvaPedido` |
 | Total con IVA (número de la cuenta de cobro) | `p.total + calcIvaPedido(p)` | `calc.js:507` `calcTotalConIvaPedido` |
-| Saldo por cobrar de un pedido | `calcTotalConIvaPedido(p) - p.abono` — **incluye IVA siempre** | `calc.js:511` `calcSaldoPedido` |
+| Saldo por cobrar de un pedido | `redondearPesos(calcTotalConIvaPedido(p) - p.abono)` — **incluye IVA siempre**, en pesos enteros: un pedido pagado con el monto redondeado queda en 0 (Hallazgo #62) | `calc.js:511` `calcSaldoPedido` |
 | Abonado (única fórmula) | suma abonos, RESTA los de `tipo:"reembolso"`. `p.abono` nunca se edita a mano. | `calc.js:541` `calcAbonadoDeLista` |
 | IVA ya cobrado de un pedido | `calcIvaPedido(p) * (p.abono / totalConIva)` — proporcional a lo pagado | `calc.js:518` `calcIvaCobrado` |
 | IVA cobrado total (KPI) | suma de todos los pedidos, incluidos cancelados (si se cobró, se debe igual) | `calc.js:528` `calcIvaCobradoTotal` |
@@ -83,7 +83,7 @@ contabilidad de caja para negocio pequeño.
 | Qué | Regla | Dónde |
 |---|---|---|
 | Base de comisión de un pedido | `p.total` MENOS las líneas marcadas "servicio cobrado" (diseño, arreglos — comisionarlas dejaría esa línea en pérdida). Con descuento, **el vendedor lo comparte**: la base es lo que de verdad se cobró por las prendas (decisión del dueño, Hallazgo #61) | `calc.js:1175` `calcBaseComision` |
-| Valor de la comisión | fijo → `v.valor`; porcentaje → `base * pct/100` | `calc.js:1181` `calcComisionValor` |
+| Valor de la comisión | fijo → `v.valor`; porcentaje → `redondearPesos(base * pct / 100)` — **a pesos enteros**, porque es el monto del movimiento que se crea al pagarla (Hallazgo #62). Igual para la cotización y la consignación. | `calc.js:1181` `calcComisionValor` |
 | Comisión de consignación | se calcula POR CADA VENTA, no sobre el envío total | `calc.js:1305` `calcConsignacionComision` |
 | Marcar comisión pagada/despagada | toggle bidireccional real: crea o RETIRA el `tx` por completo (nunca solo cambia una etiqueta) — evita doble movimiento al re-marcar | `modules/pedidos.js:2030` `toggle-comision`, `modules/cotizaciones.js:1987` `toggle-comision-cot` |
 
@@ -3790,6 +3790,59 @@ columna nueva.
   recalcula todo desde cero.
 - No hay historial de *quién* dio un descuento ni *cuándo* se cambió; solo el
   motivo opcional del descuento a toda la orden.
+
+### 🔴 Hallazgo #62 — el IVA y la comisión dejaban centavos: un pedido pagado completo seguía con "saldo". ✅ CORREGIDO
+
+**Cómo apareció:** el dueño pidió un análisis de si la app puede cuadrar al
+peso con sus cuentas bancarias. Al probarlo se encontró que el IVA y la
+comisión por % no se redondeaban.
+
+**Qué fallaba (reproducido):** un pedido de $133.333 con IVA 19% daba
+$158.666,27. El cliente transfiere $158.666 —no existen los 27 centavos— y el
+pedido quedaba con un saldo de $0,27 que la pantalla mostraba como "Falta por
+cobrar $0", pero que **seguía contando** como saldo pendiente: aparecía en el
+filtro "Con saldo pendiente", como deudor y sumaba a "Por cobrar". Con
+$100.001 pasaba igual ($0,19). La comisión del 7,5% sobre $214.285 se guardaba
+como movimiento de **$16.071,375**, que ningún extracto bancario muestra. Y el
+IVA se calculaba **tres veces** por separado (calc.js y dos PDF).
+
+**Por qué era más probable ahora:** los descuentos (Hallazgo #61) hacen que los
+totales dejen de ser redondos, y el IVA de un total no redondo casi siempre trae
+fracción.
+
+**Regla nueva — todo monto calculado que termina siendo plata va en pesos
+enteros, y se redondea en UN solo sitio:**
+- `redondearPesos(n)` = `Math.round`, sin `-0`. Se multiplica ANTES de dividir
+  (`base * pct / 100`): con % enteros el producto es un entero exacto, así un
+  medio peso exacto ($67.687,5) nunca cae en $67.687,4999… por coma flotante.
+  Siempre sube ($67.688).
+- `calcIvaDeBase(base, iva)` es la **única** fórmula del IVA. La usan
+  `calcIvaPedido`, la cuenta de cobro y la cotización (los PDF ya no la
+  calculan a mano).
+- `calcSaldoPedido` y `calcIvaCobrado` también salen en pesos enteros.
+- La comisión por % (pedido, cotización y venta en consignación) sale en pesos
+  enteros. Una comisión **fija** se respeta tal cual la escribió el dueño.
+
+**Datos ya guardados:** no hace falta migrar nada. El IVA y el saldo se calculan
+al leer, así que los saldos fantasma de pedidos ya pagados desaparecen solos. Un
+movimiento de comisión ya pagado con centavos conserva su monto (es plata que ya
+se registró); lo nuevo sale entero.
+
+**Verificado:** `test/descuentos.mjs`, sección "Pesos enteros": las fórmulas, seis
+totales que antes dejaban saldo fantasma (pagando el monto redondeado, saldo 0,
+nada en "Por cobrar", ni deudor ni saldo a favor), las comisiones (incluida la de
+un total con descuento) y que los PDF impriman el mismo IVA y el mismo "PAGADO
+COMPLETO" que la app. La sonda de reproducción dio saldo 0,27 antes y 0 después.
+
+**Pendiente, a propósito (decisiones de negocio, no solo de código):** otras
+fuentes de montos con fracción que NO se tocaron —
+- **Nómina semanal/quincenal:** `calcSalarioPorPeriodo` divide el salario
+  mensual entre 4 o 2; la semanal usa "4 semanas por mes" (aproximación) y puede
+  dar centavos. Hay que decidir cómo se redondea un pago de nómina.
+- **Cuotas de deuda:** `calcDeudaValorCuota` = monto / cuotas ($1.000.000 en 3 =
+  $333.333,33). La última cuota paga el saldo restante, así que redondear cada
+  cuota a pesos cuadraría solo — pero toca lo que ya se pagó de deudas en curso.
+- **Gastos fijos prorrateados por periodo.**
 
 ---
 
