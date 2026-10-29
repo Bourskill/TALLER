@@ -3,7 +3,7 @@
 // (son puras salvo por leer `state`) y reutilizarlas en reportes/exportaciones
 // sin arrastrar código de HTML.
 
-import { state } from "./store.js";
+import { state, anotarReparacion } from "./store.js";
 import { num, norm, todayStr, diasPagoDe, fmt, redondear2, hashCorto } from "./utils.js";
 import { ESTADOS_DEFAULT, UNIDAD_SERVICIO, CUENTA_SIN_ASIGNAR } from "./constants.js";
 
@@ -3176,7 +3176,7 @@ export function calcListaCompras(cot) {
 // Reportado en producción 2026-09-20 ("solo pasa con las salidas de
 // dinero" — el patrón exacto de esto, ya que las compras son gastos).
 export function repararComprasSinSeguimiento(tx, cotizaciones) {
-  var huboReparacion = false;
+  var reparados = 0;
   (tx || []).forEach(function (t) {
     // La parte de un Recibo de compra también lleva origenCompraClave +
     // cotizacionId, pero su compra puede faltar A PROPÓSITO (se borró la
@@ -3191,9 +3191,10 @@ export function repararComprasSinSeguimiento(tx, cotizaciones) {
     var lineaViva = calcListaCompras(cot).filter(function (l) { return l.clave === t.origenCompraClave; })[0];
     if (!lineaViva) return;
     cot.compras = (cot.compras || []).concat([{ clave: t.origenCompraClave, estado: "si", costoReal: num(t.monto), txId: t.id }]);
-    huboReparacion = true;
+    reparados++;
   });
-  return huboReparacion;
+  anotarReparacion("comprasSinSeguimiento", reparados);
+  return reparados > 0;
 }
 
 // ---------- compras compartidas entre varios pedidos ----------

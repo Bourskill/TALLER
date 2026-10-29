@@ -24,3 +24,23 @@
 @media (max-width:600px){
   .marca-grid{grid-template-columns:1fr;gap:var(--sp-3);}
 }
+
+/* Salud de los datos (modules/salud.js): una fila por hallazgo, con el borde
+   del color de su gravedad. Reutiliza .badge, .chip, .buscador y .help-tip. */
+.salud-ok{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;color:var(--ink-soft);margin:4px 0 2px;}
+.salud-item{border:1px solid var(--border-soft);border-left:3px solid var(--border-strong);border-radius:var(--radius-sm);
+  background:var(--surface-2);padding:10px 12px;margin-top:8px;}
+.salud-item.error{border-left-color:var(--danger);}
+.salud-item.aviso{border-left-color:var(--warning);}
+.salud-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px;color:var(--ink);}
+.salud-detalle{font-size:12.5px;color:var(--ink-soft);margin-top:5px;line-height:1.5;overflow-wrap:anywhere;}
+.salud-pie{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin-top:8px;}
+.salud-donde{font-size:11.5px;color:var(--ink-faint);flex:1 1 220px;min-width:0;}
+.salud-enlaces{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.salud-ir{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.salud-mas{font-size:11.5px;color:var(--ink-faint);}
+/* Lo corregido en silencio al cargar: si hubo algo, se ve (borde de aviso). */
+.salud-rep{font-size:12.5px;color:var(--ink-soft);margin-top:12px;line-height:1.5;}
+.salud-rep.aviso{border-left:3px solid var(--warning);padding:6px 0 6px 12px;}
+.salud-rep ul{margin:6px 0 0;padding-left:18px;}
+.salud-rep li{margin:2px 0;}

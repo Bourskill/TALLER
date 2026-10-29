@@ -275,6 +275,30 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésima duodécima ronda: «Salud de los datos»)
+
+- **Un panel que avisa cuando algo de dinero no cuadra** (solo admin, arriba de
+  todo en Configuración). Con los datos sanos dice «Todo cuadra»; si no, lista
+  cada caso con su porqué en lenguaje simple, dónde se arregla y un botón que lleva
+  al pedido, la cotización, el recibo o los movimientos. Chips Errores/Avisos,
+  buscador con contador y **Copiar informe** (texto plano).
+- **Insignia roja en «Configuración»** del menú con el número de errores.
+- **Qué revisa:** lo abonado de cada pedido; que cada abono y reembolso esté en
+  Finanzas por el mismo monto; movimientos duplicados (la comisión pagada dos
+  veces) o sin origen; comisiones «pagadas» y su movimiento; monto, fecha y tipo de
+  cada movimiento (con aviso por **centavos**); que el total del pedido salga de
+  sus líneas y descuentos; los recibos de compra; servicios en negativo; la caja
+  contra una suma independiente; y clientes con saldo a favor.
+- **Lo que la app corrige sola al cargar ahora se dice:** «Al cargar, la app
+  corrigió N cosas por su cuenta: …». Las 11 reparaciones hacen exactamente lo
+  mismo que antes; solo anotan cuántas cosas corrigieron.
+- **Solo lee:** no repara ni escribe nada, y no agrega columnas a ninguna hoja.
+- **Todavía no revisa** las cuentas bancarias (la rama de «Cuentas y conciliación»,
+  Hallazgo #63, no está integrada a `main`), ni la nómina, las deudas o la
+  consignación. Ver la lista completa en CONTABILIDAD.md, Hallazgo #64.
+- Para sumar una verificación: `registrarVerificacion` en `core/salud.js`. Prueba
+  nueva: `node test/salud.mjs` (no necesita jsdom).
+
 ## Registro de cambios — octubre 2026 (centésimo undécima ronda: cuentas y conciliación)
 
 - **Cuentas** (Efectivo, Banco y Nequi por defecto; se editan en **Configuración →
@@ -4868,6 +4892,7 @@ js/
     backup.js                     copia de seguridad diaria de la Sheet a una carpeta de Drive
     store.js             *el* estado global + persistencia + notify()
     calc.js               todo lo derivado del estado (caja, márgenes, ventas por vendedor...)
+    salud.js               «Salud de los datos»: verifica y reporta lo que no cuadra (solo lee)
     components.js          piezas de HTML COMPARTIDAS: buscador, tarjeta de índice,
                              combobox de cliente, burbuja de ayuda, tipos de costo.
                              Antes de escribir un componente nuevo, mirar acá.
@@ -4878,8 +4903,11 @@ js/
     resumen.js, finanzas.js, pedidos.js, cotizaciones.js,
     clientes.js, pendientes.js, config.js, mis-ventas.js (solo rol vendedor)
                          una pestaña = un archivo = su render() + sus actions
+    salud.js             el panel «Salud de los datos» (lo dibuja config.js; no es una pestaña)
 test/
   smoke.mjs            recorre la app simulando clicks reales (Node + jsdom)
+  descuentos.mjs       descuentos y pesos enteros (Node solo, sin jsdom)
+  salud.mjs            «Salud de los datos» y lo corregido al cargar (Node solo, sin jsdom)
 ```
 
 ## Cómo trabajar sobre un área sin romper las demás
@@ -4995,6 +5023,12 @@ Para correrlo:
 npm install jsdom
 node test/smoke.mjs
 ```
+Las pruebas que no necesitan jsdom se corren cada una sola:
+```bash
+node test/descuentos.mjs
+node test/salud.mjs
+```
+
 (`jsdom` es solo una dependencia de desarrollo para el test; la app en sí no
 la necesita — no hay `package.json` en el proyecto porque no hace falta un
 build step para producción.)

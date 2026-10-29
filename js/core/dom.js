@@ -13,6 +13,7 @@
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, ETIQUETA_CLAVE } from "./store.js";
 import { esc, esUrlImagen } from "./utils.js";
 import { calcNotificaciones } from "./calc.js";
+import { calcResumenSalud } from "./salud.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout, haySesionPorVencer, renovarSesionAhora } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
@@ -117,7 +118,7 @@ function irAPestana(key) {
   if (!key) return;
   state.tab = key;
   state.sidebarMobileOpen = false; // al elegir una pestaña en móvil, cerrar el cajón
-  if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; }
+  if (state.tab !== "finanzas") { state.filtroTxVista = "activos"; state.txEditando = ""; state.txEnfocados = []; }
   if (state.tab !== "pedidos") { state.filtroPedidosVista = "activos"; }
   // Nota: `cotizacionesVista` NO se resetea acá — arranca en "nueva" (ver
   // DEFAULT en store.js) para que la primera vez que se entra a
@@ -816,10 +817,20 @@ function renderSidebar() {
     tabs.forEach(function (key) {
       var label = TAB_LABEL[key];
       var active = state.tab === key;
-      html += '<button class="nav-item' + (active ? " active" : "") + '" id="nav-tab-' + key + '" data-action="tab" data-tab="' + key + '" title="' + esc(label) + '"' +
+      // «Salud de los datos» vive en Configuración (solo la ve el admin): si hay
+      // errores, el menú lo dice sin tener que entrar. Solo cuentan los errores;
+      // los avisos se ven al abrir el panel.
+      // (Si el chequeo mismo fallara, el menú se pinta igual: el insignia es una
+      // ayuda, no puede tumbar la app. Cada verificación ya atrapa su propio error.)
+      var erroresSalud = 0;
+      if (key === "config") {
+        try { erroresSalud = calcResumenSalud().errores; } catch (e) { console.error("Salud de los datos", e); }
+      }
+      html += '<button class="nav-item' + (active ? " active" : "") + '" id="nav-tab-' + key + '" data-action="tab" data-tab="' + key + '" title="' + esc(label) + (erroresSalud ? " — " + erroresSalud + " error(es) en Salud de los datos" : "") + '"' +
         ' tabindex="' + (key === conFoco ? "0" : "-1") + '"' + (active ? ' aria-current="page"' : "") + ">" +
         '<span class="nav-icon">' + (ICONS[key] || "") + "</span>" +
         '<span class="nav-label">' + esc(label) + "</span>" +
+        (erroresSalud ? '<span class="nav-badge">' + (erroresSalud > 9 ? "9+" : erroresSalud) + "</span>" : "") +
         "</button>";
     });
     html += "</div></div>";

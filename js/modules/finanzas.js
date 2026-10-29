@@ -540,6 +540,9 @@ function renderHistorial() {
   }) + "</div>";
 
   html += '<div class="filters">';
+  if ((state.txEnfocados || []).length) {
+    html += '<button class="chip chip-aviso active" data-action="quitar-enfoque-tx" title="Ver todos los movimientos otra vez">Solo los señalados en Salud de los datos<span class="chip-n">' + state.txEnfocados.length + "</span> ✕</button>";
+  }
   [["todos", "Todos"], ["ingreso", "Ingresos"], ["gasto", "Gastos"], ["nomina", "Nómina"], ["comision", "Comisiones"]].forEach(function (c) {
     html += '<button class="chip ' + (state.filtroTx === c[0] ? "active" : "") + '" data-action="filtro-tx" data-val="' + c[0] + '">' + c[1] + "</button>";
   });
@@ -646,6 +649,10 @@ function filtrarTx() {
   if (state.filtroTxCuenta && state.filtroTxCuenta !== "todas") {
     list = list.filter(function (t) { return cuentaDeTx(t) === state.filtroTxCuenta; });
   }
+  // «Salud de los datos» señala movimientos concretos: solo esos (ver el chip
+  // de renderHistorial para volver a verlos todos).
+  var enfocados = state.txEnfocados || [];
+  if (enfocados.length) list = list.filter(function (t) { return enfocados.indexOf(t.id) !== -1; });
 
   var periodo = state.filtroTxPeriodo || "todos";
   if (periodo !== "todos") {
@@ -918,6 +925,10 @@ export var actions = {
   // cotización, gasto fijo o deuda) y, si tiene un anchor identificable en
   // el DOM, hace scroll hasta ahí — mismo patrón que
   // "ver-cotizacion-relacionada" en pedidos.js.
+  "quitar-enfoque-tx": function () {
+    state.txEnfocados = [];
+    notify();
+  },
   "ver-origen-tx": function (el) {
     var id = el.getAttribute("data-id");
     var t = state.tx.filter(function (t) { return t.id === id; })[0];
@@ -1289,7 +1300,7 @@ export var actions = {
 
 // Lleva a Finanzas → Historial con la tarjeta del recibo abierta y a la
 // vista (limpia filtros para que no quede escondida detrás de uno).
-function irARecibo(reciboId) {
+export function irARecibo(reciboId) {
   if (!reciboId) return;
   state.tab = "finanzas";
   state.sidebarMobileOpen = false;
