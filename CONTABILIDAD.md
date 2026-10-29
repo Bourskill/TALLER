@@ -4031,6 +4031,10 @@ que la app produce en su uso normal o lo que está pendiente de decidir:
   El pago de un gasto fijo de un periodo **ya cerrado** queda suelto a propósito
   (`MARCAS_ORIGEN_SISTEMA`) y no se reporta.
 - **Saldo a favor:** es plata del cliente, ya sumada en «Por pagar».
+- **Las cuentas contra la Caja:** la suma de los saldos por cuenta tiene que ser la
+  Caja (error si no); aviso si hay movimientos en una cuenta que ya no existe, o una
+  transferencia que sale y entra a la misma cuenta o usa una cuenta inexistente; error
+  si una transferencia vigente tiene un monto que no es positivo.
 
 **Cómo se extiende:** una verificación es `{ id, titulo, porque, donde, correr }`;
 `correr()` devuelve `[{ clave, severidad, titulo, detalle, afectados }]` (vacío =
@@ -4041,13 +4045,15 @@ si cuadra. Cada marca nueva de `MARCAS_ORIGEN_SISTEMA` tiene que clasificarse co
 única o repetible (`MARCAS_UNICAS`/`MARCAS_REPETIBLES`): la prueba falla si falta.
 
 **Qué NO verifica todavía (a propósito, o pendiente):**
-- **Cuentas bancarias / conciliación (Hallazgo #63):** la rama
-  `claude/dreamy-lalande-419844` (campo `cuenta` en los movimientos, saldo por
-  cuenta, transferencias) **no está integrada a `main`**, así que no existe la
-  verificación «la suma de los saldos por cuenta es igual a `calcCaja()`» ni «ningún
-  movimiento queda sin una cuenta válida». Cuando se integre, se agrega con
-  `registrarVerificacion` (no hay que tocar nada más). **Hoy no se compara nada
-  contra el banco**: solo que la app sea coherente consigo misma.
+- **Contra el banco (Hallazgo #63):** la verificación «Las cuentas contra la Caja»
+  comprueba que la suma de los saldos por cuenta sea `calcCaja()`, que no haya
+  movimientos en una cuenta que ya no existe y que ninguna transferencia tenga un
+  monto o una cuenta imposibles. **«Sin asignar» no se señala** a propósito: es el
+  estado normal de los movimientos de antes de las cuentas y la pantalla de Cuentas
+  ya tiene su botón «Repartir ahora» (esto avisa de inconsistencias, no de tareas
+  pendientes). **No compara nada contra el extracto bancario**: solo que la app sea
+  coherente consigo misma; la comparación con el banco es la conciliación de Cuentas,
+  que hace el dueño a mano.
 - Que el **monto de una comisión ya pagada** sea el que daría hoy la fórmula (si el
   total cambió después, el movimiento conserva lo que se pagó, por regla del #62).
 - Las **ventas de consignación** y la comisión del punto contra sus movimientos (solo

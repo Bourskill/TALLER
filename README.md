@@ -19,8 +19,9 @@ en vez de adivinar.
 
 ## Pruebas automáticas
 
-Hay dos pruebas: `test/smoke.mjs` (la de humo, usa jsdom) y
-`test/descuentos.mjs`. **Corren solas en GitHub** (pestaña Actions, workflow
+Hay cuatro pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+`test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
+conciliación) y `test/salud.mjs` («Salud de los datos»). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
 
@@ -288,14 +289,16 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   veces) o sin origen; comisiones «pagadas» y su movimiento; monto, fecha y tipo de
   cada movimiento (con aviso por **centavos**); que el total del pedido salga de
   sus líneas y descuentos; los recibos de compra; servicios en negativo; la caja
-  contra una suma independiente; y clientes con saldo a favor.
+  contra una suma independiente; **las cuentas contra la Caja** (que su suma sea
+  la Caja, y que no haya plata en una cuenta que ya no existe ni una transferencia
+  imposible); y clientes con saldo a favor.
 - **Lo que la app corrige sola al cargar ahora se dice:** «Al cargar, la app
-  corrigió N cosas por su cuenta: …». Las 11 reparaciones hacen exactamente lo
+  corrigió N cosas por su cuenta: …». Las 12 reparaciones hacen exactamente lo
   mismo que antes; solo anotan cuántas cosas corrigieron.
 - **Solo lee:** no repara ni escribe nada, y no agrega columnas a ninguna hoja.
-- **Todavía no revisa** las cuentas bancarias (la rama de «Cuentas y conciliación»,
-  Hallazgo #63, no está integrada a `main`), ni la nómina, las deudas o la
-  consignación. Ver la lista completa en CONTABILIDAD.md, Hallazgo #64.
+- **Todavía no revisa** la nómina, las deudas ni la consignación, y **no compara nada
+  contra el banco**: eso lo hace la conciliación de «Cuentas», a mano, con tu
+  extracto. Ver la lista completa en CONTABILIDAD.md, Hallazgo #64.
 - Para sumar una verificación: `registrarVerificacion` en `core/salud.js`. Prueba
   nueva: `node test/salud.mjs` (no necesita jsdom).
 
@@ -4907,6 +4910,7 @@ js/
 test/
   smoke.mjs            recorre la app simulando clicks reales (Node + jsdom)
   descuentos.mjs       descuentos y pesos enteros (Node solo, sin jsdom)
+  cuentas.mjs          cuentas, transferencias y conciliación (Node solo, sin jsdom)
   salud.mjs            «Salud de los datos» y lo corregido al cargar (Node solo, sin jsdom)
 ```
 

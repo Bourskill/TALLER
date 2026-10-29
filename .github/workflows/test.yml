@@ -31,3 +31,9 @@ jobs:
 
       - name: Prueba de descuentos (test/descuentos.mjs)
         run: node test/descuentos.mjs
+
+      - name: Prueba de cuentas y conciliación (test/cuentas.mjs)
+        run: node test/cuentas.mjs
+
+      - name: Prueba de salud de los datos (test/salud.mjs)
+        run: node test/salud.mjs

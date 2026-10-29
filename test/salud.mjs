@@ -236,6 +236,31 @@ escenario("un cliente pagó de más", d => {
 }, ["saldo-a-favor:aviso"],
   hs => ok(hs[0].afectados[0].id === "P5", "señala al pedido"));
 
+console.log("== 11. las cuentas contra la Caja (Hallazgo #63)");
+{
+  const CUENTAS = [{ id: "efectivo", nombre: "Efectivo" }, { id: "banco", nombre: "Banco" }];
+  const conCuentas = d => { state.config.cuentas = CUENTAS; state.transferencias = []; d.tx.forEach((x, i) => { x.cuenta = i % 2 ? "banco" : "efectivo"; }); };
+  const transf = (extra) => Object.assign({ id: "tr1", fecha: "2026-10-25", de: "efectivo", a: "banco", monto: 50000, anulada: "", conciliadoDe: "", conciliadoA: "" }, extra || {});
+  escenario("movimientos repartidos entre cuentas de verdad: cero hallazgos", conCuentas, []);
+  {
+    cargar(datosLimpios()); conCuentas({ tx: state.tx });
+    ok(calc.calcSaldosPorCuenta().cuadra === true, "(la suma de las cuentas es la Caja con datos limpios)");
+  }
+  escenario("una transferencia válida entre cuentas NO es un hallazgo", d => { conCuentas(d); state.transferencias = [transf()]; }, []);
+  escenario("movimientos sin cuenta («Sin asignar») NO se señalan: es el estado normal de antes", d => { conCuentas(d); d.tx.forEach(x => { delete x.cuenta; }); }, []);
+  escenario("movimientos en una cuenta que ya no existe → aviso", d => { conCuentas(d); t(d, "t-a1").cuenta = "caja-vieja"; }, ["cuentas:aviso"],
+    hs => ok(hs[0].afectados.some(a => a.tipo === "movimiento" && a.id === "t-a1") && hs[0].detalle.indexOf("caja-vieja") !== -1, "señala el movimiento y la cuenta"));
+  escenario("transferencia con monto negativo → error", d => { conCuentas(d); state.transferencias = [transf({ monto: -5000 })]; }, ["cuentas:error"]);
+  escenario("transferencia con monto cero → error", d => { conCuentas(d); state.transferencias = [transf({ monto: 0 })]; }, ["cuentas:error"]);
+  escenario("transferencia con un monto que no es número → error", d => { conCuentas(d); state.transferencias = [transf({ monto: "abc" })]; }, ["cuentas:error"]);
+  escenario("transferencia hacia una cuenta que ya no existe → aviso", d => { conCuentas(d); state.transferencias = [transf({ a: "nequi-vieja" })]; }, ["cuentas:aviso"]);
+  escenario("transferencia que sale y entra a la misma cuenta → aviso", d => { conCuentas(d); state.transferencias = [transf({ a: "efectivo" })]; }, ["cuentas:aviso"]);
+  escenario("una transferencia ANULADA con datos raros no se señala (ya no cuenta)", d => { conCuentas(d); state.transferencias = [transf({ monto: -1, a: "nequi-vieja", anulada: "2026-10-26" })]; }, []);
+  escenario("el monto infinito sigue dando solo sus dos hallazgos (las cuentas no se suman al ruido)", d => { conCuentas(d); t(d, "t-hilo").monto = Infinity; }, ["movimiento-datos:error", "caja:error"]);
+  ok(salud.VERIFICACIONES_SALUD.some(v => v.id === "cuentas" && v.porque && v.donde), "la verificación «cuentas» está registrada con su porqué y su dónde");
+  state.config.cuentas = []; state.transferencias = []; // no contaminar lo que sigue
+}
+
 console.log("== combinaciones y orden");
 {
   const d = datosLimpios();

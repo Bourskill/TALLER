@@ -27,7 +27,8 @@ import {
   calcAbonadoDeLista, calcCaja, calcResumenMovimientos, calcDesglosePedido,
   calcServiciosDisponibles, calcIdsRecibos, calcRecibo, verificarRecibo,
   listaSaldosAFavorClientes, origenSistemaHuerfano, MARCAS_ORIGEN_SISTEMA,
-  estadoComisionPedido, estadoComisionCot, esFilaRecibo, pedidoIdDeCotParaTx
+  estadoComisionPedido, estadoComisionCot, esFilaRecibo, pedidoIdDeCotParaTx,
+  calcSaldosPorCuenta, transferenciasVigentes, existeCuenta, nombreCuenta, cuentaDeTx
 } from "./calc.js";
 
 // Ruido de coma flotante, no un peso: 0,1 + 0,2 no es 0,3 en un computador.
@@ -496,7 +497,77 @@ function verificarCaja() {
 }
 
 // ---------------------------------------------------------------------------
-// 10. Clientes a quienes se les cobró de más
+// 10. Las cuentas contra la Caja (Hallazgo #63)
+// ---------------------------------------------------------------------------
+// La garantía de las cuentas es que SU SUMA es la Caja: el signo de un
+// movimiento sale de una sola función (montoConSigno) y cada transferencia suma
+// cero, así que por construcción coinciden. Esto es el cable de seguridad por si
+// algún día dejan de coincidir. Además señala lo que haría que una cuenta no se
+// pueda comparar con su extracto: movimientos en una cuenta que ya no existe, o
+// una transferencia con un monto o una cuenta imposibles.
+//
+// «Sin asignar» NO se señala: es el estado normal de los movimientos de antes
+// de las cuentas, y la pantalla de Cuentas ya tiene su botón «Repartir ahora».
+// Esto avisa de INCONSISTENCIAS, no de tareas pendientes.
+function verificarCuentas() {
+  var res = [];
+  var s = calcSaldosPorCuenta();
+  // Si un monto no es un número, la comparación no tiene sentido (y la
+  // verificación de «Monto, fecha y tipo» ya lo señala con nombre propio).
+  if (isFinite(s.total) && isFinite(s.caja) && !s.cuadra) {
+    res.push({
+      clave: "suma-cuentas", severidad: "error",
+      titulo: "La suma de las cuentas no es la Caja",
+      detalle: "Sumando el saldo de cada cuenta da " + fmt(s.total) + " y «Caja actual» dice " + fmt(s.caja) + ". Algún movimiento o transferencia se está leyendo mal.",
+      afectados: []
+    });
+  }
+  s.cuentas.filter(function (c) { return c.huerfana; }).forEach(function (c) {
+    var movs = state.tx.filter(function (t) { return cuentaDeTx(t) === c.id; });
+    // Si solo hay transferencias hacia/desde esa cuenta, ya las señala la
+    // revisión de transferencias de abajo: un problema, un hallazgo.
+    if (!movs.length) return;
+    res.push({
+      clave: "cuenta-eliminada:" + c.id, severidad: "aviso",
+      titulo: "Hay movimientos en una cuenta que ya no existe",
+      detalle: movs.length + " movimiento(s) están en la cuenta «" + c.id + "», que ya no está en Configuración → Cuentas, y la cuenta suma " + fmt(c.saldo) + ". Esa plata cuenta en la Caja pero no en ningún saldo que puedas comparar con un extracto.",
+      afectados: movs.map(refTx)
+    });
+  });
+  transferenciasVigentes().forEach(function (tr) {
+    var m = Number(tr.monto);
+    var rotulo = "La transferencia del " + (tr.fecha || "?") + " de " + fmt(isFinite(m) ? m : 0);
+    if (!isFinite(m) || m <= 0) {
+      res.push({
+        clave: "transferencia-monto:" + tr.id, severidad: "error",
+        titulo: "Una transferencia entre cuentas tiene un monto imposible",
+        detalle: rotulo + " tiene un monto que no es un valor positivo, así que no se sabe cuánto movió entre las dos cuentas.",
+        afectados: []
+      });
+    }
+    var raras = [tr.de, tr.a].filter(function (id) { return id && !existeCuenta(id); });
+    if (raras.length) {
+      res.push({
+        clave: "transferencia-cuenta:" + tr.id, severidad: "aviso",
+        titulo: "Una transferencia usa una cuenta que ya no existe",
+        detalle: rotulo + " (" + nombreCuenta(tr.de) + " → " + nombreCuenta(tr.a) + ") usa una cuenta que ya no está en Configuración → Cuentas: ese saldo no se puede comparar con ningún extracto.",
+        afectados: []
+      });
+    }
+    if (tr.de && tr.de === tr.a) {
+      res.push({
+        clave: "transferencia-misma:" + tr.id, severidad: "aviso",
+        titulo: "Una transferencia sale y entra a la misma cuenta",
+        detalle: rotulo + " no mueve nada: origen y destino son la misma cuenta («" + nombreCuenta(tr.de) + "»).",
+        afectados: []
+      });
+    }
+  });
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// 11. Clientes a quienes se les cobró de más
 // ---------------------------------------------------------------------------
 function verificarSaldosAFavor() {
   var pedidos = indexarPorId(state.pedidos);
@@ -576,6 +647,12 @@ export var VERIFICACIONES_SALUD = [
     correr: verificarCaja
   },
   {
+    id: "cuentas", titulo: "Las cuentas contra la Caja",
+    porque: "El saldo de cada cuenta (efectivo, banco, Nequi…) tiene que sumar exactamente la Caja actual. Si no suma, o hay plata en una cuenta que ya no existe, no vas a poder comparar una cuenta con su extracto bancario.",
+    donde: "Finanzas → 🏦 Cuentas (saldos y transferencias) y Configuración → Cuentas",
+    correr: verificarCuentas
+  },
+  {
     id: "saldo-a-favor", titulo: "Clientes con saldo a favor",
     porque: "Cuando un cliente paga más de lo que debía, esa plata no es tuya: hay que devolverla (ya cuenta en «Por pagar»).",
     donde: "Pedidos → tarjeta del pedido → registrar el reembolso",
@@ -583,9 +660,8 @@ export var VERIFICACIONES_SALUD = [
   }
 ];
 
-// Para sumar una verificación nueva (ej. «la suma de los saldos por cuenta es
-// igual a calcCaja()», cuando exista el campo `cuenta` de los movimientos)
-// sin tocar nada de lo demás. Si el id ya existe, la reemplaza.
+// Para sumar una verificación nueva sin tocar nada de lo demás. Si el id ya
+// existe, la reemplaza.
 export function registrarVerificacion(v) {
   var i = VERIFICACIONES_SALUD.map(function (x) { return x.id; }).indexOf(v.id);
   if (i === -1) VERIFICACIONES_SALUD.push(v); else VERIFICACIONES_SALUD[i] = v;
