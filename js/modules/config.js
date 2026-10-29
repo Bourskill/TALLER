@@ -11,12 +11,19 @@ import { calcBalancePeriodo } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
 import { subirImagenReferencia, compartirRecursosConNuevoMiembro } from "../core/drive.js";
-import { agregarMiembroEquipo } from "../core/auth.js";
+import { agregarMiembroEquipo, getSession } from "../core/auth.js";
+import { renderSalud, actions as saludActions } from "./salud.js";
 
 export function render() {
   var cfg = state.config;
 
-  var html = '<div class="card"><div class="section-title small">Marca del taller' +
+  // Primero: si algo de dinero no cuadra, es lo primero que hay que ver. La
+  // pestaña es solo de admin (ver NAV_GROUPS_VENDEDOR en core/dom.js); la
+  // sesión se vuelve a mirar por si alguien llega acá por otro camino.
+  var session = getSession();
+  var html = (!session || session.rol !== "vendedor") ? renderSalud() : "";
+
+  html += '<div class="card"><div class="section-title small">Marca del taller' +
     renderHelp("El nombre y el icono se reflejan en el panel y en el PDF de cotizacion. El icono puede ser una imagen (se sube a tu Drive, igual que las fotos de referencia) o, si prefieres algo mas simple, un emoji.") +
     "</div>" +
     '<div class="marca-grid">' +
@@ -127,7 +134,7 @@ function renderPiePaginaImg(cfg) {
   return '<div class="ref-thumb ref-thumb-empty" data-action="set-pie-imagen" title="Subir una imagen desde tu dispositivo (se guarda en tu Google Drive)">+ imagen</div>';
 }
 
-export var actions = {
+export var actions = Object.assign({}, saludActions, {
   "set-config-campo": function (el) {
     state.config[el.getAttribute("data-campo")] = el.value;
     persist("config"); notify();
@@ -206,7 +213,7 @@ export var actions = {
     state.config.pdfPiePaginaImagenUrl = "";
     persist("config"); notify();
   }
-};
+});
 
 function fechaHoraCorta(iso) {
   return new Date(iso).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).replace(".", "");

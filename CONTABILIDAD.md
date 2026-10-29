@@ -59,6 +59,10 @@ contabilidad de caja para negocio pequeño.
    disponible para gastar). Un servicio ya pagado de verdad deja de
    restar de Ganancia (se topa a lo "disponible", nunca al bruto —
    restarlo dos veces sería doble conteo).
+7. **Verificar y avisar; no arreglar en silencio.** Lo que se corrige solo
+   (las reparaciones de `loadAll()`) se cuenta y se muestra, y lo que no
+   cuadra se reporta con su porqué y un enlace al caso — nunca se "arregla"
+   sin que el dueño se entere. Ver Hallazgo #64 (`core/salud.js`).
 
 ---
 
@@ -3843,6 +3847,114 @@ fuentes de montos con fracción que NO se tocaron —
   $333.333,33). La última cuota paga el saldo restante, así que redondear cada
   cuota a pesos cuadraría solo — pero toca lo que ya se pagó de deudas en curso.
 - **Gastos fijos prorrateados por periodo.**
+
+### 🟡 Hallazgo #64 — «Salud de los datos»: la app avisa cuando algo de dinero deja de cuadrar. ✅ IMPLEMENTADO (pedido del dueño)
+
+**Qué se pidió:** que la app sea rigurosa con el dinero —que todo lo que muestra
+sea verdad y cuadre al peso con las cuentas del dueño— y que la herramienta no le
+cause más trabajo. El análisis de Finanzas encontró que solo los recibos de compra
+tenían una verificación que *avisa* (`verificarRecibo`); todo lo demás se arreglaba
+en silencio al cargar (11 reparaciones en `loadAll()`) o no se miraba nunca.
+
+**Qué hay ahora:**
+- **`calcSaludDatos()`** (`core/salud.js`): una lista de hallazgos
+  `{ id, regla, severidad: "error"|"aviso", titulo, detalle, porque, afectados:
+  [{tipo, id, etiqueta}], donde }`. **Solo lee**: no repara ni escribe nada
+  (hay una prueba que compara el estado antes y después).
+- **El panel** (`modules/salud.js`, arriba de todo en **Configuración**, solo
+  admin): «Todo cuadra» con los datos sanos, o la lista de lo que no cuadra, con
+  chips Todos/Errores/Avisos, buscador con contador, el porqué en el «?» de cada
+  fila, dónde se arregla, y botones **↗ Pedido / Cotización / Recibo /
+  movimientos** que llevan al caso (los movimientos se muestran solos en
+  Finanzas, con un chip para volver a verlos todos: `state.txEnfocados`). Un
+  botón **Copiar informe** deja todo como texto para pegarlo donde sea.
+- **Insignia roja** en «Configuración» del menú con el número de **errores** (los
+  avisos no la prenden: se ven al abrir el panel).
+- **Lo corregido en silencio, a la vista.** Cada reparación de `loadAll()` sigue
+  haciendo exactamente lo mismo y devuelve lo mismo, pero ahora anota cuántas cosas
+  corrigió (`anotarReparacion`, `REPARACIONES_AL_CARGAR` en `core/store.js`;
+  `state.reparacionesAlCargar`, que nunca se persiste). El panel lo dice: «Al
+  cargar, la app corrigió N cosas por su cuenta: …». Si la carga cayó a la copia
+  sin conexión (las reparaciones solo corren con red real), lo dice también.
+
+**Qué verifica** (cada una con su porqué en lenguaje simple, en `VERIFICACIONES_SALUD`):
+
+| # | Verificación | Gravedad |
+|---|---|---|
+| 1 | `p.abono` contra `calcAbonadoDeLista(p.abonos)`. Menor = imposible (la base se topa en 0). Mayor = "base sin respaldo" de pedido viejo: se da por explicada si Finanzas tiene ingresos sueltos del pedido por ese monto; si no, aviso | error / aviso |
+| 2 | Cada abono tiene su ingreso (`origenAbonoId`) y cada reembolso su gasto, por el **mismo monto**; ningún movimiento apunta a un abono que ya no existe; el movimiento de un abono que quedó en otro pedido (una sola falla, un solo hallazgo) | error |
+| 3a | Dos movimientos con la **misma marca de origen** (la comisión pagada dos veces, un abono dos veces, el gasto fijo dos veces en el mismo periodo) | error |
+| 3b | Movimientos cuyo origen ya no existe (`origenSistemaHuerfano`) | aviso |
+| 4 | Comisión «pagada» sin movimiento; movimiento de comisión sin que el pedido/cotización la tenga pagada; pagada desde la cotización **y** desde su pedido | error |
+| 5 | Monto no numérico o negativo (error); en cero o **con centavos** (aviso); fecha inválida; tipo desconocido (error) | error / aviso |
+| 6 | El total guardado del pedido contra lo que suman sus líneas y descuentos (`calcDesglosePedido`) | aviso |
+| 7 | Cada recibo de compra, con `verificarRecibo` | error |
+| 8 | Servicios con el disponible negativo | error |
+| 9 | `calcCaja()` y el balance del reporte contra una suma independiente en centavos | error |
+| 10 | Clientes con saldo a favor (`listaSaldosAFavorClientes`) | aviso |
+
+**Decisiones de gravedad (por qué «aviso» y no «error»):** un *error* es que la
+plata de la app y la real ya no coinciden, o no pueden coincidir. Es *aviso* lo
+que la app produce en su uso normal o lo que está pendiente de decidir:
+- **Centavos** en un monto (Hallazgo #62): la nómina semanal y las cuotas de deuda
+  todavía los generan; sería una alarma permanente. Pero se muestran, porque un
+  valor con centavos **nunca** va a coincidir con el extracto del banco.
+- **Total que no sale de las líneas:** `calcTotalConDescuentos` ya prevé pedidos muy
+  viejos cuyas líneas nunca sumaron su total.
+- **Movimientos sueltos** (se borró el pedido o la cotización): la plata sí se movió.
+  El pago de un gasto fijo de un periodo **ya cerrado** queda suelto a propósito
+  (`MARCAS_ORIGEN_SISTEMA`) y no se reporta.
+- **Saldo a favor:** es plata del cliente, ya sumada en «Por pagar».
+
+**Cómo se extiende:** una verificación es `{ id, titulo, porque, donde, correr }`;
+`correr()` devuelve `[{ clave, severidad, titulo, detalle, afectados }]` (vacío =
+cuadra) y se suma con `registrarVerificacion(v)` o al arreglo
+`VERIFICACIONES_SALUD`. Una verificación que lanza una excepción **no se calla**:
+sale como un error propio («No se pudo revisar…»), porque si no corrió, no se sabe
+si cuadra. Cada marca nueva de `MARCAS_ORIGEN_SISTEMA` tiene que clasificarse como
+única o repetible (`MARCAS_UNICAS`/`MARCAS_REPETIBLES`): la prueba falla si falta.
+
+**Qué NO verifica todavía (a propósito, o pendiente):**
+- **Cuentas bancarias / conciliación (Hallazgo #63):** la rama
+  `claude/dreamy-lalande-419844` (campo `cuenta` en los movimientos, saldo por
+  cuenta, transferencias) **no está integrada a `main`**, así que no existe la
+  verificación «la suma de los saldos por cuenta es igual a `calcCaja()`» ni «ningún
+  movimiento queda sin una cuenta válida». Cuando se integre, se agrega con
+  `registrarVerificacion` (no hay que tocar nada más). **Hoy no se compara nada
+  contra el banco**: solo que la app sea coherente consigo misma.
+- Que el **monto de una comisión ya pagada** sea el que daría hoy la fórmula (si el
+  total cambió después, el movimiento conserva lo que se pagó, por regla del #62).
+- Las **ventas de consignación** y la comisión del punto contra sus movimientos (solo
+  se mira que su origen exista y que no estén duplicadas).
+- Los pagos de **nómina, gastos fijos y deudas**: que cada cuota o pago tenga el monto
+  correcto, y que `cuotasPagadas` de una deuda coincida con sus movimientos.
+- Las **compras de una cotización** marcadas «Sí» contra su movimiento (fuera de los
+  recibos), y el costo estimado completo registrado dos veces.
+- Que el **total del pedido coincida con su cotización** de origen (`desfase`), y
+  los pedidos **sin líneas** (los viejos): su total no tiene contra qué compararse.
+- La **fecha** de un abono contra la de su movimiento (solo se compara el monto).
+- Lo que está en la **papelera** (`pedidosPapelera`, `txPapelera`).
+- Que lo que ve la app sea **lo mismo que hay en la hoja de Google** (conflictos
+  entre dispositivos, copia local vieja): eso lo cubren `core/guardado.js` y el aviso
+  de «Sin conexión».
+- **No hay historial** de lo corregido en silencio: la reparación se guarda, así que
+  en la carga siguiente ya no hay nada que contar y el aviso desaparece. Solo se ve
+  el de la carga en curso.
+
+**Verificado:** `test/salud.mjs` (134 pruebas, `node test/salud.mjs`, sin jsdom).
+Unos datos limpios (con abonos, reembolso, descuentos, comisiones de pedido y de
+cotización, un pedido viejo con base, gasto fijo, cuotas de deuda, un servicio y
+un recibo) dan **cero** hallazgos; cada corrupción da **exactamente** su hallazgo
+(una sola causa = un solo hallazgo); el panel, sus filtros, el buscador, la
+navegación, el informe y el insignia; que las 11 reparaciones anotan cuántas
+corrigieron sin cambiar lo que devuelven; y que 800 pedidos con 3.300 movimientos
+se revisan en milisegundos (la revisión corre en cada pintado por el insignia del
+menú). `loadAll()` en sí no se probó con almacenamiento real: sus dos anotaciones
+propias (el detalle de tallas y los recibos) se revisaron a mano.
+
+**Límites conocidos:** la pantalla se verificó en el navegador con datos de ejemplo
+(claro, oscuro, móvil, menú colapsado) pero no con el login real de Google;
+`test/smoke.mjs` (jsdom) no se pudo correr en este equipo, y la CI debe correrlo.
 
 ---
 

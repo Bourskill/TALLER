@@ -18,6 +18,8 @@ import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsqu
 // terminaron de evaluarse. La alternativa (duplicar calcListaCompras acá)
 // rompería "una sola fuente por fórmula".
 import { repararComprasSinSeguimiento, migrarComprasARecibos } from "./calc.js";
+// (calc.js a su vez importa `anotarReparacion` de acá, para la reparación que
+// vive allá: mismo ciclo ya aceptado, mismas funciones de uso en ejecución.)
 import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
@@ -457,6 +459,20 @@ export const state = {
   // ({convertidos, saltados}, ver loadAll) — para avisarlo en la pestaña
   // Recibos de compra. Solo pantalla.
   migracionRecibos: null,
+  // Lo que las reparaciones de loadAll() corrigieron en SILENCIO en ESTA carga
+  // ([{ clave, cantidad }], ver REPARACIONES_AL_CARGAR y anotarReparacion) y
+  // si se saltaron por no haber red real. Es lo que muestra "Salud de los
+  // datos": lo que se arregla sin decirlo es justo lo que el dueño quiere ver.
+  // Solo pantalla, nunca se persiste.
+  reparacionesAlCargar: [],
+  reparacionesOmitidas: false,
+  // Panel «Salud de los datos» (modules/salud.js): filtro por gravedad y texto
+  // de búsqueda. Solo pantalla.
+  saludFiltro: "todos", // "todos" | "error" | "aviso"
+  saludBuscar: "",
+  // Ids de movimientos que Salud de los datos le pide a Finanzas mostrar SOLOS
+  // (vacío = sin filtro). Se quita con el chip de Finanzas o al salir de ahí.
+  txEnfocados: [],
   // { [insumoId]: true } — qué panel de "Enlace" (ver renderEnlacePanel en
   // core/components.js) está desplegado, y { [insumoId]: texto } lo que hay
   // escrito en su buscador de insumo específico. Estado de UI: nunca se
@@ -547,6 +563,40 @@ function safeParse(raw, fallback) {
   }
 }
 
+// ---------- bitácora de lo que loadAll() corrige en silencio ----------
+// Al cargar, la app corre once reparaciones (más la del detalle de tallas) que
+// arreglan datos viejos sin decirle nada a nadie. Cada una sigue haciendo
+// exactamente lo mismo; lo único nuevo es que ANOTA cuántas cosas corrigió
+// (anotarReparacion), para que el panel "Salud de los datos" lo muestre:
+// lo que se arregla sin decirlo es justo lo que el dueño quiere ver.
+//
+// Una cosa corregida = un movimiento / pedido / insumo / referencia tocado (no
+// un campo). El orden de este mapa es el orden en que corren en loadAll().
+// Si se agrega una reparación nueva a loadAll(), se suma acá su clave y su
+// frase (test/salud.mjs falla si una clave anotada no tiene frase).
+export var REPARACIONES_AL_CARGAR = {
+  tallas: "pedido(s) con el detalle de tallas pasado a su cotización",
+  marcaExcedente: "movimiento(s) de excedente a los que se les devolvió la marca que habían perdido",
+  txHuerfanosCotEscalada: "movimiento(s) sin pedido que se enlazaron al pedido de su cotización",
+  vendedorPerdido: "pedido(s) a los que se les reconstruyó el vendedor cuya comisión ya estaba pagada",
+  marcasInconsistentes: "movimiento(s) con una marca de origen imposible que se limpió",
+  pedidoIdExcedente: "movimiento(s) de excedente que se desligaron de su pedido",
+  recibos: "compra(s) ya registrada(s) que pasaron a ser recibo de compra",
+  comprasSinSeguimiento: "compra(s) que habían perdido su seguimiento y se reconectaron",
+  origenCatalogo: "insumo(s) que se volvieron a vincular con el catálogo",
+  categoriaInsumos: "insumo(s) a los que se les devolvió su categoría",
+  consumoTela: "tela(s) que recibieron su propio consumo",
+  referenciasProveedor: "referencia(s) de proveedor convertida(s) en insumo"
+};
+// Suma `cantidad` cosas corregidas a la bitácora de esta carga. No hace nada
+// con 0, así que "no corrigió nada" no deja rastro.
+export function anotarReparacion(clave, cantidad) {
+  var n = Number(cantidad) || 0;
+  if (n <= 0) return;
+  var fila = state.reparacionesAlCargar.filter(function (r) { return r.clave === clave; })[0];
+  if (fila) fila.cantidad += n; else state.reparacionesAlCargar.push({ clave: clave, cantidad: n });
+}
+
 // Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin
 // `pedidoId` cuya cotización SÍ tiene a dónde apuntar (pedidoId, o
 // pedidoOrigenId si es un borrador "escalado" desde un pedido rápido — ver
@@ -566,7 +616,7 @@ function safeParse(raw, fallback) {
 // sobre un espejo local que pudiera estar desactualizado frente a otro
 // dispositivo (ver el llamado, más abajo).
 export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
-  var huboReparacion = false;
+  var reparados = 0;
   (tx || []).forEach(function (t) {
     // El tx de excedente de una compra (ver sincronizarComprasFinanzasDe,
     // modules/cotizaciones.js) SIEMPRE tiene cotizacionId pero SIN pedidoId
@@ -591,9 +641,10 @@ export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
     var pedidoId = cot && (cot.pedidoId || cot.pedidoOrigenId);
     if (!pedidoId || !(pedidos || []).some(function (p) { return p.id === pedidoId; })) return;
     t.pedidoId = pedidoId;
-    huboReparacion = true;
+    reparados++;
   });
-  return huboReparacion;
+  anotarReparacion("txHuerfanosCotEscalada", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío
@@ -620,7 +671,7 @@ export function repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos) {
 // se pagó: es el único número que no admite duda, y si el usuario corrige
 // el tipo/valor después, no cambia lo que ya se pagó.
 export function repararVendedorPerdido(pedidos, tx) {
-  var huboReparacion = false;
+  var reparados = 0;
   (pedidos || []).forEach(function (p) {
     if (p.vendedor && p.vendedor.nombre) return; // no está roto
     var txComision = (tx || []).filter(function (t) {
@@ -628,9 +679,10 @@ export function repararVendedorPerdido(pedidos, tx) {
     })[0];
     if (!txComision || !txComision.contraparte) return;
     p.vendedor = { nombre: txComision.contraparte, tipo: "fijo", valor: num(txComision.monto), estado: "pagado" };
-    huboReparacion = true;
+    reparados++;
   });
-  return huboReparacion;
+  anotarReparacion("vendedorPerdido", reparados);
+  return reparados > 0;
 }
 
 // Qué campo de MARCAS_ORIGEN_SISTEMA (ver core/calc.js) es legítimo en QUÉ
@@ -681,8 +733,9 @@ var TIPOS_VALIDOS_POR_MARCA = {
 // sin origen del sistema, editable/borrable normal, sin la insignia
 // confusa. Auditoría financiera 2026-09-20, post-mortem.
 export function repararMarcasOrigenInconsistentes(tx) {
-  var huboReparacion = false;
+  var reparados = 0; // movimientos tocados (no campos): un movimiento con dos marcas falsas es UNA cosa corregida
   (tx || []).forEach(function (t) {
+    var tocado = false;
     Object.keys(TIPOS_VALIDOS_POR_MARCA).forEach(function (campo) {
       if (!t[campo]) return;
       if (TIPOS_VALIDOS_POR_MARCA[campo].indexOf(t.tipo) !== -1) return; // combinación posible, no se toca
@@ -690,7 +743,7 @@ export function repararMarcasOrigenInconsistentes(tx) {
       // Las tres columnas de un Recibo de compra van juntas: sin su id, el
       // rol y la línea sueltos no significan nada.
       if (campo === "reciboCompraId") { t.reciboCompraRol = ""; t.reciboCompraLinea = ""; }
-      huboReparacion = true;
+      tocado = true;
     });
     // Chequeo más preciso, más allá del tipo: origenGastoFijoPeriodo SIEMPRE
     // se escribe como "<id del gasto fijo>|<periodo>" (ver
@@ -705,10 +758,12 @@ export function repararMarcasOrigenInconsistentes(tx) {
     // —por tipo— no lo detecta; este sí, porque "1" nunca tiene "|".
     if (t.origenGastoFijoPeriodo && String(t.origenGastoFijoPeriodo).indexOf("|") === -1) {
       t.origenGastoFijoPeriodo = "";
-      huboReparacion = true;
+      tocado = true;
     }
+    if (tocado) reparados++;
   });
-  return huboReparacion;
+  anotarReparacion("marcasInconsistentes", reparados);
+  return reparados > 0;
 }
 
 // Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44
@@ -728,14 +783,15 @@ export function repararMarcasOrigenInconsistentes(tx) {
 // del tx de excedente (ver sincronizarComprasFinanzasDe) — el tx normal de
 // la misma compra nunca la lleva, así que no hay forma de confundirlos.
 export function repararPedidoIdExcedente(tx) {
-  var huboReparacion = false;
+  var reparados = 0;
   (tx || []).forEach(function (t) {
     if (t.reciboCompraId) return; // una parte de recibo SÍ lleva su pedido (Hallazgo #52)
     if (!t.origenCompraExcedenteClave || !t.pedidoId) return;
     t.pedidoId = "";
-    huboReparacion = true;
+    reparados++;
   });
-  return huboReparacion;
+  anotarReparacion("pedidoIdExcedente", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un
@@ -759,7 +815,7 @@ export function repararPedidoIdExcedente(tx) {
 // deshace repararPedidoIdExcedente, más abajo en la misma pasada, pero
 // mejor no depender del orden de dos arreglos para uno solo).
 export function repararMarcaExcedentePerdida(tx, cotizaciones) {
-  var huboReparacion = false;
+  var reparados = 0;
   var txPorId = {};
   (tx || []).forEach(function (t) { txPorId[t.id] = t; });
   (cotizaciones || []).forEach(function (cot) {
@@ -768,10 +824,11 @@ export function repararMarcaExcedentePerdida(tx, cotizaciones) {
       var t = txPorId[compra.excedenteTxId];
       if (!t || t.cotizacionId !== cot.id || t.origenCompraExcedenteClave || t.reciboCompraId) return;
       t.origenCompraExcedenteClave = compra.clave;
-      huboReparacion = true;
+      reparados++;
     });
   });
-  return huboReparacion;
+  anotarReparacion("marcaExcedente", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`)
@@ -805,24 +862,23 @@ export function repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, produc
     if (idPorNombre[clave] && idPorNombre[clave] !== i.id) { nombresAmbiguos[clave] = true; return; }
     idPorNombre[clave] = i.id;
   });
+  var reparados = 0;
   function repararLista(insumos) {
-    var hubo = false;
     (insumos || []).forEach(function (ins) {
       if (ins.origenCatalogoId) return;
       var clave = norm(String(ins.nombre || "").trim());
       if (!clave || nombresAmbiguos[clave] || !idPorNombre[clave]) return;
       ins.origenCatalogoId = idPorNombre[clave];
-      hubo = true;
+      reparados++;
     });
-    return hubo;
   }
-  var huboReparacion = false;
-  (plantillas || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
-  (productos || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (plantillas || []).forEach(function (p) { repararLista(p.insumos); });
+  (productos || []).forEach(function (p) { repararLista(p.insumos); });
   (cotizaciones || []).forEach(function (c) {
-    (c.referencias || []).forEach(function (r) { if (repararLista(r.insumos)) huboReparacion = true; });
+    (c.referencias || []).forEach(function (r) { repararLista(r.insumos); });
   });
-  return huboReparacion;
+  anotarReparacion("origenCatalogo", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a
@@ -844,24 +900,23 @@ export function repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, produc
 export function repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos, cotizaciones) {
   var catalogoPorId = {};
   (catalogoInsumos || []).forEach(function (i) { catalogoPorId[i.id] = i; });
+  var reparados = 0;
   function repararLista(insumos) {
-    var hubo = false;
     (insumos || []).forEach(function (ins) {
       if (ins.categoriaId || !ins.origenCatalogoId) return;
       var origen = catalogoPorId[ins.origenCatalogoId];
       if (!origen || !origen.categoriaId) return;
       ins.categoriaId = origen.categoriaId;
-      hubo = true;
+      reparados++;
     });
-    return hubo;
   }
-  var huboReparacion = false;
-  (plantillas || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
-  (productos || []).forEach(function (p) { if (repararLista(p.insumos)) huboReparacion = true; });
+  (plantillas || []).forEach(function (p) { repararLista(p.insumos); });
+  (productos || []).forEach(function (p) { repararLista(p.insumos); });
   (cotizaciones || []).forEach(function (c) {
-    (c.referencias || []).forEach(function (r) { if (repararLista(r.insumos)) huboReparacion = true; });
+    (c.referencias || []).forEach(function (r) { repararLista(r.insumos); });
   });
-  return huboReparacion;
+  anotarReparacion("categoriaInsumos", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, insumos tipo "tela" que todavía no tienen su
@@ -885,23 +940,24 @@ export function repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos
 // consumoAprox cualquier consumo que el usuario ya hubiera personalizado a
 // propósito después de este fix.
 function repararConsumoTelaDeLista(insumos, consumoDefault) {
-  var hubo = false;
+  var reparados = 0;
   (insumos || []).forEach(function (ins) {
     if (ins.tipo !== "tela" || ins.consumoPropio) return;
     ins.cantidad = num(consumoDefault) || 0;
     ins.consumoPropio = true;
-    hubo = true;
+    reparados++;
   });
-  return hubo;
+  return reparados;
 }
 export function repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones) {
-  var huboReparacion = false;
-  (plantillas || []).forEach(function (p) { if (repararConsumoTelaDeLista(p.insumos, p.consumoSugerido)) huboReparacion = true; });
-  (productos || []).forEach(function (p) { if (repararConsumoTelaDeLista(p.insumos, p.consumoSugerido)) huboReparacion = true; });
+  var reparados = 0;
+  (plantillas || []).forEach(function (p) { reparados += repararConsumoTelaDeLista(p.insumos, p.consumoSugerido); });
+  (productos || []).forEach(function (p) { reparados += repararConsumoTelaDeLista(p.insumos, p.consumoSugerido); });
   (cotizaciones || []).forEach(function (c) {
-    (c.referencias || []).forEach(function (r) { if (repararConsumoTelaDeLista(r.insumos, r.consumoAprox)) huboReparacion = true; });
+    (c.referencias || []).forEach(function (r) { reparados += repararConsumoTelaDeLista(r.insumos, r.consumoAprox); });
   });
-  return huboReparacion;
+  anotarReparacion("consumoTela", reparados);
+  return reparados > 0;
 }
 
 // Repara, mutando en el sitio, una referencia que todavía usa el modelo
@@ -926,7 +982,7 @@ export function repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)
 // así que una referencia ya migrada nunca vuelve a calificar (no hace
 // falta una marca aparte, a diferencia de consumoPropio).
 export function repararReferenciasProveedorAInsumo(cotizaciones) {
-  var huboReparacion = false;
+  var reparados = 0;
   (cotizaciones || []).forEach(function (c) {
     (c.referencias || []).forEach(function (r) {
       if (r.origen !== "proveedor") return;
@@ -939,10 +995,11 @@ export function repararReferenciasProveedorAInsumo(cotizaciones) {
       r.origen = "taller";
       r.costoCompra = 0;
       r.proveedorId = "";
-      huboReparacion = true;
+      reparados++;
     });
   });
-  return huboReparacion;
+  anotarReparacion("referenciasProveedor", reparados);
+  return reparados > 0;
 }
 
 // Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave
@@ -1193,8 +1250,12 @@ export async function loadAll() {
     // y `tablaFallo` (si su propia pestaña, la fuente real hoy, falló y cayó
     // al espejo). Mirar solo la primera dejaría pasar la migración aunque la
     // cotización de verdad viniera de una copia vieja.
+    // La bitácora de lo corregido en silencio (ver REPARACIONES_AL_CARGAR) se
+    // reinicia acá: cada carga cuenta solo lo suyo.
+    state.reparacionesAlCargar = [];
+    state.reparacionesOmitidas = huboFalloDeRed;
     if (state.pedidos.length && state.cotizaciones.length && !clavesDeEspejo.pedidos && !clavesDeEspejo.cotizaciones && !tablaFallo.cotizaciones) {
-      var huboMigracion = false;
+      var migrados = 0;
       state.pedidos.forEach(function (p) {
         if (!p.detalle || !p.detalle.length || !p.cotizacionId) return;
         var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
@@ -1203,9 +1264,10 @@ export async function loadAll() {
         if (yaTieneDetalle) return;
         cot.referencias[0].detalle = p.detalle;
         delete p.detalle;
-        huboMigracion = true;
+        migrados++;
       });
-      if (huboMigracion) { persist("cotizaciones"); persist("pedidos"); }
+      anotarReparacion("tallas", migrados);
+      if (migrados) { persist("cotizaciones"); persist("pedidos"); }
     }
 
     // Auto-reparación: un movimiento (tx) generado DESDE una cotización
@@ -1277,6 +1339,7 @@ export async function loadAll() {
     if (!huboFalloDeRed && candidatasRecuperacion.indexOf("tx") === -1 && candidatasRecuperacion.indexOf("cotizaciones") === -1) {
       var migracion = migrarComprasARecibos(state.tx, state.cotizaciones);
       if (migracion.convertidos.length) {
+        anotarReparacion("recibos", migracion.convertidos.length);
         state.tx = migracion.tx;
         state.cotizaciones = migracion.cotizaciones;
         persist("tx"); persist("cotizaciones");
