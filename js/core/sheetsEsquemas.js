@@ -6,6 +6,7 @@
 // (TABLAS_SHEET + la migración de loadAll()).
 
 import { crearTablaSheet } from "./sheetsTabular.js";
+import { CUENTA_SIN_ASIGNAR } from "./constants.js";
 
 // OJO — INCIDENTE 2026-09-20: sheetsTabular.js lee cada fila por POSICIÓN
 // (columnas[i] <-> fila[i]), nunca por el nombre del encabezado. Este
@@ -90,9 +91,23 @@ export var COLUMNAS_MOVIMIENTOS = [
   // vacío (lección de los Hallazgos #50/#51). AL FINAL, ver el aviso arriba.
   { key: "reciboCompraId", header: "recibo_compra_id" },
   { key: "reciboCompraRol", header: "recibo_compra_rol" },
-  { key: "reciboCompraLinea", header: "recibo_compra_linea" }
+  { key: "reciboCompraLinea", header: "recibo_compra_linea" },
+  // Cuentas (Hallazgo #63): en qué cuenta (efectivo, banco, Nequi...) entró o
+  // salió esta plata — el `id` de una cuenta de config.cuentas, o
+  // "sin-asignar". Una celda vacía (todo lo guardado antes de esta columna) se
+  // lee como "sin-asignar" — ver `post` abajo — así la Caja no cambia al
+  // migrar. AL FINAL, ver el aviso de arriba.
+  { key: "cuenta", header: "cuenta" },
+  // Fecha en que se marcó este movimiento como "conciliado" (visto en el
+  // extracto de su cuenta). Vacío = sin conciliar. AL FINAL, ver el aviso de arriba.
+  { key: "conciliadoEn", header: "conciliado_en" }
 ];
-export var tablaMovimientos = crearTablaSheet("Movimientos", COLUMNAS_MOVIMIENTOS);
+export var tablaMovimientos = crearTablaSheet("Movimientos", COLUMNAS_MOVIMIENTOS, {
+  post: function (item) {
+    if (!item.cuenta) item.cuenta = CUENTA_SIN_ASIGNAR;
+    return item;
+  }
+});
 
 export var tablaClientes = crearTablaSheet("Clientes", [
   { key: "id", header: "id" },

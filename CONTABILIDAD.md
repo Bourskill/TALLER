@@ -110,7 +110,8 @@ contabilidad de caja para negocio pequeño.
 
 | KPI | Fórmula | Dónde |
 |---|---|---|
-| Caja actual | acumulado histórico COMPLETO de `state.tx` (ingresos suman, todo lo demás resta) | `calc.js:128` `calcCaja` |
+| Caja actual | acumulado histórico COMPLETO de `state.tx` (ingresos suman, todo lo demás resta; el signo sale de `montoConSigno`, la misma regla que usa el saldo de cada cuenta) | `calc.js` `calcCaja` / `montoConSigno` |
+| Saldo por cuenta | suma de los asientos de esa cuenta (sus movimientos con signo + las dos puntas de sus transferencias vigentes). **La suma de todas las cuentas es siempre la Caja actual** (`calcSaldosPorCuenta().cuadra`). Ver Hallazgo #63. | `calc.js` `calcAsientos` / `calcSaldosPorCuenta` |
 | Por cobrar | suma de `calcSaldoPedido(p)` (con IVA) SOLO cuando es positivo, de pedidos no cancelados | `calc.js:546` `calcPorCobrarPedidos` |
 | Por pagar | `gastos fijos + nómina + comisiones (pedido y cotización) + deudas (valor de la cuota) + comisiones de consignación` pendientes | `calc.js:570` `calcPorPagar` |
 | Balance (30 días) | ingresos − gastos del rango, vía `calcSerieMovimientos` (misma función que CUALQUIER otro reporte) | `modules/resumen.js:321` |
@@ -133,6 +134,11 @@ contabilidad de caja para negocio pequeño.
   botón de borrar sigue visible pero como 🔒, con un mensaje que dice
   dónde deshacerlo de verdad (en el pedido/cotización/gasto fijo/deuda
   que lo generó).
+- Todo `tx` lleva una **cuenta** (`tx.cuenta`: efectivo, banco, Nequi... o
+  "sin-asignar"). Cambiar la cuenta SÍ se puede aunque el movimiento tenga
+  marca de origen —solo mueve plata entre cuentas: el monto, el tipo y la Caja
+  no cambian—. Si estaba conciliado, la marca (`conciliadoEn`) se quita cuando
+  cambia su cuenta, monto, fecha o tipo. Ver Hallazgo #63.
 
 ### Mutaciones de dinero en Pedidos y Cotizaciones
 
@@ -3843,6 +3849,128 @@ fuentes de montos con fracción que NO se tocaron —
   $333.333,33). La última cuota paga el saldo restante, así que redondear cada
   cuota a pesos cuadraría solo — pero toca lo que ya se pagó de deudas en curso.
 - **Gastos fijos prorrateados por periodo.**
+
+---
+
+### 🟡 Hallazgo #63 — cuentas (efectivo, banco, Nequi...) y conciliación contra el extracto. ✅ IMPLEMENTADO (pedido del dueño)
+
+**Qué se pidió:** que lo que muestra la app coincida **al peso con las cuentas
+del dueño**. Hasta hoy "Caja actual" era un solo número: ningún movimiento sabía
+en qué cuenta entró o salió la plata, aunque los abonos sí guardaban su medio de
+pago.
+
+**Decisiones del dueño (2026-10-29):**
+1. Cuentas: **Efectivo, Banco y Nequi** (la lista es configurable).
+2. La plata de los clientes llega **mezclada** (efectivo y transferencia): el
+   abono tiene que preguntar **en qué cuenta entró**.
+3. El saldo por cuenta se ve **en Resumen y en Finanzas**.
+
+**La regla que sostiene todo lo demás:** las cuentas son una forma de *repartir*
+la Caja, no una segunda contabilidad. Por eso:
+- El signo de un movimiento sale de **una sola función** (`montoConSigno`: ingreso
+  suma, todo lo demás resta). La usan `calcCaja` y el saldo de cada cuenta
+  (`calcAsientos` → `calcSaldosPorCuenta`). No hay segunda fórmula que mantener
+  igual a mano: **la suma de las cuentas es la Caja** por construcción, y
+  `calcSaldosPorCuenta().cuadra` lo comprueba (si alguna vez no cuadrara, la
+  pantalla lo dice en rojo, no lo esconde).
+- Cada movimiento lleva el `id` de su cuenta en `tx.cuenta` (columna nueva, **al
+  final** de `COLUMNAS_MOVIMIENTOS`, junto a `conciliadoEn`). Los `id` son
+  estables: renombrar una cuenta no toca ningún movimiento.
+
+| Dónde | Campo | Forma |
+|---|---|---|
+| Movimiento | `tx.cuenta` | id de una cuenta de `config.cuentas`, o `"sin-asignar"` |
+| Movimiento | `tx.conciliadoEn` | fecha en que se marcó como visto en el extracto; vacío = sin conciliar |
+| Configuración | `config.cuentas` | `[{ id, nombre }]` (por defecto Efectivo, Banco, Nequi) |
+| Configuración | `config.cuentaPredeterminada` | id de la cuenta donde caen los pagos que la app registra sola; vacío = «Sin asignar» |
+| Configuración | `config.conciliaciones` | `{ [cuentaId]: { fecha, saldoExtracto, saldoCalculado, diferencia, guardadaEl } }` — la última guardada de cada cuenta |
+| Abono / reembolso | `metodoPago` | **el id de la cuenta** donde entró (o de la que salió) la plata. Los medios de antes («transferencia», «tarjeta», «otro») se siguen mostrando tal cual |
+| Nueva clave | `state.transferencias` | `[{ id, fecha, de, a, monto, nota, anulada, conciliadoDe, conciliadoA }]` |
+
+**Migración (los movimientos existentes → «Sin asignar», sin cambiar nada):**
+- Una celda `cuenta` vacía se lee como `"sin-asignar"` (`post` de `tablaMovimientos`),
+  y `migrarCuentasMovimientos` hace lo mismo con lo que venga del espejo local o
+  del blob viejo. **Solo escribe `cuenta` donde falta**: nunca toca monto, tipo,
+  fecha ni marcas de origen, así que la Caja y todo reporte quedan idénticos. Es
+  idempotente y no guarda nada por su cuenta (la columna se llena en la Sheet con
+  el próximo guardado normal).
+- Para el dueño: el primer día **toda** su plata está en «Sin asignar». Se reparte
+  con **una transferencia** desde «Sin asignar» a cada cuenta (el botón «Repartir
+  ahora» la deja armada). Así el saldo inicial de cada cuenta queda como un hecho
+  visible y no como un número que apareció de la nada.
+
+**Transferencias entre cuentas (consignar el efectivo al banco):**
+- **No son movimientos**: viven en `state.transferencias`, no en `state.tx`. Eso
+  es lo que garantiza que ninguna fórmula que lee `state.tx` —Caja, balance,
+  ganancia, serie de las gráficas, reporte financiero, PDF, CSV— las cuente jamás
+  como ingreso ni gasto: no hay que acordarse de excluirlas en cada una.
+- Una transferencia es **un registro con dos puntas** (sale de una cuenta, entra a
+  otra) que `calcAsientos` reparte en dos asientos que suman cero. Al ser un solo
+  registro **no puede quedar a medias**: no existe «la salida sin la entrada».
+- No se borra: se **anula** (vuelve a lo de antes) y se puede **restaurar**, igual
+  que «Borrar = mover a papelera». Avisa antes de dejar una cuenta en negativo.
+
+**Qué cuenta le toca a cada movimiento nuevo:**
+- **Con formulario** (movimiento a mano, abono, abono inicial de un pedido rápido,
+  reembolso): se elige en pantalla, y lo que se ve elegido es lo que se guarda
+  (`cuentaSugerida`: la elegida → la predeterminada → la primera de la lista).
+- **Sin formulario** (nómina, gasto fijo, cuota de deuda, comisión, compras, el
+  botón «Cobrar saldo»): `persist("tx")` le pone la **cuenta predeterminada**, o
+  «Sin asignar» si no hay — **la app no adivina**. Es el único punto por el que
+  pasan todos, así que un movimiento nuevo de cualquier origen (también uno
+  futuro) queda con cuenta. Solo toca los que **no tienen** cuenta: los de antes
+  de las cuentas ya llegan migrados y no caen en la predeterminada.
+- Los pendientes se asignan de a uno en Finanzas → Cuentas («Movimientos sin
+  cuenta») o al editar la fila. **Cambiar la cuenta de un movimiento con marca de
+  origen está permitido** (no cambia monto, tipo ni Caja); monto y tipo siguen de
+  solo lectura, como dicen las reglas del «Ciclo de vida de un movimiento».
+- Editar un abono: el movimiento sigue a su abono (monto, fecha y cuenta). Un
+  abono de antes de las cuentas que se edita sin tocar el medio no mueve su
+  movimiento de donde esté.
+
+**Conciliación (Finanzas → Cuentas):** el dueño elige una cuenta y una fecha y
+escribe el saldo de su extracto. La app muestra el saldo que calcula hasta esa
+fecha y la **diferencia**. Los movimientos (y cada punta de una transferencia) se
+marcan como «en el extracto»: lo que queda sin marcar es lo que la app tiene y el
+banco no, y la diferencia se explica sola:
+
+`diferencia = (extracto − marcados) − (calculado − marcados)`
+= *lo que el banco tiene y la app no* − *lo que la app tiene y el banco no*.
+
+- Marcar no cambia ningún saldo, monto ni la Caja: es solo una verificación.
+- La marca se quita sola si el movimiento cambia de cuenta, monto, fecha o tipo
+  (lo que el banco mostró era otra cosa).
+- «Guardar esta conciliación» deja la última de cada cuenta (fecha, extracto,
+  calculado y diferencia).
+- La conciliación **encuentra** lo que falta; no lo corrige. Para arreglarlo se
+  registra el movimiento que falta (o se borra el que sobra) con su cuenta.
+
+**Verificado:** `test/cuentas.mjs` (270 pruebas, se corre solo con
+`node test/cuentas.mjs`, no necesita jsdom). Cubre la regla de signo; la
+migración (Caja, reporte financiero, serie y totales idénticos antes y después, y
+suma de cuentas = Caja en cada paso); las columnas nuevas al final de la hoja (ida
+y vuelta por una Sheet simulada, incluida una fila guardada *antes* de ellas); que
+una transferencia no mueva la Caja ni el reporte ni `state.tx`; los abonos (inicial,
+registrado, editado, reembolsado, anulado, «cobrar saldo»); la edición de una fila
+con origen; la conciliación con su identidad; la configuración de cuentas; y una
+prueba de propiedad —300 operaciones al azar (movimientos, asignaciones,
+transferencias, anulaciones, borrados, marcas)— donde las cuentas **siempre** sumaron
+la Caja. `test/smoke.mjs` fija el orden de columnas con las dos nuevas.
+
+**Límites conocidos, a propósito:**
+- Una cuenta con movimientos (o con una transferencia, aunque esté anulada, o que
+  sea la predeterminada) **no se puede borrar**, solo renombrar.
+- La cuenta predeterminada es una sola para todo lo que la app registra sola: un
+  gasto fijo que siempre sale del banco y otro que siempre sale de caja caen en la
+  misma. Se corrige al asignar. (Una cuenta por defecto *por* gasto fijo / empleado /
+  deuda sería el siguiente paso si hace falta.)
+- «Cobrar saldo» y los pagos de la app no preguntan la cuenta (son un clic); lo
+  dicen en la confirmación y se cambian desde Finanzas → Editar.
+- La conciliación no tiene extractos históricos: guarda solo la última por cuenta.
+- El filtro por cuenta del Historial muestra movimientos; las transferencias se ven
+  en Finanzas → Cuentas.
+- No se importa el extracto del banco (CSV/PDF): el saldo y las marcas se
+  escriben a mano.
 
 ---
 

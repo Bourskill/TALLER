@@ -12,6 +12,7 @@ import { renderHelp } from "../core/components.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
 import { subirImagenReferencia, compartirRecursosConNuevoMiembro } from "../core/drive.js";
 import { agregarMiembroEquipo } from "../core/auth.js";
+import { renderConfigCuentas } from "./cuentas.js";
 
 export function render() {
   var cfg = state.config;
@@ -28,6 +29,8 @@ export function render() {
     '</label><input id="inp-config-logo" value="' + esc(esEmoji(cfg.logoUrl) ? cfg.logoUrl : "") + '" placeholder="Emoji" maxlength="4" /></div>' +
     "</div></div>" +
     '<div class="pedido-actions"><button class="btn small" data-action="save-marca">Guardar nombre y emoji</button></div></div>';
+
+  html += renderConfigCuentas();
 
   html += '<div class="card"><div class="section-title small">Datos del negocio para el PDF' +
     renderHelp("Aparecen como remitente (\"DE\") en las cotizaciones, recibos y cuentas de cobro que generas en PDF para tus clientes. No aparecen en la orden de producción.") +

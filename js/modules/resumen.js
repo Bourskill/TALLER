@@ -16,6 +16,7 @@ import {
 } from "../core/graficas.js";
 import { generarPDFReporteFinanciero, generarPDFReporteProductos } from "../core/pdf.js";
 import { getSession } from "../core/auth.js";
+import { renderCuentasResumen } from "./cuentas.js";
 
 export function render() {
   // Un pedido cancelado no está pendiente de entregar: sacarlo de acá evita
@@ -40,6 +41,10 @@ export function render() {
   var cotizacionesAbiertas = state.cotizaciones.filter(function (c) { return c.estado !== "convertida"; }).slice(0, 5);
 
   var html = renderKpis();
+
+  // Cómo está repartida la Caja entre las cuentas (efectivo, banco, Nequi...) —
+  // la suma de las tarjetas es siempre la "Caja actual" de arriba (Hallazgo #63).
+  html += renderCuentasResumen();
 
   html += renderAvisoPropuestasPendientes();
 

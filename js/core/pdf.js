@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, calcIvaDeBase, calcMontoDescuento, calcDesglosePedido, calcPrecioServicio, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcIvaDeBase, calcMontoDescuento, calcDesglosePedido, calcPrecioServicio, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra, nombreMetodoPago } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -1393,7 +1393,7 @@ export async function generarPDFRecibo(p, abono, opts) {
   [
     "Pedido: " + (p.descripcion || "—"),
     "Fecha del abono: " + (abono.fecha || "—"),
-    "Método de pago: " + (abono.metodoPago || "—")
+    "Método de pago: " + (abono.metodoPago ? nombreMetodoPago(abono.metodoPago) : "—")
   ].forEach(function (l) { doc.text(l, marginX, y); y += 16; });
   y += 14;
 
@@ -1526,7 +1526,7 @@ export async function generarPDFCuentaCobro(p, opts) {
       head: [["FECHA", "MÉTODO", "MONTO"]],
       body: abonosPed.map(function (a) {
         var esReembolso = a.tipo === "reembolso";
-        var metodo = esReembolso ? ("Reembolso" + (a.motivo ? " — " + a.motivo : "")) : (a.metodoPago || "—");
+        var metodo = esReembolso ? ("Reembolso" + (a.motivo ? " — " + a.motivo : "")) : (a.metodoPago ? nombreMetodoPago(a.metodoPago) : "—");
         return [a.fecha || "—", metodo, (esReembolso ? "-" : "") + money(a.monto)];
       }),
       styles: { font: "helvetica", fontSize: 9.5, cellPadding: 6 },

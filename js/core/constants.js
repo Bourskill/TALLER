@@ -30,11 +30,20 @@ export const PERIODOS_PAGO = {
 // (ej. la nómina se paga los sábados). Usa el mismo índice que Date#getDay().
 export const DIAS_SEMANA = { 1: "Lunes", 2: "Martes", 3: "Miércoles", 4: "Jueves", 5: "Viernes", 6: "Sábado", 0: "Domingo" };
 
+// Cuenta a la que pertenece todo movimiento que no dice cuál es la suya —los
+// que ya existían antes de que hubiera cuentas, y los que la app registra sola
+// mientras el dueño no elija una predeterminada (Hallazgo #63)—. Vive acá y no
+// en core/calc.js porque core/sheetsEsquemas.js la necesita al leer la hoja, y
+// calc.js importa (vía store.js) ese mismo archivo: importarla de calc.js
+// cerraría un ciclo.
+export const CUENTA_SIN_ASIGNAR = "sin-asignar";
+
 export const KEYS = {
   config: "config:datos",
   configNombreLegacy: "config:nombre",
   tx: "finanzas:transacciones",
   txPapelera: "finanzas:papelera",
+  transferencias: "finanzas:transferencias", // plata que pasa de una cuenta a otra (Hallazgo #63) — NO son movimientos: no tocan la caja ni los reportes
   pedidos: "pedidos:lista",
   pedidosPapelera: "pedidos:papelera",
   clientes: "clientes:lista",
@@ -98,6 +107,19 @@ export const DEFAULT_CONFIG = {
   // "separar" (plata que ya estaba en caja, sin tx propio) o "aporte"
   // (plata nueva, genera un ingreso en Finanzas — ahí txId apunta a ese tx).
   colchonMovimientos: [], // { id, fecha, monto, origen, nota, txId }
+  // Cuentas donde está la plata del taller (Hallazgo #63): cada movimiento de
+  // Finanzas lleva el `id` de la suya en `tx.cuenta`. "Sin asignar" NO está en
+  // esta lista a propósito: es una cuenta de la app (ver CUENTA_SIN_ASIGNAR en
+  // core/calc.js), siempre existe y no se renombra ni se borra. Los `id` son
+  // estables —el nombre se puede cambiar sin tocar ningún movimiento—.
+  cuentas: [{ id: "efectivo", nombre: "Efectivo" }, { id: "banco", nombre: "Banco" }, { id: "nequi", nombre: "Nequi" }],
+  // Cuenta donde caen los movimientos que la app registra sola, sin preguntar
+  // (nómina, gasto fijo, cuota de deuda, comisión, compras). Vacía = "Sin
+  // asignar": mientras el dueño no elige, la app no adivina.
+  cuentaPredeterminada: "",
+  // Última conciliación guardada de cada cuenta: { [cuentaId]: { fecha,
+  // saldoExtracto, saldoCalculado, diferencia, guardadaEl } }.
+  conciliaciones: {},
   // Meta con periodo graduable (antes solo existía "Meta de fin de mes").
   meta: { label: "Meta de balance neto", monto: 0, periodo: "mensual" },
   // Datos de facturación/PDF (aparecen como "DE" en la cotización para el cliente).

@@ -3,8 +3,8 @@
 // en vez de duplicar el combobox.
 
 import { esc, norm, fmt, num, opt } from "./utils.js";
-import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo, categoriasMadre, subcategoriasDe } from "./calc.js";
-import { TIPOS_COSTO } from "./constants.js";
+import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo, categoriasMadre, subcategoriasDe, calcCuentasConfig, existeCuenta } from "./calc.js";
+import { TIPOS_COSTO, CUENTA_SIN_ASIGNAR } from "./constants.js";
 
 // <option> de los 3 tipos de costo (tela / fijo por pedido / fijo por prenda).
 // Compartido entre Cotizaciones, Catálogo y Plantillas para que el texto de
@@ -41,6 +41,27 @@ export function renderToggleSeccion(o) {
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (o.abierta ? "▾" : "▸") + "</button> " + o.titulo +
     (o.ayuda ? renderHelp(o.ayuda) : "") +
     "</div>";
+}
+
+// <option> de las cuentas del taller (Hallazgo #63). Es LA lista de cuentas de
+// toda la app —el formulario de un movimiento, el abono de un pedido, el
+// reembolso, la edición de una fila, la transferencia, la conciliación—: no se
+// arma una distinta por pantalla. `valorActual` es la cuenta seleccionada.
+// o.conSinAsignar: false la esconde (para donde "Sin asignar" no tiene sentido
+// elegirla, como al registrar un abono nuevo); si el valor actual SÍ es "Sin
+// asignar" se muestra igual, o el select mentiría. o.extra: [[valor, texto]] para
+// opciones propias de la pantalla (ej. el medio de un abono anterior a las cuentas).
+export function renderCuentaSelectOptions(valorActual, o) {
+  o = o || {};
+  var html = calcCuentasConfig().map(function (c) { return opt(c.id, esc(c.nombre), valorActual); }).join("");
+  if (o.conSinAsignar !== false || valorActual === CUENTA_SIN_ASIGNAR) {
+    html += opt(CUENTA_SIN_ASIGNAR, "Sin asignar", valorActual);
+  }
+  (o.extra || []).forEach(function (e) { html += opt(e[0], esc(e[1]), valorActual); });
+  if (valorActual && !existeCuenta(valorActual) && !(o.extra || []).some(function (e) { return e[0] === valorActual; })) {
+    html += opt(valorActual, "Cuenta eliminada", valorActual);
+  }
+  return html;
 }
 
 // Campo de descuento (Hallazgo #61): "% | $" + el valor. Es EL campo de

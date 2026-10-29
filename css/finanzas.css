@@ -26,3 +26,10 @@
    mismo criterio que la tabla de insumos rediseñada (ver Hallazgo #39). */
 .cc-reparto .tx-row.head span.ins-th-num,
 .cc-reparto .tx-row span.amount{ text-align:right; display:block; }
+
+/* Cuentas (ver modules/cuentas.js, Hallazgo #63): las filas de la conciliación,
+   de las transferencias y de los movimientos sin cuenta reutilizan .tx-row (misma
+   tarjeta por fila en móvil, mismo hover) y solo cambian las columnas de escritorio:
+   fecha, concepto, monto y una celda final (casilla, cuenta o botón). En móvil
+   manda responsive.css (cada celda lleva su .mobile-th), así que acá no hay nada. */
+.tx-row.cuenta-fila{ grid-template-columns: 90px minmax(160px,1fr) 120px 150px; }

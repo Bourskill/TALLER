@@ -5,7 +5,7 @@
 
 import { state } from "./store.js";
 import { num, norm, todayStr, diasPagoDe, fmt, redondear2, hashCorto } from "./utils.js";
-import { ESTADOS_DEFAULT, UNIDAD_SERVICIO } from "./constants.js";
+import { ESTADOS_DEFAULT, UNIDAD_SERVICIO, CUENTA_SIN_ASIGNAR } from "./constants.js";
 
 // Flujo por defecto para una referencia que solo trae prendas COMPRADAS ya
 // hechas (nada de tela ni mano de obra propia) — a diferencia de
@@ -138,9 +138,223 @@ export function estadoAgregadoDeCot(cot) {
 // pedido (por cobrar); lo que el taller aún debe vive en Pendientes (gastos
 // fijos, nómina, deudas, comisiones) — nunca como un tx a medias.
 export function calcCaja() {
-  return state.tx.reduce(function (acc, t) {
-    return t.tipo === "ingreso" ? acc + num(t.monto) : acc - num(t.monto);
-  }, 0);
+  return state.tx.reduce(function (acc, t) { return acc + montoConSigno(t); }, 0);
+}
+// LA regla de signo de un movimiento (ingreso suma, todo lo demás resta). Es la
+// única: la usan la Caja de arriba Y el saldo de cada cuenta (calcAsientos),
+// así que "la suma de las cuentas = la Caja" no depende de que dos fórmulas
+// se mantengan iguales a mano — es la misma. Hallazgo #63.
+export function montoConSigno(t) {
+  return t && t.tipo === "ingreso" ? num(t.monto) : -num(t.monto);
+}
+
+// ---------- cuentas (Hallazgo #63) ----------
+// Dónde está la plata: efectivo, banco, Nequi... Cada movimiento de Finanzas
+// lleva el id de su cuenta en `tx.cuenta`. La Caja sigue siendo UN número (la
+// suma de todos los movimientos); las cuentas son una forma de repartirlo, no
+// una segunda contabilidad — por eso la suma de las cuentas es SIEMPRE la
+// Caja (ver calcSaldosPorCuenta, que además lo comprueba).
+//
+// Una transferencia entre cuentas (consignar efectivo al banco) NO es un
+// movimiento: no vive en state.tx, así que ningún reporte, balance, ganancia ni
+// PDF la cuenta como ingreso o gasto (la plata no entró ni salió del taller,
+// solo cambió de lugar). Vive en state.transferencias y aporta DOS asientos a
+// las cuentas —sale de una, entra a otra— que suman cero: la Caja no se mueve.
+export { CUENTA_SIN_ASIGNAR };
+
+// Los medios de pago que usaban los abonos antes de que hubiera cuentas. Un
+// abono viejo sigue diciendo "Transferencia", no "medio sin registrar".
+var METODOS_PAGO_ANTIGUOS = { efectivo: "Efectivo", transferencia: "Transferencia", tarjeta: "Tarjeta", otro: "Otro medio" };
+
+// Las cuentas que el dueño configuró (sin "Sin asignar"), ya depuradas: sin id
+// ni nombre vacío, sin repetidos, sin la cuenta reservada.
+export function calcCuentasConfig() {
+  var vistos = {};
+  var res = [];
+  ((state.config && state.config.cuentas) || []).forEach(function (c) {
+    if (!c || !c.id || c.id === CUENTA_SIN_ASIGNAR || vistos[c.id]) return;
+    var nombre = String(c.nombre || "").trim();
+    if (!nombre) return;
+    vistos[c.id] = true;
+    res.push({ id: c.id, nombre: nombre });
+  });
+  return res;
+}
+export function existeCuenta(id) {
+  return id === CUENTA_SIN_ASIGNAR || calcCuentasConfig().some(function (c) { return c.id === id; });
+}
+export function nombreCuenta(id) {
+  if (!id || id === CUENTA_SIN_ASIGNAR) return "Sin asignar";
+  var c = calcCuentasConfig().filter(function (x) { return x.id === id; })[0];
+  return c ? c.nombre : "Cuenta eliminada";
+}
+// La cuenta de un movimiento. Sin dato = "Sin asignar" (nunca otra cosa): así
+// un movimiento anterior a las cuentas cae siempre en el mismo lugar.
+export function cuentaDeTx(t) {
+  return (t && t.cuenta) || CUENTA_SIN_ASIGNAR;
+}
+// La cuenta para un movimiento nuevo: la que se eligió (si existe), si no la
+// predeterminada del taller (si existe), si no "Sin asignar". La app no adivina.
+export function cuentaParaMovimientoNuevo(elegida) {
+  if (elegida && existeCuenta(elegida)) return elegida;
+  var pred = state.config && state.config.cuentaPredeterminada;
+  if (pred && existeCuenta(pred)) return pred;
+  return CUENTA_SIN_ASIGNAR;
+}
+// La cuenta que un formulario de alta (movimiento, abono, reembolso) muestra
+// elegida: la que se eligió, si existe; si no, la predeterminada; si no, la
+// primera de la lista. Nunca "Sin asignar" a escondidas: lo que se ve en el
+// select es exactamente lo que se guarda.
+export function cuentaSugerida(elegida) {
+  if (elegida && existeCuenta(elegida)) return elegida;
+  var pred = cuentaParaMovimientoNuevo();
+  if (pred !== CUENTA_SIN_ASIGNAR) return pred;
+  var primera = calcCuentasConfig()[0];
+  return primera ? primera.id : CUENTA_SIN_ASIGNAR;
+}
+// El medio de pago de un abono es, desde las cuentas, el id de la cuenta donde
+// entró. Un abono viejo ("transferencia", "otro"...) no apunta a ninguna
+// cuenta: devuelve "" y el movimiento queda donde estaba.
+export function cuentaDeMetodoPago(metodo) {
+  return metodo && metodo !== CUENTA_SIN_ASIGNAR && calcCuentasConfig().some(function (c) { return c.id === metodo; }) ? metodo : "";
+}
+export function nombreMetodoPago(metodo) {
+  var cuenta = cuentaDeMetodoPago(metodo);
+  if (cuenta) return nombreCuenta(cuenta);
+  if (metodo === CUENTA_SIN_ASIGNAR) return nombreCuenta(metodo);
+  if (METODOS_PAGO_ANTIGUOS[metodo]) return METODOS_PAGO_ANTIGUOS[metodo];
+  return metodo ? String(metodo) : "medio sin registrar";
+}
+
+// Pasa los movimientos de antes de las cuentas a "Sin asignar". Solo escribe
+// `cuenta` donde falta —nunca toca monto, tipo ni fecha—, así que la Caja y
+// todo reporte quedan idénticos. Idempotente: lo ya migrado no se vuelve a tocar.
+// Devuelve la MISMA lista si no había nada que migrar (sin guardados de más).
+export function migrarCuentasMovimientos(lista) {
+  var migrados = 0;
+  var tx = (lista || []).map(function (t) {
+    if (!t || t.cuenta) return t;
+    migrados++;
+    return Object.assign({}, t, { cuenta: CUENTA_SIN_ASIGNAR });
+  });
+  return { tx: migrados ? tx : lista, migrados: migrados };
+}
+// Los movimientos que la app registra sola (nómina, gasto fijo, cuota de
+// deuda, comisión, compras) nacen sin cuenta: se la pone esto, en el único
+// punto por el que todos pasan al guardarse (persist("tx") en core/store.js).
+// Solo toca los que NO tienen — los anteriores a las cuentas ya llegan
+// migrados a "Sin asignar" desde la lectura, y no se les vuelve a poner otra.
+export function asegurarCuentaEnMovimientos(lista) {
+  var cuenta = null;
+  var cambiados = 0;
+  (lista || []).forEach(function (t) {
+    if (!t || t.cuenta) return;
+    if (cuenta === null) cuenta = cuentaParaMovimientoNuevo();
+    t.cuenta = cuenta;
+    cambiados++;
+  });
+  return cambiados;
+}
+
+export function transferenciasVigentes() {
+  return (state.transferencias || []).filter(function (tr) { return !tr.anulada; });
+}
+
+// TODO lo que mueve una cuenta, en una sola lista: los movimientos de Finanzas
+// y las dos puntas de cada transferencia vigente, con su monto CON SIGNO. Es la
+// única fuente de los saldos por cuenta, del saldo a una fecha y de la
+// conciliación: nadie suma las cuentas por su lado.
+export function calcAsientos() {
+  var res = [];
+  (state.tx || []).forEach(function (t) {
+    res.push({
+      clave: "tx:" + t.id, origen: "tx", id: t.id, cuenta: cuentaDeTx(t), fecha: t.fecha || "",
+      concepto: t.concepto || "", contraparte: t.contraparte || "", monto: montoConSigno(t), conciliadoEn: t.conciliadoEn || ""
+    });
+  });
+  transferenciasVigentes().forEach(function (tr) {
+    var m = num(tr.monto);
+    var de = tr.de || CUENTA_SIN_ASIGNAR, a = tr.a || CUENTA_SIN_ASIGNAR;
+    res.push({
+      clave: "tr:" + tr.id + ":de", origen: "transferencia", id: tr.id, lado: "de", cuenta: de, fecha: tr.fecha || "",
+      concepto: "Transferencia a " + nombreCuenta(a) + (tr.nota ? " — " + tr.nota : ""), contraparte: "", monto: -m, conciliadoEn: tr.conciliadoDe || ""
+    });
+    res.push({
+      clave: "tr:" + tr.id + ":a", origen: "transferencia", id: tr.id, lado: "a", cuenta: a, fecha: tr.fecha || "",
+      concepto: "Transferencia desde " + nombreCuenta(de) + (tr.nota ? " — " + tr.nota : ""), contraparte: "", monto: m, conciliadoEn: tr.conciliadoA || ""
+    });
+  });
+  return res;
+}
+
+// Saldo de cada cuenta + la comprobación contra la Caja. `cuadra` es la
+// garantía del dueño: lo que suman todas las cuentas es lo que dice "Caja
+// actual". "Sin asignar" aparece solo si tiene algo; una cuenta que ya no está
+// en la lista pero conserva movimientos aparece igual (nunca se pierde plata
+// de la vista).
+export function calcSaldosPorCuenta() {
+  var saldos = {}, cuantos = {};
+  calcAsientos().forEach(function (a) {
+    saldos[a.cuenta] = (saldos[a.cuenta] || 0) + a.monto;
+    cuantos[a.cuenta] = (cuantos[a.cuenta] || 0) + 1;
+  });
+  var conocidas = {};
+  var filas = calcCuentasConfig().map(function (c) {
+    conocidas[c.id] = true;
+    return { id: c.id, nombre: c.nombre, saldo: saldos[c.id] || 0, movimientos: cuantos[c.id] || 0, sistema: false };
+  });
+  if (cuantos[CUENTA_SIN_ASIGNAR] || saldos[CUENTA_SIN_ASIGNAR]) {
+    filas.push({ id: CUENTA_SIN_ASIGNAR, nombre: "Sin asignar", saldo: saldos[CUENTA_SIN_ASIGNAR] || 0, movimientos: cuantos[CUENTA_SIN_ASIGNAR] || 0, sistema: true });
+  }
+  Object.keys(saldos).forEach(function (id) {
+    if (id === CUENTA_SIN_ASIGNAR || conocidas[id]) return;
+    filas.push({ id: id, nombre: "Cuenta eliminada", saldo: saldos[id], movimientos: cuantos[id], sistema: false, huerfana: true });
+  });
+  var total = filas.reduce(function (a, f) { return a + f.saldo; }, 0);
+  var caja = calcCaja();
+  return { cuentas: filas, total: total, caja: caja, cuadra: Math.abs(total - caja) < 0.005 };
+}
+
+// Cuánto se usa una cuenta (para saber si se puede borrar): movimientos,
+// transferencias (también las anuladas, que se pueden restaurar), movimientos
+// en la papelera y si es la predeterminada.
+export function calcUsoCuenta(id) {
+  var usos = 0;
+  usos += (state.tx || []).filter(function (t) { return cuentaDeTx(t) === id; }).length;
+  usos += (state.txPapelera || []).filter(function (t) { return t.cuenta === id; }).length;
+  usos += (state.transferencias || []).filter(function (tr) { return tr.de === id || tr.a === id; }).length;
+  if (state.config && state.config.cuentaPredeterminada === id) usos++;
+  return usos;
+}
+
+// Conciliación de UNA cuenta contra su extracto, a una fecha: lo que dice el
+// banco (saldoExtracto) contra lo que calcula la app con todo lo que tiene
+// registrado hasta esa fecha. Los movimientos marcados como conciliados son
+// los que el dueño ya vio en el extracto; con eso la diferencia se explica sola:
+//   diferencia = (extracto − marcados) − (calculado − marcados)
+//              = lo que el banco tiene y la app no − lo que la app tiene y el banco no
+// `saldoExtracto` vacío = todavía no lo escribió (no hay diferencia que mostrar).
+export function calcConciliacion(cuentaId, fecha, saldoExtracto) {
+  var asientos = calcAsientos().filter(function (a) { return a.cuenta === cuentaId && (!fecha || a.fecha <= fecha); });
+  var calculado = 0, marcados = 0, sinMarcar = 0;
+  asientos.forEach(function (a) {
+    calculado += a.monto;
+    if (a.conciliadoEn) marcados += a.monto; else sinMarcar++;
+  });
+  var tieneExtracto = String(saldoExtracto === undefined || saldoExtracto === null ? "" : saldoExtracto).trim() !== "";
+  var extracto = tieneExtracto ? num(saldoExtracto) : 0;
+  asientos.sort(function (a, b) { return String(b.fecha).localeCompare(String(a.fecha)); });
+  return {
+    cuenta: cuentaId, fecha: fecha || "", tieneExtracto: tieneExtracto,
+    saldoExtracto: extracto,
+    saldoCalculado: redondear2(calculado),
+    diferencia: tieneExtracto ? redondear2(extracto - calculado) : 0,
+    conciliado: redondear2(marcados),
+    sinConciliar: redondear2(calculado - marcados),
+    faltaEnApp: tieneExtracto ? redondear2(extracto - marcados) : 0,
+    asientos: asientos,
+    sinMarcar: sinMarcar
+  };
 }
 export function calcIngresosTotales() {
   return state.tx
