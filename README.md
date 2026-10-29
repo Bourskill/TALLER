@@ -17,6 +17,21 @@ financieras de la app (saldo, IVA, abonos, servicios, comisiones, por
 pagar) y los hallazgos de la auditoría de septiembre 2026, para comparar
 en vez de adivinar.
 
+## Pruebas automáticas
+
+Hay dos pruebas: `test/smoke.mjs` (la de humo, usa jsdom) y
+`test/descuentos.mjs`. **Corren solas en GitHub** (pestaña Actions, workflow
+"Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
+commit o el PR queda en rojo. No hace falta instalar nada para eso.
+
+Para correrlas en tu máquina hace falta Node (la versión LTS) y, una sola
+vez, `npm ci`:
+
+```bash
+npm ci
+npm test
+```
+
 ## 🆘 Si el login da error de Google Sheets (404 / archivo no encontrado)
 
 Le pasó de verdad al taller el 2026-09-19: la Google Sheet que actúa como

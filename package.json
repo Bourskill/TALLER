@@ -1,5 +1,8 @@
 {
   "type": "module",
+  "scripts": {
+    "test": "node test/smoke.mjs && node test/descuentos.mjs"
+  },
   "dependencies": {
     "jsdom": "^30.0.1"
   }
