@@ -84,6 +84,7 @@
 .ref-fields{display:flex;flex-direction:column;align-items:stretch;gap:9px;}
 .ref-fields span{display:flex;align-items:center;gap:8px;}
 .ref-fields label{flex:0 0 128px;font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.03em;}
+.ref-fields .descuento-campo{flex:1;}
 .ins-table{width:100%;margin-top:10px;font-size:12px;}
 /* Pulido 2026-09-21 ("no me gusta la estética de esa tabla... metele
    estilo, que haya armonía"): antes cada fila era borde a borde, sin

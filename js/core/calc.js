@@ -1506,10 +1506,17 @@ export function calcGastosFijosMensuales() {
 // Un pedido sin líneas de servicio (todos los que existían antes de esto, y
 // cualquiera creado a mano sin servicios) da exactamente `p.total`: el número
 // de siempre.
+//
+// Con descuento (Hallazgo #61, decisión del dueño: "con descuento") la base es
+// lo que de verdad se cobró por las prendas: el vendedor comparte el
+// descuento. Por eso los servicios se restan YA rebajados, con su parte del
+// descuento de la orden — es el espejo de `precioPrendas` en la cotización.
 export function calcBaseComision(p) {
   var servicios = ((p && p.lineas) || []).reduce(function (a, l) {
     return a + (l.esServicioCobrado ? num(l.precioUnitario) * num(l.cantidad) : 0);
   }, 0);
+  var d = calcDesglosePedido(p);
+  if (d.descuento) servicios = d.totalServicios;
   return num(p.total) - servicios;
 }
 export function calcComisionValor(p) {
@@ -2216,6 +2223,148 @@ export function insumoCambioDeCatalogo(linea) {
   return { costoCatalogo: costoActual, costoLinea: num(linea.costo) };
 }
 
+// ---------- Descuentos (Hallazgo #61) ----------
+// Un descuento es { tipo: "porcentaje" | "fijo", valor, motivo? }. Puede
+// colgar de UN ítem (una referencia o servicio de la cotización, una línea
+// del pedido) y de TODA la orden. Sin descuento = null, o valor 0.
+//
+// REGLA DE ORO: `p.total` (y `precioTotal` en una cotización) es SIEMPRE el
+// valor YA rebajado, lo que el cliente de verdad debe. Todo lo que cuelga de
+// ese número —IVA, saldo por cobrar, comisión del vendedor, reportes, PDFs—
+// se corrige solo, sin que ninguna fórmula tenga que saber que hubo
+// descuento. Lo único nuevo es poder explicar el número: de cuánto era antes
+// y cuánto se rebajó (calcDesglosePedido / calcCotizacionTotales).
+//
+// Orden de aplicación: primero el de cada ítem, después el de la orden sobre
+// el subtotal ya rebajado. Todo descuento se redondea a pesos enteros y se
+// topa al valor sobre el que se aplica (nunca deja un precio negativo).
+export function descuentoVigente(d) {
+  return !!(d && num(d.valor) > 0);
+}
+export function calcMontoDescuento(d, base) {
+  base = Math.max(0, num(base));
+  if (!descuentoVigente(d) || base <= 0) return 0;
+  var bruto = d.tipo === "fijo" ? num(d.valor) : base * Math.min(100, num(d.valor)) / 100;
+  return Math.min(base, Math.round(bruto));
+}
+// Texto corto de un descuento para pantallas y PDFs: "10 %" o "$5.000".
+export function textoDescuento(d) {
+  if (!descuentoVigente(d)) return "";
+  if (d.tipo === "fijo") return fmt(d.valor);
+  return (d.porcentajeOrigen != null ? num(d.porcentajeOrigen) : num(d.valor)) + " %";
+}
+// El descuento que el usuario escribió en un formulario (texto) → objeto
+// limpio, o null si no hay nada. Es la única puerta para guardar uno.
+export function descuentoDesdeForm(tipo, valor, motivo) {
+  var v = Math.max(0, num(valor));
+  if (!(v > 0)) return null;
+  var t = tipo === "fijo" ? "fijo" : "porcentaje";
+  if (t === "porcentaje") v = Math.min(100, v);
+  var out = { tipo: t, valor: v };
+  if (motivo && String(motivo).trim()) out.motivo = String(motivo).trim();
+  return out;
+}
+
+// El corazón: dado un conjunto de ítems [{ bruto, descuento, esServicio }] y el
+// descuento de la orden, devuelve de dónde sale el total. Lo comparten la
+// cotización (ítems = referencias + servicios) y el pedido (ítems = líneas),
+// y por eso la comisión del vendedor no cambia al convertir.
+//
+//   bruto            lo que sumaría todo a precio de lista
+//   descuentoItems   lo rebajado ítem por ítem
+//   subtotal         bruto - descuentoItems
+//   descuentoOrden   lo rebajado sobre el subtotal
+//   total            subtotal - descuentoOrden  (= p.total)
+//   totalPrendas / totalServicios   el total partido entre lo que NO es y lo
+//     que SÍ es servicio cobrado, repartiendo el descuento de la orden en
+//     proporción. totalPrendas es la base de la comisión (ver calcBaseComision):
+//     el diseño no es margen que el vendedor haya generado, y el descuento de la
+//     orden también lo comparte.
+export function calcDesgloseDescuentos(items, descuentoOrden) {
+  var bruto = 0, descuentoItems = 0, netoServicios = 0;
+  var netos = (items || []).map(function (it) {
+    var b = Math.max(0, num(it.bruto));
+    var d = calcMontoDescuento(it.descuento, b);
+    bruto += b; descuentoItems += d;
+    if (it.esServicio) netoServicios += b - d;
+    return b - d;
+  });
+  var subtotal = bruto - descuentoItems;
+  var descuentoOrdenMonto = calcMontoDescuento(descuentoOrden, subtotal);
+  var parteServicios = subtotal > 0 ? Math.round(descuentoOrdenMonto * netoServicios / subtotal) : 0;
+  var netoPrendas = subtotal - netoServicios;
+  return {
+    bruto: bruto, descuentoItems: descuentoItems, subtotal: subtotal,
+    descuentoOrden: descuentoOrdenMonto, descuento: descuentoItems + descuentoOrdenMonto,
+    total: subtotal - descuentoOrdenMonto, netos: netos,
+    totalServicios: netoServicios - parteServicios,
+    totalPrendas: netoPrendas - (descuentoOrdenMonto - parteServicios)
+  };
+}
+
+// Cambia UN campo (tipo o valor) de un descuento que se está editando en un
+// formulario, sin tocar el otro. Es el único camino para los campos de
+// descuento de pantalla (renderDescuentoCampo): guarda un objeto, aunque el
+// valor quede en 0, para no perder el tipo elegido mientras se escribe.
+export function parchearDescuento(d, campo, valor) {
+  var out = Object.assign({ tipo: "porcentaje", valor: 0 }, d || {});
+  if (campo === "descuentoTipo") {
+    out.tipo = valor === "fijo" ? "fijo" : "porcentaje";
+  } else {
+    out.valor = Math.max(0, num(valor));
+  }
+  if (out.tipo === "porcentaje") out.valor = Math.min(100, out.valor);
+  delete out.porcentajeOrigen; // ya no es el porcentaje que vino de la cotización
+  return out;
+}
+
+function itemsDeLineasPedido(lineas) {
+  return (lineas || []).map(function (l) {
+    return { bruto: num(l.precioUnitario) * num(l.cantidad), descuento: l.descuento, esServicio: !!l.esServicioCobrado };
+  });
+}
+
+// De dónde sale el total de UN pedido. El total guardado (`p.total`) manda
+// siempre —es el que lee el resto de la app—; el desglose solo lo explica:
+// `bruto` es lo que ese total valdría sin descuento. Un pedido sin descuento
+// (todos los que existían antes) da bruto === total y descuento 0. La
+// consignación no lleva descuento: su precio es el del punto de venta.
+export function calcDesglosePedido(p) {
+  var total = num(p && p.total);
+  if (!p || p.consignacion) {
+    return { bruto: total, descuentoItems: 0, descuentoOrden: 0, descuento: 0, total: total, subtotal: total, netos: [], totalServicios: 0, totalPrendas: total, motivo: "" };
+  }
+  var d = calcDesgloseDescuentos(itemsDeLineasPedido(p.lineas), p.descuento);
+  return {
+    bruto: total + d.descuento, descuentoItems: d.descuentoItems, descuentoOrden: d.descuentoOrden,
+    descuento: d.descuento, total: total, subtotal: total + d.descuentoOrden, netos: d.netos,
+    totalServicios: d.totalServicios, totalPrendas: d.totalPrendas,
+    motivo: (p.descuento && p.descuento.motivo) || ""
+  };
+}
+
+// Lo que cada línea del pedido VALE de verdad: su total rebajado, menos la
+// parte que le toca del descuento de la orden (en proporción, sin perder ni un
+// peso — repartirProporcional). Lo leen los reportes por producto: así la suma
+// de las líneas vuelve a dar el total del pedido.
+export function calcNetoLineasPedido(p) {
+  var lineas = (p && p.lineas) || [];
+  var d = calcDesgloseDescuentos(itemsDeLineasPedido(lineas), p && !p.consignacion ? p.descuento : null);
+  if (!d.descuentoOrden) return d.netos;
+  var partes = repartirProporcional(d.descuentoOrden, d.netos, 0);
+  return d.netos.map(function (n, i) { return n - partes[i]; });
+}
+
+// El nuevo total de un pedido ya creado si sus líneas/orden pasan a tener
+// estos descuentos. Conserva lo que ese pedido valía a precio de lista (aunque
+// sus líneas no cuadren con el total, como en un pedido muy viejo): solo cambia
+// la parte del descuento. Devuelve { total, descuento, bruto }.
+export function calcTotalConDescuentos(p, lineas, descuentoOrden) {
+  var actual = calcDesglosePedido(p);
+  var nuevo = calcDesgloseDescuentos(itemsDeLineasPedido(lineas), descuentoOrden);
+  return { bruto: actual.bruto, descuento: nuevo.descuento, total: Math.max(0, actual.bruto - nuevo.descuento), descuentoItems: nuevo.descuentoItems, descuentoOrden: nuevo.descuentoOrden };
+}
+
 // Total de prendas del pedido, sumando todas las referencias. Es el divisor
 // de un costo global: se reparte parejo entre todo lo que se produce.
 export function calcUnidadesCotizacion(cot) {
@@ -2259,11 +2408,15 @@ export function calcRefTotalesConGlobales(cot, ref) {
     costoGlobalUnit: globalUnit,
     costoUnit: costoUnit,
     precioUnit: base.precioUnit,
+    precioLista: base.precioLista,
+    descuento: base.descuento,
     gananciaUnit: gananciaUnit,
     margenPct: base.precioUnit > 0 ? (gananciaUnit / base.precioUnit * 100) : 0,
     costoTotal: costoUnit * cantidad,
     precioTotal: base.precioTotal,
-    gananciaTotal: gananciaUnit * cantidad
+    // Con descuento, el precio por unidad es un promedio: la ganancia total sale
+    // del total rebajado, no de multiplicar un promedio por la cantidad.
+    gananciaTotal: base.descuento ? base.precioTotal - costoUnit * cantidad : gananciaUnit * cantidad
   };
 }
 
@@ -2284,13 +2437,21 @@ export function calcCostoUnitarioRef(ref) {
 }
 export function calcRefTotales(ref) {
   var costoUnit = calcCostoUnitarioRef(ref);
-  var precioUnit = num(ref.precioVenta);
+  var precioLista = num(ref.precioVenta);
   var cantidad = num(ref.cantidadPedida) || 0;
+  // Descuento de ESTA referencia (Hallazgo #61). `precioUnit`/`precioTotal` son
+  // lo que se cobra, ya rebajado; `precioLista` es el precio de siempre. Sin
+  // descuento las dos cosas coinciden y todo da el número de siempre.
+  var descuento = calcMontoDescuento(ref.descuento, precioLista * cantidad);
+  var precioTotal = precioLista * cantidad - descuento;
+  var precioUnit = (descuento && cantidad > 0) ? precioTotal / cantidad : precioLista;
   var gananciaUnit = precioUnit - costoUnit;
   var margenPct = precioUnit > 0 ? (gananciaUnit / precioUnit * 100) : 0;
   return {
-    costoUnit: costoUnit, precioUnit: precioUnit, gananciaUnit: gananciaUnit, margenPct: margenPct,
-    costoTotal: costoUnit * cantidad, precioTotal: precioUnit * cantidad, gananciaTotal: gananciaUnit * cantidad
+    costoUnit: costoUnit, precioUnit: precioUnit, precioLista: precioLista, descuento: descuento,
+    gananciaUnit: gananciaUnit, margenPct: margenPct,
+    costoTotal: costoUnit * cantidad, precioTotal: precioTotal,
+    gananciaTotal: descuento ? precioTotal - costoUnit * cantidad : gananciaUnit * cantidad
   };
 }
 // Costos que se pagan UNA vez por pedido, sin importar cuántas referencias
@@ -2317,19 +2478,28 @@ export function calcCostosGlobales(cot) {
 // No cuentan como prendas en ningún lado: no entran en
 // calcUnidadesCotizacion, así que no diluyen el reparto de los costos
 // globales ni inflan la cantidad del pedido.
+// El precio de un servicio es lo que se cobra ya rebajado por SU descuento
+// (s.descuento, Hallazgo #61); `precioLista` es lo que valía antes.
+export function calcPrecioServicio(s) {
+  var lista = num(s && s.precio);
+  return lista - calcMontoDescuento(s && s.descuento, lista);
+}
 export function calcServiciosCobrados(cot) {
   return ((cot && cot.serviciosCobrados) || []).reduce(function (a, s) {
-    a.precio += num(s.precio);
+    a.precio += calcPrecioServicio(s);
+    a.precioLista += num(s.precio);
     a.costo += num(s.costo);
     return a;
-  }, { precio: 0, costo: 0 });
+  }, { precio: 0, precioLista: 0, costo: 0 });
 }
 
 export function calcCotizacionTotales(cot) {
   var acc = { costoTotal: 0, precioTotal: 0, gananciaTotal: 0 };
+  var items = [];
   (cot.referencias || []).forEach(function (ref) {
     var t = calcRefTotales(ref);
     acc.costoTotal += t.costoTotal; acc.precioTotal += t.precioTotal; acc.gananciaTotal += t.gananciaTotal;
+    items.push({ bruto: t.precioLista * (num(ref.cantidadPedida) || 0), descuento: ref.descuento, esServicio: false });
   });
   var globales = calcCostosGlobales(cot);
   acc.costosGlobales = globales;
@@ -2346,6 +2516,24 @@ export function calcCotizacionTotales(cot) {
   acc.precioTotal += serv.precio;
   acc.costoTotal += serv.costo;
   acc.gananciaTotal += serv.precio - serv.costo;
+  (cot.serviciosCobrados || []).forEach(function (s) {
+    items.push({ bruto: num(s.precio), descuento: s.descuento, esServicio: true });
+  });
+  // Descuento de la ORDEN (Hallazgo #61): se aplica sobre el subtotal ya
+  // rebajado ítem por ítem, y baja el precio y la ganancia peso a peso. Sale
+  // de la misma función que usa el pedido sobre sus líneas, así la base de la
+  // comisión (precioPrendas) es igual en la cotización y en el pedido.
+  var d = calcDesgloseDescuentos(items, cot.descuento);
+  acc.precioBruto = d.bruto;
+  acc.descuentoItems = d.descuentoItems;
+  acc.descuentoOrden = d.descuentoOrden;
+  acc.descuento = d.descuento;
+  if (d.descuentoOrden) {
+    acc.precioTotal -= d.descuentoOrden;
+    acc.gananciaTotal -= d.descuentoOrden;
+    acc.precioPrendas = d.totalPrendas;
+    acc.precioServicios = d.totalServicios;
+  }
   acc.margenPct = acc.precioTotal > 0 ? (acc.gananciaTotal / acc.precioTotal * 100) : 0;
   return acc;
 }
@@ -4049,7 +4237,7 @@ export function calcCostoUnitarioProducto(p) {
 // se escriben a mano en el formulario, se calculan — así es imposible que el
 // total diga una cosa y las líneas otra. Ver renderIndicadoresPedido en
 // modules/pedidos.js, que muestra justo estos números.
-export function calcTotalesLineasPedido(lineas) {
+export function calcTotalesLineasPedido(lineas, descuentoOrden) {
   var unidades = 0, precioTotal = 0, costoDirecto = 0, costoIndirecto = 0;
   (lineas || []).forEach(function (l) {
     var cant = num(l.cantidad);
@@ -4062,10 +4250,21 @@ export function calcTotalesLineasPedido(lineas) {
     // pedido y la suma de sus líneas no daban lo mismo.
     costoIndirecto += num(l.costoIndirectoUnitario) * cant;
   });
+  // Descuentos (Hallazgo #61): `precioBruto` es lo que sumaban las líneas a
+  // precio de lista; `precioTotal` pasa a ser lo que de verdad se cobra, el
+  // número que se guarda como total del pedido.
+  var desc = calcDesgloseDescuentos(itemsDeLineasPedido(lineas), descuentoOrden);
+  var precioBruto = precioTotal;
+  if (desc.descuento) precioTotal = desc.total;
   var costoTotal = costoDirecto + costoIndirecto;
   var gananciaTotal = precioTotal - costoTotal;
   return {
     unidades: unidades,
+    precioBruto: precioBruto,
+    descuentoItems: desc.descuentoItems,
+    descuentoOrden: desc.descuentoOrden,
+    descuento: desc.descuento,
+    subtotal: desc.subtotal,
     precioTotal: precioTotal,
     costoTotal: costoTotal,
     costoDirecto: costoDirecto,
@@ -4146,17 +4345,26 @@ export function calcProductosVendidosRango(desde, hasta) {
     // `stockConsumido`, sin precio propio — se completa con el catálogo.
     var desdeLineas = !!(p.lineas && p.lineas.length);
     var lineas = desdeLineas ? p.lineas : (p.stockConsumido || []);
-    var base = lineas.map(function (l) {
+    // Lo que cada línea vale YA rebajada (por su descuento y su parte del de la
+    // orden, Hallazgo #61): el reporte cuenta lo que se vendió de verdad, y la
+    // suma de las líneas vuelve a dar el total del pedido. Sin descuento es
+    // exactamente precio x cantidad, como siempre.
+    var netosLineas = desdeLineas ? calcNetoLineasPedido(p) : null;
+    var listasLineas = desdeLineas ? itemsDeLineasPedido(p.lineas) : null;
+    var base = lineas.map(function (l, idx) {
       var prod = l.productoId ? productoById(l.productoId) : null;
       var cant = num(l.cantidad) || 0;
       var precioUnit = l.precioUnitario !== undefined ? num(l.precioUnitario) : num(prod && prod.precioVenta);
+      var precioTotalLinea = netosLineas ? netosLineas[idx] : precioUnit * cant;
+      var descuentoLinea = netosLineas ? Math.max(0, listasLineas[idx].bruto - netosLineas[idx]) : 0;
+      if (netosLineas && descuentoLinea) precioUnit = cant > 0 ? precioTotalLinea / cant : precioUnit;
       var costoDirectoUnit = l.costoUnitario !== undefined ? num(l.costoUnitario) : calcCostoUnitarioProducto(prod);
       // El costo real de vender esta línea incluye la parte que le tocó de
       // los costos globales del pedido (domicilio, diseño...). Sin sumarla, el
       // reporte reportaba MENOS costo del que la cotización ya había contado,
       // e inflaba la ganancia por esa misma diferencia.
       var costoEstimadoUnit = costoDirectoUnit + num(l.costoIndirectoUnitario);
-      return { l: l, prod: prod, cant: cant, precioUnit: precioUnit, costoDirectoUnit: costoDirectoUnit, costoEstimadoUnit: costoEstimadoUnit, costoEstimado: costoEstimadoUnit * cant };
+      return { l: l, prod: prod, cant: cant, precioUnit: precioUnit, precioTotal: precioTotalLinea, descuento: descuentoLinea, costoDirectoUnit: costoDirectoUnit, costoEstimadoUnit: costoEstimadoUnit, costoEstimado: costoEstimadoUnit * cant };
     });
     // Las líneas del pedido guardan el costo ESTIMADO (la foto que se tomó
     // al convertir la cotización; calcDesfaseCotizacionPedido depende de que
@@ -4184,8 +4392,10 @@ export function calcProductosVendidosRango(desde, hasta) {
         talla: b.l.talla || "—", cantidad: b.cant,
         costoUnit: b.cant > 0 ? costoTotal / b.cant : b.costoEstimadoUnit,
         costoDirectoUnit: b.costoDirectoUnit, costoEstimadoUnit: b.costoEstimadoUnit, precioUnit: b.precioUnit,
-        costoTotal: costoTotal, precioTotal: b.precioUnit * b.cant,
-        ganancia: b.precioUnit * b.cant - costoTotal,
+        costoTotal: costoTotal, precioTotal: b.precioTotal,
+        // Cuánto se rebajó en esta línea (su descuento + su parte del de la orden).
+        descuento: b.descuento,
+        ganancia: b.precioTotal - costoTotal,
         comision: 0,
         numeroOp: p.numeroOp || "—", cliente: p.cliente || "—", vendedor: vendedor,
         observacion: b.l.observacion || "",
@@ -4363,6 +4573,9 @@ export function calcPedidosRango(desde, hasta) {
         // exactamente el IVA, y esta tabla (y el PDF que la reutiliza) lo
         // pintaba en verde como si fuera a favor del cliente.
         total: total, costo: costo, ganancia: total - costo,
+        // Lo rebajado a este cliente (Hallazgo #61): `total` ya viene con el
+        // descuento aplicado, `lista` es lo que habría sido sin él.
+        descuento: calcDesglosePedido(p).descuento, lista: calcDesglosePedido(p).bruto,
         abonado: abonado, saldo: calcSaldoPedido(p),
         // El cancelado SIGUE apareciendo en la lista —es el registro de que
         // existió— pero va marcado, y calcResumenPedidos lo deja fuera de los
@@ -4418,10 +4631,11 @@ export function calcPrendasTerminadasPorDia(desde, hasta) {
 // el usuario note que la suma de la columna no da el total.
 export function calcResumenPedidos(filas) {
   var vigentes = (filas || []).filter(function (f) { return !f.cancelado; });
-  var acc = { pedidos: vigentes.length, cancelados: (filas || []).length - vigentes.length, unidades: 0, total: 0, costo: 0, ganancia: 0, abonado: 0, saldo: 0 };
+  var acc = { pedidos: vigentes.length, cancelados: (filas || []).length - vigentes.length, unidades: 0, total: 0, costo: 0, ganancia: 0, abonado: 0, saldo: 0, descuento: 0 };
   vigentes.forEach(function (f) {
     acc.unidades += num(f.cantidad); acc.total += num(f.total); acc.costo += num(f.costo);
     acc.ganancia += num(f.ganancia); acc.abonado += num(f.abonado); acc.saldo += num(f.saldo);
+    acc.descuento += num(f.descuento);
   });
   return acc;
 }
@@ -4447,10 +4661,11 @@ export function calcVentasPorVendedorRango(desde, hasta) {
 }
 
 export function calcResumenProductosVendidos(filas) {
-  var acc = { unidades: 0, costoTotal: 0, precioTotal: 0, ganancia: 0 };
+  var acc = { unidades: 0, costoTotal: 0, precioTotal: 0, ganancia: 0, descuento: 0 };
   (filas || []).forEach(function (f) {
     acc.unidades += num(f.cantidad); acc.costoTotal += num(f.costoTotal);
     acc.precioTotal += num(f.precioTotal); acc.ganancia += num(f.ganancia);
+    acc.descuento += num(f.descuento);
   });
   acc.margenPct = acc.precioTotal > 0 ? (acc.ganancia / acc.precioTotal * 100) : 0;
   return acc;

@@ -295,6 +295,9 @@ export const state = {
     conFlujoProduccion: true,
     // Consignación: enviar mercancía a un punto de venta externo (ver modules/pedidos.js).
     esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+    // Descuento sobre el TOTAL del pedido (Hallazgo #61); el de cada ítem vive
+    // en su línea (`descuento: { tipo, valor }`).
+    descuentoTipo: "porcentaje", descuentoValor: "", descuentoMotivo: "",
     // Líneas del pedido: cada una es { id, tipo:"catalogo"|"libre",
     // productoId, productoNombre, imagenUrl, talla, cantidad,
     // precioUnitario, costoUnitario, observacion, campos:[{id,nombre,valor}] }.
@@ -304,6 +307,12 @@ export const state = {
     lineas: []
   },
   pedidoVendedorAbierto: false, // sección de comisión de vendedor desplegada en el formulario de pedido
+  pedidoDescuentoFormAbierto: false, // sección "Descuento al total" desplegada en el formulario de pedido
+  // Editor de descuento de un pedido YA creado (Hallazgo #61): el id del pedido
+  // que se está editando (o "") y su borrador { lineas: {lineaId: {tipo,valor}},
+  // tipo, valor, motivo } — nada se guarda hasta "Guardar descuento".
+  pedidoDescuentoEditando: "",
+  formDescuentoPedido: { lineas: {}, tipo: "porcentaje", valor: "", motivo: "" },
   pedidoOpcionesAvanzadasAbierto: false, // sección "Opciones avanzadas" (tipo de pedido, flujo, origen) desplegada en el formulario de pedido
   // true solo cuando state.formPedido se prellenó con "Duplicar pedido": es
   // lo único que decide si el formulario recoge tipo/flujo/origen detrás de
@@ -462,6 +471,7 @@ export const state = {
   refActiva: {}, // { [cotId]: refId } — qué referencia está activa en la vista de pestañas de cada cotización
   cotTabActiva: {}, // { [cotId]: "referencias"|"produccion" } — pestaña interna activa dentro del detalle de una cotización
   cotVendedorEditando: "", // id de la cotización con el formulario de vendedor/comisión desplegado, o "" (por defecto solo se ve un resumen de una línea)
+  cotDescuentoEditando: "", // id de la cotización con el descuento al total desplegado, o "" (por defecto solo se ve un resumen de una línea)
   // "nueva" | "contactos" | "proveedores" — quien te compra y quien te vende
   // viven en pestañas separadas: se buscan en momentos distintos y se ordenan
   // distinto (ver modules/clientes.js). "historial" es el nombre viejo de la

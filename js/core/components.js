@@ -2,7 +2,7 @@
 // Si mañana un tercer módulo necesita buscar/crear un cliente, se reutiliza esto
 // en vez de duplicar el combobox.
 
-import { esc, norm, fmt, num } from "./utils.js";
+import { esc, norm, fmt, num, opt } from "./utils.js";
 import { clienteById, unidadesConocidas, calcServiciosDisponibles, calcHistorialServicio, categoriasAplanadas, idsConSubcategorias, cantidadEfectivaInsumo, categoriasMadre, subcategoriasDe } from "./calc.js";
 import { TIPOS_COSTO } from "./constants.js";
 
@@ -41,6 +41,25 @@ export function renderToggleSeccion(o) {
     '<button class="cot-collapse-toggle" style="position:static;" tabindex="-1">' + (o.abierta ? "▾" : "▸") + "</button> " + o.titulo +
     (o.ayuda ? renderHelp(o.ayuda) : "") +
     "</div>";
+}
+
+// Campo de descuento (Hallazgo #61): "% | $" + el valor. Es EL campo de
+// descuento de toda la app —la línea de un pedido, el total de un pedido, una
+// referencia o un servicio de cotización, el editor de un pedido ya creado—:
+// no se escribe uno distinto por pantalla. `accion` es el data-action-change
+// que recibe el cambio (lee data-campo="descuentoTipo" | "descuentoValor" y
+// el value); `attrs` son los data-* que identifican a qué pertenece (data-linea,
+// data-ref...), que además son los que usa el re-render para devolver el foco.
+export function renderDescuentoCampo(o) {
+  var d = o.descuento || {};
+  var tipo = d.tipo === "fijo" ? "fijo" : "porcentaje";
+  var valor = num(d.valor) > 0 ? d.valor : "";
+  var comun = ' data-action-change="' + o.accion + '"' + (o.attrs || "");
+  return '<span class="descuento-campo">' +
+    '<select class="mini-input" aria-label="Tipo de descuento"' + comun + ' data-campo="descuentoTipo">' +
+    opt("porcentaje", "%", tipo) + opt("fijo", "$", tipo) + "</select>" +
+    '<input type="number" min="0" class="mini-input" aria-label="Descuento" placeholder="0"' + comun + ' data-campo="descuentoValor" value="' + esc(valor) + '" />' +
+    "</span>";
 }
 
 // Botón "▾" + panel de sugerencias para un campo "Unidad" (insumo, costo

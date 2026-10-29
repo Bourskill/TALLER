@@ -76,12 +76,13 @@ contabilidad de caja para negocio pequeño.
 | IVA cobrado total (KPI) | suma de todos los pedidos, incluidos cancelados (si se cobró, se debe igual) | `calc.js:528` `calcIvaCobradoTotal` |
 | Pedido cancelado | no borra nada; excluye al pedido de TODO lo que mira hacia adelante (por cobrar, deudores, comisión pendiente, activo, ventas del reporte) — ver principio 4 | `calc.js:459` `pedidoCancelado`, usado en ~11 funciones distintas |
 | Único camino para tocar `p.abono` | `recalcularAbonoPedido` — toda acción (agregar/editar/eliminar abono, reembolso, "cobrar") pasa por acá | `modules/pedidos.js:15-33` |
+| Descuento (por ítem y/o a toda la orden) | `p.total` es SIEMPRE el valor **ya rebajado**: IVA, saldo, comisión y reportes salen de él sin saber que hubo descuento. El descuento se guarda aparte (`l.descuento` en cada línea, `p.descuento` al total) solo para poder explicarlo. Primero el de cada ítem, luego el de la orden sobre el subtotal ya rebajado; todo en pesos enteros y topado al valor sobre el que se aplica. Ver Hallazgo #61. | `calc.js` `calcDesgloseDescuentos`, `calcDesglosePedido` |
 
 ### Comisiones (vendedor y consignación)
 
 | Qué | Regla | Dónde |
 |---|---|---|
-| Base de comisión de un pedido | `p.total` MENOS las líneas marcadas "servicio cobrado" (diseño, arreglos — comisionarlas dejaría esa línea en pérdida) | `calc.js:1175` `calcBaseComision` |
+| Base de comisión de un pedido | `p.total` MENOS las líneas marcadas "servicio cobrado" (diseño, arreglos — comisionarlas dejaría esa línea en pérdida). Con descuento, **el vendedor lo comparte**: la base es lo que de verdad se cobró por las prendas (decisión del dueño, Hallazgo #61) | `calc.js:1175` `calcBaseComision` |
 | Valor de la comisión | fijo → `v.valor`; porcentaje → `base * pct/100` | `calc.js:1181` `calcComisionValor` |
 | Comisión de consignación | se calcula POR CADA VENTA, no sobre el envío total | `calc.js:1305` `calcConsignacionComision` |
 | Marcar comisión pagada/despagada | toggle bidireccional real: crea o RETIRA el `tx` por completo (nunca solo cambia una etiqueta) — evita doble movimiento al re-marcar | `modules/pedidos.js:2030` `toggle-comision`, `modules/cotizaciones.js:1987` `toggle-comision-cot` |
@@ -3689,6 +3690,106 @@ filas que antes, vivos, con una línea congelada y con todas congeladas.
    `data-role`.
 3. **Selector inválido.** Un valor raro en `data-clave`, por ejemplo un
    salto de línea en el nombre de un insumo, ya no puede romper el render.
+
+### 🟡 Hallazgo #61 — descuentos: por ítem y a toda la orden, en cotizaciones y pedidos. ✅ IMPLEMENTADO (pedido del dueño)
+
+**Qué se pidió:** poder rebajarle al cliente el precio, por ítem o por toda
+la orden, "y que se refleje en todas las áreas relacionadas".
+
+**Decisiones del dueño (2026-10-29):**
+1. Se puede dar en la **cotización**, al **crear un pedido rápido** y sobre un
+   **pedido ya creado**.
+2. La **comisión del vendedor se calcula sobre el precio con descuento**: el
+   vendedor comparte el descuento.
+3. **Cualquiera** (admin o vendedor) puede dar descuentos.
+4. El **cliente ve el descuento** en los PDF: SUBTOTAL → DESCUENTO → (VALOR
+   NETO, si hay IVA) → IVA → TOTAL.
+
+**La regla que sostiene todo lo demás:** `p.total` (y `precioTotal` en una
+cotización) es **siempre el valor ya rebajado**. Por eso el IVA, el saldo por
+cobrar, la comisión, "Por cobrar", los reportes y la cuenta de cobro salen
+correctos sin que ninguna de esas fórmulas sepa que hubo descuento. El
+descuento se guarda **aparte** únicamente para poder *explicar* el número (de
+cuánto era y cuánto se rebajó):
+
+| Dónde | Campo | Forma |
+|---|---|---|
+| Línea de un pedido | `l.descuento` | `{ tipo: "porcentaje" \| "fijo", valor }` |
+| Total de un pedido | `p.descuento` | `{ tipo, valor, motivo? }` |
+| Referencia / servicio cobrado de una cotización | `ref.descuento`, `s.descuento` | `{ tipo, valor }` (viajan dentro de `referencias_json` y `servicios_cobrados_json`) |
+| Total de una cotización | `cot.descuento` | `{ tipo, valor, motivo? }` (columna nueva `descuento_json`, **al final** del esquema) |
+
+**Reglas de cálculo (una sola fuente: `calcDesgloseDescuentos`):**
+- Primero el descuento de cada ítem; después el de la orden **sobre el
+  subtotal ya rebajado**. Lo usan la cotización (ítems = referencias +
+  servicios) y el pedido (ítems = líneas): por eso la base de comisión es la
+  misma antes y después de convertir.
+- Un descuento en `$` de una línea o referencia es **para toda la línea**, no
+  por unidad.
+- Todo descuento se **redondea a pesos enteros** y se **topa** al valor sobre el
+  que se aplica (nunca deja un precio negativo; un % mayor a 100 vale 100).
+- El **IVA se calcula sobre el valor ya rebajado** (sale solo de `p.total`).
+- **Comisión:** `calcBaseComision` resta los servicios cobrados *ya rebajados*,
+  con su parte del descuento de la orden (repartida en proporción). Es el
+  espejo exacto de `precioPrendas` en `calcCotizacionTotales`.
+- **Consignación no lleva descuento** (el precio es el del punto de venta);
+  `calcDesglosePedido` devuelve 0 para ella aunque el dato exista.
+- Un pedido que existía antes de esto no tiene `descuento` en ningún lado: da
+  `bruto === total` y descuento 0 — todo queda exactamente como estaba.
+
+**Cómo viaja de la cotización al pedido:**
+- `lineasDeCotizacion` pasa a guardar el precio de **lista** en cada línea y
+  reparte el descuento de la referencia entre sus líneas (una por talla) en
+  proporción a la cantidad, con `repartirProporcional` — sin perder un peso. Queda
+  como valor fijo; si venía en %, recuerda cuál (`porcentajeOrigen`) para
+  mostrarlo.
+- `datosPedidoDesdeCot` suma `descuento` (el de la orden). El desfase
+  cotización↔pedido (`calcDesfaseCotizacionPedido`) ahora también mira el
+  descuento: pasar un descuento de un ítem a la orden deja el mismo total pero
+  reparte distinto la comisión y los reportes, y el pedido debe enterarse.
+- "Aplicar a pedido" (cotización escalada) y "Cotizar este pedido" (escalar)
+  llevan el descuento en los dos sentidos.
+
+**Pedido ya creado:** el editor de la tarjeta (`🏷 Aplicar un descuento`)
+recalcula con `calcTotalConDescuentos` (lo que el pedido valía a precio de
+lista menos los descuentos). Lo ya abonado **no se toca**: si el nuevo total
+queda por debajo de lo abonado, el pedido pasa a "saldo a favor del cliente"
+(la regla de siempre) y se **avisa antes de guardar**. Un pedido que *sigue a su
+cotización* (`cotizacionQueManda`) **no** se edita ahí —cada guardado de la
+cotización le reescribiría el total—: se cambia en la cotización.
+
+**Duplicar** (pedido o cotización) **nace a precio de lista**, sin el descuento
+del original: el descuento es del cliente, no del producto. Regalarle a otro
+cliente un descuento sin darse cuenta es plata; olvidarse de uno se ve en el
+total.
+
+**Reportes:** `calcProductosVendidosRango` cuenta cada línea ya rebajada (con su
+parte del descuento de la orden), así que la suma de las líneas vuelve a dar el
+total del pedido. `calcPedidosRango` suma `descuento` y `lista` por fila;
+`calcResumenPedidos`/`calcResumenProductosVendidos`, el total del periodo. El
+reporte de Pedidos (pantalla y PDF) muestra cuánto se rebajó.
+
+**Avisos (no bloquean):** un descuento que deja el pedido o la cotización en
+pérdida lo dice —solo si es *él* quien la causa—, y guardar un descuento sobre un
+pedido ya abonado avisa del saldo a favor.
+
+**Verificado:** `test/descuentos.mjs` (164 pruebas, se corre solo con
+`node test/descuentos.mjs`, no necesita jsdom). Cubre los cálculos, que
+cotización y pedido den la misma comisión, el reparto sin perder pesos, los
+formularios, el editor de un pedido ya creado, lo que se imprime en los PDF
+(con y sin descuento: sin descuento el documento es idéntico al de siempre) y el
+viaje de ida y vuelta por Google Sheets, incluida una fila guardada *antes* de la
+columna nueva.
+
+**Límites conocidos, a propósito:**
+- La cuenta de cobro de un pedido que viene de una cotización lista las
+  referencias, no los servicios cobrados (ya era así); el SUBTOTAL/DESCUENTO de
+  abajo sí los incluye.
+- Si el descuento nace como % y se reparte a las líneas por talla, el pedido lo
+  guarda como valor fijo por línea (suma exacta). Editarlo en la cotización lo
+  recalcula todo desde cero.
+- No hay historial de *quién* dio un descuento ni *cuándo* se cambió; solo el
+  motivo opcional del descuento a toda la orden.
 
 ---
 

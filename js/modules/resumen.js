@@ -739,7 +739,9 @@ function renderDesglosePedidos(fr) {
       '<span class="mobile-th">N.º OP</span><span style="font-family:\'IBM Plex Mono\',monospace;">' + esc(f.numeroOp) + "</span>" +
       '<span class="mobile-th">Cliente</span><span>' + esc(f.cliente) +
       (f.cancelado ? ' <span class="badge danger">Cancelado</span>' : "") +
-      '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) + "</div></span>" +
+      '<div class="section-sub" style="margin:0;">' + esc(f.descripcion) +
+      // Total ya viene rebajado; esto dice cuánto se rebajó (Hallazgo #61).
+      (f.descuento ? ' · 🏷 <span class="descuento-monto">−' + fmt(f.descuento) + "</span> de descuento" : "") + "</div></span>" +
       '<span class="mobile-th">Vendedor</span><span>' + esc(f.vendedor || "—") + "</span>" +
       '<span class="mobile-th">Cant.</span><span class="amount">' + f.cantidad + "</span>" +
       '<span class="mobile-th">Total</span><span class="amount">' + fmt(f.total) + "</span>" +
@@ -749,7 +751,8 @@ function renderDesglosePedidos(fr) {
   });
   // Se dice cuántos cancelados hay para que la suma de la columna no parezca
   // que no cuadra: están en la lista (es el registro) pero no en los totales.
-  html += '<div class="section-sub" style="margin:6px 0 0;">' + r.pedidos + " pedido(s) · " + fmt(r.total) + " vendido · " +
+  html += '<div class="section-sub" style="margin:6px 0 0;">' + r.pedidos + " pedido(s) · " + fmt(r.total) + " vendido" +
+    (r.descuento ? " (ya con " + fmt(r.descuento) + " de descuentos)" : "") + " · " +
     fmt(r.abonado) + " cobrado · <b>" + fmt(r.saldo) + "</b> por cobrar." +
     (r.cancelados ? " <span style=\"color:var(--danger-ink);\">" + r.cancelados + " cancelado(s), no incluido(s) en estos totales.</span>" : "") +
     "</div>";
@@ -826,7 +829,8 @@ function renderDesgloseProductos(fr) {
       "</div>";
   });
   html += '<div class="section-sub" style="margin:6px 0 0;">' + resumen.unidades + " unidad(es) · " + fmt(resumen.precioTotal) +
-    " vendidos · <b>" + fmt(resumen.ganancia) + "</b> de ganancia (" + resumen.margenPct.toFixed(1) + "% de margen).</div>";
+    " vendidos" + (resumen.descuento ? " (ya con " + fmt(resumen.descuento) + " de descuentos)" : "") +
+    " · <b>" + fmt(resumen.ganancia) + "</b> de ganancia (" + resumen.margenPct.toFixed(1) + "% de margen).</div>";
   return html;
 }
 

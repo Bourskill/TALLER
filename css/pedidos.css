@@ -48,10 +48,16 @@
 .pedido-linea-top{display:flex;align-items:flex-start;gap:12px;}
 .pedido-linea-id{flex:1;min-width:0;}
 .pedido-linea-acciones{display:flex;gap:6px;align-items:center;flex-shrink:0;}
-.pedido-linea-campos{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:var(--sp-3);}
+.pedido-linea-campos{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:var(--sp-3);}
 .pedido-linea-campos .field{display:flex;flex-direction:column;gap:3px;min-width:0;}
 .pedido-linea-campos label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);}
 .pedido-linea-campos .mini-input{width:100%;}
+/* Editor de descuento de un pedido ya creado: una fila por línea — nombre,
+   campo de descuento, y lo que rebaja. */
+.descuento-editor-lineas{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.descuento-editor-linea{display:grid;grid-template-columns:minmax(0,1fr) 120px 80px;gap:8px;align-items:center;}
+.descuento-editor-linea .del-nombre{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;}
+.descuento-editor-linea .del-rebaja{text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12px;}
 .pedido-linea-extras{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
 .pedido-linea-extra{display:flex;gap:5px;align-items:center;}
 .picker-item-thumb{flex:0 0 auto;width:34px;height:34px;border-radius:6px;overflow:hidden;background:var(--surface-3);display:flex;align-items:center;justify-content:center;font-size:14px;}

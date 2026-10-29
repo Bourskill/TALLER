@@ -1,9 +1,9 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
+import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcMontoDescuento, calcDesglosePedido, calcTotalConDescuentos, descuentoDesdeForm, descuentoVigente, parchearDescuento, textoDescuento, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
-import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker } from "../core/components.js";
+import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker, renderDescuentoCampo } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
@@ -167,10 +167,18 @@ function renderOpcionesAvanzadasPedido(f) {
   return html + "</div>";
 }
 
+// El descuento al TOTAL del borrador, tal como lo ven los cálculos. Los campos
+// son planos en el formulario (como los del vendedor) y se vuelven un objeto
+// recién al crear el pedido (descuentoDesdeForm). En consignación no hay
+// descuento: el precio es el del punto de venta.
+function descuentoOrdenDeForm(f) {
+  return f.esConsignacion ? null : { tipo: f.descuentoTipo, valor: f.descuentoValor };
+}
+
 function renderFormNuevoPedido() {
   var f = state.formPedido;
   var lineas = f.lineas || [];
-  var totales = calcTotalesLineasPedido(lineas);
+  var totales = calcTotalesLineasPedido(lineas, descuentoOrdenDeForm(f));
   var faltantes = faltantesPedido(f);
   var esDuplicado = !!state.pedidoFormDuplicado;
 
@@ -266,7 +274,10 @@ function renderLineaPedido(f, l) {
   var esCatalogo = l.tipo === "catalogo";
   var producto = esCatalogo && l.productoId ? productoById(l.productoId) : null;
   var attrs = ' data-action-change="set-pedido-linea-campo" data-linea="' + l.id + '"';
-  var subtotal = num(l.precioUnitario) * num(l.cantidad);
+  var bruto = num(l.precioUnitario) * num(l.cantidad);
+  // En consignación no hay descuento (el precio es el del punto de venta).
+  var descLinea = f.esConsignacion ? 0 : calcMontoDescuento(l.descuento, bruto);
+  var subtotal = bruto - descLinea;
 
   var html = '<div class="pedido-linea">';
 
@@ -288,12 +299,17 @@ function renderLineaPedido(f, l) {
     "</div></div>";
 
   // --- Datos básicos: talla, cantidad, precio, costo ---
-  html += '<div class="pedido-linea-campos">';
+  html += '<div class="pedido-linea-campos"' + (f.esConsignacion ? ' style="grid-template-columns:repeat(5,1fr);"' : "") + ">";
   html += '<span class="field"><label>Talla</label>' + renderLineaTalla(f, l, producto, attrs) + "</span>";
   html += '<span class="field"><label>Cantidad</label><input type="number" min="1" class="mini-input" value="' + esc(l.cantidad) + '"' + attrs + ' data-campo="cantidad" /></span>';
   html += '<span class="field"><label>Precio x1</label><input type="number" class="mini-input" value="' + esc(l.precioUnitario) + '" placeholder="0"' + attrs + ' data-campo="precioUnitario" /></span>';
   html += '<span class="field"><label>Costo x1' + renderHelp("Lo que te cuesta a ti esta unidad. Si viene del catálogo llega calculado (insumos, o costo de compra si es de proveedor); puedes ajustarlo para este pedido puntual.") + '</label><input type="number" class="mini-input" value="' + esc(l.costoUnitario) + '" placeholder="0"' + attrs + ' data-campo="costoUnitario" /></span>';
-  html += '<span class="field"><label>Subtotal</label><span class="amount" style="align-self:center;">' + fmt(subtotal) + "</span></span>";
+  if (!f.esConsignacion) {
+    html += '<span class="field"><label>Descuento' + renderHelp("Se rebaja de esta línea. En % es sobre el subtotal de la línea; en $ es lo que se descuenta en TODA la línea (no por unidad).") + "</label>" +
+      renderDescuentoCampo({ descuento: l.descuento, accion: "set-pedido-linea-descuento", attrs: ' data-linea="' + l.id + '"' }) + "</span>";
+  }
+  html += '<span class="field"><label>Subtotal</label><span class="amount" style="align-self:center;">' +
+    (descLinea ? '<span class="precio-lista-tachado">' + fmt(bruto) + "</span>" : "") + fmt(subtotal) + "</span></span>";
   html += "</div>";
 
   // --- Observación y campos propios de esta línea ---
@@ -374,9 +390,21 @@ function renderPrecioYPago(f, totales) {
     '<div class="rs-item"><div class="rl">Ganancia x unidad</div><div class="rv">' + fmt(totales.gananciaUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (totales.margenPct >= 0 ? "pos" : "neg") + '">' + totales.margenPct.toFixed(1) + "%</span></div></div>" +
     '<div class="rs-item"><div class="rl">Costo total</div><div class="rv">' + fmt(totales.costoTotal) + "</div></div>" +
+    // Con descuento, el total se explica: de cuánto era y cuánto se rebajó.
+    (totales.descuento
+      ? '<div class="rs-item"><div class="rl">A precio de lista</div><div class="rv">' + fmt(totales.precioBruto) + "</div></div>" +
+        '<div class="rs-item"><div class="rl">Descuento</div><div class="rv descuento-monto">−' + fmt(totales.descuento) + "</div></div>"
+      : "") +
     '<div class="rs-item"><div class="rl">Total del pedido</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (totales.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(totales.gananciaTotal) + "</div></div>" +
     "</div>";
+  // Un descuento que se come todo el margen: avisa, no impide (a veces se
+  // vende a pérdida a propósito). Solo cuando el descuento es lo que lo deja en
+  // pérdida: si ya perdía sin él, el aviso culparía a quien no es.
+  if (totales.descuento && totales.gananciaTotal < 0 && totales.gananciaTotal + totales.descuento >= 0) {
+    html += '<div class="descuento-aviso">⚠ Con este descuento el pedido queda en pérdida: el total (' + fmt(totales.precioTotal) + ") no cubre el costo (" + fmt(totales.costoTotal) + ").</div>";
+  }
+  html += renderDescuentoTotalPedido(f, totales);
   html += '<div class="form-grid" style="margin-top:12px;">' +
     '<div class="field"><label>Abono inicial recibido</label><input type="number" class="mini-input" value="' + esc(f.abono) + '" placeholder="0" data-action-change="set-form-pedido-campo" data-campo="abono" /></div>' +
     "</div>";
@@ -387,6 +415,29 @@ function renderPrecioYPago(f, totales) {
 
   html += '<hr class="stitch" />';
   html += renderVendedorPedido(f, totales);
+  return html;
+}
+
+// Descuento sobre el TOTAL del pedido (Hallazgo #61), el que se hace "a toda
+// la orden". El de cada ítem está en su línea. Recogido por defecto, igual que
+// el vendedor: no todo pedido lleva uno; si ya tiene valor, queda abierto.
+function renderDescuentoTotalPedido(f, totales) {
+  var d = { tipo: f.descuentoTipo, valor: f.descuentoValor };
+  var hay = descuentoVigente(d);
+  var abierta = !!state.pedidoDescuentoFormAbierto || hay;
+  var html = renderToggleSeccion({
+    titulo: "Descuento al total (opcional)" + (hay ? " · " + esc(textoDescuento(d)) : ""),
+    abierta: abierta, action: "toggle-pedido-descuento-form", margenSuperior: "12px",
+    ayuda: "Para rebajarle a este cliente el pedido completo (el de cada producto va en su línea). Se aplica sobre el subtotal que queda después de los descuentos de las líneas, y baja el total, el IVA, la comisión del vendedor y la ganancia."
+  });
+  if (!abierta) return html;
+  html += '<div class="form-grid" style="margin-top:8px;">' +
+    '<div class="field"><label>Descuento</label>' + renderDescuentoCampo({ descuento: d, accion: "set-form-pedido-campo" }) + "</div>" +
+    '<div class="field"><label>Motivo (opcional)</label><input data-form="pedido" data-field="descuentoMotivo" value="' + esc(f.descuentoMotivo || "") + '" placeholder="Ej. cliente frecuente, pago de contado" /></div>' +
+    "</div>";
+  if (totales.descuentoOrden) {
+    html += '<div class="section-sub" style="margin:6px 0 0;">Subtotal ' + fmt(totales.subtotal) + ' − <span class="descuento-monto">' + fmt(totales.descuentoOrden) + "</span> = <b>" + fmt(totales.precioTotal) + "</b></div>";
+  }
   return html;
 }
 
@@ -625,6 +676,7 @@ function renderHistorialPedidos() {
     var gananciaTxt = ganancia == null ? "" : (fmt(ganancia) + (gananciaPct != null ? " (" + gananciaPct.toFixed(1) + "%)" : " · sin precio de venta asignado"));
 
     var cancelado = pedidoCancelado(p);
+    var desglose = calcDesglosePedido(p);
     html += '<div class="pedido-card' + (cancelado ? " cancelado" : "") + '" data-pedido-id="' + p.id + '">' +
       '<div class="pedido-top"><div>' +
       '<span class="badge" style="font-family:\'IBM Plex Mono\',monospace;">' + esc(p.numeroOp || "—") + "</span> " +
@@ -635,6 +687,8 @@ function renderHistorialPedidos() {
       '<div class="pedido-meta">' + esc(p.descripcion) + " · cantidad " + esc(p.cantidad) + (p.fechaEntrega ? " · entrega " + esc(p.fechaEntrega) : "") + (cliente && cliente.cedula ? " · CC/NIT " + esc(cliente.cedula) : "") + "</div>" +
       (cliente ? '<div class="pedido-meta">📦 ' + esc(cliente.direccion || "—") + ", " + esc(cliente.ciudad || "—") + (cliente.cp ? " (CP " + esc(cliente.cp) + ")" : "") + "</div>" : "") +
       (ganancia != null ? '<div class="pedido-meta"' + (costoPedido !== num(p.costo) ? ' title="Costo estimado al cotizar: ' + fmt(p.costo) + '"' : "") + '>Costo ' + fmt(costoPedido) + ' · Ganancia <b style="color:' + (ganancia >= 0 ? "var(--success-ink)" : "var(--danger-ink)") + ';">' + gananciaTxt + "</b></div>" : "") +
+      // Con descuento, la tarjeta lo dice: el "Valor del pedido" ya viene rebajado.
+      (desglose.descuento ? '<div class="pedido-meta">🏷 Descuento <b class="descuento-monto">−' + fmt(desglose.descuento) + "</b> sobre " + fmt(desglose.bruto) + (desglose.motivo ? " · " + esc(desglose.motivo) : "") + "</div>" : "") +
       "</div>" + renderCabeceraDinero(p, saldo, cancelado) +
       "</div>" +
       renderDetalleLineasPedido(p) +
@@ -978,6 +1032,7 @@ function pctCobradoTexto(pct) {
 
 function renderResumenDinero(p, saldo, cancelado) {
   var base = num(p.total);
+  var desglose = calcDesglosePedido(p);
   var iva = calcIvaPedido(p);
   var total = calcTotalConIvaPedido(p);
   var abonado = num(p.abono);
@@ -986,6 +1041,13 @@ function renderResumenDinero(p, saldo, cancelado) {
   var pct = total > 0 ? Math.max(0, Math.min(100, abonado / total * 100)) : 0;
 
   var html = '<div class="ref-summary pedido-dinero-cifras">' +
+    // Con descuento, de dónde sale "Valor del pedido": lo de lista y lo rebajado.
+    (desglose.descuento
+      ? '<div class="rs-item"><div class="rl">A precio de lista</div><div class="rv">' + fmt(desglose.bruto) + "</div></div>" +
+        '<div class="rs-item"><div class="rl">Descuento' +
+        renderHelp("Lo que se le rebajó a este cliente" + (desglose.descuentoItems && desglose.descuentoOrden ? " (" + fmt(desglose.descuentoItems) + " en las líneas y " + fmt(desglose.descuentoOrden) + " al total)" : "") + ". El valor del pedido, el IVA y la comisión del vendedor ya salen de lo rebajado.") +
+        '</div><div class="rv descuento-monto">−' + fmt(desglose.descuento) + "</div></div>"
+      : "") +
     '<div class="rs-item"><div class="rl">Valor del pedido</div><div class="rv">' + fmt(base) + "</div></div>" +
     // El IVA solo se desglosa cuando existe: si no aplica, "Valor del pedido"
     // YA es el total a cobrar y repetirlo sería una cifra de más.
@@ -1026,6 +1088,91 @@ function renderResumenDinero(p, saldo, cancelado) {
   return html;
 }
 
+// ---------- Descuento de un pedido YA creado (Hallazgo #61) ----------
+// Para cuando el descuento se negocia después de crear el pedido. Cambia lo
+// mismo que el formulario: el descuento de cada línea y el del total. Nada se
+// guarda hasta "Guardar descuento" (el borrador vive en state.formDescuentoPedido).
+//
+// Un pedido que viene de una cotización NO se edita acá: él es el espejo de su
+// cotización (ver datosPedidoDesdeCot en cotizaciones.js) y cada guardado de
+// ella le reescribiría el total — el descuento se cambia allá. Mismo criterio
+// para consignación (no lleva descuento).
+function cotizacionQueManda(p) {
+  if (!p || !p.cotizacionId) return null;
+  var cot = state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0];
+  return (cot && cot.pedidoId === p.id) ? cot : null;
+}
+
+function renderDescuentoPedido(p, cancelado) {
+  if (p.consignacion || cancelado) return "";
+  var d = calcDesglosePedido(p);
+  var html = '<div class="cot-col-title" style="margin-top:14px;">🏷 Descuento</div>';
+  var cot = cotizacionQueManda(p);
+  if (cot) {
+    return html + '<div class="section-sub" style="margin:4px 0 8px;">Este pedido sigue a su cotización: el descuento se cambia allí.</div>' +
+      '<button class="btn ghost small" data-action="ver-cotizacion-relacionada" data-id="' + cot.id + '">Abrir la cotización ↗</button>';
+  }
+  if (state.pedidoDescuentoEditando === p.id) return html + renderEditorDescuentoPedido(p);
+  html += d.descuento
+    ? '<div class="section-sub" style="margin:4px 0 8px;">Se le rebajó <b class="descuento-monto">' + fmt(d.descuento) + "</b>" + (d.motivo ? " · " + esc(d.motivo) : "") + ".</div>"
+    : "";
+  return html + '<button class="btn ghost small" data-action="abrir-descuento-pedido" data-id="' + p.id + '">' + (d.descuento ? "Cambiar el descuento" : "Aplicar un descuento") + "</button>";
+}
+
+// Las líneas del pedido con los descuentos del borrador puestos encima.
+function lineasConDescuentoBorrador(p, fd) {
+  return (p.lineas || []).map(function (l) {
+    var ed = fd.lineas[l.id];
+    if (ed === undefined) return l;
+    var desc = descuentoDesdeForm(ed.tipo, ed.valor);
+    var copia = Object.assign({}, l);
+    if (desc) copia.descuento = desc; else delete copia.descuento;
+    return copia;
+  });
+}
+
+function renderEditorDescuentoPedido(p) {
+  var fd = state.formDescuentoPedido;
+  var lineas = lineasConDescuentoBorrador(p, fd);
+  var orden = descuentoDesdeForm(fd.tipo, fd.valor, fd.motivo);
+  var nuevo = calcTotalConDescuentos(p, lineas, orden);
+  var abonado = num(p.abono);
+  var html = "";
+  if (lineas.length) {
+    html += '<div class="descuento-editor-lineas">';
+    lineas.forEach(function (l) {
+      var bruto = num(l.precioUnitario) * num(l.cantidad);
+      var rebaja = calcMontoDescuento(l.descuento, bruto);
+      html += '<div class="descuento-editor-linea">' +
+        '<span class="del-nombre">' + esc(l.productoNombre || "—") + (l.talla ? " (" + esc(l.talla) + ")" : "") + " ×" + num(l.cantidad) +
+        ' <span class="section-sub" style="margin:0;display:inline;">' + fmt(bruto) + "</span></span>" +
+        renderDescuentoCampo({ descuento: fd.lineas[l.id], accion: "set-descuento-pedido-linea", attrs: ' data-linea="' + l.id + '" data-id="' + p.id + '"' }) +
+        '<span class="descuento-monto del-rebaja">' + (rebaja ? "−" + fmt(rebaja) : "") + "</span>" +
+        "</div>";
+    });
+    html += "</div>";
+  }
+  html += '<div class="form-grid" style="margin-top:8px;">' +
+    '<div class="field"><label>Descuento al total</label>' + renderDescuentoCampo({ descuento: { tipo: fd.tipo, valor: fd.valor }, accion: "set-descuento-pedido-orden", attrs: ' data-id="' + p.id + '"' }) + "</div>" +
+    '<div class="field"><label>Motivo (opcional)</label><input class="mini-input" data-action-change="set-descuento-pedido-orden" data-campo="descuentoMotivo" data-id="' + p.id + '" value="' + esc(fd.motivo || "") + '" placeholder="Ej. cliente frecuente" /></div>' +
+    "</div>";
+  html += '<div class="section-sub" style="margin:8px 0 0;">A precio de lista ' + fmt(nuevo.bruto) + ' − <span class="descuento-monto">' + fmt(nuevo.descuento) + "</span> = <b>" + fmt(nuevo.total) + "</b> (antes " + fmt(p.total) + ")</div>";
+  // Dos avisos que no bloquean, pero que el dueño tiene que ver antes de guardar.
+  if (nuevo.total < abonado) {
+    html += '<div class="descuento-aviso">⚠ El cliente ya abonó ' + fmt(abonado) + ": con este descuento le quedaría un saldo a favor de " + fmt(abonado - nuevo.total) + " (hay que devolvérselo).</div>";
+  }
+  var costo = costoRealDePedido(p);
+  if (nuevo.descuento && nuevo.total < costo && nuevo.bruto >= costo) {
+    html += '<div class="descuento-aviso">⚠ Con este descuento el pedido queda en pérdida: el total (' + fmt(nuevo.total) + ") no cubre el costo (" + fmt(costo) + ").</div>";
+  }
+  html += '<div class="row-actions" style="margin-top:10px;flex-wrap:wrap;">' +
+    '<button class="btn small" data-action="guardar-descuento-pedido" data-id="' + p.id + '">Guardar descuento</button>' +
+    (calcDesglosePedido(p).descuento ? '<button class="btn danger small" data-action="quitar-descuentos-pedido" data-id="' + p.id + '">Quitar los descuentos</button>' : "") +
+    '<button class="btn ghost small" data-action="cerrar-descuento-pedido">Cancelar</button>' +
+    "</div>";
+  return html;
+}
+
 // Todo lo secundario de la tarjeta (antes amontonado en una sola fila de
 // botones difícil de leer) vive aquí, oculto por defecto y dividido en zonas
 // claras: dinero y documentos arriba, una junto a la otra, y los movimientos
@@ -1044,6 +1191,7 @@ function renderPanelPedido(p, saldo) {
 
   html += '<div class="pedido-panel-col"><div class="cot-col-title">💰 Dinero del pedido</div>';
   html += renderResumenDinero(p, saldo, cancelado);
+  html += renderDescuentoPedido(p, cancelado);
   // El formulario se ofrece SIEMPRE salvo en un pedido cancelado:
   //  - antes solo aparecía con saldo > 0, así que en un pedido ya cobrado (o
   //    cobrado de más, o sin precio todavía) NO había forma de registrar un
@@ -1332,6 +1480,45 @@ export function sincronizarEventoPedido(p) {
   }).catch(function (e) { console.error("No se pudo sincronizar el pedido con Calendar", e); });
 }
 
+// Guarda el descuento de un pedido ya creado (o, con `quitar`, los borra todos).
+// El total nuevo sale SIEMPRE de calcTotalConDescuentos: lo que el pedido valía
+// a precio de lista menos los descuentos, así que no hay un segundo cálculo que
+// pueda separarse del de la creación. Lo que ya se abonó no se toca: si el
+// total nuevo queda por debajo, el pedido pasa a "saldo a favor del cliente"
+// (la misma regla de siempre, ver calcSaldoPedido) — por eso se pregunta antes.
+function guardarDescuentoPedido(id, quitar) {
+  var p = state.pedidos.filter(function (x) { return x.id === id; })[0];
+  if (!p || p.consignacion || cotizacionQueManda(p)) return;
+  var fd = state.formDescuentoPedido;
+  var lineas = quitar
+    ? (p.lineas || []).map(function (l) { var c = Object.assign({}, l); delete c.descuento; return c; })
+    : lineasConDescuentoBorrador(p, fd).map(function (l) {
+      var c = Object.assign({}, l);
+      var desc = descuentoDesdeForm(l.descuento && l.descuento.tipo, l.descuento && l.descuento.valor);
+      if (desc) c.descuento = desc; else delete c.descuento;
+      return c;
+    });
+  var orden = quitar ? null : descuentoDesdeForm(fd.tipo, fd.valor, fd.motivo);
+  var nuevo = calcTotalConDescuentos(p, lineas, orden);
+  var abonado = num(p.abono);
+  var antes = calcDesglosePedido(p);
+  if (nuevo.descuento === antes.descuento && nuevo.total === num(p.total) && !quitar) {
+    state.pedidoDescuentoEditando = ""; notify(); return; // no cambió nada
+  }
+  var msg = (quitar ? "¿Quitar los descuentos de este pedido?" : "¿Guardar este descuento?") +
+    "\n\nEl total pasa de " + fmt(p.total) + " a " + fmt(nuevo.total) + (nuevo.descuento ? " (descuento de " + fmt(nuevo.descuento) + ")" : "") + "." +
+    "\nLo que el cliente ya abonó (" + fmt(abonado) + ") no cambia.";
+  if (nuevo.total < abonado) msg += "\n\n⚠ El cliente ya abonó más que el nuevo total: quedaría un saldo a favor de " + fmt(abonado - nuevo.total) + " que hay que devolverle.";
+  if (!window.confirm(msg)) return;
+  state.pedidos = state.pedidos.map(function (x) {
+    if (x.id !== id) return x;
+    return Object.assign({}, x, { lineas: lineas, descuento: orden, total: nuevo.total });
+  });
+  state.pedidoDescuentoEditando = "";
+  persist("pedidos"); notify();
+  mostrarToast(nuevo.descuento ? "🏷 Descuento guardado: el pedido queda en " + fmt(nuevo.total) + "." : "Se quitaron los descuentos del pedido.");
+}
+
 export var actions = {
   "pedido-vista": function (el) {
     state.pedidosVista = el.getAttribute("data-val");
@@ -1377,6 +1564,52 @@ export var actions = {
     state.pedidoVendedorAbierto = !state.pedidoVendedorAbierto;
     notify();
   },
+  "toggle-pedido-descuento-form": function () {
+    state.pedidoDescuentoFormAbierto = !state.pedidoDescuentoFormAbierto;
+    notify();
+  },
+  // Descuento de UNA línea del borrador (renderDescuentoCampo): cambia el tipo
+  // o el valor sin tocar el otro, y se redibuja para mostrar el subtotal
+  // rebajado, el total y el aviso de pérdida.
+  "set-pedido-linea-descuento": function (el) {
+    var lineaId = el.getAttribute("data-linea"), campo = el.getAttribute("data-campo");
+    state.formPedido.lineas = (state.formPedido.lineas || []).map(function (l) {
+      return l.id === lineaId ? Object.assign({}, l, { descuento: parchearDescuento(l.descuento, campo, el.value) }) : l;
+    });
+    notify();
+  },
+  // ----- Descuento de un pedido ya creado (ver renderDescuentoPedido) -----
+  "abrir-descuento-pedido": function (el) {
+    var p = state.pedidos.filter(function (x) { return x.id === el.getAttribute("data-id"); })[0];
+    if (!p || p.consignacion || cotizacionQueManda(p)) return;
+    var lineas = {};
+    (p.lineas || []).forEach(function (l) { lineas[l.id] = l.descuento ? Object.assign({}, l.descuento) : { tipo: "porcentaje", valor: 0 }; });
+    var o = p.descuento || {};
+    state.formDescuentoPedido = { lineas: lineas, tipo: o.tipo || "porcentaje", valor: o.valor || "", motivo: o.motivo || "" };
+    state.pedidoDescuentoEditando = p.id;
+    notify();
+  },
+  "cerrar-descuento-pedido": function () {
+    state.pedidoDescuentoEditando = "";
+    notify();
+  },
+  "set-descuento-pedido-linea": function (el) {
+    var lineaId = el.getAttribute("data-linea");
+    var fd = state.formDescuentoPedido;
+    fd.lineas = Object.assign({}, fd.lineas, { [lineaId]: parchearDescuento(fd.lineas[lineaId], el.getAttribute("data-campo"), el.value) });
+    notify();
+  },
+  "set-descuento-pedido-orden": function (el) {
+    var campo = el.getAttribute("data-campo"), fd = state.formDescuentoPedido;
+    if (campo === "descuentoMotivo") fd.motivo = el.value;
+    else {
+      var d = parchearDescuento({ tipo: fd.tipo, valor: fd.valor }, campo, el.value);
+      fd.tipo = d.tipo; fd.valor = d.valor;
+    }
+    notify();
+  },
+  "guardar-descuento-pedido": function (el) { guardarDescuentoPedido(el.getAttribute("data-id"), false); },
+  "quitar-descuentos-pedido": function (el) { guardarDescuentoPedido(el.getAttribute("data-id"), true); },
   "quitar-pedido-linea": function (el) {
     var lineaId = el.getAttribute("data-linea");
     var fp = state.formPedido;
@@ -1594,7 +1827,7 @@ export var actions = {
     var faltantes = faltantesPedido(fp);
     if (faltantes.length) { window.alert("Para crear el pedido falta " + faltantes.join(", ") + "."); return; }
     var esConsignacion = fp.esConsignacion;
-    var totales = calcTotalesLineasPedido(lineas);
+    var totales = calcTotalesLineasPedido(lineas, descuentoOrdenDeForm(fp));
     var resumen = resumenLineasPedido(lineas);
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
     // Solo las líneas de CATÁLOGO mueven stock real — una línea escrita a
@@ -1631,7 +1864,16 @@ export var actions = {
       // Detalle completo de lo vendido, con el precio y el costo tal como
       // fueron en ESTE pedido — el catálogo puede cambiar de precio después
       // y el reporte tiene que seguir contando lo que en verdad pasó.
-      lineas: lineas.map(function (l) { return JSON.parse(JSON.stringify(l)); }),
+      lineas: lineas.map(function (l) {
+        var copia = JSON.parse(JSON.stringify(l));
+        // El descuento de cada línea se guarda limpio (o no se guarda); en
+        // consignación no existe (Hallazgo #61).
+        var desc = esConsignacion ? null : descuentoDesdeForm(l.descuento && l.descuento.tipo, l.descuento && l.descuento.valor);
+        if (desc) copia.descuento = desc; else delete copia.descuento;
+        return copia;
+      }),
+      // Descuento al TOTAL del pedido; `total` de arriba ya lo trae aplicado.
+      descuento: esConsignacion ? null : descuentoDesdeForm(fp.descuentoTipo, fp.descuentoValor, fp.descuentoMotivo),
       stockConsumido: [], // se completa abajo con lo que en verdad se descontó (ver ajustarStockProducto)
       // Un pedido en consignación ya está producido/listo — no pasa por el
       // tape de etapas, así que nace directo como "entregado" (ver
@@ -1701,10 +1943,12 @@ export var actions = {
       vendedorNombre: "", vendedorTipo: "porcentaje", vendedorValor: "",
       conFlujoProduccion: true,
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+      descuentoTipo: "porcentaje", descuentoValor: "", descuentoMotivo: "",
       lineas: []
     };
     state.pedidoProductoBusqueda = "";
     state.pedidoVendedorAbierto = false;
+    state.pedidoDescuentoFormAbierto = false;
     state.pedidoFormDuplicado = false; // el próximo "+ Nuevo pedido rápido" vuelve a ser el formulario normal, no el recogido de un duplicado
     state.pedidoOpcionesAvanzadasAbierto = false;
     // Salta directo al Historial para confirmar de una vez que el pedido
@@ -1930,6 +2174,9 @@ export var actions = {
           return {
             id: uid(), nombre: l.productoNombre || p.descripcion, imagenUrl: l.imagenUrl || "",
             consumoAprox: 1, cantidadPedida: num(l.cantidad) || 1, precioVenta: num(l.precioUnitario) || 0,
+            // El descuento de la línea pasa a ser el de la referencia: misma
+            // cantidad y mismo precio de lista, así el total no cambia al escalar.
+            descuento: descuentoVigente(l.descuento) ? Object.assign({}, l.descuento) : null,
             insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "",
             productoId: l.productoId || "",
             // El progreso que el pedido YA llevaba se siembra en cada
@@ -1944,6 +2191,8 @@ export var actions = {
         })
         : [{ id: uid(), nombre: p.descripcion, imagenUrl: "", consumoAprox: 1, cantidadPedida: num(p.cantidad) || 1, precioVenta: num(p.total) || 0, insumos: [], detalle: [], origen: "taller", costoCompra: 0, proveedorId: "", estado: p.estado, estadosDef: p.estadosDef || null }],
       gastosReales: [], iva: { activo: false, porcentaje: 19 },
+      // El descuento al total del pedido viaja a la cotización (Hallazgo #61).
+      descuento: descuentoVigente(p.descuento) ? Object.assign({}, p.descuento) : null,
       // Mismo motivo que en duplicarCotizacionCompleta (cotizaciones.js): si
       // la comisión del pedido ya estaba "pagada", esa bandera no debe
       // quedarle a la cotización escalada — el tx real sigue siendo del
@@ -2013,9 +2262,14 @@ export var actions = {
       // puntual, no algo que "otro cliente también pidió" — duplicar deja
       // siempre una venta normal con las mismas líneas.
       esConsignacion: false, consignacionPrecioUnitario: "", consignacionComisionTipo: "porcentaje", consignacionComisionValor: "",
+      // El descuento es del CLIENTE, no del producto: un duplicado (otro
+      // cliente pide lo mismo) nace a precio de lista, sin el descuento del
+      // original (Hallazgo #61). Regalarle a otro cliente un descuento sin
+      // darse cuenta es plata; olvidarse de uno se ve en el total.
+      descuentoTipo: "porcentaje", descuentoValor: "", descuentoMotivo: "",
       // refId/servicioId apuntan a la cotización del ORIGINAL: un id hacia
       // afuera no se copia (el duplicado es un pedido rápido, sin cotización).
-      lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); delete copia.refId; delete copia.servicioId; return copia; })
+      lineas: (p.lineas || []).map(function (l) { var copia = JSON.parse(JSON.stringify(l)); copia.id = uid(); delete copia.refId; delete copia.servicioId; delete copia.descuento; return copia; })
     };
     state.pedidoVendedorAbierto = !!(p.vendedor && p.vendedor.nombre);
     // Marca este borrador como "duplicado": SOLO en este caso la base del

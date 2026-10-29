@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
-import { renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcDesglosePedido, descuentoVigente, descuentoDesdeForm, parchearDescuento, repartirProporcional, calcMontoDescuento, calcPrecioServicio, textoDescuento, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
+import { renderDescuentoCampo, renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
@@ -42,7 +42,12 @@ export function duplicarCotizacionCompleta(cot) {
   // corrigiendo un nombre) confunda una compra de ESTA cotización con la de
   // su gemela. Auditoría financiera 2026-09-20, post-mortem.
   (copia.costosGlobales || []).forEach(function (g) { g.id = uid(); });
-  (copia.serviciosCobrados || []).forEach(function (s) { s.id = uid(); });
+  (copia.serviciosCobrados || []).forEach(function (s) { s.id = uid(); delete s.descuento; });
+  // El descuento es del CLIENTE, no de lo que se vende: la copia (para otro
+  // cliente) nace a precio de lista, sin los descuentos del original — ni el de
+  // cada referencia/servicio ni el del total (Hallazgo #61).
+  (copia.referencias || []).forEach(function (r) { delete r.descuento; });
+  copia.descuento = null;
   // `compras` (estado/costoReal/cantidadReal/txId por línea) y
   // `estimadoTxId` son el historial REAL de compras/movimientos de ESTE
   // pedido — no del duplicado, que todavía no ha comprado ni pagado nada.
@@ -277,6 +282,7 @@ function renderAvisoPedidoDesfasado(cot) {
   if (d.difCantidad) partes.push("cantidad: el pedido dice " + d.cantidadPedido + " y la cotización " + d.cantidadCot);
   if (d.difTotal) partes.push("precio: el pedido dice " + fmt(d.totalPedido) + " y la cotización " + fmt(d.totalCot));
   if (d.difCosto) partes.push("costo: diferencia de " + fmt(Math.abs(d.difCosto)));
+  if (d.difDescuento) partes.push("descuento: diferencia de " + fmt(Math.abs(d.difDescuento)));
   // Usa `.aviso-barra`, la MISMA barra con la que el resto de la app avisa de
   // algo que hay que resolver (guardado fallido, recuperación al arrancar —
   // ver core/dom.js). Antes reutilizaba `.save-bar` pisándole los colores con
@@ -379,6 +385,7 @@ function renderCotCard(c) {
   html += renderCotHead(c, iva);
   html += renderCotStatsRow(totales, real.comision);
   html += renderCotVendedorCompact(c);
+  html += renderCotDescuentoCompact(c, totales);
   html += renderCotTabsStrip(c, tab);
   html += '<div class="cot-tab-body">';
   if (tab === "produccion") html += renderTabProduccion(c, totales, real);
@@ -445,7 +452,9 @@ function renderCotStatsRow(totales, comision) {
   var gananciaNeta = totales.gananciaTotal - (comision || 0);
   var margenNeto = totales.precioTotal > 0 ? (gananciaNeta / totales.precioTotal * 100) : 0;
   return '<div class="cot-hero-stats">' +
-    '<div class="cot-hero-stat"><div class="rl">Precio total cotizado</div><div class="rv">' + fmt(totales.precioTotal) + "</div></div>" +
+    '<div class="cot-hero-stat"><div class="rl">Precio total cotizado</div><div class="rv">' + fmt(totales.precioTotal) +
+    (totales.descuento ? '<div class="section-sub" style="margin:2px 0 0;font-size:11px;font-weight:400;text-transform:none;letter-spacing:normal;">(ya con ' + fmt(totales.descuento) + " de descuento sobre " + fmt(totales.precioBruto) + ")</div>" : "") +
+    "</div></div>" +
     '<div class="cot-hero-stat"><div class="rl">Ganancia estimada</div><div class="rv" style="color:' + (gananciaNeta >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(gananciaNeta) +
     (comision > 0 ? '<div class="section-sub" style="margin:2px 0 0;font-size:11px;font-weight:400;text-transform:none;letter-spacing:normal;">(ya se descontó ' + fmt(comision) + " de comisión del vendedor)</div>" : "") +
     "</div></div>" +
@@ -498,6 +507,35 @@ function renderCotVendedorCompact(c) {
           (!pagado ? ('<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);">Fecha de pago<input type="date" class="mini-input" value="' + esc(v.fechaPago || "") + '" data-action-change="set-cot-vendedor-fecha" data-id="' + c.id + '" /></label>') : "")))) : "") +
     '<button class="btn ghost small" data-action="toggle-cot-vendedor" data-id="' + c.id + '">Listo</button>' +
     "</div>";
+}
+
+// Descuento al TOTAL de la cotización (Hallazgo #61), el de toda la orden: el de
+// cada referencia/servicio vive en su propia fila. Mismo patrón que el vendedor:
+// una línea por defecto, clic para desplegar los campos. Se aplica sobre el
+// subtotal ya rebajado ítem por ítem, y baja el precio, el IVA, la comisión del
+// vendedor y la ganancia — al convertir en pedido viaja tal cual.
+function renderCotDescuentoCompact(c, totales) {
+  var hay = descuentoVigente(c.descuento);
+  // Un descuento que se come el margen: avisa (siempre visible, hay plata en
+  // riesgo), no impide — a veces se vende a pérdida a propósito.
+  var aviso = (totales.descuento && totales.gananciaTotal < 0 && totales.gananciaTotal + totales.descuento >= 0)
+    ? '<div class="descuento-aviso">⚠ Con los descuentos la cotización queda en pérdida: el precio (' + fmt(totales.precioTotal) + ") no cubre el costo (" + fmt(totales.costoTotal) + ").</div>"
+    : "";
+  if (state.cotDescuentoEditando !== c.id) {
+    var resumen = hay
+      ? "al total: " + esc(textoDescuento(c.descuento)) + " · −" + fmt(totales.descuentoOrden) + (c.descuento.motivo ? " · " + esc(c.descuento.motivo) : "")
+      : (totales.descuentoItems ? "en referencias/servicios: −" + fmt(totales.descuentoItems) + " · sin descuento al total" : "Sin descuento");
+    return '<div class="cot-vendedor-compact" data-action="toggle-cot-descuento" data-id="' + c.id + '">🏷 Descuento: ' + resumen + "</div>" + aviso;
+  }
+  var d = c.descuento || {};
+  var html = '<div class="section-sub" style="margin:10px 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+    "<span>Descuento al total" + renderHelp("Para rebajarle al cliente la cotización completa (el de cada referencia o servicio va en su propia fila). Se aplica sobre el subtotal que queda después de esos descuentos, y baja el precio, el IVA, la comisión del vendedor y la ganancia. Al convertir en pedido se traslada solo.") + ":</span>" +
+    '<span style="width:150px;display:inline-flex;">' + renderDescuentoCampo({ descuento: d, accion: "set-cot-descuento", attrs: ' data-id="' + c.id + '"' }) + "</span>" +
+    '<input class="mini-input" style="width:200px" placeholder="Motivo (opcional)" value="' + esc(d.motivo || "") + '" data-action-change="set-cot-descuento" data-campo="descuentoMotivo" data-id="' + c.id + '" />' +
+    (totales.descuentoOrden ? '<b class="descuento-monto">−' + fmt(totales.descuentoOrden) + "</b>" : "") +
+    '<button class="btn ghost small" data-action="toggle-cot-descuento" data-id="' + c.id + '">Listo</button>' +
+    "</div>";
+  return html + aviso;
 }
 
 function renderCotTabsStrip(c, tab) {
@@ -930,6 +968,9 @@ function renderReferenciasTabs(c) {
 // usuario 2026-09-21: "que insumo sea más grandesito y con mayor
 // protagonismo... enlace que prácticamente sea un icono".
 var INS_COLS_REF = "minmax(150px,1fr) 55px 75px 165px 58px 55px 85px 30px";
+// Los servicios cobrados usan la columna de "Enlace" (que ellos no tienen) para
+// su descuento, así que esa columna es más ancha (Hallazgo #61).
+var INS_COLS_SERV = "minmax(150px,1fr) 55px 75px 165px 118px 70px 85px 30px";
 
 // Aviso de que un insumo cambió en el catálogo desde que se copió a esta
 // referencia (ver insumoCambioDeCatalogo en core/calc.js). A propósito NO es
@@ -1027,23 +1068,24 @@ function renderFilasServicios(cotId) {
     // arriba (las columnas 5 y 6 son precio y ganancia, no cantidad y costo
     // por prenda), así que reusar el encabezado de la tabla de insumos las
     // haría leer al revés.
-    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_REF + ';">' +
-    "<span>Servicio</span><span>Unidad</span><span class=\"ins-th-num\">Te cuesta</span><span>Tipo de costo</span><span></span><span class=\"ins-th-num\">Le cobras</span><span class=\"ins-th-num\">Ganancia</span><span></span></div>";
+    '<div class="ins-row head" style="grid-template-columns:' + INS_COLS_SERV + ';">' +
+    "<span>Servicio</span><span>Unidad</span><span class=\"ins-th-num\">Te cuesta</span><span>Tipo de costo</span><span>Descuento</span><span class=\"ins-th-num\">Le cobras</span><span class=\"ins-th-num\">Ganancia</span><span></span></div>";
   servicios.forEach(function (s) {
     var attrs = ' data-action-change="set-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '"';
-    var ganancia = num(s.precio) - num(s.costo);
+    // La ganancia sale de lo que de verdad se cobra, ya con el descuento del servicio.
+    var ganancia = calcPrecioServicio(s) - num(s.costo);
     // Mismo aviso de "el catálogo cambió" que ya existe para un insumo de
     // referencia — un insumo agregado del catálogo puede terminar acá (ver
     // moverInsumoAServicio) sin perder su vínculo, y antes nadie lo
     // revisaba en esta lista. Reportado en producción 2026-09-21.
     var cambio = insumoCambioDeCatalogo(s);
-    html += '<div class="ins-row servicio' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:' + INS_COLS_REF + ';">' +
+    html += '<div class="ins-row servicio' + (cambio ? " cambio-catalogo" : "") + '" style="grid-template-columns:' + INS_COLS_SERV + ';">' +
       '<span class="mobile-th">Servicio</span><input class="mini-input" style="width:100%" placeholder="Ej. diseño" value="' + esc(s.nombre || "") + '"' + attrs + ' data-campo="nombre" />' +
       '<span class="mobile-th">Unidad</span><span class="insumo-unidad-cell"><input class="mini-input insumo-unidad" id="cotserv-unidad-' + s.id + '" style="width:100%" value="' + esc(s.unidad || "") + '"' + attrs + ' data-campo="unidad" />' +
       renderComboUnidad({ id: "cotserv-unidad-" + s.id }) + "</span>" +
       '<span class="mobile-th">Te cuesta</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.costo) + '"' + attrs + ' data-campo="costo" title="' + (cambio ? "El catálogo cambió este costo — ver el aviso debajo" : "Lo que te cuesta producirlo (lo que le pagas al diseñador). Si lo haces tú y no sale plata, déjalo en 0.") + '" />' +
       '<span class="mobile-th">Tipo de costo</span><select class="mini-input tipo-sel" style="width:100%"' + attrs + ' data-campo="tipo">' + renderTipoCostoOptions("servicio_cobrado", true) + "</select>" +
-      "<span></span>" +
+      '<span class="mobile-th">Descuento</span>' + renderDescuentoCampo({ descuento: s.descuento, accion: "set-servicio-descuento", attrs: ' data-cot="' + cotId + '" data-servicio="' + s.id + '"' }) +
       '<span class="mobile-th">Le cobras</span><input type="number" class="mini-input" style="width:100%" value="' + esc(s.precio) + '"' + attrs + ' data-campo="precio" title="Lo que le cobras al cliente por este servicio. Es lo que sale en la cotización." />' +
       '<span class="mobile-th">Ganancia</span><span class="amount' + (ganancia < 0 ? " neg" : "") + '" title="Lo que le cobras menos lo que te cuesta">' + fmt(ganancia) + "</span>" +
       '<button class="ins-remove-btn" data-action="remove-servicio-cobrado" data-cot="' + cotId + '" data-servicio="' + s.id + '" title="Quitar" aria-label="Quitar">✕</button>' +
@@ -1163,6 +1205,8 @@ function renderRefCard(cotId, ref) {
     '<div class="ref-fields" style="margin-top:8px;">' +
     '<span><label>Cantidad pedido</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.cantidadPedida) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="cantidadPedida" /></span>' +
     '<span><label>Precio venta x1</label><input type="number" class="mini-input" style="flex:1;" value="' + esc(ref.precioVenta) + '" data-action-change="set-ref-campo"' + attrs + ' data-campo="precioVenta" /></span>' +
+    '<span><label>Descuento' + renderHelp("Se rebaja de esta referencia (el de TODA la cotización va debajo, junto al vendedor). En % es sobre cantidad × precio; en $ es lo que se rebaja en toda la referencia, no por unidad.") + "</label>" +
+    renderDescuentoCampo({ descuento: ref.descuento, accion: "set-ref-descuento", attrs: attrs }) + "</span>" +
     '<button class="btn danger small" style="align-self:flex-start;" data-action="remove-referencia"' + attrs + ">Eliminar referencia</button>" +
     "</div>" +
     "</div>" +
@@ -1190,7 +1234,8 @@ function renderRefCard(cotId, ref) {
     '<div class="rs-item"><div class="rl">Ganancia x prenda</div><div class="rv">' + fmt(calc.gananciaUnit) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Margen</div><div class="rv"><span class="margen-badge ' + (calc.margenPct >= 0 ? "pos" : "neg") + '">' + calc.margenPct.toFixed(1) + "%</span></div></div>" +
     '<div class="rs-item"><div class="rl">Costo total (' + esc(ref.cantidadPedida) + ')</div><div class="rv">' + fmt(calc.costoTotal) + "</div></div>" +
-    '<div class="rs-item"><div class="rl">Precio total</div><div class="rv">' + fmt(calc.precioTotal) + "</div></div>" +
+    '<div class="rs-item"><div class="rl">Precio total</div><div class="rv">' +
+    (calc.descuento ? '<span class="precio-lista-tachado">' + fmt(calc.precioLista * (num(ref.cantidadPedida) || 0)) + "</span>" : "") + fmt(calc.precioTotal) + "</div></div>" +
     '<div class="rs-item"><div class="rl">Ganancia total</div><div class="rv" style="color:' + (calc.gananciaTotal >= 0 ? "var(--success)" : "var(--danger)") + ';">' + fmt(calc.gananciaTotal) + "</div></div>" +
     "</div>";
 
@@ -1414,6 +1459,43 @@ export var actions = {
     var id = el.getAttribute("data-id");
     state.cotVendedorEditando = state.cotVendedorEditando === id ? "" : id;
     notify();
+  },
+  // Descuentos de la cotización (Hallazgo #61). Los tres son edición normal de
+  // la cotización: quedan como "cambios sin guardar" (marcarSucia) hasta el
+  // Guardar de siempre, y al guardar el pedido que ya salió de ella se entera.
+  "toggle-cot-descuento": function (el) {
+    var id = el.getAttribute("data-id");
+    state.cotDescuentoEditando = state.cotDescuentoEditando === id ? "" : id;
+    notify();
+  },
+  "set-cot-descuento": function (el) {
+    var id = el.getAttribute("data-id"), campo = el.getAttribute("data-campo");
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (c.id !== id) return c;
+      var nuevo = campo === "descuentoMotivo"
+        ? Object.assign({ tipo: "porcentaje", valor: 0 }, c.descuento || {}, { motivo: el.value })
+        : Object.assign({}, parchearDescuento(c.descuento, campo, el.value), (c.descuento && c.descuento.motivo) ? { motivo: c.descuento.motivo } : {});
+      return Object.assign({}, c, { descuento: nuevo });
+    });
+    marcarSucia(id);
+  },
+  "set-ref-descuento": function (el) {
+    var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref"), campo = el.getAttribute("data-campo");
+    mapRef(cotId, refId, function (r) {
+      return Object.assign({}, r, { descuento: parchearDescuento(r.descuento, campo, el.value) });
+    });
+  },
+  "set-servicio-descuento": function (el) {
+    var cotId = el.getAttribute("data-cot"), sId = el.getAttribute("data-servicio"), campo = el.getAttribute("data-campo");
+    state.cotizaciones = state.cotizaciones.map(function (c) {
+      if (c.id !== cotId) return c;
+      return Object.assign({}, c, {
+        serviciosCobrados: (c.serviciosCobrados || []).map(function (s) {
+          return s.id === sId ? Object.assign({}, s, { descuento: parchearDescuento(s.descuento, campo, el.value) }) : s;
+        })
+      });
+    });
+    marcarSucia(cotId);
   },
   "set-ref-activa": function (el) {
     var cotId = el.getAttribute("data-cot"), refId = el.getAttribute("data-ref");
@@ -2649,6 +2731,9 @@ export var actions = {
         // escalarlo — y con eso el reporte de productos lo ve bien costeado.
         costo: totales.costoTotal,
         lineas: lineasDeCotizacion(cot),
+        // Lo aplicado reemplaza también al descuento del pedido rápido: el de la
+        // cotización escalada (que ya traía el del pedido, ver escalar-a-cotizacion).
+        descuento: descuentoVigente(cot.descuento) ? Object.assign({}, cot.descuento) : null,
         fechaCreacion: p.fechaCreacion || todayStr(),
         iva: cot.iva || p.iva,
         estado: agregado ? agregado.estado : p.estado,
@@ -2766,6 +2851,7 @@ function lineasDeCotizacion(cot) {
   var lineas = [];
   (cot.referencias || []).forEach(function (ref) {
     var t = calcRefTotales(ref);
+    var primeraDeLaRef = lineas.length;
     function nuevaLinea(talla, cantidad) {
       return {
         id: uid(), tipo: ref.productoId ? "catalogo" : "libre",
@@ -2773,8 +2859,11 @@ function lineasDeCotizacion(cot) {
         // esta línea las compras de SU referencia (Hallazgo #55).
         refId: ref.id || "",
         productoId: ref.productoId || "", productoNombre: ref.nombre || cot.descripcion || "—",
+        // El precio de LISTA: el descuento de la referencia viaja aparte, en
+        // cada línea (abajo), así el pedido puede mostrar de cuánto era y
+        // cuánto se rebajó (Hallazgo #61).
         imagenUrl: ref.imagenUrl || "", talla: talla, cantidad: cantidad,
-        precioUnitario: t.precioUnit, costoUnitario: t.costoUnit,
+        precioUnitario: t.precioLista, costoUnitario: t.costoUnit,
         costoIndirectoUnitario: 0, // se reparte abajo, una vez se sabe el total de unidades
         observacion: "", campos: []
       };
@@ -2790,6 +2879,20 @@ function lineasDeCotizacion(cot) {
     tallas.forEach(function (talla) { lineas.push(nuevaLinea(talla, porTalla[talla])); });
     var resto = num(ref.cantidadPedida) - conTalla;
     if (resto > 0 || !tallas.length) lineas.push(nuevaLinea("", Math.max(0, resto)));
+    // El descuento de la referencia se reparte entre sus líneas (una por talla)
+    // en proporción a la cantidad, sin perder ni un peso: la suma de lo que se
+    // rebaja en las líneas es EXACTAMENTE el descuento de la referencia, así el
+    // pedido da el mismo total y la misma base de comisión que la cotización.
+    // Quedan como valor fijo; si venía en %, se guarda cuál era para mostrarlo.
+    if (t.descuento) {
+      var propias = lineas.slice(primeraDeLaRef).filter(function (l) { return num(l.cantidad) > 0; });
+      var partes = repartirProporcional(t.descuento, propias.map(function (l) { return num(l.cantidad); }), 0);
+      propias.forEach(function (l, i) {
+        if (!partes[i]) return;
+        l.descuento = { tipo: "fijo", valor: partes[i] };
+        if (ref.descuento.tipo !== "fijo") l.descuento.porcentajeOrigen = num(ref.descuento.valor);
+      });
+    }
   });
   lineas = lineas.filter(function (l) { return num(l.cantidad) > 0; });
   repartirCostosGlobales(cot, lineas);
@@ -2798,7 +2901,7 @@ function lineasDeCotizacion(cot) {
   // Si entraran antes, el domicilio se repartiría también sobre el diseño y
   // las prendas cargarían de menos.
   (cot.serviciosCobrados || []).forEach(function (s) {
-    lineas.push({
+    var lineaServicio = {
       id: uid(), tipo: "libre", productoId: "",
       servicioId: s.id || "", // ver refId arriba: a esta línea van las compras de SU servicio
       productoNombre: s.nombre || "Servicio",
@@ -2809,7 +2912,10 @@ function lineasDeCotizacion(cot) {
       // prenda: la comisión del vendedor la excluye (ver calcBaseComision).
       esServicioCobrado: true,
       observacion: "", campos: []
-    });
+    };
+    // Cantidad 1: el descuento del servicio pasa tal cual (Hallazgo #61).
+    if (descuentoVigente(s.descuento)) lineaServicio.descuento = Object.assign({}, s.descuento);
+    lineas.push(lineaServicio);
   });
   return lineas;
 }
@@ -3290,6 +3396,9 @@ function datosPedidoDesdeCot(cot) {
     // Detalle línea por línea, con el precio y el costo (ya con su parte de
     // los costos globales) de cada una — es lo que leen los reportes.
     lineas: lineasDeCotizacion(cot),
+    // El descuento al total de la orden (el de cada ítem ya va dentro de las
+    // líneas); `total` de arriba ya viene rebajado (Hallazgo #61).
+    descuento: descuentoVigente(cot.descuento) ? Object.assign({}, cot.descuento) : null,
     iva: cot.iva || { activo: false, porcentaje: 19 }
   };
 }
@@ -3316,10 +3425,14 @@ export function calcDesfaseCotizacionPedido(cot) {
   var difTotal = num(datos.total) - num(ped.total);
   var difCosto = num(datos.costo) - num(ped.costo);
   var difCantidad = num(datos.cantidad) - num(ped.cantidad);
-  if (!difTotal && !difCosto && !difCantidad) return null;
+  // El descuento también cuenta: cambiarlo de un ítem a la orden (mismo total)
+  // reparte distinto la comisión y los reportes, así que el pedido debe
+  // enterarse aunque el total no se mueva (Hallazgo #61).
+  var difDescuento = calcCotizacionTotales(cot).descuento - calcDesglosePedido(ped).descuento;
+  if (!difTotal && !difCosto && !difCantidad && !difDescuento) return null;
   return {
     pedido: ped, datos: datos,
-    difTotal: difTotal, difCosto: difCosto, difCantidad: difCantidad,
+    difTotal: difTotal, difCosto: difCosto, difCantidad: difCantidad, difDescuento: difDescuento,
     totalPedido: num(ped.total), totalCot: num(datos.total),
     cantidadPedido: num(ped.cantidad), cantidadCot: num(datos.cantidad)
   };

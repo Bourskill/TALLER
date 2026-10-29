@@ -194,6 +194,12 @@ export var COLUMNAS_COTIZACIONES = [
   // una cotización vieja puede seguir trayéndolos — se preservan tal cual
   // para no perder el histórico de una que ya los tenía.
   { key: "gastosReales", header: "gastos_reales_json", json: true, jsonDefault: function () { return []; } },
-  { key: "compras", header: "compras_json", json: true, jsonDefault: function () { return []; } }
+  { key: "compras", header: "compras_json", json: true, jsonDefault: function () { return []; } },
+  // Descuento al TOTAL de la cotización (Hallazgo #61): { tipo, valor, motivo }
+  // o null. SIEMPRE al final: una columna insertada en medio corre todo lo que
+  // ya estaba guardado (Hallazgos #15 y #19). El descuento de cada referencia y
+  // de cada servicio no necesita columna: viaja dentro de referencias_json y
+  // servicios_cobrados_json.
+  { key: "descuento", header: "descuento_json", json: true, jsonDefault: function () { return null; } }
 ];
 export var tablaCotizaciones = crearTablaSheet("Cotizaciones", COLUMNAS_COTIZACIONES);

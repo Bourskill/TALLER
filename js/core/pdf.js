@@ -3,7 +3,7 @@
 // arma el documento a partir de una cotización ya calculada por core/calc.js.
 
 import { state, persist, notify } from "./store.js";
-import { calcCotizacionTotales, calcRefTotales, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
+import { calcCotizacionTotales, calcRefTotales, calcMontoDescuento, calcDesglosePedido, calcPrecioServicio, clienteById, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcComisionValorCot, calcSaldoPedido, calcResumenMovimientos, compraDeLinea, estadoLineaCompra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, faltanteVigenteCompra, costoFaltanteCompra, etiquetaComisionVendedor, estadoComisionCot, desperdicioCompra } from "./calc.js";
 import { KEYS, ESTADO_LABEL } from "./constants.js";
 import { num, slugify, codigoPublico } from "./utils.js";
 
@@ -341,27 +341,42 @@ export async function generarPDFCotizacion(cot, opts) {
   var imagenes = await Promise.all(refs.map(function (r) { return cargarImagenDataUrl(r.ref.imagenUrl); }));
   // La cantidad y la referencia (nombre) son datos clave para el cliente: viven
   // en `ref`, no en `calc` (que solo trae precios/costos), así que se leen de ahí.
+  // Descuentos (Hallazgo #61, decisión del dueño: el cliente ve el descuento).
+  // La columna DESCUENTO solo existe si algún ítem tiene uno: sin descuentos el
+  // documento es exactamente el de siempre. El precio por unidad es el de
+  // LISTA y el total de la línea ya viene rebajado.
+  var serviciosPdf = (cot.serviciosCobrados || []).map(function (s) {
+    var lista = num(s.precio);
+    return { s: s, lista: lista, descuento: calcMontoDescuento(s.descuento, lista) };
+  });
+  var conDescuento = refs.some(function (r) { return r.calc.descuento > 0; }) || serviciosPdf.some(function (x) { return x.descuento > 0; });
+  function filaConDescuento(inicio, unit, descuento, total) {
+    return inicio.concat([money(unit)], conDescuento ? [descuento ? "-" + money(descuento) : ""] : [], [money(total)]);
+  }
   var filas = refs.map(function (r) {
-    return ["", numFmt(r.ref.cantidadPedida), r.ref.nombre || "Referencia", money(r.calc.precioUnit), money(r.calc.precioTotal)];
+    return filaConDescuento(["", numFmt(r.ref.cantidadPedida), r.ref.nombre || "Referencia"], r.calc.precioLista, r.calc.descuento, r.calc.precioTotal);
   });
   // Los servicios que se cobran aparte (diseño, arreglos) van como sus
   // propias filas, después de las prendas: es justo lo que el cliente tiene
   // que ver desglosado para saber por qué está pagando. Su costo interno
   // nunca sale acá, igual que no sale el de ninguna prenda.
-  (cot.serviciosCobrados || []).forEach(function (s) {
-    filas.push(["", "1", s.nombre || "Servicio", money(num(s.precio)), money(num(s.precio))]);
+  serviciosPdf.forEach(function (x) {
+    filas.push(filaConDescuento(["", "1", x.s.nombre || "Servicio"], x.lista, x.descuento, x.lista - x.descuento));
   });
+  var colTotalPdf = conDescuento ? 5 : 4;
 
   var paginacion = opcionesPaginacion(doc, "COTIZACIÓN", codigo, logoDataUrl);
+  var columnasPdf = { 0: { cellWidth: 34 }, 1: { halign: "center", cellWidth: 60 }, 3: { halign: "right" }, 4: { halign: "right" } };
+  columnasPdf[colTotalPdf] = { halign: "right" };
   doc.autoTable({
     startY: y,
-    head: [["", "CANTIDAD", "REFERENCIA", "PRECIO POR UNIDAD", "TOTAL DE LA LÍNEA"]],
+    head: [["", "CANTIDAD", "REFERENCIA", "PRECIO POR UNIDAD"].concat(conDescuento ? ["DESCUENTO"] : [], ["TOTAL DE LA LÍNEA"])],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7, minCellHeight: 32, valign: "middle" },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
     margin: Object.assign({ left: marginX, right: marginX }, paginacion.margin),
     didDrawPage: paginacion.didDrawPage,
-    columnStyles: { 0: { cellWidth: 34 }, 1: { halign: "center", cellWidth: 60 }, 3: { halign: "right" }, 4: { halign: "right" } },
+    columnStyles: columnasPdf,
     // "plain": sin el rayado gris automático que trae 'striped' por defecto
     // — si se deja, se suma al tinte de la columna 4 de abajo y el total
     // queda con dos grises distintos pisándose en vez de uno solo, parejo.
@@ -371,7 +386,7 @@ export async function generarPDFCotizacion(cot, opts) {
     // tinte se pusiera ahí): es la columna que responde "¿cuánto vale esto?",
     // así que es la que conviene que el ojo siga bajando de fila en fila.
     didParseCell: function (data) {
-      if (data.section === "body" && data.column.index === 4) data.cell.styles.fillColor = [242, 242, 242];
+      if (data.section === "body" && data.column.index === colTotalPdf) data.cell.styles.fillColor = [242, 242, 242];
     },
     didDrawCell: function (data) {
       if (data.section === "body" && data.column.index === 0) {
@@ -393,13 +408,10 @@ export async function generarPDFCotizacion(cot, opts) {
   var totalConIva = totales.precioTotal + ivaMonto;
 
   var finalY = doc.lastAutoTable.finalY + 26;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(80, 80, 80);
-  doc.text("SUBTOTAL", pageW - marginX - 160, finalY);
-  doc.text(money(totales.precioTotal), pageW - marginX, finalY, { align: "right" });
-  finalY += 16;
-  doc.text(ivaActivo ? ("IVA " + ivaPct + "%") : "IVA (no aplica)", pageW - marginX - 160, finalY);
-  doc.text(money(ivaMonto), pageW - marginX, finalY, { align: "right" });
-  finalY += 14;
+  finalY = dibujarSubtotalesPdf(doc, finalY, pageW, marginX, {
+    bruto: totales.precioBruto, descuento: totales.descuento, motivo: cot.descuento && cot.descuento.motivo,
+    neto: totales.precioTotal, ivaActivo: ivaActivo, ivaPct: ivaPct, ivaMonto: ivaMonto
+  }) - 2;
   finalY = drawTotalBox(doc, pageW - marginX - 190, finalY, 190, "TOTAL", money(totalConIva));
 
   finalY += 24;
@@ -411,6 +423,41 @@ export async function generarPDFCotizacion(cot, opts) {
 }
 
 // ---------- helpers compartidos por los demás PDFs (pedido, recibo, cuenta de cobro, interno) ----------
+
+// El bloque que va justo sobre el cuadro de TOTAL, igual en la cotización y en
+// la cuenta de cobro: SUBTOTAL, DESCUENTO y VALOR NETO (solo si hubo
+// descuento) e IVA. `bruto` es lo que valía todo a precio de lista y `neto` lo
+// que queda después del descuento (la base del IVA). Sin descuento imprime
+// exactamente lo de siempre — SUBTOTAL e IVA — porque entonces bruto === neto
+// (Hallazgo #61). Devuelve la Y de la siguiente línea; cada documento le suma
+// el espacio que ya tenía antes de su cuadro de TOTAL.
+function dibujarSubtotalesPdf(doc, y, pageW, marginX, o) {
+  var filas = [["SUBTOTAL", money(o.descuento ? o.bruto : o.neto)]];
+  var motivo = String(o.motivo || "").trim();
+  if (motivo.length > 40) motivo = motivo.slice(0, 39) + "…";
+  if (o.descuento) {
+    filas.push(["DESCUENTO", "-" + money(o.descuento), motivo]);
+    // Con IVA, la base es el valor ya rebajado: se imprime para que el IVA
+    // de abajo se pueda verificar a ojo.
+    if (o.ivaActivo) filas.push(["VALOR NETO", money(o.neto)]);
+  }
+  filas.push([o.ivaActivo ? ("IVA " + o.ivaPct + "%") : "IVA (no aplica)", money(o.ivaMonto)]);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(80, 80, 80);
+  filas.forEach(function (fila) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(80, 80, 80);
+    doc.text(fila[0], pageW - marginX - 160, y);
+    doc.text(fila[1], pageW - marginX, y, { align: "right" });
+    y += 16;
+    // El motivo, si lo hay, va debajo en chiquito: el rótulo de la fila no
+    // tiene sitio para él sin pisar el monto.
+    if (fila[2]) {
+      doc.setFontSize(8.5); doc.setTextColor(130, 130, 130);
+      doc.text(fila[2], pageW - marginX - 160, y - 3);
+      y += 9;
+    }
+  });
+  return y;
+}
 
 // DE/PARA: dos columnas dentro de un panel gris clarito (antes flotaban
 // directo sobre la hoja en blanco) — el mismo truco de agrupar visualmente
@@ -588,22 +635,28 @@ function seccionDesglosePedidos(doc, y, marginX, pageW, pedidos, titulo, docNum)
   y = tituloSeccionReporte(doc, y, marginX, "Pedidos del periodo", "Con lo cobrado, lo que falta por cobrar y quién vendió cada uno.", titulo, docNum);
   var acc = pedidos.reduce(function (a, f) {
     a.total += num(f.total); a.abonado += num(f.abonado); a.saldo += num(f.saldo); a.ganancia += num(f.ganancia);
+    a.descuento += num(f.descuento);
     return a;
-  }, { total: 0, abonado: 0, saldo: 0, ganancia: 0 });
+  }, { total: 0, abonado: 0, saldo: 0, ganancia: 0, descuento: 0 });
+  // La columna "Descuento" (Hallazgo #61) solo aparece si algún pedido del
+  // periodo lo tuvo: "Total" ya viene rebajado, esta dice cuánto se rebajó.
+  var conDesc = pedidos.some(function (f) { return num(f.descuento) > 0; });
   var pag = opcionesPaginacion(doc, titulo, docNum);
+  var colsPedidos = { 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" } };
+  if (conDesc) colsPedidos[9] = { halign: "right" };
   doc.autoTable({
     startY: y,
     margin: Object.assign({ left: marginX, right: marginX }, pag.margin),
     didDrawPage: pag.didDrawPage,
-    head: [["Fecha", "N.º OP", "Cliente", "Vendedor", "Tipo", "Cant.", "Total", "Abonado", "Saldo"]],
+    head: [["Fecha", "N.º OP", "Cliente", "Vendedor", "Tipo", "Cant.", "Total", "Abonado", "Saldo"].concat(conDesc ? ["Descuento"] : [])],
     body: pedidos.length
       ? pedidos.map(function (f) {
-        return [f.fecha, f.numeroOp, f.cliente, f.vendedor || "—", f.tipo, numFmt(f.cantidad), money(f.total), money(f.abonado), money(f.saldo)];
-      }).concat([["", "", "TOTAL", "", "", "", money(acc.total), money(acc.abonado), money(acc.saldo)]])
+        return [f.fecha, f.numeroOp, f.cliente, f.vendedor || "—", f.tipo, numFmt(f.cantidad), money(f.total), money(f.abonado), money(f.saldo)].concat(conDesc ? [f.descuento ? "-" + money(f.descuento) : ""] : []);
+      }).concat([["", "", "TOTAL", "", "", "", money(acc.total), money(acc.abonado), money(acc.saldo)].concat(conDesc ? ["-" + money(acc.descuento)] : [])])
       : [["—", "—", "Sin pedidos en este periodo", "—", "—", "—", "—", "—", "—"]],
     styles: { font: "helvetica", fontSize: 8, textColor: [40, 40, 40], cellPadding: 4 },
     headStyles: { fillColor: colorAcentoOscuro(), textColor: textoSobreAcento(), fontStyle: "bold" },
-    columnStyles: { 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" } },
+    columnStyles: colsPedidos,
     didParseCell: pedidos.length ? resaltarFilaTotal(pedidos.length + 1) : undefined,
     theme: "grid"
   });
@@ -903,7 +956,7 @@ export async function generarPDFInternoCotizacion(cot, opts) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(60, 60, 60);
     [
       "Costo total estimado: " + money(totales.costoTotal),
-      "Precio total cotizado: " + money(totales.precioTotal),
+      "Precio total cotizado: " + money(totales.precioTotal) + (totales.descuento ? " (ya con " + money(totales.descuento) + " de descuento sobre " + money(totales.precioBruto) + " de lista)" : ""),
       "Ganancia estimada: " + money(gananciaEstimadaPdf) + " (" + margenEstimadoPdf.toFixed(1) + "%)",
       "Costo total real: " + money(real.costoTotal),
       "Ganancia real: " + money(real.gananciaTotal) + " (" + real.margenPct.toFixed(1) + "%)"
@@ -1383,11 +1436,14 @@ export async function generarPDFCuentaCobro(p, opts) {
   y = drawParties(doc, y, marginX, pageW, negocioLinesFrom(cfg), clienteLines, "PARA");
 
   var cot = p.cotizacionId ? state.cotizaciones.filter(function (c) { return c.id === p.cotizacionId; })[0] : null;
-  var filas;
+  // Cada fila: { cant, desc, unit, descuento, total }. `unit` es el precio de
+  // LISTA, `descuento` lo rebajado en esa fila y `total` ya viene rebajado
+  // (Hallazgo #61); la columna DESCUENTO solo se imprime si alguna fila tiene.
+  var filasCC;
   if (cot && (cot.referencias || []).length) {
-    filas = cot.referencias.map(function (ref) {
+    filasCC = cot.referencias.map(function (ref) {
       var c = calcRefTotales(ref);
-      return [numFmt(ref.cantidadPedida), ref.nombre || "Referencia", money(c.precioUnit), money(c.precioTotal)];
+      return { cant: numFmt(ref.cantidadPedida), desc: ref.nombre || "Referencia", unit: c.precioLista, descuento: c.descuento, total: c.precioTotal };
     });
   } else if ((p.lineas || []).length) {
     // Venta directa: cada línea del pedido es una línea de la cuenta de cobro, con su
@@ -1395,33 +1451,43 @@ export async function generarPDFCuentaCobro(p, opts) {
     // amontonada y un "valor unitario" que era el total dividido entre las
     // unidades — un promedio que no le habían cobrado a nadie, y que en un
     // pedido de dos cosas distintas mostraba un precio que no existía.
-    filas = p.lineas.map(function (l) {
+    filasCC = p.lineas.map(function (l) {
       var descripcion = (l.productoNombre || l.textoDescripcion || "—") + (l.talla ? " (" + l.talla + ")" : "");
-      return [numFmt(l.cantidad), descripcion, money(l.precioUnitario), money(num(l.precioUnitario) * num(l.cantidad))];
+      var bruto = num(l.precioUnitario) * num(l.cantidad);
+      var rebaja = calcMontoDescuento(l.descuento, bruto);
+      return { cant: numFmt(l.cantidad), desc: descripcion, unit: num(l.precioUnitario), descuento: rebaja, total: bruto - rebaja };
     });
   } else {
-    filas = [[String(p.cantidad || 1), p.descripcion || "Pedido", money(num(p.total) / (num(p.cantidad) || 1)), money(p.total)]];
+    filasCC = [{ cant: String(p.cantidad || 1), desc: p.descripcion || "Pedido", unit: num(p.total) / (num(p.cantidad) || 1), descuento: 0, total: num(p.total) }];
   }
+  var conDescuentoCC = filasCC.some(function (f) { return f.descuento > 0; });
+  var filas = filasCC.map(function (f) {
+    return [f.cant, f.desc, money(f.unit)].concat(conDescuentoCC ? [f.descuento ? "-" + money(f.descuento) : ""] : [], [money(f.total)]);
+  });
+  var colTotalCC = conDescuentoCC ? 4 : 3;
 
   var pagFact = opcionesPaginacion(doc, "CUENTA DE COBRO", codigo, logoDataUrl);
+  var columnasCC = { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } };
+  columnasCC[colTotalCC] = { halign: "right" };
   doc.autoTable({
     startY: y,
-    head: [["CANTIDAD", "DESCRIPCIÓN", "VALOR UNITARIO", "TOTAL"]],
+    head: [["CANTIDAD", "DESCRIPCIÓN", "VALOR UNITARIO"].concat(conDescuentoCC ? ["DESCUENTO"] : [], ["TOTAL"])],
     body: filas,
     styles: { font: "helvetica", fontSize: 10, textColor: [30, 30, 30], cellPadding: 7 },
     headStyles: { fillColor: colorAcento(), textColor: textoSobreAcento(), fontStyle: "bold", fontSize: 9 },
     margin: Object.assign({ left: marginX, right: marginX }, pagFact.margin),
     didDrawPage: pagFact.didDrawPage,
-    columnStyles: { 0: { halign: "center", cellWidth: 70 }, 2: { halign: "right" }, 3: { halign: "right" } },
+    columnStyles: columnasCC,
     theme: "plain",
     didParseCell: function (data) {
-      if (data.section === "body" && data.column.index === 3) data.cell.styles.fillColor = [242, 242, 242];
+      if (data.section === "body" && data.column.index === colTotalCC) data.cell.styles.fillColor = [242, 242, 242];
     }
   });
 
   var ivaActivo = !!(p.iva && p.iva.activo);
   var ivaPct = ivaActivo ? num(p.iva.porcentaje) : 0;
   var subtotal = num(p.total);
+  var desglosePdf = calcDesglosePedido(p);
   var ivaMonto = ivaActivo ? subtotal * (ivaPct / 100) : 0;
   var totalConIva = subtotal + ivaMonto;
   // El saldo sale de calcSaldoPedido, que YA cobra con IVA (ver la sección
@@ -1433,11 +1499,9 @@ export async function generarPDFCuentaCobro(p, opts) {
   var saldo = calcSaldoPedido(p);
 
   var finalY = doc.lastAutoTable.finalY + 26;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(80, 80, 80);
-  [["SUBTOTAL", money(subtotal)], [ivaActivo ? ("IVA " + ivaPct + "%") : "IVA (no aplica)", money(ivaMonto)]].forEach(function (row) {
-    doc.text(row[0], pageW - marginX - 160, finalY);
-    doc.text(row[1], pageW - marginX, finalY, { align: "right" });
-    finalY += 16;
+  finalY = dibujarSubtotalesPdf(doc, finalY, pageW, marginX, {
+    bruto: desglosePdf.bruto, descuento: desglosePdf.descuento, motivo: desglosePdf.motivo,
+    neto: subtotal, ivaActivo: ivaActivo, ivaPct: ivaPct, ivaMonto: ivaMonto
   });
   finalY += 12;
 

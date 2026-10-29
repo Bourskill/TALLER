@@ -259,6 +259,32 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésimo novena ronda: descuentos por ítem y a toda la orden)
+
+- **Descuentos** en cotizaciones, pedidos rápidos y pedidos ya creados:
+  - por **ítem** (cada línea de un pedido, cada referencia y cada servicio
+    cobrado de una cotización) y a **toda la orden**, en `%` o en `$`;
+  - primero se aplica el de cada ítem y después el de la orden, sobre lo que
+    queda;
+  - un **motivo opcional** para el descuento a toda la orden.
+- **`total` ya viene rebajado**: el IVA, el saldo por cobrar, la comisión del
+  vendedor, "Por cobrar" y los reportes salen correctos solos. La **comisión se
+  calcula sobre el precio con descuento**.
+- **Pedido ya creado:** en su tarjeta, `🏷 Aplicar un descuento` (por línea y/o
+  al total) con vista previa y aviso si el cliente ya abonó más que el nuevo
+  total. Un pedido que sigue a su cotización se cambia en la cotización.
+- **PDF de cotización y cuenta de cobro:** columna DESCUENTO por línea y,
+  abajo, SUBTOTAL → DESCUENTO → VALOR NETO (con IVA) → IVA → TOTAL. Sin
+  descuentos el documento queda idéntico al de antes.
+- **Reportes:** el de Pedidos (pantalla y PDF) muestra cuánto se rebajó; el de
+  Productos vendidos cuenta cada línea ya rebajada.
+- **Un duplicado** (pedido o cotización) nace a precio de lista, sin el
+  descuento del original.
+- La cotización guarda su descuento en una columna nueva (`descuento_json`,
+  **al final** de la hoja "Cotizaciones": no mueve nada de lo ya guardado).
+- Ver CONTABILIDAD.md, Hallazgo #61. Prueba nueva: `node test/descuentos.mjs`
+  (no necesita jsdom).
+
 ## Registro de cambios — octubre 2026 (centésimo octava ronda: cuarta revisión de "Anular y corregir")
 
 - Tras "Anular y corregir", **cambiar "Pagué" o "Compré" vuelve a repartir
