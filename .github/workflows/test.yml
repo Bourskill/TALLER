@@ -1,0 +1,33 @@
+# Corre las pruebas del Panel del Taller en cada push y en cada pull request
+# hacia main. Si cualquiera de las dos falla, el workflow falla (el paso queda
+# en rojo y GitHub lo marca en el commit / PR). Las mismas pruebas se corren en
+# local con `npm test` (ver README.md, "Pruebas automáticas").
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # LTS actual de Node. jsdom 30 (package-lock.json) pide Node ^22.22.2,
+      # ^24.15.0 o >=26, así que "lts/*" sirve mientras la LTS sea de esas.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - run: npm ci
+
+      # Cada prueba va en su propio paso para ver cuál falló sin abrir el log.
+      - name: Prueba de humo (test/smoke.mjs)
+        run: node test/smoke.mjs
+
+      - name: Prueba de descuentos (test/descuentos.mjs)
+        run: node test/descuentos.mjs
