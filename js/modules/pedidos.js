@@ -1,9 +1,9 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
-import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcMontoDescuento, calcDesglosePedido, calcTotalConDescuentos, descuentoDesdeForm, descuentoVigente, parchearDescuento, textoDescuento, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado } from "../core/calc.js";
+import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcMontoDescuento, calcDesglosePedido, calcTotalConDescuentos, descuentoDesdeForm, descuentoVigente, parchearDescuento, textoDescuento, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado, cuentaSugerida, cuentaDeMetodoPago, cuentaParaMovimientoNuevo, nombreMetodoPago, CUENTA_SIN_ASIGNAR } from "../core/calc.js";
 import { fmt, norm } from "../core/utils.js";
-import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker, renderDescuentoCampo } from "../core/components.js";
+import { renderHelp, renderBuscador, renderProgresoEtapas, renderToggleSeccion, renderClienteSeleccionCampo, renderClientePicker, renderDescuentoCampo, renderCuentaSelectOptions } from "../core/components.js";
 import { generarPDFPedido, generarPDFRecibo, generarPDFCuentaCobro, generarPDFRemision } from "../core/pdf.js";
 import { enviarCorreoConAdjunto, plantillaCorreoHtml } from "../core/gmail.js";
 import { sincronizarEvento, eliminarEvento, eventoUnDia } from "../core/calendar.js";
@@ -407,6 +407,11 @@ function renderPrecioYPago(f, totales) {
   html += renderDescuentoTotalPedido(f, totales);
   html += '<div class="form-grid" style="margin-top:12px;">' +
     '<div class="field"><label>Abono inicial recibido</label><input type="number" class="mini-input" value="' + esc(f.abono) + '" placeholder="0" data-action-change="set-form-pedido-campo" data-campo="abono" /></div>' +
+    // ¿En qué cuenta entró? Solo importa si hay abono (Hallazgo #63).
+    (num(f.abono) > 0
+      ? '<div class="field"><label>¿En qué cuenta entró?</label><select class="mini-input" data-action-change="set-form-pedido-campo" data-campo="cuentaAbono">' +
+        renderCuentaSelectOptions(cuentaSugerida(f.cuentaAbono), { conSinAsignar: false }) + "</select></div>"
+      : "") +
     "</div>";
   if (totales.precioTotal > 0) {
     html += '<div class="section-sub" style="margin:6px 0 0;">Saldo por cobrar: <b>' + fmt(Math.max(0, saldo)) + "</b>" +
@@ -1324,14 +1329,14 @@ function renderAbonoForm(p, saldo) {
   // Solo se muestra el borrador si es DE ESTE pedido: pueden estar abiertos
   // varios paneles a la vez y, con un borrador global, lo tecleado en uno
   // aparecía escrito dentro del formulario del otro.
-  var fa = state.formAbono.pedidoId === p.id ? state.formAbono : { monto: "", fecha: "", metodo: "efectivo" };
-  var metodos = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro medio"]];
-  return '<div class="cot-col-title">Registrar un abono del cliente</div>' +
+  var fa = state.formAbono.pedidoId === p.id ? state.formAbono : { monto: "", fecha: "", metodo: "" };
+  return '<div class="cot-col-title">Registrar un abono del cliente' +
+    renderHelp("Elige la cuenta donde entró la plata (efectivo, banco, Nequi...). Así el saldo de cada cuenta en Finanzas → Cuentas coincide con tu extracto. Las cuentas se editan en Configuración.") + "</div>" +
     '<div class="inline-form pedido-abono-form">' +
     '<input type="number" class="mini-input abono-monto" id="abono-monto-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="monto" value="' + esc(fa.monto) + '" placeholder="Monto — faltan ' + fmt(saldo) + '" />' +
     '<input type="date" class="mini-input abono-fecha" id="abono-fecha-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="fecha" value="' + esc(fa.fecha || todayStr()) + '" />' +
     '<select class="mini-input abono-metodo" id="abono-metodo-' + p.id + '" data-form="abono" data-pedido="' + p.id + '" data-field="metodo">' +
-    metodos.map(function (m) { return opt(m[0], m[1], fa.metodo || "efectivo"); }).join("") +
+    renderCuentaSelectOptions(cuentaSugerida(fa.metodo), { conSinAsignar: false }) +
     "</select>" +
     '<label class="btn ghost small pedido-abono-adjunto">📎 Adjuntar comprobante<input type="file" accept="image/*" data-role="abono-comprobante" /></label>' +
     '<button class="btn small" data-action="add-abono" data-id="' + p.id + '">Registrar abono</button>' +
@@ -1356,19 +1361,17 @@ function renderReembolsoForm(p) {
     '<input type="number" class="mini-input abono-monto" id="reembolso-monto-' + p.id + '" data-form="reembolso" data-field="monto" value="' + esc(fr.monto) + '" placeholder="Monto — máximo ' + fmt(disponible) + '" />' +
     '<input type="date" class="mini-input abono-fecha" id="reembolso-fecha-' + p.id + '" data-form="reembolso" data-field="fecha" value="' + esc(fr.fecha || todayStr()) + '" />' +
     '<input class="mini-input abono-monto" id="reembolso-motivo-' + p.id + '" data-form="reembolso" data-field="motivo" value="' + esc(fr.motivo) + '" placeholder="Motivo (opcional)" />' +
+    '<select class="mini-input abono-metodo" id="reembolso-cuenta-' + p.id + '" data-form="reembolso" data-field="cuenta" title="Cuenta de la que sale la plata" aria-label="Cuenta de la que sale la plata">' +
+    renderCuentaSelectOptions(cuentaSugerida(fr.cuenta), { conSinAsignar: false }) + "</select>" +
     '<button class="btn danger small" data-action="add-reembolso" data-id="' + p.id + '">Confirmar reembolso</button>' +
     '<button class="btn ghost small" data-action="toggle-reembolso-form" data-id="' + p.id + '">Cancelar</button>' +
     "</div>";
 }
 
-// Nombre presentable de un medio de pago. Se usa en el concepto de cada fila
-// ("Abono · Transferencia"), así que tiene que leerse como texto humano y no
-// como el valor interno en minúsculas que se guarda.
-var METODOS_ABONO = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro medio"]];
-function nombreMetodoPago(m) {
-  var f = METODOS_ABONO.filter(function (x) { return x[0] === m; })[0];
-  return f ? f[1] : (m ? String(m) : "medio sin registrar");
-}
+// El medio de pago de un abono es, desde las cuentas (Hallazgo #63), el id de la
+// cuenta donde entró la plata. Para mostrarlo ("Abono · Banco") se usa
+// nombreMetodoPago de core/calc.js, que también entiende los medios de antes de
+// las cuentas ("Transferencia", "Tarjeta", "Otro medio").
 
 // El comprobante adjunto (o una raya si no hay). Antes esta columna se llamaba
 // "Comprobante" pero en las filas de reembolso mostraba el MOTIVO, que no es
@@ -1420,7 +1423,13 @@ function renderMovimientosPedido(p) {
       html += '<div class="tx-row" data-abono-edit-row="' + a.id + '">' +
         '<span class="mobile-th">Fecha</span><span><input type="date" class="mini-input" data-role="edit-abono-fecha" value="' + esc(a.fecha || "") + '" /></span>' +
         '<span class="mobile-th">Concepto</span><span><select class="mini-input" data-role="edit-abono-metodo">' +
-        METODOS_ABONO.map(function (m) { return opt(m[0], "Abono · " + m[1], a.metodoPago || "efectivo"); }).join("") +
+        // Un abono de antes de las cuentas ("transferencia", "tarjeta"...) no
+        // apunta a ninguna: se conserva como opción propia para que guardar
+        // el abono sin tocar el medio no lo cambie por la primera cuenta.
+        renderCuentaSelectOptions(cuentaDeMetodoPago(a.metodoPago) || a.metodoPago || "", {
+          conSinAsignar: false,
+          extra: cuentaDeMetodoPago(a.metodoPago) ? [] : [[a.metodoPago || "", nombreMetodoPago(a.metodoPago) + " (sin cuenta)"]]
+        }) +
         "</select></span>" +
         '<span class="mobile-th">Monto</span><span><input type="number" class="mini-input" data-role="edit-abono-monto" value="' + esc(a.monto) + '" /></span>' +
         '<span class="mobile-th">Soporte</span><span>' + celdaSoporteAbono(a) + "</span>" +
@@ -1902,8 +1911,12 @@ export var actions = {
     };
     if (abonoInicial > 0) {
       var abonoInicialId = uid();
-      nuevoPedido.abonos.push({ id: abonoInicialId, monto: abonoInicial, fecha: todayStr(), metodoPago: "efectivo", comprobanteUrl: "" });
-      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono inicial — " + resumen.descripcion, monto: abonoInicial, contraparte: fp.cliente, fecha: todayStr(), pedidoId: nuevoPedido.id, origenAbonoId: abonoInicialId });
+      // La cuenta que se vio elegida en el formulario (cuentaSugerida es la
+      // misma función que dibujó el select): el medio de pago del abono ES esa
+      // cuenta, y el movimiento nace en ella.
+      var cuentaAbonoInicial = cuentaSugerida(fp.cuentaAbono);
+      nuevoPedido.abonos.push({ id: abonoInicialId, monto: abonoInicial, fecha: todayStr(), metodoPago: cuentaAbonoInicial, comprobanteUrl: "" });
+      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono inicial — " + resumen.descripcion, monto: abonoInicial, contraparte: fp.cliente, fecha: todayStr(), cuenta: cuentaAbonoInicial, pedidoId: nuevoPedido.id, origenAbonoId: abonoInicialId });
       persist("tx");
     }
     // El stock del catálogo baja recién ahora, que el pedido ya es real. Se
@@ -2357,12 +2370,16 @@ export var actions = {
     if (pedido) {
       var saldo = calcSaldoPedido(pedido);
       if (saldo > 0) {
-        if (!window.confirm('¿Registrar el saldo completo de ' + fmt(saldo) + ' como cobrado para "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nEsto crea un movimiento de ingreso en Finanzas. Puedes anular el abono luego desde Finanzas si te equivocas.')) return;
+        // Este botón no pregunta la cuenta (es un clic): cae en la
+        // predeterminada del taller, o en «Sin asignar» si no hay una, y se
+        // dice antes de confirmar. Se corrige después desde Finanzas → Editar.
+        var cuentaCobro = cuentaParaMovimientoNuevo();
+        if (!window.confirm('¿Registrar el saldo completo de ' + fmt(saldo) + ' como cobrado para "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nEsto crea un movimiento de ingreso en Finanzas, en la cuenta «' + nombreMetodoPago(cuentaCobro) + '» (si entró en otra, cámbiala en Finanzas → Editar). Puedes anular el abono luego desde Finanzas si te equivocas.')) return;
         var abonoId = uid();
-        state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Saldo pedido — " + pedido.descripcion, monto: saldo, contraparte: pedido.cliente, fecha: todayStr(), pedidoId: pedido.id, origenAbonoId: abonoId });
+        state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Saldo pedido — " + pedido.descripcion, monto: saldo, contraparte: pedido.cliente, fecha: todayStr(), cuenta: cuentaCobro, pedidoId: pedido.id, origenAbonoId: abonoId });
         state.pedidos = state.pedidos.map(function (p) {
           if (p.id !== id) return p;
-          var abonos = (p.abonos || []).concat([{ id: abonoId, monto: saldo, fecha: todayStr(), metodoPago: "otro", comprobanteUrl: "" }]);
+          var abonos = (p.abonos || []).concat([{ id: abonoId, monto: saldo, fecha: todayStr(), metodoPago: cuentaCobro === CUENTA_SIN_ASIGNAR ? "otro" : cuentaCobro, comprobanteUrl: "" }]);
           // Deja el pedido cobrado hasta el total FACTURADO (con IVA si
           // aplica, ver calcSaldoPedido), pero pasa
           // por la misma puerta que el resto para que la lista y el total
@@ -2381,7 +2398,7 @@ export var actions = {
   "toggle-reembolso-form": function (el) {
     var id = el.getAttribute("data-id");
     state.reembolsoAbierto = state.reembolsoAbierto === id ? "" : id;
-    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
+    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "", cuenta: "" };
     notify();
   },
   "add-reembolso": function (el) {
@@ -2396,14 +2413,18 @@ export var actions = {
     if (!window.confirm('¿Registrar un reembolso de ' + fmt(monto) + ' a "' + ped.cliente + '"?\n\nEsto crea un movimiento de gasto en Finanzas y reduce el abono registrado de este pedido.')) return;
     var reembolsoId = uid();
     var fecha = fr.fecha || todayStr();
-    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Reembolso — " + ped.descripcion + (fr.motivo ? " (" + fr.motivo + ")" : ""), monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenReembolsoId: reembolsoId });
+    // La cuenta de la que salió la plata: la que se vio en el select del
+    // formulario (el DOM manda si ese pedido lo tiene abierto, como en add-abono).
+    var cuentaEl = document.getElementById("reembolso-cuenta-" + id);
+    var cuentaReembolso = cuentaSugerida(cuentaEl ? cuentaEl.value : fr.cuenta);
+    state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Reembolso — " + ped.descripcion + (fr.motivo ? " (" + fr.motivo + ")" : ""), monto: monto, contraparte: ped.cliente, fecha: fecha, cuenta: cuentaReembolso, pedidoId: ped.id, origenReembolsoId: reembolsoId });
     state.pedidos = state.pedidos.map(function (p) {
       if (p.id !== id) return p;
-      var abonos = (p.abonos || []).concat([{ id: reembolsoId, monto: monto, fecha: fecha, tipo: "reembolso", motivo: fr.motivo || "", comprobanteUrl: "" }]);
+      var abonos = (p.abonos || []).concat([{ id: reembolsoId, monto: monto, fecha: fecha, tipo: "reembolso", motivo: fr.motivo || "", metodoPago: cuentaReembolso, comprobanteUrl: "" }]);
       return Object.assign({}, p, { abonos: abonos, abono: recalcularAbonoPedido(p, abonos) });
     });
     state.reembolsoAbierto = "";
-    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "" };
+    state.formReembolso = { monto: "", fecha: todayStr(), motivo: "", cuenta: "" };
     persist("tx"); persist("pedidos"); notify();
   },
   // El monto, la fecha y el método ya NO viven solo en el DOM: su casa es el
@@ -2437,7 +2458,10 @@ export var actions = {
     var monto = num(visible("monto", fa.monto));
     if (monto <= 0) return;
     var fecha = visible("fecha", fa.fecha) || todayStr();
-    var metodo = visible("metodo", fa.metodo) || "efectivo";
+    // El medio de pago ES la cuenta donde entró la plata (Hallazgo #63). Se
+    // normaliza con la misma función que dibujó el select, así lo que se ve
+    // elegido es lo que se guarda aunque el borrador traiga un valor viejo.
+    var metodo = cuentaSugerida(visible("metodo", fa.metodo));
     var card = el.closest(".pedido-card");
     var fileEl = card ? card.querySelector('[data-role="abono-comprobante"]') : null;
     var file = fileEl && fileEl.files && fileEl.files[0];
@@ -2460,7 +2484,7 @@ export var actions = {
           "Se registra tal cual (queda como saldo a favor del cliente). Si fue un error de digitación, cancela y corrige el monto.")) return;
       }
       var abonoId = uid();
-      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono — " + ped.descripcion, monto: monto, contraparte: ped.cliente, fecha: fecha, pedidoId: ped.id, origenAbonoId: abonoId });
+      state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Abono — " + ped.descripcion, monto: monto, contraparte: ped.cliente, fecha: fecha, cuenta: metodo, pedidoId: ped.id, origenAbonoId: abonoId });
       state.pedidos = state.pedidos.map(function (p) {
         if (p.id !== id) return p;
         var abonos = (p.abonos || []).concat([{ id: abonoId, monto: monto, fecha: fecha, metodoPago: metodo, comprobanteUrl: comprobanteUrl || "" }]);
@@ -2472,7 +2496,7 @@ export var actions = {
       // paneles abiertos, resetearlo entero le borraba al usuario el monto que
       // tenía tecleado en el otro, sin aviso y en pleno registro de plata.
       if (state.formAbono.pedidoId === id || !state.formAbono.pedidoId) {
-        state.formAbono = { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" };
+        state.formAbono = { pedidoId: "", monto: "", fecha: "", metodo: metodo };
       }
       persist("tx"); persist("pedidos"); notify();
     }
@@ -2534,8 +2558,18 @@ export var actions = {
       });
       return Object.assign({}, p, { abonos: abonos, abono: recalcularAbonoPedido(p, abonos) });
     });
+    // El movimiento sigue al abono: monto, fecha y —si el medio nuevo es una
+    // cuenta— la cuenta donde entró. Un medio anterior a las cuentas
+    // ("transferencia"...) no apunta a ninguna, así que no mueve el movimiento
+    // de donde esté. Si cambió algo con lo que se compara contra el extracto,
+    // el movimiento deja de estar conciliado.
+    var cuentaNueva = cuentaDeMetodoPago(nuevoMetodo);
     state.tx = state.tx.map(function (t) {
-      return t.origenAbonoId === abonoId ? Object.assign({}, t, { monto: nuevoMonto, fecha: nuevaFecha }) : t;
+      if (t.origenAbonoId !== abonoId) return t;
+      var cuentaFinal = cuentaNueva || t.cuenta;
+      var cambio = Object.assign({}, t, { monto: nuevoMonto, fecha: nuevaFecha, cuenta: cuentaFinal });
+      if (t.conciliadoEn && (num(t.monto) !== nuevoMonto || t.fecha !== nuevaFecha || t.cuenta !== cuentaFinal)) cambio.conciliadoEn = "";
+      return cambio;
     });
     state.abonoEditando = "";
     persist("pedidos"); persist("tx"); notify();

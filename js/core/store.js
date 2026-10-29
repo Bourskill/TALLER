@@ -17,7 +17,7 @@ import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsqu
 // en tiempo de ejecución, mucho después de que los dos módulos ya
 // terminaron de evaluarse. La alternativa (duplicar calcListaCompras acá)
 // rompería "una sola fuente por fórmula".
-import { repararComprasSinSeguimiento, migrarComprasARecibos } from "./calc.js";
+import { repararComprasSinSeguimiento, migrarComprasARecibos, migrarCuentasMovimientos, asegurarCuentaEnMovimientos } from "./calc.js";
 import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
@@ -201,6 +201,11 @@ export const state = {
   atajosAbiertos: false,
   tx: [],
   txPapelera: [], // movimientos eliminados (papelera): se pueden restaurar o borrar definitivo
+  // Plata que pasó de una cuenta a otra (Hallazgo #63): { id, fecha, de, a,
+  // monto, nota, anulada, conciliadoDe, conciliadoA }. NO son movimientos: no
+  // están en `tx`, así que ningún reporte las cuenta como ingreso ni gasto, y la
+  // Caja no se mueve (ver el bloque "cuentas" de core/calc.js).
+  transferencias: [],
   pedidos: [],
   pedidosPapelera: [], // pedidos eliminados: se pueden restaurar o borrar definitivo
   clientes: [],
@@ -266,7 +271,9 @@ export const state = {
   // cuatro campos vacíos ahí siempre.
   // `servicios`: [{nombre, monto}] — igual que en formNominaPago, solo se
   // ofrece para tipo "gasto"/"nomina" (ver renderAsignarServicios).
-  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] },
+  // `cuenta`: id de la cuenta elegida; vacío = la predeterminada o la primera
+  // (ver cuentaSugerida en core/calc.js).
+  formTx: { tipo: "ingreso", concepto: "", monto: "", contraparte: "", fecha: todayStr(), cuenta: "", pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] },
   // Borrador de "Compras conjuntas" (ver modules/finanzas.js): qué pedidos se
   // eligieron para comprar juntos, y por cada insumo compartido (clave =
   // misma de calcListaCompras) lo que se lleva escrito antes de pulsar
@@ -365,7 +372,12 @@ export const state = {
   abonoEditando: "", // id del abono de un pedido actualmente en modo edición (o "")
   abonosProcesando: [], // ids de pedido con un "add-abono" en curso (comprobante leyéndose) — evita registrar el mismo abono dos veces con un doble clic
   reembolsoAbierto: "", // id del pedido con el mini-formulario de reembolso abierto (o "")
-  formReembolso: { monto: "", fecha: "", motivo: "" },
+  formReembolso: { monto: "", fecha: "", motivo: "", cuenta: "" },
+  // Pestaña "Cuentas" de Finanzas (Hallazgo #63): transferencia entre cuentas y
+  // conciliación contra el extracto. Puramente visual: lo que se escribe acá
+  // solo cambia nada hasta que se pulsa el botón de la acción — nunca se persiste.
+  formTransferencia: { de: "", a: "", monto: "", fecha: "", nota: "" },
+  formConciliacion: { cuenta: "", fecha: "", saldo: "", ver: "pendientes" }, // ver: "pendientes" | "todos"
   // Borrador del abono. Antes vivía SOLO en el DOM (se leía con data-role al
   // pulsar "Registrar"), así que cualquier re-render en medio —un filtro que
   // se dispara, otra pestaña que guarda— borraba el monto ya tecleado y
@@ -374,7 +386,9 @@ export const state = {
   // `pedidoId` acota el borrador al pedido que lo está escribiendo: pueden
   // estar abiertos varios paneles a la vez, y un borrador global hacía que lo
   // tecleado en un pedido apareciera dentro del formulario de otro.
-  formAbono: { pedidoId: "", monto: "", fecha: "", metodo: "efectivo" },
+  // `metodo` es el id de la cuenta donde entró el abono (Hallazgo #63); vacío =
+  // la primera cuenta de la lista (ver renderAbonoForm).
+  formAbono: { pedidoId: "", monto: "", fecha: "", metodo: "" },
   refImagenSubiendo: {}, // { [refId]: true } mientras una imagen de referencia se sube a Drive — nunca se persiste
   plantillaImagenSubiendo: {}, // { [plantillaId]: true } — mismo patrón, para la foto de una plantilla de prenda
   imagenPreview: "", // URL de la foto actualmente abierta en grande (overlay de previsualización), o "" — nunca se persiste
@@ -384,6 +398,7 @@ export const state = {
   pdfPreview: null,
   finanzasVista: "nuevo", // "nuevo" | "historial" — pestañas superiores de Finanzas, mismo patrón que Cotizaciones
   filtroTx: "todos",
+  filtroTxCuenta: "todas", // "todas" o el id de una cuenta (Hallazgo #63)
   filtroPedidos: "todos",
   filtroPedidosSoloSaldo: false,
   filtroPedidosVista: "activos", // "activos" | "papelera"
@@ -972,6 +987,7 @@ export async function loadAll() {
     configNombreLegacy: KEYS.configNombreLegacy,
     tx: KEYS.tx,
     txPapelera: KEYS.txPapelera,
+    transferencias: KEYS.transferencias,
     pedidos: KEYS.pedidos,
     pedidosPapelera: KEYS.pedidosPapelera,
     clientes: KEYS.clientes,
@@ -1078,6 +1094,7 @@ export async function loadAll() {
 
     if (datos.tx) state.tx = datos.tx;
     if (datos.txPapelera) state.txPapelera = datos.txPapelera;
+    if (datos.transferencias) state.transferencias = datos.transferencias;
     if (datos.pedidos) state.pedidos = datos.pedidos;
     if (datos.pedidosPapelera) state.pedidosPapelera = datos.pedidosPapelera;
     if (datos.clientes) state.clientes = datos.clientes;
@@ -1152,6 +1169,14 @@ export async function loadAll() {
         if (parsed !== undefined) state[key] = parsed;
       });
     }));
+    // Cuentas (Hallazgo #63): todo movimiento sin cuenta —los de antes de que
+    // existieran, venga de la hoja, del espejo local o del blob viejo de "kv"—
+    // queda en "Sin asignar". Solo en memoria, a propósito: no escribe nada ni
+    // toca monto/tipo/fecha (la Caja y los reportes quedan idénticos); la
+    // columna se llena en la Sheet con el próximo guardado normal de "tx".
+    state.tx = migrarCuentasMovimientos(state.tx).tx;
+    state.txPapelera = migrarCuentasMovimientos(state.txPapelera).tx;
+
     if (Object.keys(tablaFallo).length) {
       state.avisoTablaSheetFallo = {
         claves: Object.keys(tablaFallo),
@@ -1368,6 +1393,7 @@ export var ETIQUETA_CLAVE = {
   pendientes: "notas", deudas: "deudas", deudasHistorial: "historial de deudas",
   config: "configuración del taller", ui: "preferencias de interfaz",
   txPapelera: "papelera de movimientos", pedidosPapelera: "papelera de pedidos",
+  transferencias: "transferencias entre cuentas",
   catalogoPropuestas: "cambios propuestos del catálogo", productoPropuestas: "cambios propuestos de productos",
   // No es una clave que se guarde en la Sheet (ver CLAVES_PERSISTIBLES más
   // abajo) — es el formulario de "Nuevo pedido rápido" a medio llenar. Se
@@ -1781,6 +1807,12 @@ configurarGuardado({ escribir: escribirClave, alCambiar: notify });
 
 // key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...).
 export async function persist(key) {
+  // Cuentas (Hallazgo #63): un movimiento que la app registra sola (nómina,
+  // gasto fijo, cuota de deuda, comisión, compra...) nace sin cuenta; aquí, el
+  // único punto por el que todos pasan antes de guardarse, se le pone la
+  // predeterminada (o "Sin asignar"). Va ANTES del chequeo de storage: es una
+  // regla del dato, no de si hay dónde escribirlo.
+  if (key === "tx") asegurarCuentaEnMovimientos(state.tx);
   if (!STORAGE_OK) return;
   var session = getSession();
   // Un vendedor puede seguir usando su edición en el momento (ya quedó

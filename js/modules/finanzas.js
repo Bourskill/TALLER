@@ -1,8 +1,9 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
-import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional, desperdicioCompra, esMiembroRecibo, calcListaCompras } from "../core/calc.js";
-import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
+import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional, desperdicioCompra, esMiembroRecibo, calcListaCompras, cuentaDeTx, nombreCuenta, cuentaSugerida, existeCuenta } from "../core/calc.js";
+import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio, renderCuentaSelectOptions } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
+import { renderCuentas } from "./cuentas.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -24,6 +25,8 @@ export function render() {
     html += state.filtroTxVista === "papelera" ? renderPapelera() : renderHistorial();
   } else if (vista === "conjuntas") {
     html += renderRecibosCompra();
+  } else if (vista === "cuentas") {
+    html += renderCuentas();
   } else {
     html += renderFormMovimiento();
   }
@@ -36,6 +39,7 @@ function renderTabsFinanzas(vista) {
     '<button class="gsheet-tab ' + (vista === "nuevo" ? "active" : "") + '" data-action="finanzas-vista" data-val="nuevo">+ Registrar movimiento</button>' +
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="finanzas-vista" data-val="historial">Historial' + (state.tx.length ? " (" + state.tx.length + ")" : "") + "</button>" +
     '<button class="gsheet-tab ' + (vista === "conjuntas" ? "active" : "") + '" data-action="finanzas-vista" data-val="conjuntas">🧾 Recibos de compra</button>' +
+    '<button class="gsheet-tab ' + (vista === "cuentas" ? "active" : "") + '" data-action="finanzas-vista" data-val="cuentas">🏦 Cuentas</button>' +
     "</div>";
 }
 
@@ -467,6 +471,9 @@ function renderFormMovimiento() {
     '<div class="field"><label>Concepto</label>' +
     '<input data-form="tx" data-field="concepto" value="' + esc(f.concepto) + '" placeholder="Ej. Tela para el pedido de San Jorge" /></div>' +
     '<div class="field"><label>Fecha</label><input type="date" data-form="tx" data-field="fecha" value="' + esc(f.fecha) + '" /></div>' +
+    '<div class="field"><label>Cuenta' +
+    renderHelp("En qué cuenta entró (o de cuál salió) esta plata: efectivo, banco, Nequi... Las cuentas se editan en Configuración; Finanzas → Cuentas muestra cuánto hay en cada una.") +
+    '</label><select data-form="tx" data-field="cuenta">' + renderCuentaSelectOptions(cuentaSugerida(f.cuenta)) + "</select></div>" +
     "</div>";
 
   // ---- 2. Con quién y a qué se asocia ----
@@ -549,6 +556,12 @@ function renderHistorial() {
     Object.keys(PERIODOS_TX).map(function (k) { return '<option value="' + k + '" ' + (state.filtroTxPeriodo === k ? "selected" : "") + '>' + PERIODOS_TX[k] + "</option>"; }).join("") +
     "</select>" +
     renderHelp("Filtra los movimientos que caen dentro del periodo actual (según el periodo de pago configurado), igual que el cálculo de nómina pendiente.") +
+    // Una sola cuenta a la vez (solo sus movimientos, sin las transferencias,
+    // que no son movimientos: para el libro completo de una cuenta, ver
+    // Finanzas → Cuentas).
+    '<select class="mini-input" style="width:auto;" aria-label="Filtrar por cuenta" data-action-change="set-tx-cuenta">' +
+    '<option value="todas">Todas las cuentas</option>' + renderCuentaSelectOptions(state.filtroTxCuenta && state.filtroTxCuenta !== "todas" ? state.filtroTxCuenta : "") +
+    "</select>" +
     '<button class="btn ghost small" style="margin-left:auto;" data-action="ver-papelera">🗑 Papelera' + (state.txPapelera.length ? " (" + state.txPapelera.length + ")" : "") + "</button>" +
     "</div>";
 
@@ -630,6 +643,10 @@ function filtrarTx() {
     : state.filtroTx === "huerfanos" ? state.tx.filter(function (t) { return !!origenSistemaHuerfano(t); })
       : state.tx.filter(function (t) { return t.tipo === state.filtroTx; });
 
+  if (state.filtroTxCuenta && state.filtroTxCuenta !== "todas") {
+    list = list.filter(function (t) { return cuentaDeTx(t) === state.filtroTxCuenta; });
+  }
+
   var periodo = state.filtroTxPeriodo || "todos";
   if (periodo !== "todos") {
     var miPeriodo = periodoKey(todayStr(), periodo);
@@ -688,6 +705,8 @@ function renderFila(t) {
   return '<div class="tx-row">' +
     "<span class=\"mobile-th\">Fecha</span><span style=\"font-family:'IBM Plex Mono',monospace;font-size:12px;\">" + esc(t.fecha) + "</span>" +
     '<span class="mobile-th">Concepto</span><span>' + esc(t.concepto) +
+    ' <span class="tag" style="background:var(--surface-3);" title="Cuenta donde entró o salió la plata">🏦 ' + esc(nombreCuenta(cuentaDeTx(t))) + "</span>" +
+    (t.conciliadoEn ? ' <span class="tag" style="background:var(--success-soft);color:var(--success-ink);" title="Conciliado con el extracto el ' + esc(t.conciliadoEn) + '">✓ conciliado</span>' : "") +
     (huerfano ? ' <span class="tag" style="background:var(--warning-soft);color:var(--warning-ink);" title="Se generó desde ' + esc(huerfano.que) + ', pero ese registro ya se eliminó. Este movimiento quedó suelto: revísalo y bórralo si no corresponde. (' + esc(huerfano.campo) + ": " + esc(huerfano.valor) + ')">origen eliminado</span>' : "") +
     (esFilaRecibo(t) ? ' <button class="tag" style="cursor:pointer;border:none;" data-action="ver-recibo" data-recibo-id="' + esc(t.reciboCompraId) + '" title="Parte de un recibo de compra — ver el recibo completo">🧾 Recibo</button>' : "") +
     ((t.serviciosDescuento || []).length
@@ -723,11 +742,16 @@ function renderFila(t) {
 // todo sigue editable como siempre.
 function renderFilaEdicion(t) {
   var origen = origenDeTx(t);
+  // La cuenta SÍ se puede cambiar aunque el movimiento tenga origen: mover un
+  // movimiento de una cuenta a otra no toca su monto ni su tipo (ni la Caja),
+  // solo dice dónde estuvo la plata (Hallazgo #63).
+  var cuentaSelect = '<select class="mini-input" style="width:100%;margin-top:4px;" data-role="edit-cuenta" title="Cuenta" aria-label="Cuenta">' +
+    renderCuentaSelectOptions(cuentaDeTx(t)) + "</select>";
   var tipoCell = '<span class="mobile-th">Tipo</span>' + (origen
-    ? '<span><span class="tag ' + t.tipo + '" title="No editable: vinculado a ' + esc(origen.label) + '">' + TIPOS_TX[t.tipo] + "</span></span>"
+    ? '<span><span class="tag ' + t.tipo + '" title="No editable: vinculado a ' + esc(origen.label) + '">' + TIPOS_TX[t.tipo] + "</span>" + cuentaSelect + "</span>"
     : '<span><select class="mini-input" style="width:100%" data-role="edit-tipo">' +
       Object.keys(TIPOS_TX).map(function (k) { return opt(k, TIPOS_TX[k], t.tipo); }).join("") +
-      "</select></span>");
+      "</select>" + cuentaSelect + "</span>");
   var montoCell = '<span class="mobile-th">Monto</span>' + (origen
     ? '<span class="amount" title="No editable: vinculado a ' + esc(origen.label) + '">' + fmt(t.monto) + "</span>"
     : '<span><input type="number" class="mini-input" style="width:100%" data-role="edit-monto" value="' + esc(t.monto) + '" /></span>');
@@ -787,6 +811,10 @@ export var actions = {
     state.filtroTxPeriodo = el.value;
     notify();
   },
+  "set-tx-cuenta": function (el) {
+    state.filtroTxCuenta = el.value;
+    notify();
+  },
   "ver-papelera": function () {
     state.filtroTxVista = state.filtroTxVista === "papelera" ? "activos" : "papelera";
     notify();
@@ -821,8 +849,10 @@ export var actions = {
     // Todo sale del borrador (state.formTx), no de leer el DOM: es lo que
     // permite que los campos de insumo existan solo cuando la casilla está
     // marcada sin que el guardado dependa de que estén en pantalla.
+    var cuenta = cuentaSugerida(f.cuenta);
     state.tx.unshift({
       id: uid(), tipo: f.tipo, concepto: f.concepto, monto: num(f.monto), contraparte: f.contraparte, fecha: f.fecha,
+      cuenta: cuenta,
       pedidoId: f.pedidoId || "", cotizacionId: f.cotizacionId || "",
       esInsumo: f.esInsumo ? "1" : "",
       insumoNombre: f.esInsumo ? (f.insumoNombre || "") : "",
@@ -831,7 +861,7 @@ export var actions = {
       unidad: f.esInsumo ? (f.unidad || "") : "",
       serviciosDescuento: serviciosDescuento
     });
-    state.formTx = { tipo: f.tipo, concepto: "", monto: "", contraparte: "", fecha: todayStr(), pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] };
+    state.formTx = { tipo: f.tipo, concepto: "", monto: "", contraparte: "", fecha: todayStr(), cuenta: cuenta, pedidoId: "", cotizacionId: "", esInsumo: false, insumoNombre: "", proveedorId: "", cantidad: "", unidad: "", servicios: [] };
     state.finanzasVista = "historial"; // aterriza viendo el movimiento recién creado, no el formulario en blanco
     persist("tx"); notify();
   },
@@ -862,15 +892,24 @@ export var actions = {
     var monto = montoRaw === null ? num(original.monto) : num(montoRaw);
     if (monto <= 0) return;
     var contraparteRaw = g("edit-contraparte");
+    var cuentaRaw = g("edit-cuenta");
     state.tx = state.tx.map(function (t) {
       if (t.id !== id) return t;
-      return Object.assign({}, t, {
+      var editado = Object.assign({}, t, {
         fecha: g("edit-fecha") || t.fecha,
         concepto: concepto,
         contraparte: contraparteRaw === null ? t.contraparte : contraparteRaw,
         tipo: g("edit-tipo") || t.tipo,
-        monto: monto
+        monto: monto,
+        cuenta: cuentaRaw && existeCuenta(cuentaRaw) ? cuentaRaw : cuentaDeTx(t)
       });
+      // Un movimiento ya marcado como conciliado deja de estarlo si cambia
+      // algo con lo que se compara contra el extracto: lo que el banco mostró
+      // era OTRA cosa (otro monto, otra fecha, otra cuenta, otro sentido).
+      if (t.conciliadoEn && (editado.monto !== num(t.monto) || editado.fecha !== t.fecha || editado.cuenta !== cuentaDeTx(t) || editado.tipo !== t.tipo)) {
+        editado.conciliadoEn = "";
+      }
+      return editado;
     });
     state.txEditando = "";
     persist("tx"); notify();

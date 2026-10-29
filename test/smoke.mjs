@@ -5060,7 +5060,8 @@ assert(JSON.stringify(COLUMNAS_MOVIMIENTOS.map(function (c) { return c.key; })) 
   "origenComisionConsignacionId", "origenCompraClave", "origenGastoFijoPeriodo", "origenComisionCotId",
   "origenComisionPedidoId", "origenGastoId", "origenDeudaIngresoId", "origenColchonId",
   "esInsumo", "proveedorId", "insumoNombre", "cantidad", "unidad", "serviciosDescuento", "empleadoId",
-  "origenCompraExcedenteClave", "reciboCompraId", "reciboCompraRol", "reciboCompraLinea"
+  "origenCompraExcedenteClave", "reciboCompraId", "reciboCompraRol", "reciboCompraLinea",
+  "cuenta", "conciliadoEn"
 ]), "el orden de columnas de tablaMovimientos no cambió: una columna nueva se agregó al final, nunca insertada en medio (ver el incidente del 2026-09-20 arriba)");
 
 // --- Hallazgo #51 (2026-09-23): origenCompraExcedenteClave nunca fue

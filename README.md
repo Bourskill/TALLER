@@ -104,7 +104,8 @@ Piezas compartidas que ya existen y **hay que usar** en vez de escribir otra:
 | `renderHelp()` | `core/components.js` | Párrafos explicativos sueltos en la UI |
 | `etapasDe()` | `core/calc.js` | Siete resoluciones distintas de "cuáles son las etapas de esto" |
 | `.chip` + `.chip-n`/`.chip-aviso`/`.chip-accion` | `forms.css` | Chips de filtro con contador, antes cada pestaña se lo inventaba |
-| `.tx-row` + modificador | `tables.css` | Filas de tabla; una pestaña que necesite otra jerarquía agrega un modificador (ej. `.tx-row.insumo`), no una fila nueva |
+| `.tx-row` + modificador | `tables.css` | Filas de tabla; una pestaña que necesite otra jerarquía agrega un modificador (ej. `.tx-row.insumo`, `.tx-row.cuenta-fila`), no una fila nueva |
+| `renderCuentaSelectOptions()` | `core/components.js` | Un selector de cuentas distinto por pantalla (movimiento, abono, reembolso, edición, transferencia, conciliación). El saldo de cada cuenta sale de `calcSaldosPorCuenta()`, nunca de una suma propia |
 
 ## Regla: la facilidad manda (UI/UX)
 
@@ -273,6 +274,40 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — octubre 2026 (centésimo undécima ronda: cuentas y conciliación)
+
+- **Cuentas** (Efectivo, Banco y Nequi por defecto; se editan en **Configuración →
+  Cuentas**): cada movimiento de Finanzas dice en qué cuenta entró o salió la plata.
+  Los **abonos** (el inicial de un pedido rápido y los que se registran después)
+  preguntan **en qué cuenta entró**; el movimiento nace ahí. Lo mismo el reembolso
+  (de cuál sale) y el movimiento a mano.
+- **Saldo por cuenta** en **Resumen** (bajo "Caja actual") y en la nueva pestaña
+  **Finanzas → 🏦 Cuentas**. **La suma de las cuentas es siempre la Caja actual**: el
+  signo de un movimiento sale de una sola función (`montoConSigno`) que usan los
+  dos; la pantalla dice "✓ coinciden" (o avisa en rojo).
+- **Transferencia entre cuentas** (ej. consignar efectivo al banco): mueve plata de
+  una a otra **sin cambiar la Caja y sin contar como ingreso ni gasto** en ningún
+  reporte (no es un movimiento: vive en `state.transferencias`). Se anula con un
+  clic y se puede restaurar.
+- **Conciliación**: el dueño escribe el saldo de su extracto para una cuenta y una
+  fecha; la app muestra la **diferencia** con el saldo calculado y deja marcar los
+  movimientos que ve en el extracto para encontrar los que faltan. Se puede guardar
+  la última conciliación de cada cuenta.
+- **Los movimientos que ya existían pasan a «Sin asignar»** sin cambiar la Caja ni
+  ningún reporte. Se reparten con una transferencia desde «Sin asignar» (botón
+  «Repartir ahora»). Los pagos que la app registra sola (nómina, gastos fijos,
+  deudas, comisiones, compras) caen en la **cuenta predeterminada** que se elige en
+  Configuración; mientras no haya, en «Sin asignar» (la app no adivina).
+- Cambiar la cuenta de un movimiento está permitido aunque tenga origen (monto y
+  tipo siguen de solo lectura). El Historial se puede filtrar por cuenta.
+- Dos columnas nuevas **al final** de la hoja "Movimientos" (`cuenta`,
+  `conciliado_en`): no mueven nada de lo ya guardado. El PDF de recibo muestra el
+  nombre de la cuenta como método de pago.
+- Pieza compartida nueva: `renderCuentaSelectOptions()` (`core/components.js`), el
+  selector de cuentas de toda la app.
+- Ver CONTABILIDAD.md, Hallazgo #63. Prueba nueva: `node test/cuentas.mjs` (no
+  necesita jsdom).
 
 ## Registro de cambios — octubre 2026 (centésima décima ronda: el IVA y la comisión en pesos enteros)
 
