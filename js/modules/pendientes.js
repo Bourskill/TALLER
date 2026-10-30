@@ -13,7 +13,7 @@ import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
   calcDeudaValorCuota, calcDeudaSaldoPendiente, calcNominaPagadaEmpleado, calcDetalleComisionesVendedor,
   calcSalarioPorPeriodo, salarioBaseDe, rangoPeriodoActual, periodoDeEmpleado, diasPagoDeEmpleado,
-  calcServiciosDisponibles, validarServiciosAsignados, periodoKey
+  calcServiciosDisponibles, validarServiciosAsignados, periodoKey, redondearPesos
 } from "../core/calc.js";
 import { PERIODOS_PAGO, DIAS_SEMANA } from "../core/constants.js";
 import { renderHelp, renderAsignarServicios, renderHistorialServicio } from "../core/components.js";
@@ -398,7 +398,9 @@ function renderFormNominaPago(e, periodoPago, rango) {
   var fp = state.formNominaPago;
   var bono = num(fp.bono), descuento = num(fp.descuento);
   var base = calcSalarioPorPeriodo(e, periodoPago);
-  var total = Math.max(0, base + bono - descuento);
+  // En pesos enteros (Hallazgo #62): es el MISMO cálculo de "pagar-nomina", así
+  // que lo que se muestra es exactamente lo que se paga.
+  var total = redondearPesos(Math.max(0, base + bono - descuento));
   return '<div style="background:var(--surface-2);border-radius:10px;padding:12px 14px;margin:2px 0 10px;">' +
     '<div class="section-sub" style="margin:0 0 10px;">Pago de <b style="color:var(--ink);">' + esc(e.nombre) + "</b> por el periodo <b style=\"color:var(--ink);\">" + esc(rangoTexto(rango)) + "</b></div>" +
     '<div class="form-grid">' +
@@ -654,7 +656,7 @@ export var actions = {
     // El salario del PERIODO, no el mensual crudo: si el taller paga semanal,
     // esto cobra la semana. Antes tomaba e.salario tal cual (siempre mensual)
     // y exigía el mes completo aunque el pago fuera semanal.
-    var monto = Math.max(0, calcSalarioPorPeriodo(e, periodoPago) + bono - descuento);
+    var monto = redondearPesos(Math.max(0, calcSalarioPorPeriodo(e, periodoPago) + bono - descuento)); // pesos enteros (Hallazgo #62)
     if (monto <= 0) return;
     // Ver validarServiciosAsignados en core/calc.js: ningún servicio puede
     // quedar negativo, lo que no se cubra sale de Ganancia sin más.

@@ -3854,15 +3854,30 @@ nada en "Por cobrar", ni deudor ni saldo a favor), las comisiones (incluida la d
 un total con descuento) y que los PDF impriman el mismo IVA y el mismo "PAGADO
 COMPLETO" que la app. La sonda de reproducción dio saldo 0,27 antes y 0 después.
 
-**Pendiente, a propósito (decisiones de negocio, no solo de código):** otras
-fuentes de montos con fracción que NO se tocaron —
-- **Nómina semanal/quincenal:** `calcSalarioPorPeriodo` divide el salario
-  mensual entre 4 o 2; la semanal usa "4 semanas por mes" (aproximación) y puede
-  dar centavos. Hay que decidir cómo se redondea un pago de nómina.
-- **Cuotas de deuda:** `calcDeudaValorCuota` = monto / cuotas ($1.000.000 en 3 =
-  $333.333,33). La última cuota paga el saldo restante, así que redondear cada
-  cuota a pesos cuadraría solo — pero toca lo que ya se pagó de deudas en curso.
-- **Gastos fijos prorrateados por periodo.**
+**Segunda parte (2026-10-30, a pedido del dueño): nómina y cuotas de deuda.** Eran
+lo último que dejaba centavos. Se redondean al peso más cercano con la misma
+`redondearPesos`:
+- **Nómina:** `calcSalarioPorPeriodo` redondea cuando CONVIERTE de base (un salario
+  mensual que se paga por semana es entre 4: $1.750.333 / 4 = $437.583, no
+  $437.583,25). En su propia base el salario se paga tal cual. El total del pago
+  (salario + bono − descuento) se redondea en un solo cálculo, el mismo que muestra
+  el formulario y el que registra `pagar-nomina`.
+- **Nómina pendiente:** un faltante de **menos de un peso es cero**. Sin esto, un
+  pago anterior con centavos dejaba un "pendiente de $0,75" que no se podía saldar.
+- **Cuotas de deuda:** `calcDeudaValorCuota` = `redondearPesos(monto / cuotas)`
+  ($1.000.000 en 3 = $333.333). La **última cuota paga el saldo** (así ya lo hacía
+  `pagar-deuda`): $333.333 + $333.333 + $333.334 = $1.000.000 exacto. Con todas las
+  cuotas pagadas el saldo es 0 (sin esto, lo redondeado hacia abajo en las primeras
+  dejaba $1 de saldo fantasma).
+- **Gastos fijos:** se corrigió un error de esta nota: NO dejan centavos. Se pagan por
+  el monto que el dueño escribió; solo la "mensualización" de los reportes los
+  multiplica por un factor entero.
+- Datos ya guardados: ningún pago ni cuota anterior se reescribe. El saldo de una
+  deuda en curso puede moverse unos pesos (se calcula por número de cuotas pagadas,
+  no por los movimientos).
+- Verificado: sección 6 de `test/descuentos.mjs` (26 casos): conversiones de base,
+  40 salarios x 9 combinaciones sin centavos, el faltante menor a un peso, y que las
+  cuotas sumen EXACTAMENTE el monto (incluido el caso que sube: $200 en 3).
 
 ### 🟡 Hallazgo #63 — cuentas (efectivo, banco, Nequi...) y conciliación contra el extracto. ✅ IMPLEMENTADO (pedido del dueño)
 

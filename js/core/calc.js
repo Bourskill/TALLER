@@ -1723,7 +1723,11 @@ export function calcNominaPendienteEmpleado(e) {
   var periodo = periodoDeEmpleado(e);
   var aPagar = calcSalarioPorPeriodo(e, periodo);
   var pagado = calcNominaPagadaEmpleado(e, periodo);
-  return Math.max(0, aPagar - pagado);
+  var falta = aPagar - pagado;
+  // Pesos enteros (Hallazgo #62): un faltante de menos de UN peso no se puede
+  // pagar. Sin esto, un pago anterior con centavos (de antes del redondeo)
+  // dejaba un "pendiente de $0,75" que no se podía saldar.
+  return falta >= 1 ? redondearPesos(falta) : 0;
 }
 export function calcNominaPendiente() {
   return (state.config.nomina || []).reduce(function (a, e) { return a + calcNominaPendienteEmpleado(e); }, 0);
@@ -1753,7 +1757,10 @@ export function calcSalarioMensual(e) {
 // definido en esa misma base, es el número tal cual, sin conversión.
 export function calcSalarioPorPeriodo(e, periodoPago) {
   if (salarioBaseDe(e) === periodoPago) return num(e.salario);
-  return calcSalarioMensual(e) / factorPeriodo(periodoPago);
+  // Al convertir de una base a otra (ej. un salario mensual que se paga por
+  // semana: entre 4) el resultado puede traer centavos; el pago es en pesos
+  // enteros (Hallazgo #62), al peso más cercano.
+  return redondearPesos(calcSalarioMensual(e) / factorPeriodo(periodoPago));
 }
 // Rango de fechas del periodo de pago que está corriendo AHORA — lo que
 // contesta "¿este pago qué días cubre?". Usa los mismos cortes que
@@ -2194,9 +2201,13 @@ export function calcHistorialCliente(clienteId) {
 // ---------- deudas del taller ----------
 // Valor de cada cuota (monto total repartido entre el número de cuotas, 1 si
 // no se definieron varias).
+//
+// En pesos enteros (Hallazgo #62): $1.000.000 en 3 cuotas es $333.333 las dos
+// primeras y la ÚLTIMA paga lo que reste ($333.334), porque "pagar-deuda" paga
+// el saldo (no la cuota) en la última. La suma siempre da el monto exacto.
 export function calcDeudaValorCuota(d) {
   var cuotas = num(d.cuotas) || 1;
-  return num(d.monto) / cuotas;
+  return redondearPesos(num(d.monto) / cuotas);
 }
 // Saldo restante de una deuda: si se han ido pagando cuotas una por una
 // (cuotasPagadas), descuenta esas del monto total en vez de tratarla como
@@ -2205,8 +2216,12 @@ export function calcDeudaValorCuota(d) {
 export function calcDeudaSaldoPendiente(d) {
   var cuotas = num(d.cuotas) || 1;
   var pagadas = Math.min(num(d.cuotasPagadas) || 0, cuotas);
+  // Con todas las cuotas pagadas no queda nada: sin esto, $1.000.000 en 3 cuotas
+  // ($333.333 + $333.333 + la última por el saldo) dejaría $1 de "saldo" de lo
+  // que se redondeó hacia abajo en las dos primeras.
+  if (pagadas >= cuotas) return 0;
   var valorCuota = calcDeudaValorCuota(d);
-  return Math.max(0, num(d.monto) - pagadas * valorCuota);
+  return Math.max(0, redondearPesos(num(d.monto) - pagadas * valorCuota));
 }
 // state.deudas ya solo contiene deudas AÚN pendientes: en cuanto una queda
 // pagada por completo se saca de aquí y se mueve entera a

@@ -277,6 +277,21 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — octubre 2026 (centésima decimocuarta ronda: la nómina y las cuotas de deuda en pesos enteros)
+
+- **Nómina:** un salario que se convierte de base (ej. mensual que se paga por semana,
+  entre 4) se paga al **peso más cercano**: $1.750.333 / 4 = $437.583, no $437.583,25.
+  En su propia base el salario se paga tal cual. El total del pago (salario + bono −
+  descuento) se calcula una sola vez y es el mismo que muestra el formulario.
+- **Nómina pendiente:** un faltante de **menos de un peso cuenta como cero**: ya no
+  queda un "pendiente de $0,75" que no se puede pagar.
+- **Cuotas de deuda:** $1.000.000 en 3 cuotas es $333.333, $333.333 y la **última
+  paga el saldo** ($333.334): suman exacto. Con todas pagadas no queda ni un peso.
+- Con esto **ningún pago que la app calcula deja centavos**. No se reescribe ningún
+  pago anterior; el saldo de una deuda en curso puede moverse unos pesos.
+- Ver CONTABILIDAD.md, Hallazgo #62 (segunda parte). Pruebas: sección 6 de
+  `node test/descuentos.mjs`.
+
 ## Registro de cambios — octubre 2026 (centésima decimotercera ronda: bitácora de cambios y cierre de mes)
 
 - **📒 Bitácora (Finanzas, solo admin, solo lectura):** cada cambio de dinero queda
@@ -379,8 +394,8 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
 - **Una sola fórmula del IVA** (`calcIvaDeBase`): la cuenta de cobro y la
   cotización en PDF ya no la calculan por su cuenta.
 - No cambia ningún dato guardado: el IVA y el saldo se calculan al leer.
-- Sin tocar (decisión de negocio pendiente): nómina semanal/quincenal, cuotas de
-  deuda y gastos fijos prorrateados. Ver CONTABILIDAD.md, Hallazgo #62.
+- La nómina y las cuotas de deuda se cerraron después (ver la ronda 114, más
+  arriba). Los gastos fijos no dejan centavos. Ver CONTABILIDAD.md, Hallazgo #62.
 
 ## Registro de cambios — octubre 2026 (centésimo novena ronda: descuentos por ítem y a toda la orden)
 

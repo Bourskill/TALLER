@@ -585,6 +585,65 @@ ok(hay("$114.000"), "el TOTAL es $114.000");
   state.pedidos = [];
 }
 
+// ======================= 6. Nómina y cuotas de deuda en pesos enteros (Hallazgo #62) =======================
+// Lo último que dejaba centavos: un salario que se convierte de base (mensual →
+// semanal, entre 4) y la cuota de una deuda (monto / cuotas).
+{
+  const { todayStr } = await import(R + "core/utils.js");
+  console.log("== nómina: un salario convertido de base se paga en pesos enteros");
+  const emp = (salario, base) => ({ id: "e1", nombre: "Ana", salario, salarioPeriodo: base });
+  igual(calc.calcSalarioPorPeriodo(emp(1750333, "mensual"), "semanal"), 437583, "1.750.333 mensual / 4 = 437.583 (no 437.583,25)");
+  igual(calc.calcSalarioPorPeriodo(emp(1750335, "mensual"), "semanal"), 437584, "1.750.335 mensual / 4 = 437.584 (437.583,75 sube)");
+  igual(calc.calcSalarioPorPeriodo(emp(1000001, "mensual"), "quincenal"), 500001, "1.000.001 / 2 = 500.001 (el medio peso sube)");
+  igual(calc.calcSalarioPorPeriodo(emp(1000000, "mensual"), "mensual"), 1000000, "en su propia base el salario se paga tal cual");
+  igual(calc.calcSalarioPorPeriodo(emp(1000000, "mensual"), "semanal"), 250000, "los salarios redondos dan lo mismo de siempre");
+  igual(calc.calcSalarioPorPeriodo(emp(437583, "semanal"), "mensual"), 1750332, "de semanal a mensual (x4) sigue siendo entero");
+  let todosEnteros = true;
+  for (let s = 1000001; s <= 1000040; s++) {
+    ["semanal", "quincenal", "mensual"].forEach(b => ["semanal", "quincenal", "mensual"].forEach(pp => {
+      if (!Number.isInteger(calc.calcSalarioPorPeriodo(emp(s, b), pp))) todosEnteros = false;
+    }));
+  }
+  ok(todosEnteros, "ninguna combinación de salario/base/periodo (40 salarios x 9) deja centavos");
+
+  console.log("== nómina pendiente: ni centavos ni un faltante menor a un peso");
+  const empPend = { id: "e1", nombre: "Ana", salario: 1750333, salarioPeriodo: "mensual", periodo: "semanal" };
+  const pagoNomina = (monto) => ({ id: "n1", tipo: "nomina", concepto: "Nómina", monto, fecha: todayStr(), empleadoId: "e1", contraparte: "Ana" });
+  const txPrevio = state.tx, nominaPrevia = state.config.nomina;
+  state.config.nomina = [empPend];
+  state.tx = [];
+  igual(calc.calcNominaPendienteEmpleado(empPend), 437583, "sin pagos, lo pendiente es el pago entero de la semana");
+  state.tx = [pagoNomina(437583)];
+  igual(calc.calcNominaPendienteEmpleado(empPend), 0, "pagado el monto redondeado, no queda nada");
+  state.tx = [pagoNomina(437583.25)];
+  igual(calc.calcNominaPendienteEmpleado(empPend), 0, "un pago ANTERIOR con centavos que pasó el monto tampoco deja pendiente");
+  state.tx = [pagoNomina(437582.4)];
+  igual(calc.calcNominaPendienteEmpleado(empPend), 0, "ni uno que quedó a menos de un peso (un faltante de 60 centavos no se puede pagar)");
+  state.tx = [pagoNomina(437580)];
+  igual(calc.calcNominaPendienteEmpleado(empPend), 3, "pero un faltante real de $3 sí cuenta");
+  igual(calc.calcNominaPendiente(), 3, "y el total de nómina pendiente lo suma");
+  state.tx = txPrevio; state.config.nomina = nominaPrevia;
+
+  console.log("== cuotas de deuda: en pesos enteros y la última paga el saldo");
+  const deuda = (monto, cuotas, pagadas) => ({ id: "d", concepto: "x", monto, cuotas, cuotasPagadas: pagadas || 0 });
+  igual(calc.calcDeudaValorCuota(deuda(1000000, 3)), 333333, "1.000.000 en 3 cuotas: cada cuota es $333.333 (no 333.333,33)");
+  igual(calc.calcDeudaSaldoPendiente(deuda(1000000, 3, 0)), 1000000, "sin pagar nada, el saldo es el monto");
+  igual(calc.calcDeudaSaldoPendiente(deuda(1000000, 3, 1)), 666667, "pagada la 1ª, el saldo es 666.667");
+  igual(calc.calcDeudaSaldoPendiente(deuda(1000000, 3, 2)), 333334, "pagadas dos, la ÚLTIMA cuota es el saldo: 333.334");
+  igual(333333 + 333333 + calc.calcDeudaSaldoPendiente(deuda(1000000, 3, 2)), 1000000, "las tres cuotas suman EXACTAMENTE el monto");
+  igual(calc.calcDeudaSaldoPendiente(deuda(1000000, 3, 3)), 0, "con todas pagadas no queda ni un peso (el redondeo de las primeras no deja saldo)");
+  igual(calc.calcDeudaValorCuota(deuda(200, 3)), 67, "200 en 3: cuota 67 (66,67 sube)");
+  igual(67 + 67 + calc.calcDeudaSaldoPendiente(deuda(200, 3, 2)), 200, "y aun subiendo, la última (66) cuadra el total en 200");
+  igual(calc.calcDeudaValorCuota(deuda(600000, 6)), 100000, "una deuda que divide exacto da lo mismo de siempre");
+  igual(calc.calcDeudaSaldoPendiente(deuda(600000, 6, 4)), 200000, "y su saldo también");
+  igual(calc.calcDeudaValorCuota(deuda(500000.4, 1)), 500000, "una deuda de una sola cuota con centavos se paga en pesos enteros");
+  igual(calc.calcDeudaSaldoPendiente(deuda(500000.4, 1, 0)), 500000, "y su saldo igual");
+  const deudasPrevias = state.deudas;
+  state.deudas = [deuda(1000000, 3, 0), deuda(200, 3, 0)];
+  igual(calc.calcDeudasPendientes(), 333333 + 67, "«por pagar» suma las próximas cuotas, enteras");
+  state.deudas = deudasPrevias;
+}
+
 console.log("");
 console.log(fallos ? "X " + fallos + " de " + pruebas + " pruebas FALLARON" : "OK " + pruebas + " pruebas de descuentos y redondeo");
 process.exit(fallos ? 1 : 0);
