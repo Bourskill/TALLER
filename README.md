@@ -17,6 +17,11 @@ financieras de la app (saldo, IVA, abonos, servicios, comisiones, por
 pagar) y los hallazgos de la auditoría de septiembre 2026, para comparar
 en vez de adivinar.
 
+**¿Retomas el trabajo en otra sesión?** Lee primero
+[CONTINUIDAD.md](CONTINUIDAD.md): dónde quedó todo, qué sigue y en qué orden,
+las decisiones del dueño que no hay que volver a preguntar y qué NO está
+comprobado todavía.
+
 ## Pruebas automáticas
 
 Hay cinco pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
