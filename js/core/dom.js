@@ -24,6 +24,8 @@ import { actualizarIconoApp } from "./appIcon.js";
 import * as resumen from "../modules/resumen.js";
 import * as finanzas from "../modules/finanzas.js";
 import * as cuentas from "../modules/cuentas.js";
+import * as cierres from "../modules/cierres.js";
+import * as bitacora from "../modules/bitacora.js";
 import * as pedidos from "../modules/pedidos.js";
 import * as cotizaciones from "../modules/cotizaciones.js";
 import * as catalogo from "../modules/catalogo.js";
@@ -478,7 +480,7 @@ var coreActions = {
 var actionRegistry = Object.assign(
   {},
   coreActions, atajosActions,
-  resumen.actions, finanzas.actions, cuentas.actions, pedidos.actions, cotizaciones.actions,
+  resumen.actions, finanzas.actions, cuentas.actions, cierres.actions, bitacora.actions, pedidos.actions, cotizaciones.actions,
   catalogo.actions, productos.actions, plantillas.actions,
   clientes.actions, pendientes.actions, notas.actions, config.actions,
   misVentas.actions

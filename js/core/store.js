@@ -11,7 +11,7 @@ import { KEYS, DEFAULT_CONFIG, DEFAULT_UI, APPROVAL_REQUIRED_KEYS } from "./cons
 import { todayStr, uid, num, norm } from "./utils.js";
 import { catalogoInsumosDefault, plantillasPrendasDefault } from "./seed-data.js";
 import { getSession } from "./auth.js";
-import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsquemas.js";
+import { tablaMovimientos, tablaClientes, tablaCotizaciones, tablaCierres } from "./sheetsEsquemas.js";
 // calc.js importa `state` DE ESTE archivo — importar de vuelta acá cierra
 // un ciclo, pero es seguro: loadAll() (más abajo) solo invoca esta función
 // en tiempo de ejecución, mucho después de que los dos módulos ya
@@ -20,6 +20,7 @@ import { tablaMovimientos, tablaClientes, tablaCotizaciones } from "./sheetsEsqu
 import { repararComprasSinSeguimiento, migrarComprasARecibos, migrarCuentasMovimientos, asegurarCuentaEnMovimientos } from "./calc.js";
 // (calc.js a su vez importa `anotarReparacion` de acá, para la reparación que
 // vive allá: mismo ciclo ya aceptado, mismas funciones de uso en ejecución.)
+import { registrarCambios, tomarFoto, tomarFotos, modoAutomatico, CLAVES_BITACORA } from "./bitacora.js";
 import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesionAnterior, olvidarPendientesDeSesionAnterior, marcarBorrador, olvidarBorrador, borradoresDeSesionAnterior } from "./guardado.js";
 
 // Claves ya migradas de la pestaña "kv" (un blob JSON por clave) a su propia
@@ -30,7 +31,8 @@ import { configurarGuardado, guardarClave, espejar, leerEspejo, pendientesDeSesi
 // claves (pedidos, config...) sigue viviendo en "kv" hasta que se migren con
 // el mismo patrón — "pedidos" es la siguiente candidata más probable si algún
 // día le toca el mismo límite.
-var TABLAS_SHEET = { tx: tablaMovimientos, clientes: tablaClientes, cotizaciones: tablaCotizaciones };
+// "cierres" (Hallazgo #65) nace ya con su propia pestaña: una fila por mes cerrado.
+var TABLAS_SHEET = { tx: tablaMovimientos, clientes: tablaClientes, cotizaciones: tablaCotizaciones, cierres: tablaCierres };
 
 export const STORAGE_OK = typeof window.storage !== "undefined" && window.storage !== null;
 
@@ -144,6 +146,9 @@ async function reloadKey(key) {
     if (window.storage.releerFresco) await window.storage.releerFresco();
     if (TABLAS_SHEET[key]) {
       state[key] = await TABLAS_SHEET[key].leer();
+      // Lo que otra pestaña ya guardó (y ya anotó en la bitácora) no es un
+      // cambio de esta: pasa a ser el "antes" del próximo.
+      if (CLAVES_BITACORA.indexOf(key) !== -1) tomarFoto(key, state);
       await fijarRevConocida(key);
       notify();
       return;
@@ -159,6 +164,7 @@ async function reloadKey(key) {
     } else if (valor !== undefined) {
       state[key] = valor;
     }
+    if (CLAVES_BITACORA.indexOf(key) !== -1) tomarFoto(key, state);
     await fijarRevConocida(key);
     notify();
   } catch (e) {
@@ -208,6 +214,11 @@ export const state = {
   // están en `tx`, así que ningún reporte las cuenta como ingreso ni gasto, y la
   // Caja no se mueve (ver el bloque "cuentas" de core/calc.js).
   transferencias: [],
+  // Meses cerrados (Hallazgo #65): { mes: "AAAA-MM", estado: "cerrado" | "reabierto",
+  // cerradoPor, cerradoPorNombre, cerradoEn, resumen, historial }. Mientras un mes
+  // está "cerrado" no se escribe dinero con fecha en él (ver periodoCerrado en
+  // core/calc.js y exigirMesAbierto en core/cierre.js).
+  cierres: [],
   pedidos: [],
   pedidosPapelera: [], // pedidos eliminados: se pueden restaurar o borrar definitivo
   clientes: [],
@@ -485,6 +496,9 @@ export const state = {
   // de búsqueda. Solo pantalla.
   saludFiltro: "todos", // "todos" | "error" | "aviso"
   saludBuscar: "",
+  // Finanzas → Cierre de mes y Bitácora (Hallazgo #65): solo pantalla.
+  cierreBuscar: "", cierreVerTodos: false, cierreReabriendo: "", cierreMotivo: "",
+  bitacoraChip: "todas", bitacoraBuscar: "", bitacoraDesde: "", bitacoraHasta: "", bitacoraUsuario: "", bitacoraAspecto: "", bitacoraMax: 100, bitacoraAbierta: {},
   // Ids de movimientos que Salud de los datos le pide a Finanzas mostrar SOLOS
   // (vacío = sin filtro). Se quita con el chip de Finanzas o al salir de ahí.
   txEnfocados: [],
@@ -1045,6 +1059,7 @@ export async function loadAll() {
     tx: KEYS.tx,
     txPapelera: KEYS.txPapelera,
     transferencias: KEYS.transferencias,
+    cierres: KEYS.cierres,
     pedidos: KEYS.pedidos,
     pedidosPapelera: KEYS.pedidosPapelera,
     clientes: KEYS.clientes,
@@ -1152,6 +1167,7 @@ export async function loadAll() {
     if (datos.tx) state.tx = datos.tx;
     if (datos.txPapelera) state.txPapelera = datos.txPapelera;
     if (datos.transferencias) state.transferencias = datos.transferencias;
+    if (datos.cierres) state.cierres = datos.cierres;
     if (datos.pedidos) state.pedidos = datos.pedidos;
     if (datos.pedidosPapelera) state.pedidosPapelera = datos.pedidosPapelera;
     if (datos.clientes) state.clientes = datos.clientes;
@@ -1275,6 +1291,12 @@ export async function loadAll() {
     // y `tablaFallo` (si su propia pestaña, la fuente real hoy, falló y cayó
     // al espejo). Mirar solo la primera dejaría pasar la migración aunque la
     // cotización de verdad viniera de una copia vieja.
+    // Bitácora de cambios (Hallazgo #65): lo que hay AHORA —ya leído y migrado
+    // en memoria, antes de cualquier reparación— es el punto de partida contra
+    // el que se compara cada guardado. Lo que las reparaciones de aquí abajo
+    // reescriban se anota como «automático», no como el cambio de una persona.
+    tomarFotos(state);
+    modoAutomatico(true);
     // La bitácora de lo corregido en silencio (ver REPARACIONES_AL_CARGAR) se
     // reinicia acá: cada carga cuenta solo lo suyo.
     state.reparacionesAlCargar = [];
@@ -1417,6 +1439,8 @@ export async function loadAll() {
       persist("cotizaciones");
     }
 
+    modoAutomatico(false); // terminaron las reparaciones: lo que se guarde desde aquí lo hace una persona
+
     // Borradores en la nube: solo importan para "cotizaciones"/"formPedido"
     // (las dos únicas áreas en "guardado explícito" / formulario a medio
     // llenar — ver revisarBorradoresSinGuardar). Mejor esfuerzo: si esto
@@ -1442,6 +1466,7 @@ export async function loadAll() {
       mostrarToast("📶 Sin conexión: mostrando la última copia guardada en este dispositivo. Se actualiza sola en cuanto vuelva la señal.");
     }
   } catch (e) {
+    modoAutomatico(false);
     console.error("Error cargando datos", e);
   }
 }
@@ -1457,6 +1482,7 @@ export var ETIQUETA_CLAVE = {
   config: "configuración del taller", ui: "preferencias de interfaz",
   txPapelera: "papelera de movimientos", pedidosPapelera: "papelera de pedidos",
   transferencias: "transferencias entre cuentas",
+  cierres: "cierres de mes",
   catalogoPropuestas: "cambios propuestos del catálogo", productoPropuestas: "cambios propuestos de productos",
   // No es una clave que se guarde en la Sheet (ver CLAVES_PERSISTIBLES más
   // abajo) — es el formulario de "Nuevo pedido rápido" a medio llenar. Se
@@ -1877,6 +1903,14 @@ export async function persist(key) {
   // regla del dato, no de si hay dónde escribirlo.
   if (key === "tx") asegurarCuentaEnMovimientos(state.tx);
   if (!STORAGE_OK) return;
+  // Bitácora de cambios (Hallazgo #65): ESTE es el único punto por el que pasa
+  // toda escritura de dinero, así que aquí —y no en cada acción— se compara el
+  // estado nuevo con el anterior y se anota quién cambió qué. Síncrono a
+  // propósito (antes de cualquier await): así las reparaciones de loadAll, que
+  // llaman a persist() sin esperar, quedan marcadas como automáticas. No
+  // bloquea ni lanza: si la Sheet no responde, la anotación espera en una cola
+  // y el guardado del dinero sigue su camino (ver core/bitacora.js).
+  if (CLAVES_BITACORA.indexOf(key) !== -1) registrarCambios(key, state);
   var session = getSession();
   // Un vendedor puede seguir usando su edición en el momento (ya quedó
   // aplicada en `state[key]` antes de llamar a persist()), pero para las

@@ -218,3 +218,66 @@ export var COLUMNAS_COTIZACIONES = [
   { key: "descuento", header: "descuento_json", json: true, jsonDefault: function () { return null; } }
 ];
 export var tablaCotizaciones = crearTablaSheet("Cotizaciones", COLUMNAS_COTIZACIONES);
+
+// Bitácora de cambios del dinero (Hallazgo #65): UNA FILA por cambio, en su
+// propia pestaña. A propósito NO es una clave más de "kv" (un blob JSON en una
+// sola celda): la bitácora solo crece y el límite de 50.000 caracteres por
+// celda (Hallazgo #42) la habría dejado sin poder guardar en cuestión de meses.
+//
+// Y tampoco se reescribe entera en cada guardado como las demás tablas: se le
+// AGREGAN filas al final (`agregar` en core/sheetsTabular.js). Una bitácora que
+// se reescribe es una bitácora que se puede perder a medias.
+//
+// Columna nueva SIEMPRE al final (Hallazgos #15-#19): esta tabla se lee por
+// posición, igual que Movimientos.
+export var COLUMNAS_BITACORA = [
+  { key: "id", header: "id" },
+  // Fecha y hora ISO (UTC) en que se hizo el cambio.
+  { key: "fecha", header: "fecha_hora" },
+  // Quién: el correo de su sesión de Google, su nombre en la app y su rol. Una
+  // corrección que la app hace sola al cargar lleva origen "automatico" y no el
+  // nombre de ninguna persona.
+  { key: "usuario", header: "usuario" },
+  { key: "nombre", header: "nombre" },
+  { key: "rol", header: "rol" },
+  { key: "origen", header: "origen" }, // persona | automatico | sistema (cierre y reapertura de mes)
+  // A qué: la clave de `state` (tx, pedidos, cotizaciones, transferencias,
+  // config, deudas...) y el id del registro; un abono lleva además el id del
+  // pedido en registro_id y el suyo en sub_id.
+  { key: "clave", header: "clave" },
+  { key: "registroId", header: "registro_id" },
+  { key: "subId", header: "sub_id" },
+  { key: "aspecto", header: "aspecto" }, // movimiento | pedido | abono | reembolso | cotización | transferencia | cuenta | ...
+  // Qué hizo: crear | editar | eliminar | restaurar | cerrar-mes | reabrir-mes | inicio
+  { key: "accion", header: "accion" },
+  { key: "etiqueta", header: "etiqueta" }, // el registro, en palabras: «Abono — Uniformes ($300.000)»
+  { key: "cambios", header: "cambios" },   // lo que cambió, en palabras: «monto: $100.000 → $120.000»
+  // Los campos de dinero antes y después (JSON compacto). Vacío en crear
+  // (antes) y en eliminar (después).
+  { key: "antes", header: "antes_json", json: true, jsonDefault: function () { return null; } },
+  { key: "despues", header: "despues_json", json: true, jsonDefault: function () { return null; } },
+  // Meses (AAAA-MM, separados por coma) a los que pertenece la plata tocada:
+  // el de la fecha del registro antes y después. Es lo que permite saber, sin
+  // abrir el JSON, si un cambio tocó un mes cerrado.
+  { key: "meses", header: "meses" },
+  // "1" si, cuando se hizo el cambio, alguno de esos meses estaba cerrado.
+  { key: "enMesCerrado", header: "en_mes_cerrado" }
+];
+export var tablaBitacora = crearTablaSheet("Bitacora", COLUMNAS_BITACORA);
+
+// Cierres de mes (Hallazgo #65): una fila por mes. Una pestaña propia (y no un
+// blob en "kv") porque crece para siempre, aunque despacio: 12 filas por año.
+export var COLUMNAS_CIERRES = [
+  { key: "mes", header: "mes" }, // AAAA-MM
+  { key: "estado", header: "estado" }, // cerrado | reabierto
+  { key: "cerradoPor", header: "cerrado_por" }, // correo
+  { key: "cerradoPorNombre", header: "cerrado_por_nombre" },
+  { key: "cerradoEn", header: "cerrado_en" }, // fecha y hora ISO del cierre vigente
+  // Lo que el mes valía al cerrarlo: ingresos, gastos, balance, Caja al final
+  // del mes y el saldo de cada cuenta. Es contra lo que «Salud de los datos»
+  // compara el mes más adelante.
+  { key: "resumen", header: "resumen_json", json: true, jsonDefault: function () { return null; } },
+  // Cada cierre y cada reapertura (con su motivo), en orden.
+  { key: "historial", header: "historial_json", json: true, jsonDefault: function () { return []; } }
+];
+export var tablaCierres = crearTablaSheet("Cierres", COLUMNAS_CIERRES);

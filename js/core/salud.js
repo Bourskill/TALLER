@@ -28,8 +28,11 @@ import {
   calcServiciosDisponibles, calcIdsRecibos, calcRecibo, verificarRecibo,
   listaSaldosAFavorClientes, origenSistemaHuerfano, MARCAS_ORIGEN_SISTEMA,
   estadoComisionPedido, estadoComisionCot, esFilaRecibo, pedidoIdDeCotParaTx,
-  calcSaldosPorCuenta, transferenciasVigentes, existeCuenta, nombreCuenta, cuentaDeTx
+  calcSaldosPorCuenta, transferenciasVigentes, existeCuenta, nombreCuenta, cuentaDeTx,
+  calcDiferenciasCierre
 } from "./calc.js";
+import { entradasBitacora, estadoLecturaBitacora, tocadasDespuesDelCierre } from "./bitacora.js";
+import { nombreMes } from "./cierre.js";
 
 // Ruido de coma flotante, no un peso: 0,1 + 0,2 no es 0,3 en un computador.
 var TOL = 0.005;
@@ -666,6 +669,85 @@ export function registrarVerificacion(v) {
   var i = VERIFICACIONES_SALUD.map(function (x) { return x.id; }).indexOf(v.id);
   if (i === -1) VERIFICACIONES_SALUD.push(v); else VERIFICACIONES_SALUD[i] = v;
 }
+
+// ---------------------------------------------------------------------------
+// 12. Meses cerrados (Hallazgo #65)
+// ---------------------------------------------------------------------------
+// Un mes cerrado guardó, al cerrarse, lo que valía: ingresos, gastos, Caja al
+// final del mes, saldo de cada cuenta. Dos formas de que eso deje de ser cierto
+// (y por eso un UNICO hallazgo por mes, no uno por cada forma):
+//  - los números de hoy ya no coinciden con los guardados (alguien cambió un
+//    movimiento, una transferencia o una fecha de ese mes);
+//  - la bitácora dice que algo con fecha en ese mes se tocó DESPUÉS del cierre.
+//    Si lo hizo una persona es un error (la app no debió dejarlo: o se le
+//    olvidó una acción, o se editó la Sheet directo); si lo hizo la app sola al
+//    cargar (una reparación) es un aviso, porque no cambia ningún número.
+// Solo lee: no reabre el mes ni corrige nada. Si la bitácora no se pudo leer,
+// lo dice (aviso) en vez de callar: sin ella no se sabe quién tocó qué.
+var MAX_AFECTADOS_MES = 300;
+function verificarMesesCerrados() {
+  var cerrados = (state.cierres || []).filter(function (c) { return c && c.estado === "cerrado"; });
+  if (!cerrados.length) return [];
+  var out = [];
+  var lectura = estadoLecturaBitacora();
+  var entradas = lectura.cargada ? entradasBitacora() : [];
+  cerrados.forEach(function (c) {
+    var motivos = [];
+    var hayError = false;
+    var mesTexto = nombreMes(c.mes);
+    mesTexto = mesTexto.charAt(0).toUpperCase() + mesTexto.slice(1); // abre la frase: «Septiembre 2026 …»
+    var difs = calcDiferenciasCierre(c);
+    if (difs.length) {
+      hayError = true;
+      motivos.push("Hoy suma distinto de cuando se cerró: " + difs.map(function (d) {
+        return d.etiqueta + " (cerró en " + (d.campo === "movimientos" ? d.guardado : fmt(d.guardado)) + ", hoy " + (d.campo === "movimientos" ? d.hoy : fmt(d.hoy)) + ")";
+      }).join("; ") + ".");
+    }
+    var tocadas = tocadasDespuesDelCierre(c, entradas);
+    var porPersona = tocadas.filter(function (e) { return e.origen !== "automatico"; });
+    if (porPersona.length) {
+      hayError = true;
+      motivos.push("La bitácora dice que después del cierre " + porPersona.length + " cambio(s) tocaron su dinero: " + porPersona.slice(0, 3).map(function (e) {
+        return (e.nombre || e.usuario || "alguien") + " — " + e.accion + " «" + e.etiqueta + "»" + (e.cambios ? " (" + e.cambios + ")" : "") + ", " + String(e.fecha).slice(0, 10);
+      }).join("; ") + (porPersona.length > 3 ? "; y " + (porPersona.length - 3) + " más" : "") + ".");
+    } else if (difs.length && lectura.cargada) {
+      motivos.push("La bitácora no tiene ningún cambio de ese mes después del cierre: pudo editarse directo en la Google Sheet.");
+    }
+    var automaticas = tocadas.filter(function (e) { return e.origen === "automatico"; });
+    if (automaticas.length) {
+      motivos.push("Al cargar, la app corrigió sola " + automaticas.length + " dato(s) de ese mes (no cambia ningún número).");
+    }
+    if (!motivos.length) return;
+    var afectados = [];
+    var vistos = {};
+    (state.tx || []).forEach(function (t) {
+      if (String(t.fecha || "").slice(0, 7) === c.mes && afectados.length < MAX_AFECTADOS_MES) { vistos[t.id] = true; afectados.push(refTx(t)); }
+    });
+    out.push({
+      clave: "mes:" + c.mes, severidad: hayError ? "error" : "aviso",
+      titulo: mesTexto + " cambió después de cerrarse",
+      detalle: mesTexto + " lo cerró " + (c.cerradoPorNombre || c.cerradoPor || "alguien") + " el " + String(c.cerradoEn || "").slice(0, 10) + ". " + motivos.join(" "),
+      afectados: afectados
+    });
+  });
+  if (!lectura.cargada) {
+    out.push({
+      clave: "bitacora-sin-leer", severidad: "aviso",
+      titulo: "No se ha podido leer la bitácora para revisar los meses cerrados",
+      detalle: lectura.cargando
+        ? "Se está leyendo la bitácora; en unos segundos esta revisión queda completa."
+        : "Sin la bitácora no se sabe si alguien tocó un mes cerrado después del cierre" + (lectura.error ? " (" + lectura.error + ")" : "") + ". Los números sí se compararon.",
+      afectados: [], donde: "Finanzas → 📒 Bitácora (abrirla vuelve a intentar la lectura)"
+    });
+  }
+  return out;
+}
+registrarVerificacion({
+  id: "meses-cerrados", titulo: "Meses cerrados",
+  porque: "Un mes cerrado es plata que ya se cuadró con el banco y los reportes. Si sus números cambiaron, o alguien lo tocó después de cerrarlo, lo que cerraste ya no es lo que hay.",
+  donde: "Finanzas → 🔒 Cierre de mes (reabre el mes con un motivo, corrígelo y vuelve a cerrarlo) y 📒 Bitácora (quién lo tocó)",
+  correr: verificarMesesCerrados
+});
 
 function correrVerificacion(v) {
   var encontrados;

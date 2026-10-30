@@ -1,4 +1,5 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
+import { exigirMesAbierto } from "../core/cierre.js";
 import { esc, opt, num, uid, todayStr, val, generarNumeroOp, codigoPublico, exigirCampos } from "../core/utils.js";
 import { ESTADOS, ESTADO_LABEL, ESTADOS_DEFAULT } from "../core/constants.js";
 import { clienteById, calcComisionValor, costoRealDePedido, estadoComisionPedido, estadoComisionCot, calcComisionValorCot, pedidoIdDeCotParaTx, pedidoCancelado, movimientosGeneradosPorPedido, etapasDe, siguienteEtapa, estadoLabelDe, calcConsignacionDisponible, calcConsignacionVendida, calcConsignacionRetirada, calcConsignacionComision, calcConsignacionDisponiblePorTalla, estadoAgregadoDeCot, productoById, stockTalla, validarStockLineas, calcTotalesLineasPedido, calcCostoUnitarioProducto, calcMontoDescuento, calcDesglosePedido, calcTotalConDescuentos, descuentoDesdeForm, descuentoVigente, parchearDescuento, textoDescuento, calcAbonadoDeLista, calcSaldoPedido, calcTotalConIvaPedido, calcIvaPedido, calcIvaCobrado, pedidoTerminado, cuentaSugerida, cuentaDeMetodoPago, cuentaParaMovimientoNuevo, nombreMetodoPago, CUENTA_SIN_ASIGNAR } from "../core/calc.js";
@@ -1528,6 +1529,17 @@ function guardarDescuentoPedido(id, quitar) {
   mostrarToast(nuevo.descuento ? "🏷 Descuento guardado: el pedido queda en " + fmt(nuevo.total) + "." : "Se quitaron los descuentos del pedido.");
 }
 
+// Las fechas del dinero de un abono o reembolso: la suya y la de su movimiento
+// en Finanzas (Hallazgo #65, cierre de mes). Las dos tienen que estar en meses
+// abiertos para poder cambiarlo o anularlo.
+function fechasDeAbono(pedidoId, abonoId) {
+  var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
+  var a = ped ? (ped.abonos || []).filter(function (x) { return x.id === abonoId; })[0] : null;
+  var fechas = a ? [a.fecha] : [];
+  state.tx.forEach(function (t) { if (t.origenAbonoId === abonoId || t.origenReembolsoId === abonoId) fechas.push(t.fecha); });
+  return fechas;
+}
+
 export var actions = {
   "pedido-vista": function (el) {
     state.pedidosVista = el.getAttribute("data-val");
@@ -1839,6 +1851,7 @@ export var actions = {
     var totales = calcTotalesLineasPedido(lineas, descuentoOrdenDeForm(fp));
     var resumen = resumenLineasPedido(lineas);
     var abonoInicial = esConsignacion ? 0 : num(fp.abono);
+    if (abonoInicial > 0 && !exigirMesAbierto([todayStr()], "registrar el abono inicial de este pedido")) return;
     // Solo las líneas de CATÁLOGO mueven stock real — una línea escrita a
     // mano no tiene de dónde descontar. En consignación las de catálogo
     // TAMBIÉN salen del stock (se las lleva el punto), solo que no se
@@ -1987,6 +2000,7 @@ export var actions = {
     var fechaEl = card ? card.querySelector('[data-role="consig-venta-fecha"]') : null;
     var cantidad = cantidadEl ? num(cantidadEl.value) : 0;
     var fecha = (fechaEl && fechaEl.value) || todayStr();
+    if (!exigirMesAbierto([fecha], "registrar esta venta en consignación")) return;
 
     var productoId = "", talla = "", precioUnitario = num(ped.consignacion.precioUnitario), disponible = calcConsignacionDisponible(ped);
     if (itemEl && itemEl.value) {
@@ -2154,6 +2168,7 @@ export var actions = {
     if (!ped || !ped.consignacion) return;
     var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
     if (!venta || venta.comisionPagada) return;
+    if (!exigirMesAbierto([todayStr()], "pagar esta comisión")) return;
     if (!window.confirm("¿Pagar la comisión de esta venta de consignación?\n\nMonto: " + fmt(venta.comisionMonto) + "\n\nSe registra un gasto en Finanzas (esa plata sale de la caja).")) return;
     state.tx.unshift({ id: uid(), tipo: "gasto", concepto: "Comisión consignación — " + ped.cliente, monto: venta.comisionMonto, contraparte: ped.cliente, fecha: todayStr(), pedidoId: ped.id, origenComisionConsignacionId: ventaId });
     state.pedidos = state.pedidos.map(function (p) {
@@ -2339,6 +2354,8 @@ export var actions = {
       window.alert("Este pedido está cancelado: su comisión pendiente ya no se debe. Si de verdad se va a pagar, reactiva el pedido primero.");
       return;
     }
+    var fechasComision = pagando ? [todayStr()] : state.tx.filter(function (t) { return t.origenComisionPedidoId === id; }).map(function (t) { return t.fecha; });
+    if (!exigirMesAbierto(fechasComision, pagando ? "pagar esta comisión" : "deshacer el pago de esta comisión")) return;
     if (pagando) {
       if (!window.confirm("¿Marcar como pagada la comisión de " + ped.vendedor.nombre + "?\n\n" +
         "Monto: " + fmt(valor) + "\n\n" +
@@ -2375,6 +2392,7 @@ export var actions = {
         // dice antes de confirmar. Se corrige después desde Finanzas → Editar.
         var cuentaCobro = cuentaParaMovimientoNuevo();
         if (!window.confirm('¿Registrar el saldo completo de ' + fmt(saldo) + ' como cobrado para "' + pedido.numeroOp + " — " + pedido.descripcion + '"?\n\nEsto crea un movimiento de ingreso en Finanzas, en la cuenta «' + nombreMetodoPago(cuentaCobro) + '» (si entró en otra, cámbiala en Finanzas → Editar). Puedes anular el abono luego desde Finanzas si te equivocas.')) return;
+        if (!exigirMesAbierto([todayStr()], "registrar este cobro")) return;
         var abonoId = uid();
         state.tx.unshift({ id: uid(), tipo: "ingreso", concepto: "Saldo pedido — " + pedido.descripcion, monto: saldo, contraparte: pedido.cliente, fecha: todayStr(), cuenta: cuentaCobro, pedidoId: pedido.id, origenAbonoId: abonoId });
         state.pedidos = state.pedidos.map(function (p) {
@@ -2410,6 +2428,7 @@ export var actions = {
     var disponible = num(ped.abono);
     if (!monto || monto <= 0) return;
     if (monto > disponible) { window.alert("No puedes reembolsar más de lo que el cliente ha abonado (" + fmt(disponible) + ")."); return; }
+    if (!exigirMesAbierto([fr.fecha || todayStr()], "registrar este reembolso")) return;
     if (!window.confirm('¿Registrar un reembolso de ' + fmt(monto) + ' a "' + ped.cliente + '"?\n\nEsto crea un movimiento de gasto en Finanzas y reduce el abono registrado de este pedido.')) return;
     var reembolsoId = uid();
     var fecha = fr.fecha || todayStr();
@@ -2458,6 +2477,7 @@ export var actions = {
     var monto = num(visible("monto", fa.monto));
     if (monto <= 0) return;
     var fecha = visible("fecha", fa.fecha) || todayStr();
+    if (!exigirMesAbierto([fecha], "registrar este abono")) return;
     // El medio de pago ES la cuenta donde entró la plata (Hallazgo #63). Se
     // normaliza con la misma función que dibujó el select, así lo que se ve
     // elegido es lo que se guarda aunque el borrador traiga un valor viejo.
@@ -2532,6 +2552,7 @@ export var actions = {
     var nuevaFecha = g("edit-abono-fecha");
     var nuevoMetodo = g("edit-abono-metodo");
     if (nuevoMonto <= 0 || !nuevaFecha) return;
+    if (!exigirMesAbierto(fechasDeAbono(pedidoId, abonoId).concat([nuevaFecha]), "editar este abono")) return;
     // Mismo aviso que "add-abono": registrar un abono NUEVO mayor al saldo
     // ya pregunta antes de guardar, pero editar uno YA existente no lo
     // hacía — un error de digitación al editar podía inventar un "saldo a
@@ -2587,6 +2608,7 @@ export var actions = {
     var abono = (ped.abonos || []).filter(function (a) { return a.id === abonoId; })[0];
     if (!abono) return;
     var esReembolso = abono.tipo === "reembolso";
+    if (!exigirMesAbierto(fechasDeAbono(pedidoId, abonoId), esReembolso ? "anular este reembolso" : "anular este abono")) return;
     if (!window.confirm("¿Anular " + (esReembolso ? "el reembolso" : "el abono") + " de " + fmt(abono.monto) + (abono.fecha ? " del " + abono.fecha : "") + "?\n\n" +
       "Se borra de este pedido y también se retira su movimiento de Finanzas, así la caja y el saldo del pedido siguen cuadrando.\n\nNo se puede deshacer.")) return;
     state.pedidos = state.pedidos.map(function (p) {
@@ -2607,6 +2629,8 @@ export var actions = {
     if (!ped || !ped.consignacion) return;
     var venta = (ped.consignacion.ventas || []).filter(function (v) { return v.id === ventaId; })[0];
     if (!venta) return;
+    var fechasVenta = [venta.fecha].concat(state.tx.filter(function (t) { return t.origenVentaConsignacionId === ventaId || t.origenComisionConsignacionId === ventaId; }).map(function (t) { return t.fecha; }));
+    if (!exigirMesAbierto(fechasVenta, "anular esta venta en consignación")) return;
     if (!window.confirm("¿Anular esta venta reportada (" + num(venta.cantidad) + " unidad(es) por " + fmt(venta.montoTotal) + ")?\n\n" +
       "Se retira su ingreso de Finanzas" + (venta.comisionPagada ? " y también el gasto de la comisión que ya se le pagó al punto" : "") + ", y las unidades vuelven a contar como disponibles en el punto.\n\nNo se puede deshacer.")) return;
     state.pedidos = state.pedidos.map(function (p) {
@@ -2642,6 +2666,7 @@ export var actions = {
     // la de movimientos) para que restaurarlo devuelva todo junto y nunca
     // quede la mitad de un lado.
     var movimientos = movimientosGeneradosPorPedido(id);
+    if (!exigirMesAbierto(movimientos.map(function (t) { return t.fecha; }).concat((pedido.abonos || []).map(function (a) { return a.fecha; })), "eliminar este pedido (se llevaría movimientos de ese mes)")) return;
     var netoMovimientos = movimientos.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
     var avisoDinero = movimientos.length
       ? ("\n\nSe van con él " + movimientos.length + " movimiento(s) de Finanzas que generó este pedido (abonos, comisión, ventas)" +
@@ -2692,6 +2717,8 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var pedido = state.pedidosPapelera.filter(function (p) { return p.id === id; })[0];
     if (!pedido) return;
+    var movsPorDevolver = state.txPapelera.filter(function (t) { return t.eliminadoConPedido === id; }).map(function (t) { return t.fecha; });
+    if (!exigirMesAbierto(movsPorDevolver.concat((pedido.abonos || []).map(function (a) { return a.fecha; })), "restaurar este pedido (devolvería movimientos de ese mes)")) return;
     // Vuelve a tomar su parte de cada Recibo de compra (se había devuelto a
     // la reserva al eliminarlo) — hasta donde todavía alcance.
     var retomaRecibos = retomarRecibosAlRestaurarPedido(pedido);
@@ -2746,7 +2773,9 @@ export var actions = {
   },
   "eliminar-pedido-definitivo": function (el) {
     var id = el.getAttribute("data-id");
-    var enPapelera = state.txPapelera.filter(function (t) { return t.eliminadoConPedido === id; }).length;
+    var movsEnPapelera = state.txPapelera.filter(function (t) { return t.eliminadoConPedido === id; });
+    var enPapelera = movsEnPapelera.length;
+    if (!exigirMesAbierto(movsEnPapelera.map(function (t) { return t.fecha; }), "borrar para siempre este pedido")) return;
     if (!window.confirm("Esto elimina el pedido para siempre (incluyendo sus abonos y detalle)" +
       (enPapelera ? ", junto con sus " + enPapelera + " movimiento(s) de Finanzas que estan en la papelera" : "") +
       ", y no se puede deshacer. ¿Continuar?")) return;

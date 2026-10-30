@@ -3,6 +3,7 @@
 // datos del negocio, no donde alguien busca sus números del día a día).
 
 import { state, notify, persist } from "../core/store.js";
+import { exigirMesAbierto } from "../core/cierre.js";
 import { esc, fmt, todayStr, num, uid } from "../core/utils.js";
 import {
   calcCotizacionTotales, listaDeudores, estadoLabelDe, calcSerieMovimientos,
@@ -862,6 +863,8 @@ export var actions = {
     var monto = num(f.monto);
     if (monto <= 0) { window.alert("Escribe un monto mayor a cero."); return; }
     var fecha = f.fecha || todayStr();
+    // Solo el «aporte» crea plata en Finanzas; «separar» no toca ningún mes.
+    if (f.origen === "aporte" && !exigirMesAbierto([fecha], "registrar este aporte al Colchón")) return;
     var nota = (f.nota || "").trim();
     var id = uid();
     var mov = { id: id, fecha: fecha, monto: monto, origen: f.origen, nota: nota, txId: "" };
@@ -890,6 +893,8 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var mov = (state.config.colchonMovimientos || []).filter(function (m) { return m.id === id; })[0];
     if (!mov) return;
+    var txColchon = mov.txId ? (state.tx || []).filter(function (t) { return t.id === mov.txId; })[0] : null;
+    if (txColchon && !exigirMesAbierto([txColchon.fecha], "quitar este relleno del Colchón")) return;
     var disp = calcServiciosDisponibles().filter(function (s) { return s.nombre === "Colchón"; })[0];
     var acumulado = disp ? disp.acumulado : 0;
     var usado = disp ? (disp.acumulado - disp.disponible) : 0;

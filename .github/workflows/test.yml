@@ -37,3 +37,6 @@ jobs:
 
       - name: Prueba de salud de los datos (test/salud.mjs)
         run: node test/salud.mjs
+
+      - name: Prueba de bitácora y cierre de mes (test/bitacora.mjs)
+        run: node test/bitacora.mjs

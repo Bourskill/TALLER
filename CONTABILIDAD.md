@@ -63,6 +63,12 @@ contabilidad de caja para negocio pequeño.
    (las reparaciones de `loadAll()`) se cuenta y se muestra, y lo que no
    cuadra se reporta con su porqué y un enlace al caso — nunca se "arregla"
    sin que el dueño se entere. Ver Hallazgo #64 (`core/salud.js`).
+8. **Un mes cerrado no se toca, y todo cambio de dinero deja rastro.** Cada cambio
+   queda en la bitácora con quién, cuándo y cómo estaba antes (se calcula en
+   `persist`, no acción por acción); el admin cierra un mes y la app no deja
+   escribir dinero con fecha en él hasta que lo reabra con un motivo. Es ayuda para
+   VER, no un candado: quien tenga acceso directo a la Sheet puede saltárselo. Ver
+   Hallazgo #65 (`core/bitacora.js`, `core/cierre.js`).
 
 ---
 
@@ -138,6 +144,10 @@ contabilidad de caja para negocio pequeño.
   botón de borrar sigue visible pero como 🔒, con un mensaje que dice
   dónde deshacerlo de verdad (en el pedido/cotización/gasto fijo/deuda
   que lo generó).
+- Un `tx` con fecha en un **mes cerrado** no se crea, edita, borra ni restaura
+  (tampoco se le cambia la fecha o la cuenta) hasta que el admin reabra el mes con un
+  motivo; toda acción lo pregunta con `exigirMesAbierto` antes de escribir. Cada
+  cambio queda en la bitácora. Ver Hallazgo #65.
 - Todo `tx` lleva una **cuenta** (`tx.cuenta`: efectivo, banco, Nequi... o
   "sin-asignar"). Cambiar la cuenta SÍ se puede aunque el movimiento tenga
   marca de origen —solo mueve plata entre cuentas: el monto, el tipo y la Caja
@@ -4087,6 +4097,152 @@ propias (el detalle de tallas y los recibos) se revisaron a mano.
 **Límites conocidos:** la pantalla se verificó en el navegador con datos de ejemplo
 (claro, oscuro, móvil, menú colapsado) pero no con el login real de Google;
 `test/smoke.mjs` (jsdom) no se pudo correr en este equipo, y la CI debe correrlo.
+
+### 🟡 Hallazgo #65 — bitácora de cambios del dinero y cierre de mes. ✅ IMPLEMENTADO (pedido del dueño)
+
+**Qué se pidió:** que el dinero sea verdad y se pueda comprobar. El análisis de
+Finanzas encontró dos huecos: editar un movimiento lo sobrescribía sin guardar el
+valor anterior, ni quién lo cambió, ni cuándo; y no había cierre de mes, así que se
+podía cambiar la fecha o el monto de un movimiento viejo y los reportes de ese mes
+cambiaban en silencio.
+
+**Decisiones del dueño** (preguntadas antes de escribir código):
+- La bitácora anota **todo lo que toque plata**: movimientos, abonos y reembolsos,
+  totales y descuentos de pedidos y cotizaciones, comisiones, cuentas,
+  transferencias, deudas, gastos fijos y nómina.
+- Un mes cerrado se corrige **reabriéndolo con un motivo** (no con un movimiento de
+  ajuste en el mes actual).
+- Un vendedor **no** puede tocar nada con fecha en un mes cerrado; solo el admin lo
+  reabre.
+- Si no se puede escribir la bitácora (sin red), la acción **sigue** y la anotación
+  se reintenta (igual que `core/guardado.js`); no se bloquea.
+
+**Qué hay ahora**
+
+*La bitácora* (`core/bitacora.js`)
+- **Se calcula en un solo punto:** `persist(clave)` (`core/store.js`) compara el
+  estado nuevo con una **foto** del anterior (la de la carga o la del último guardado)
+  y anota la diferencia. Cubre toda acción actual y futura sin tocar ninguna: nadie
+  tiene que acordarse de anotar. Lo que se compara son solo los **campos de dinero**
+  de cada registro (los extractores de `core/bitacora.js` son la lista de qué es
+  dinero; sumar un campo es sumarlo ahí): movimiento (fecha, tipo, concepto, monto,
+  cuenta, contraparte, pedido, cotización); pedido (total, costo, descuento, IVA,
+  cancelado, comisión del vendedor) y cada uno de sus abonos, reembolsos y ventas en
+  consignación; cotización (total, descuento, IVA, comisión); transferencia; deuda; y
+  de la configuración, las cuentas, la cuenta predeterminada, los gastos fijos, la
+  nómina y el Colchón.
+- **Cada anotación** guarda: fecha y hora ISO, quién (correo, nombre y rol de la
+  sesión), a qué (clave, id del registro, id de la parte —el abono— y el tipo),
+  qué hizo (`crear`, `editar`, `eliminar`, `restaurar`, `cerrar-mes`,
+  `reabrir-mes`, `inicio`), el registro y el cambio **en palabras**
+  («monto: $100.000 → $120.000»), el **antes** y el **después** de los campos de
+  dinero, los meses de la plata tocada y si ese mes estaba cerrado.
+- **Eliminar y restaurar** entienden las papeleras: mandar un movimiento o un pedido a
+  la papelera es UN «eliminar» (no uno por cada lista que se guarda), sacarlo es un
+  «restaurar», y borrarlo para siempre es un «eliminar» que lo dice.
+- **Lo que la app corrige sola al cargar** (las reparaciones de `loadAll()`) se anota
+  como **automático**: no lleva el correo de ninguna persona.
+- **Va en su propia pestaña de la Sheet** (`Bitacora`, una fila por cambio, esquema en
+  `COLUMNAS_BITACORA`). **Nunca** como un blob JSON en una celda de `kv` (límite de
+  50.000 caracteres, Hallazgo #42). Y **no se reescribe** en cada guardado como las
+  demás tablas: se le **agregan filas al final** (`sheetsTabular.agregar`, con
+  `values.append`). Una bitácora que solo crece y se reescribe entera es cada vez más
+  lenta, y un fallo a mitad de camino la dejaría sin filas. Toda columna nueva va al
+  final (Hallazgos #15–#19).
+- **Sin red:** la anotación queda en una cola en el disco del navegador
+  (`taller_bitacora_cola_v1`) y se reintenta sola (al volver la red, al volver a la
+  pestaña, cada 15 s, y al abrir la app en la sesión siguiente). Un `append`
+  reintentado puede repetir una fila si la primera sí llegó; por eso quien lee
+  descarta los ids repetidos.
+- **Sin migración:** lo anterior a la bitácora no tiene historial. Al crear la pestaña
+  se deja una primera entrada («La bitácora empieza aquí») que lo dice.
+
+*El cierre de mes* (`core/cierre.js`, `periodoCerrado` en `core/calc.js`)
+- El **admin cierra** un mes que ya terminó (el mes en curso y los futuros no). Se
+  guarda quién, cuándo y un **resumen**: ingresos, gastos, balance, Caja al final del
+  mes, cantidad de movimientos y el **saldo de cada cuenta**, calculado con
+  `calcResumenMovimientos` y `calcSaldosPorCuenta(mes)` —las mismas funciones de los
+  reportes y de las cuentas (Hallazgo #63), no una cuenta nueva—. Cada mes es una
+  fila de la pestaña `Cierres`.
+- **Una sola pregunta y un solo helper:** `periodoCerrado(fecha)` dice si el mes de una
+  fecha está cerrado, y `exigirMesAbierto(fechas, queHaria)` es lo que **toda acción
+  llama antes de escribir**. Si el mes está cerrado, no escribe nada y dice qué mes
+  es y **quién lo cerró** (al admin le dice dónde reabrirlo; al vendedor, que se lo
+  pida al admin). Mientras un mes está cerrado **no se puede crear, editar, borrar ni
+  restaurar** un movimiento, abono, reembolso, transferencia ni pago de comisión
+  con fecha en él —tampoco moverlo a o desde ese mes cambiándole la fecha, ni
+  cambiarle la cuenta, ni borrarlo para siempre de la papelera—.
+- Las acciones que mutan muchos movimientos de una vez sin conocer sus fechas (los
+  **recibos de compra**, `ejecutarAccionRecibo`; y la **sincronización de compras** de
+  una cotización a Finanzas) usan el mismo patrón de foto que ya tenían: si lo que
+  hicieron tocó un mes cerrado, se deshace todo y se avisa. Guardar una cotización
+  cuyas compras no se pudieron llevar a Finanzas por un mes cerrado la guarda y lo
+  avisa aparte.
+- **Reabrir exige un motivo** (mínimo 5 letras), solo el admin, y queda en la
+  bitácora y en el historial del propio mes. Mientras está reabierto se corrige; se
+  vuelve a cerrar con los números nuevos.
+- **No se bloquea** marcar un movimiento como *conciliado* con el extracto (no
+  cambia ningún número del mes), ni editar el total o el descuento de un pedido o una
+  cotización (no mueven la Caja: solo se **anotan**).
+
+*Pantallas* (solo admin, dentro de Finanzas): **🔒 Cierre de mes** (cada mes terminado
+con lo que vale hoy, quién lo cerró, un aviso rojo si ya no suma lo que sumaba,
+botones Cerrar / Reabrir con su motivo) y **📒 Bitácora** (solo lectura: chips por
+acción, filtros por fecha, persona y tipo, buscador con contador, enlace al registro
+afectado, «Antes y después», y una marca «en mes cerrado»).
+
+*Salud de los datos* — verificación **«Meses cerrados»** (`registrarVerificacion`):
+**un hallazgo por mes**, de gravedad *error*, si (a) los números de hoy ya no
+coinciden con los guardados al cerrar, o (b) la bitácora dice que algo con fecha en
+ese mes se tocó **después del cierre**. Si lo hizo una persona es un error; si lo hizo
+la app sola al cargar (una reparación) es un aviso, porque no cambia ningún número.
+Reapuntar un movimiento a su pedido (pasa al convertir una cotización) no cuenta.
+Si la bitácora no se pudo leer, lo dice (aviso) en vez de callar.
+
+**Qué NO cubre** (leer antes de fiarse):
+- **No es un candado de seguridad.** Los permisos de la app son de pantalla: los
+  vendedores usan la app con un acceso de Google que cubre **toda la hoja**. Quien
+  abra la Google Sheet directamente puede editar un movimiento, una fila de
+  `Cierres` o **borrar o cambiar filas de la `Bitacora`** sin que la app lo impida.
+  Lo que sí pasa: si cambia los números de un mes cerrado, «Meses cerrados» lo
+  señala (y dice que la bitácora no sabe de ese cambio); si además borra el rastro y
+  deja los números iguales, no hay forma de enterarse.
+- **Lo anterior a la bitácora no tiene historial** (no hay migración): solo se sabe
+  desde su primera entrada.
+- **Una acción nueva que escriba dinero y no llame a `exigirMesAbierto` se salta el
+  cierre.** La bitácora la anota igual (marcada «en mes cerrado») y «Meses cerrados»
+  la señala, pero no la frena. Quien agregue una acción de dinero con fecha debe
+  llamar al helper; es la contrapartida de no anotar a mano.
+- **La anotación registra la intención al guardar.** Si el guardado del dinero falla y
+  el cambio se descarta (un conflicto entre dispositivos, por ejemplo), puede quedar
+  una anotación de algo que no llegó a la hoja. Y si la anotación no se puede escribir
+  y se pierde el disco del navegador antes de reintentar, se pierde.
+- **Solo se vigila el dinero que tiene fecha**: movimientos, abonos, reembolsos,
+  ventas en consignación y transferencias. Un pedido sin movimientos (su total, su
+  descuento) se anota pero no se bloquea. El mes en curso nunca se puede cerrar.
+- **Las reparaciones automáticas de `loadAll()`** (por ejemplo, convertir compras
+  viejas en recibos) pueden tocar un movimiento de un mes cerrado: quedan anotadas
+  como automáticas y salen como aviso, pero no se frenan.
+- **No se lee la bitácora completa en cada pantalla:** se lee una vez por sesión
+  (admin) y hasta 200.000 filas. Una bitácora muy larga habrá que leerla por tramos.
+- Un tope de **300 anotaciones por guardado**: un cambio masivo anota las primeras y
+  una línea que dice cuántas faltan.
+- La pantalla de la bitácora y la del cierre se probaron con datos de ejemplo y
+  generando el HTML, no con el login real de Google; `test/smoke.mjs` (jsdom) no se
+  pudo correr en este equipo y debe correrlo la CI.
+
+**Verificado:** `test/bitacora.mjs` (236 pruebas, `node test/bitacora.mjs`, sin
+jsdom). Que un cambio queda con su antes, su después, su autor (administrador,
+vendedor o automático) y su fecha; crear, eliminar, restaurar y borrar para siempre;
+abonos, totales, descuentos, cotizaciones, transferencias, cuentas, gastos fijos y
+deudas; que sin red la acción sigue y la anotación espera y se escribe sola después
+(y que una fila repetida cuenta una vez); que la pestaña se crea con su primera
+entrada y se le agregan filas sin reescribirla; que el resumen del cierre suma lo
+mismo que los reportes y que las cuentas suman la Caja de ese mes; que **cada tipo de
+escritura** (18 casos con las acciones reales, incluido un recibo de compra) es rechazada en un mes
+cerrado sin cambiar nada, que reabrir exige motivo y solo lo hace el admin, y que la
+verificación de salud detecta un mes cerrado que cambió. Se comprobó que las pruebas
+**fallan** si se quita una guarda.
 
 ---
 

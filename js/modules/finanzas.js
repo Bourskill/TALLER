@@ -1,9 +1,12 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
+import { exigirMesAbierto } from "../core/cierre.js";
 import { esc, opt, num, uid, todayStr, fmt, norm, exigirCampos } from "../core/utils.js";
 import { clienteById, periodoKey, origenDeTx, origenSistemaDeTx, origenSistemaHuerfano, proveedoresDeContactos, validarServiciosAsignados, calcServiciosDisponibles, pedidoCancelado, calcLineasParaRecibo, calcRepartoLineaRecibo, aplicarReciboACotizaciones, calcRecibo, calcIdsRecibos, esFilaRecibo, reconciliarTxRecibo, verificarRecibo, quitarReciboDeCotizaciones, calcTomaReserva, totalesDesdePartes, estimadoTxDeCot, comprasEnFinanzas, pedidoIdDeCotParaTx, devolverParte, repartirProporcional, desperdicioCompra, esMiembroRecibo, calcListaCompras, cuentaDeTx, nombreCuenta, cuentaSugerida, existeCuenta } from "../core/calc.js";
 import { renderHelp, renderBuscador, renderComboUnidad, renderAsignarServicios, renderHistorialServicio, renderCuentaSelectOptions } from "../core/components.js";
 import { ejecutarAccionRecibo } from "./cotizaciones.js";
 import { renderCuentas } from "./cuentas.js";
+import { renderCierre } from "./cierres.js";
+import { renderBitacora } from "./bitacora.js";
 
 var PERIODOS_TX = { todos: "Todo el histórico", mensual: "Este mes", quincenal: "Esta quincena", semanal: "Esta semana" };
 var TIPOS_TX = { ingreso: "Ingreso", gasto: "Gasto", nomina: "Nómina", comision: "Comisión" };
@@ -27,6 +30,10 @@ export function render() {
     html += renderRecibosCompra();
   } else if (vista === "cuentas") {
     html += renderCuentas();
+  } else if (vista === "cierre") {
+    html += renderCierre();
+  } else if (vista === "bitacora") {
+    html += renderBitacora();
   } else {
     html += renderFormMovimiento();
   }
@@ -40,6 +47,8 @@ function renderTabsFinanzas(vista) {
     '<button class="gsheet-tab ' + (vista === "historial" ? "active" : "") + '" data-action="finanzas-vista" data-val="historial">Historial' + (state.tx.length ? " (" + state.tx.length + ")" : "") + "</button>" +
     '<button class="gsheet-tab ' + (vista === "conjuntas" ? "active" : "") + '" data-action="finanzas-vista" data-val="conjuntas">🧾 Recibos de compra</button>' +
     '<button class="gsheet-tab ' + (vista === "cuentas" ? "active" : "") + '" data-action="finanzas-vista" data-val="cuentas">🏦 Cuentas</button>' +
+    '<button class="gsheet-tab ' + (vista === "cierre" ? "active" : "") + '" data-action="finanzas-vista" data-val="cierre">🔒 Cierre de mes</button>' +
+    '<button class="gsheet-tab ' + (vista === "bitacora" ? "active" : "") + '" data-action="finanzas-vista" data-val="bitacora">📒 Bitácora</button>' +
     "</div>";
 }
 
@@ -853,6 +862,8 @@ export var actions = {
       if (!validacion.ok) { window.alert(validacion.error); return; }
       serviciosDescuento = validacion.limpias;
     }
+    // Cierre de mes (Hallazgo #65): no se registra plata en un mes cerrado.
+    if (!exigirMesAbierto([f.fecha], "registrar este movimiento")) return;
     // Todo sale del borrador (state.formTx), no de leer el DOM: es lo que
     // permite que los campos de insumo existan solo cuando la casilla está
     // marcada sin que el guardado dependa de que estén en pantalla.
@@ -900,6 +911,8 @@ export var actions = {
     if (monto <= 0) return;
     var contraparteRaw = g("edit-contraparte");
     var cuentaRaw = g("edit-cuenta");
+    // Cierre de mes: ni el mes donde estaba ni el mes al que pasaría pueden estar cerrados.
+    if (!exigirMesAbierto([original.fecha, g("edit-fecha") || original.fecha], "editar este movimiento")) return;
     state.tx = state.tx.map(function (t) {
       if (t.id !== id) return t;
       var editado = Object.assign({}, t, {
@@ -992,6 +1005,7 @@ export var actions = {
         "Al hacerlo, este movimiento se retira solo.");
       return;
     }
+    if (!exigirMesAbierto([item.fecha], "eliminar este movimiento")) return;
     state.tx = state.tx.filter(function (t) { return t.id !== id; });
     state.txPapelera.unshift(Object.assign({}, item, { eliminadoEl: todayStr() }));
     persist("tx"); persist("txPapelera"); notify();
@@ -1007,6 +1021,7 @@ export var actions = {
       window.alert("Este movimiento era parte de un recibo de compra anulado. Para volver a tenerlo, registra el recibo de nuevo.");
       return;
     }
+    if (!exigirMesAbierto([item.fecha], "restaurar este movimiento")) return;
     state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
     var restaurado = Object.assign({}, item);
     delete restaurado.eliminadoEl;
@@ -1019,6 +1034,8 @@ export var actions = {
   },
   "eliminar-tx-definitivo": function (el) {
     var id = el.getAttribute("data-id");
+    var enPapelera = state.txPapelera.filter(function (t) { return t.id === id; })[0];
+    if (enPapelera && !exigirMesAbierto([enPapelera.fecha], "borrar para siempre este movimiento")) return;
     if (!window.confirm("Esto elimina el movimiento para siempre y no se puede deshacer. ¿Continuar?")) return;
     state.txPapelera = state.txPapelera.filter(function (t) { return t.id !== id; });
     persist("txPapelera"); notify();

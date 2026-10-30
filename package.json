@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.mjs && node test/descuentos.mjs && node test/cuentas.mjs && node test/salud.mjs"
+    "test": "node test/smoke.mjs && node test/descuentos.mjs && node test/cuentas.mjs && node test/salud.mjs && node test/bitacora.mjs"
   },
   "dependencies": {
     "jsdom": "^30.0.1"

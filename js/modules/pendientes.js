@@ -7,6 +7,7 @@
 // pestaña "Notas" (ver modules/notas.js).
 
 import { state, persist, notify } from "../core/store.js";
+import { exigirMesAbierto } from "../core/cierre.js";
 import { esc, num, uid, fmt, opt, val, todayStr, parseDias, diasPagoDe, exigirCampos } from "../core/utils.js";
 import {
   calcGastoFijoPendiente, calcBalancePeriodo, calcPorPagar, calcPorPagarDesglose, calcFechaVencimientoPeriodo,
@@ -659,6 +660,7 @@ export var actions = {
     // quedar negativo, lo que no se cubra sale de Ganancia sin más.
     var validacion = validarServiciosAsignados(fp.servicios, monto);
     if (!validacion.ok) { window.alert(validacion.error); return; }
+    if (!exigirMesAbierto([fp.fecha || todayStr()], "registrar este pago de nómina")) return;
     var rango = rangoPeriodoActual(periodoPago);
     var concepto = "Nómina " + rangoTexto(rango) + " — " + e.nombre + (bono ? " (+" + fmt(bono) + " bono)" : "") + (descuento ? " (−" + fmt(descuento) + " descuento)" : "");
     // empleadoId (no solo el nombre en contraparte) es lo que permite a
@@ -801,6 +803,10 @@ export var actions = {
     var gastoFijo = (state.config.gastosFijos || []).filter(function (g) { return g.id === id; })[0];
     if (!gastoFijo) return;
     var pendiente = calcGastoFijoPendiente(gastoFijo) > 0;
+    // Cierre de mes: pagar crea un gasto de hoy; deshacer retira el de este periodo (con SU fecha).
+    var origenHoy = id + "|" + periodoKey(todayStr(), gastoFijo.periodo || "mensual");
+    var fechasGastoFijo = pendiente ? [todayStr()] : state.tx.filter(function (t) { return t.origenGastoFijoPeriodo === origenHoy; }).map(function (t) { return t.fecha; });
+    if (!exigirMesAbierto(fechasGastoFijo, pendiente ? "pagar este gasto fijo" : "deshacer el pago de este gasto fijo")) return;
     // Mismo aviso que toggle-comision (pedidos.js), por el mismo motivo: es
     // una pastilla chica que parece solo una etiqueta de estado, fácil de
     // tocar por accidente (o dos veces seguidas en el celular) — sin esto,
@@ -850,6 +856,7 @@ export var actions = {
   "add-deuda": function () {
     var fd = state.formDeuda;
     if (!exigirCampos([["Concepto", fd.concepto], ["Monto total", fd.monto]])) return;
+    if (fd.trajoDineroEfectivo && !exigirMesAbierto([todayStr()], "registrar el ingreso de esta deuda")) return;
     var diasElegidos = (fd.diasPago || []).filter(function (d) { return d !== undefined && d !== null && !isNaN(d); });
     var nuevaDeuda = {
       id: uid(), concepto: fd.concepto, contraparte: fd.contraparte, monto: num(fd.monto),
@@ -908,6 +915,10 @@ export var actions = {
     var monto = num(g("edit-monto"));
     if (!concepto || monto <= 0) return;
     var nuevasCuotas = num(g("edit-cuotas")) || 1;
+    // Si esta deuda trajo dinero a la caja, editar monto/concepto/contraparte reescribe ESE movimiento.
+    var txIngresoPrevio = state.tx.filter(function (t) { return t.origenDeudaIngresoId === id; })[0];
+    if (txIngresoPrevio && (num(txIngresoPrevio.monto) !== monto || txIngresoPrevio.concepto !== "Préstamo recibido — " + concepto || (txIngresoPrevio.contraparte || "") !== g("edit-contraparte")) &&
+      !exigirMesAbierto([txIngresoPrevio.fecha], "editar esta deuda (su ingreso de caja está en un mes cerrado)")) return;
     state.deudas = state.deudas.map(function (d) {
       if (d.id !== id) return d;
       return Object.assign({}, d, {
@@ -986,6 +997,7 @@ export var actions = {
     if (valor <= 0) return;
     var etiqueta = cuotas > 1 ? ("cuota " + (pagadas + 1) + " de " + cuotas) : "el saldo completo";
     if (!window.confirm('¿Registrar el pago de ' + etiqueta + " (" + fmt(valor) + ') de "' + deuda.concepto + '"?\n\nEsto crea un movimiento de gasto en Finanzas.' + (esUltima ? " Al quedar saldada, la deuda se mueve al historial." : ""))) return;
+    if (!exigirMesAbierto([todayStr()], "registrar este pago de la deuda")) return;
     var nuevasPagadas = pagadas + 1;
     var fechaPago = todayStr();
     var txPagoId = uid();
@@ -1036,6 +1048,8 @@ export var actions = {
     var historial = deuda.historial || [];
     var ultimoPago = historial[historial.length - 1];
     if (!ultimoPago) return;
+    var txUltimoPago = ultimoPago.txId ? state.tx.filter(function (t) { return t.id === ultimoPago.txId; })[0] : null;
+    if (txUltimoPago && !exigirMesAbierto([txUltimoPago.fecha], "deshacer este pago de la deuda")) return;
     // Un pago de ANTES de que existiera este botón no guardó el id del tx
     // que le corresponde (ver pagar-deuda) — no hay forma segura de saber
     // cuál movimiento de Finanzas es, así que no se adivina: se avisa y no

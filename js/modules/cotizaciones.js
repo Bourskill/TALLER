@@ -1,4 +1,5 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
+import { exigirMesAbierto, bloqueoMesCerrado, fechasCambiadas } from "../core/cierre.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
 import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcDesglosePedido, descuentoVigente, descuentoDesdeForm, parchearDescuento, repartirProporcional, calcMontoDescuento, calcPrecioServicio, textoDescuento, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
 import { renderDescuentoCampo, renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
@@ -1649,6 +1650,7 @@ export var actions = {
       return;
     }
     var movimientos = movimientosGeneradosPorCotizacion(cot);
+    if (!exigirMesAbierto(movimientos.map(function (t) { return t.fecha; }), "eliminar esta cotización (se llevaría movimientos de ese mes)")) return;
     var neto = movimientos.reduce(function (a, t) { return t.tipo === "ingreso" ? a + num(t.monto) : a - num(t.monto); }, 0);
     var aviso = movimientos.length
       ? ("\n\nSe van con ella " + movimientos.length + " movimiento(s) de Finanzas que generó (comisión, compras, estimado)" +
@@ -1659,6 +1661,8 @@ export var actions = {
     // pagó al proveedor. Pasa a la reserva del recibo (ver
     // reconciliarTxRecibo en core/calc.js) — la caja no cambia.
     var recibosCot = idsRecibosDeCot(cot);
+    // Su parte de un recibo vuelve a la reserva: las filas de ese recibo cambian de monto.
+    if (recibosCot.length && !exigirMesAbierto(state.tx.filter(function (t) { return t.reciboCompraId && recibosCot.indexOf(t.reciboCompraId) !== -1; }).map(function (t) { return t.fecha; }), "eliminar esta cotización (cambiaría un recibo de compra de ese mes)")) return;
     var avisoRecibos = recibosCot.length
       ? "\n\nSu parte de " + recibosCot.length + " recibo(s) de compra vuelve a la reserva del recibo: esa plata ya se pagó y no sale de la caja."
       : "";
@@ -2270,6 +2274,7 @@ export var actions = {
         "Lo recomendable es borrar el movimiento del estimado en Finanzas y quedarte solo con las compras reales.\n\n¿Continuar de todos modos?")) return;
     }
     var llevado = llevarComprasAFinanzas(id, { promover: true });
+    if (llevado && llevado.bloqueado) { window.alert(llevado.bloqueado); return; }
     guardarCotizaciones({ sinLlevarCompras: true }); persist("tx"); notify();
     var partes = partesLlevarCompras(llevado);
     mostrarToast(partes.length ? "✓ Finanzas al día: " + partes.join(", ") + "." : "Nada que sincronizar — marca alguna compra primero.");
@@ -2364,6 +2369,7 @@ export var actions = {
   },
   "remove-cot-gasto": function (el) {
     var cotId = el.getAttribute("data-cot"), gastoId = el.getAttribute("data-gasto");
+    if (!exigirMesAbierto(state.tx.filter(function (t) { return t.origenGastoId === gastoId; }).map(function (t) { return t.fecha; }), "quitar este costo real")) return;
     state.cotizaciones = state.cotizaciones.map(function (c) {
       if (c.id !== cotId) return c;
       return Object.assign({}, c, { gastosReales: (c.gastosReales || []).filter(function (g) { return g.id !== gastoId; }) });
@@ -2513,6 +2519,8 @@ export var actions = {
         : "El cliente todavía no acepta esta cotización: la comisión se debe desde que se convierte en pedido.");
       return;
     }
+    var fechasComisionCot = pagando ? [todayStr()] : state.tx.filter(function (t) { return t.origenComisionCotId === id; }).map(function (t) { return t.fecha; });
+    if (!exigirMesAbierto(fechasComisionCot, pagando ? "pagar esta comisión" : "deshacer el pago de esta comisión")) return;
     if (pagando) {
       if (!window.confirm("¿Marcar como pagada la comisión de " + cot.vendedor.nombre + "?\n\n" +
         "Monto: " + fmt(valor) + "\n\n" +
@@ -2558,6 +2566,7 @@ export var actions = {
     // como si no existiera, y se crea uno nuevo propio en vez de reescribir
     // el ajeno.
     var existente = estimadoTxDeCot(cot, state.tx);
+    if (!exigirMesAbierto([existente ? existente.fecha : todayStr()], existente ? "actualizar el costo estimado de este pedido" : "registrar el costo estimado de este pedido")) return;
     // Las compras ya llevadas a Finanzas, por CUALQUIERA de las dos vías:
     // compra suelta o parte de un Recibo de compra. Antes se miraba solo
     // `compra.txId`, que en una compra de recibo está vacío — con la tela
@@ -3261,6 +3270,10 @@ export function ejecutarAccionRecibo(opts, fn) {
     if (Math.abs(delta - num(opts.deltaCaja)) > 0.005) {
       problemas.push("La caja se movería " + fmt(delta) + " y se esperaba " + fmt(num(opts.deltaCaja)) + ".");
     }
+    // Cierre de mes (Hallazgo #65): un recibo crea, cambia o retira filas de
+    // Finanzas con sus fechas. Si alguna cae en un mes cerrado, no se guarda nada.
+    var bloqueoRecibo = bloqueoMesCerrado(fechasCambiadas(foto.tx, state.tx).concat(fechasCambiadas(foto.txPapelera, state.txPapelera || [])), "cambiar este recibo de compra");
+    if (bloqueoRecibo) problemas.push(bloqueoRecibo);
   } catch (e) {
     console.error(e);
     problemas.push("Error inesperado: " + (e && e.message ? e.message : e));
@@ -3359,6 +3372,9 @@ function tomarDeReservaCompraConjunta(grupoId, clave, cantidadNecesaria) {
   if (porTomar <= 0) return 0;
   var restante = porTomar;
   var porCotizacion = {};
+  // Tomar de la reserva re-sincroniza las compras de OTRAS cotizaciones: si eso
+  // tocara plata de un mes cerrado, se deshace todo (Hallazgo #65).
+  var fotoTx = JSON.stringify(state.tx), fotoCots = JSON.stringify(state.cotizaciones);
   reserva.tenedores.forEach(function (t) {
     if (restante <= 0) return;
     var deEste = Math.min(restante, t.disponible);
@@ -3375,6 +3391,13 @@ function tomarDeReservaCompraConjunta(grupoId, clave, cantidadNecesaria) {
     var sinc = sincronizarComprasFinanzasDe(Object.assign({}, c, { compras: compras }));
     return Object.assign({}, c, { compras: sinc.compras });
   });
+  var bloqueoReserva = bloqueoMesCerrado(fechasCambiadas(fotoTx, state.tx), "tomar de la reserva compartida");
+  if (bloqueoReserva) {
+    state.tx = JSON.parse(fotoTx);
+    state.cotizaciones = JSON.parse(fotoCots);
+    window.alert(bloqueoReserva);
+    return 0;
+  }
   return porTomar;
 }
 
@@ -3536,7 +3559,16 @@ function tomarSnapshotCotizacion() {
 function llevarComprasAFinanzas(id, opts) {
   var cot = state.cotizaciones.filter(function (c) { return c.id === id; })[0];
   if (!cot) return null;
+  // Cierre de mes (Hallazgo #65): la sincronización muta state.tx y no sabe de
+  // meses cerrados. Si tocó plata de uno, se deshace y se devuelve el motivo
+  // (quien llama decide cómo avisar; la cotización sigue sin sincronizar).
+  var fotoTx = JSON.stringify(state.tx);
   var r = sincronizarComprasFinanzasDe(cot);
+  var bloqueoSync = bloqueoMesCerrado(fechasCambiadas(fotoTx, state.tx), "actualizar los movimientos de estas compras");
+  if (bloqueoSync) {
+    state.tx = JSON.parse(fotoTx);
+    return { bloqueado: bloqueoSync };
+  }
   state.cotizaciones = state.cotizaciones.map(function (c) {
     return c.id === id ? Object.assign({}, c, { compras: r.compras }) : c;
   });
@@ -3549,8 +3581,12 @@ function llevarComprasAFinanzas(id, opts) {
   if (opts && opts.promover) {
     promocion = migrarComprasARecibos(state.tx, state.cotizaciones, { soloCotId: id });
     if (promocion.convertidos.length) {
-      state.tx = promocion.tx;
-      state.cotizaciones = promocion.cotizaciones;
+      if (bloqueoMesCerrado(fechasCambiadas(JSON.stringify(state.tx), promocion.tx), "pasar estas compras a recibo")) {
+        promocion = { convertidos: [], saltados: [{ motivo: "un mes cerrado lo impide (reábrelo con un motivo en Finanzas → Cierre de mes)" }] };
+      } else {
+        state.tx = promocion.tx;
+        state.cotizaciones = promocion.cotizaciones;
+      }
     }
   }
   return { r: r, promocion: promocion };
@@ -3617,8 +3653,12 @@ function guardarCotizaciones(opts) {
       if (pendientes.length) avisos.push("⚠ " + pendientes.length + " compra(s) no coinciden con Finanzas y no se actualizaron: este pedido tiene su costo estimado completo registrado. Bórralo en Finanzas, o usa \"Actualizar movimientos financieros\".");
     } else {
       var llevado = llevarComprasAFinanzas(cotAbierta.id);
-      var partesLlevado = partesLlevarCompras(llevado);
-      if (partesLlevado.length) { persist("tx"); avisos.push("✓ Finanzas al día: " + partesLlevado.join(", ") + "."); }
+      if (llevado && llevado.bloqueado) {
+        avisos.push("⚠ La cotización se guardó, pero sus compras no se llevaron a Finanzas: " + llevado.bloqueado.split("\n")[0]);
+      } else {
+        var partesLlevado = partesLlevarCompras(llevado);
+        if (partesLlevado.length) { persist("tx"); avisos.push("✓ Finanzas al día: " + partesLlevado.join(", ") + "."); }
+      }
     }
   }
   persist("cotizaciones");

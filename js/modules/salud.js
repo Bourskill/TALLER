@@ -9,6 +9,7 @@ import { esc, norm, todayStr } from "../core/utils.js";
 import { renderHelp, renderBuscador } from "../core/components.js";
 import { calcResumenSalud, calcReparacionesAlCargar, textoInformeSalud } from "../core/salud.js";
 import { irARecibo } from "./finanzas.js";
+import { cargarBitacora, estadoLecturaBitacora } from "../core/bitacora.js";
 
 // Cuántos botones «Ver…» se muestran por hallazgo; el resto se cuenta. (Todos
 // están en el informe copiado.)
@@ -62,6 +63,10 @@ function renderReparaciones() {
 }
 
 export function renderSalud() {
+  // «Meses cerrados» compara contra la bitácora: si hay algún mes cerrado y aún
+  // no se leyó (ni falló), se pide ahora; al terminar vuelve a pintar sola.
+  var lectura = estadoLecturaBitacora();
+  if (!lectura.cargada && !lectura.cargando && !lectura.error && (state.cierres || []).some(function (c) { return c.estado === "cerrado"; })) cargarBitacora();
   var r = calcResumenSalud();
   var ayuda = "Revisa que el dinero cuadre: solo lee, no cambia nada. Cada punto explica por qué importa y lleva al caso. " +
     "Se revisa: " + r.revisadas.map(function (v) { return v.titulo; }).join("; ") + ".";

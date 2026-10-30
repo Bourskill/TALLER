@@ -20,9 +20,12 @@
 // costo/patrón que ya usa sheetsStorage.js (siempre guarda el array entero,
 // nunca un diff parcial), así que no es un cambio de comportamiento, solo de
 // dónde queda visible la información.
+//
+// Excepción: una tabla que SOLO CRECE (la bitácora de cambios, Hallazgo #65) no
+// se reescribe: `agregar` le suma filas al final con values.append.
 
 import { getAccessToken } from "./auth.js";
-import { sheetsValuesGet, sheetsValuesUpdate, sheetsValuesClear, sheetsGetSheetsInfo, sheetsAddSheet, sheetsAgrandarColumnas } from "./googleRest.js";
+import { sheetsValuesGet, sheetsValuesUpdate, sheetsValuesAppend, sheetsValuesClear, sheetsGetSheetsInfo, sheetsAddSheet, sheetsAgrandarColumnas } from "./googleRest.js";
 import { SPREADSHEET_ID } from "./google-config.js";
 
 var sheetsInfoCache = null; // nombre de pestaña -> { sheetId, columnCount } ya confirmados —
@@ -56,7 +59,7 @@ async function asegurarPestana(token, nombre, columnas) {
     sheetsInfoCache[nombre] = { sheetId: propsCreada ? propsCreada.sheetId : null, columnCount: columnas.length };
     await sheetsValuesUpdate(token, SPREADSHEET_ID, nombre + "!A1:" + letraColumna(columnas.length) + "1", [columnas.map(function (c) { return c.header; })]);
     headersVerificados[nombre] = true;
-    return;
+    return true; // recién creada (ver `agregar`: la bitácora deja su primera entrada solo entonces)
   }
   // La pestaña ya existía con una grilla más angosta de lo que el esquema
   // necesita ahora (ver el aviso del incidente arriba) — agrandarla es
@@ -145,6 +148,31 @@ export function crearTablaSheet(nombrePestana, columnas, opts) {
         return columnas.map(function (col) { return celdaDesdeValor(item, col); });
       });
       await sheetsValuesUpdate(token, SPREADSHEET_ID, rangoDatos, filas);
+    },
+    // Agrega filas AL FINAL, sin tocar las que ya están. Es para una tabla que
+    // solo crece (la bitácora de cambios): reescribirla entera en cada guardado
+    // —lo que hace `escribir`— sería cada vez más lento y, peor, un fallo a
+    // mitad de camino la dejaría sin filas (clear + update no son atómicos).
+    // Con append, lo peor que pasa si algo falla es que las filas nuevas no
+    // lleguen (se reintentan), nunca que se pierdan las viejas.
+    //
+    // Reintentar un append puede repetir filas si la primera vez SÍ llegó pero la
+    // respuesta se perdió; por eso quien lee esta tabla descarta ids repetidos
+    // (ver `leer` de la bitácora en core/bitacora.js).
+    //
+    // extra.alCrear(): filas que se agregan ANTES de las nuevas, solo si esta
+    // llamada fue la que creó la pestaña (la primera entrada de la bitácora).
+    agregar: async function (items, extra) {
+      var token = getAccessToken();
+      var creada = await asegurarPestana(token, nombrePestana, columnas);
+      var lista = (items || []).slice();
+      if (creada && extra && extra.alCrear) lista = extra.alCrear().concat(lista);
+      if (!lista.length) return;
+      var filas = lista.map(function (itemOriginal) {
+        var item = opts.pre ? opts.pre(itemOriginal) : itemOriginal;
+        return columnas.map(function (col) { return celdaDesdeValor(item, col); });
+      });
+      await sheetsValuesAppend(token, SPREADSHEET_ID, nombrePestana + "!A1", filas);
     }
   };
 }

@@ -44,6 +44,7 @@ export const KEYS = {
   tx: "finanzas:transacciones",
   txPapelera: "finanzas:papelera",
   transferencias: "finanzas:transferencias", // plata que pasa de una cuenta a otra (Hallazgo #63) — NO son movimientos: no tocan la caja ni los reportes
+  cierres: "finanzas:cierres", // meses cerrados (Hallazgo #65) — vive en su propia pestaña "Cierres" (ver TABLAS_SHEET en core/store.js), no en este blob
   pedidos: "pedidos:lista",
   pedidosPapelera: "pedidos:papelera",
   clientes: "clientes:lista",

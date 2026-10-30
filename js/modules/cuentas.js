@@ -15,6 +15,7 @@
 // La lista de cuentas se configura en Configuración (renderConfigCuentas).
 
 import { state, persist, notify, mostrarToast } from "../core/store.js";
+import { exigirMesAbierto } from "../core/cierre.js";
 import { esc, fmt, num, uid, todayStr, norm } from "../core/utils.js";
 import {
   CUENTA_SIN_ASIGNAR, calcCuentasConfig, existeCuenta, nombreCuenta, cuentaDeTx,
@@ -321,6 +322,7 @@ export var actions = {
     if (!existeCuenta(de) || !existeCuenta(a)) { window.alert("Elige la cuenta de la que sale la plata y la cuenta a la que entra."); return; }
     if (de === a) { window.alert("La cuenta de origen y la de destino son la misma: no hay nada que pasar."); return; }
     if (monto <= 0) { window.alert("Escribe un monto mayor a cero."); return; }
+    if (!exigirMesAbierto([fecha], "registrar esta transferencia")) return;
     var origen = calcSaldosPorCuenta().cuentas.filter(function (x) { return x.id === de; })[0];
     var saldoOrigen = origen ? origen.saldo : 0;
     if (saldoOrigen - monto < 0 &&
@@ -335,6 +337,7 @@ export var actions = {
     var id = el.getAttribute("data-id");
     var tr = (state.transferencias || []).filter(function (x) { return x.id === id; })[0];
     if (!tr) return;
+    if (!exigirMesAbierto([tr.fecha], tr.anulada ? "restaurar esta transferencia" : "anular esta transferencia")) return;
     if (!tr.anulada && !window.confirm("¿Anular esta transferencia de " + fmt(tr.monto) + " (" + nombreCuenta(tr.de) + " → " + nombreCuenta(tr.a) + ")?\n\nLas dos cuentas vuelven al saldo que tenían antes. La Caja no cambia. Puedes restaurarla después.")) return;
     state.transferencias = state.transferencias.map(function (x) {
       return x.id === id ? Object.assign({}, x, { anulada: x.anulada ? "" : todayStr() }) : x;
@@ -392,6 +395,9 @@ export var actions = {
   "asignar-cuenta-tx": function (el) {
     var id = el.getAttribute("data-id"), cuenta = el.value;
     if (!cuenta || !existeCuenta(cuenta)) return;
+    // Cambiar la cuenta mueve el saldo de dos cuentas en ese mes: con el mes cerrado no se hace.
+    var txPrevio = state.tx.filter(function (t) { return t.id === id; })[0];
+    if (txPrevio && cuentaDeTx(txPrevio) !== cuenta && !exigirMesAbierto([txPrevio.fecha], "cambiar la cuenta de este movimiento")) return;
     state.tx = state.tx.map(function (t) { return t.id === id ? quitarConciliado(t, { cuenta: cuenta }) : t; });
     persist("tx"); notify();
   },

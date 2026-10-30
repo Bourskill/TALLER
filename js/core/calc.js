@@ -292,9 +292,14 @@ export function calcAsientos() {
 // actual". "Sin asignar" aparece solo si tiene algo; una cuenta que ya no está
 // en la lista pero conserva movimientos aparece igual (nunca se pierde plata
 // de la vista).
-export function calcSaldosPorCuenta() {
+export function calcSaldosPorCuenta(hastaMes) {
   var saldos = {}, cuantos = {};
-  calcAsientos().forEach(function (a) {
+  // `hastaMes` (AAAA-MM, opcional): el saldo AL FINAL de ese mes, con lo que la
+  // app tenía registrado hasta entonces. Es lo que guarda un cierre de mes
+  // (Hallazgo #65); sin él, el saldo de hoy de siempre.
+  var asientos = calcAsientos();
+  if (hastaMes) asientos = asientos.filter(function (a) { var m = mesDeFecha(a.fecha); return m && m <= hastaMes; });
+  asientos.forEach(function (a) {
     saldos[a.cuenta] = (saldos[a.cuenta] || 0) + a.monto;
     cuantos[a.cuenta] = (cuantos[a.cuenta] || 0) + 1;
   });
@@ -311,8 +316,88 @@ export function calcSaldosPorCuenta() {
     filas.push({ id: id, nombre: "Cuenta eliminada", saldo: saldos[id], movimientos: cuantos[id], sistema: false, huerfana: true });
   });
   var total = filas.reduce(function (a, f) { return a + f.saldo; }, 0);
-  var caja = calcCaja();
+  var caja = hastaMes ? calcCajaHastaMes(hastaMes) : calcCaja();
   return { cuentas: filas, total: total, caja: caja, cuadra: Math.abs(total - caja) < 0.005 };
+}
+
+// ---------- cierre de mes (Hallazgo #65) ----------
+// Un mes cerrado es un mes cuyo dinero ya no se toca: no se crea, edita, borra
+// ni restaura ningún movimiento, abono, reembolso, transferencia ni pago de
+// comisión con fecha en él, hasta que el admin lo reabra con un motivo. El
+// cierre guarda quién, cuándo y un RESUMEN de lo que el mes valía (ingresos,
+// gastos, Caja al final del mes, saldo por cuenta); «Salud de los datos» lo
+// compara después contra lo que el mes vale hoy.
+
+// "AAAA-MM" de una fecha "AAAA-MM-DD" ("" si no es una fecha).
+export function mesDeFecha(fecha) {
+  var m = /^(\d{4}-\d{2})/.exec(String(fecha == null ? "" : fecha));
+  return m ? m[1] : "";
+}
+
+// LA pregunta única: ¿el mes de esta fecha está cerrado? Devuelve el cierre
+// vigente ({ mes, cerradoPor, cerradoPorNombre, cerradoEn, resumen... }) o null.
+// Todo lo que escribe dinero pregunta aquí (vía exigirMesAbierto, core/cierre.js)
+// y nadie más decide si un mes está cerrado. Un mes reabierto no bloquea.
+export function periodoCerrado(fecha, cierres) {
+  var mes = mesDeFecha(fecha);
+  if (!mes) return null;
+  var lista = cierres || (state.cierres || []);
+  for (var i = 0; i < lista.length; i++) {
+    if (lista[i] && lista[i].mes === mes && lista[i].estado === "cerrado") return lista[i];
+  }
+  return null;
+}
+
+// La Caja al final de un mes: el mismo cálculo que calcCaja (la misma regla de
+// signo, montoConSigno) sobre los movimientos con fecha hasta ese mes.
+export function calcCajaHastaMes(mes) {
+  return (state.tx || []).reduce(function (acc, t) {
+    var m = mesDeFecha(t.fecha);
+    return m && m <= mes ? acc + montoConSigno(t) : acc;
+  }, 0);
+}
+
+// Lo que un mes vale HOY (y lo que se guarda al cerrarlo). Sale de las mismas
+// funciones que los reportes y las cuentas —calcResumenMovimientos y
+// calcSaldosPorCuenta—, así que el cierre nunca dice un número distinto al de
+// la pantalla.
+export function calcResumenMes(mes) {
+  var movs = (state.tx || []).filter(function (t) { return mesDeFecha(t.fecha) === mes; });
+  var r = calcResumenMovimientos(movs);
+  var s = calcSaldosPorCuenta(mes);
+  return {
+    mes: mes,
+    ingresos: r.ingresos, gastos: r.gastos, balance: r.balance,
+    caja: s.caja,
+    movimientos: movs.length,
+    cuentas: s.cuentas.map(function (c) { return { id: c.id, nombre: c.nombre, saldo: c.saldo }; })
+  };
+}
+
+// Qué números de un mes cerrado ya no son los que se guardaron al cerrarlo.
+// Vacío = el mes sigue valiendo lo mismo. Tolera la coma flotante (no un peso).
+export function calcDiferenciasCierre(cierre) {
+  var res = [];
+  if (!cierre || !cierre.resumen) return res;
+  var guardado = cierre.resumen, hoy = calcResumenMes(cierre.mes);
+  function comparar(campo, etiqueta, a, b) {
+    if (Math.abs(num(a) - num(b)) > 0.005) res.push({ campo: campo, etiqueta: etiqueta, guardado: num(a), hoy: num(b) });
+  }
+  comparar("ingresos", "Ingresos", guardado.ingresos, hoy.ingresos);
+  comparar("gastos", "Gastos", guardado.gastos, hoy.gastos);
+  comparar("caja", "Caja al final del mes", guardado.caja, hoy.caja);
+  comparar("movimientos", "Cantidad de movimientos", guardado.movimientos, hoy.movimientos);
+  var porId = {};
+  (hoy.cuentas || []).forEach(function (c) { porId[c.id] = c; });
+  var vistas = {};
+  (guardado.cuentas || []).forEach(function (c) {
+    vistas[c.id] = true;
+    comparar("cuenta:" + c.id, "Saldo de " + (c.nombre || c.id), c.saldo, porId[c.id] ? porId[c.id].saldo : 0);
+  });
+  (hoy.cuentas || []).forEach(function (c) {
+    if (!vistas[c.id]) comparar("cuenta:" + c.id, "Saldo de " + (c.nombre || c.id), 0, c.saldo);
+  });
+  return res;
 }
 
 // Cuánto se usa una cuenta (para saber si se puede borrar): movimientos,

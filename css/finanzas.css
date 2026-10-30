@@ -33,3 +33,22 @@
    fecha, concepto, monto y una celda final (casilla, cuenta o botón). En móvil
    manda responsive.css (cada celda lleva su .mobile-th), así que acá no hay nada. */
 .tx-row.cuenta-fila{ grid-template-columns: 90px minmax(160px,1fr) 120px 150px; }
+
+/* Cierre de mes y Bitácora (modules/cierres.js, modules/bitacora.js — Hallazgo
+   #65). Reutilizan la tarjeta de «Salud de los datos» (.salud-item, de
+   config.css) y solo agregan el color de borde por estado / acción. */
+.cierre-mes.cerrado{border-left-color:var(--success);}
+.cierre-mes.reabierto{border-left-color:var(--warning);}
+.cierre-mes.cerrado.error{border-left-color:var(--danger);}
+.cierre-historial{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--ink-soft);}
+.cierre-historial li{margin:2px 0;}
+.bit-item{border:1px solid var(--border-soft);border-left:3px solid var(--border-strong);border-radius:var(--radius-sm);
+  background:var(--surface-2);padding:9px 12px;margin-top:6px;}
+.bit-item.crear,.bit-item.restaurar,.bit-item.cerrar-mes{border-left-color:var(--success);}
+.bit-item.editar,.bit-item.reabrir-mes{border-left-color:var(--warning);}
+.bit-item.eliminar{border-left-color:var(--danger);}
+.bit-filtros{display:flex;gap:10px 14px;flex-wrap:wrap;margin:4px 0 8px;}
+.bit-filtros .field{margin:0;min-width:130px;}
+.bit-detalle{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 16px;margin-top:8px;font-size:12px;color:var(--ink-soft);}
+.bit-detalle ul{margin:2px 0 0;padding-left:16px;}
+.bit-detalle-titulo{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-faint);}

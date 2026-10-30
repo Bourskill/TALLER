@@ -19,9 +19,10 @@ en vez de adivinar.
 
 ## Pruebas automáticas
 
-Hay cuatro pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+Hay cinco pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
 `test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
-conciliación) y `test/salud.mjs` («Salud de los datos»). **Corren solas en GitHub** (pestaña Actions, workflow
+conciliación), `test/salud.mjs` («Salud de los datos») y `test/bitacora.mjs`
+(bitácora de cambios y cierre de mes). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
 
@@ -275,6 +276,35 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — octubre 2026 (centésima decimotercera ronda: bitácora de cambios y cierre de mes)
+
+- **📒 Bitácora (Finanzas, solo admin, solo lectura):** cada cambio de dinero queda
+  anotado con **quién, cuándo y cómo estaba antes y después**: movimientos, abonos y
+  reembolsos, totales y descuentos de pedidos y cotizaciones, comisiones, cuentas,
+  transferencias, deudas, gastos fijos y nómina. Filtros por fecha, persona y tipo,
+  buscador con contador, enlace al registro y «Antes y después». Lo que la app corrige
+  sola al cargar sale como **Automático**.
+- **Se calcula en un solo punto** (`persist`), así que cubre también lo que se agregue
+  mañana. Va en su **propia pestaña de la Sheet** (`Bitacora`, una fila por cambio) y
+  se le **agregan filas al final**, sin reescribirla. Si no hay red, la acción sigue y
+  la anotación espera y se reintenta sola.
+- **🔒 Cierre de mes (Finanzas, solo admin):** el admin cierra un mes que ya terminó;
+  se guarda quién, cuándo y lo que valía (ingresos, gastos, Caja al final del mes y
+  saldo de cada cuenta). Mientras esté cerrado **no se puede crear, editar, borrar ni
+  restaurar** un movimiento, abono, reembolso, transferencia ni pago de comisión con
+  fecha en él, y el mensaje dice qué mes es y quién lo cerró. Para corregir, el admin
+  **reabre el mes con un motivo** (queda en la bitácora) y lo vuelve a cerrar. Un
+  vendedor no puede cerrarlo ni reabrirlo.
+- **Salud de los datos** ganó «Meses cerrados»: error si los números de un mes
+  cerrado ya no coinciden con lo que se guardó, o si la bitácora dice que algo de ese
+  mes se tocó después del cierre.
+- **Qué NO cubre:** no es un candado de seguridad. Un usuario con acceso directo a la
+  Google Sheet puede saltarse todo esto (editar un movimiento o borrar filas de la
+  bitácora); lo anterior a la bitácora no tiene historial; y marcar un movimiento
+  como conciliado o editar el total de un pedido no se bloquea (se anota). Ver la
+  lista completa en CONTABILIDAD.md, Hallazgo #65.
+- Prueba nueva: `node test/bitacora.mjs` (no necesita jsdom); ya corre en la CI.
 
 ## Registro de cambios — octubre 2026 (centésima duodécima ronda: «Salud de los datos»)
 

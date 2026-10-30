@@ -48,6 +48,12 @@ async function entrarConSesion(session) {
   var domMod = await import("./core/dom.js");
   if (session.rol === "vendedor") store.state.tab = "mis-ventas";
   await store.loadAll();
+  // Bitácora de cambios (Hallazgo #65): lo que quedó sin escribir en la sesión
+  // anterior se retoma ahora; y el admin la lee de una vez si hay meses cerrados
+  // (la verificación de Salud la necesita). Ninguna de las dos frena el primer render.
+  var bitacoraMod = await import("./core/bitacora.js");
+  bitacoraMod.programarVolcado();
+  if (session.rol === "admin" && (store.state.cierres || []).some(function (c) { return c.estado === "cerrado"; })) bitacoraMod.cargarBitacora();
   domMod.render();
   // Chequeo oportunista del respaldo diario (ver core/backup.js): no bloquea
   // el primer render, y no hace nada si ya se corrió en las últimas 24h o si
