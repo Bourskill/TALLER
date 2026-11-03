@@ -26,7 +26,10 @@ function textoBuscable(h) {
 function renderEnlaces(h) {
   var movs = h.afectados.filter(function (a) { return a.tipo === "movimiento"; });
   var otros = h.afectados.filter(function (a) { return a.tipo !== "movimiento"; });
-  var ICONO = { pedido: "Pedido", cotizacion: "Cotización", recibo: "Recibo" };
+  var ICONO = {
+    pedido: "Pedido", cotizacion: "Cotización", recibo: "Recibo",
+    deuda: "Deuda", empleado: "Nómina", "papelera-pedido": "Papelera de pedidos", "papelera-movimiento": "Papelera de movimientos"
+  };
   var botones = otros.slice(0, MAX_ENLACES).map(function (a) {
     return '<button class="btn ghost small salud-ir" data-action="salud-ir" data-tipo="' + a.tipo + '" data-id="' + esc(a.id) + '" title="' + esc(a.etiqueta || "") + '">↗ ' +
       (ICONO[a.tipo] || "Ver") + "</button>";
@@ -164,6 +167,26 @@ export var actions = {
       state.tab = "cotizaciones";
       state.cotizacionEditando = id;
       state.cotizacionesVista = "nueva";
+      notify();
+    } else if (tipo === "deuda") {
+      // Las deudas activas y las saldadas viven en pestañas distintas de Pendientes.
+      state.tab = "pendientes";
+      state.deudasVista = (state.deudasHistorial || []).some(function (d) { return d.id === id; }) && !(state.deudas || []).some(function (d) { return d.id === id; }) ? "historial" : "activas";
+      notify();
+      destellar('[data-deuda-id="' + id + '"]');
+    } else if (tipo === "empleado") {
+      state.tab = "pendientes";
+      notify();
+    } else if (tipo === "papelera-pedido") {
+      state.tab = "pedidos";
+      state.pedidosVista = "historial";
+      state.filtroPedidosVista = "papelera";
+      notify();
+    } else if (tipo === "papelera-movimiento") {
+      state.tab = "finanzas";
+      state.finanzasVista = "historial";
+      state.filtroTxVista = "papelera";
+      state.txEnfocados = [];
       notify();
     } else if (tipo === "movimiento") {
       // Finanzas se queda solo con esos movimientos (ver txEnfocados) y deja

@@ -282,6 +282,46 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
 
+## Registro de cambios — noviembre 2026 (centésima decimoquinta ronda: «Salud de los datos» revisa ocho cosas más)
+
+- **El panel pasa de 13 a 21 verificaciones** (solo lee, no repara ni escribe nada;
+  los avisos y errores salen en la misma pantalla, con su «?», dónde se arregla y
+  botones «↗» al caso — ahora también a una **Deuda**, a la **Nómina** y a la
+  **Papelera**):
+  1. **Nómina del periodo:** aviso si a alguien se le pagó **más** que su sueldo en el
+     periodo en curso y el pago no dice «(+$X bono)». Pagos de meses pasados y pagos de
+     menos no se señalan (a propósito, ver abajo).
+  2. **Deudas:** `cuotasPagadas`, el historial de pagos y los movimientos de la deuda
+     tienen que contar lo mismo. **Error** si un pago enlazado ya no está en Finanzas o
+     tiene otro monto, o si Finanzas tiene más pagos que la deuda registra (el siguiente
+     «Pagar» cobraría una cuota ya pagada); **aviso** si son números de datos viejos. Un
+     solo hallazgo por deuda.
+  3. **Compras «Sí» de una cotización** contra su movimiento (aviso).
+  4. **Costo estimado completo + compras reales a la vez** (**error**: ese costo está
+     dos veces en la caja).
+  5. **Consignación:** cada venta con su ingreso y cada comisión pagada con su gasto, por
+     el mismo monto (error). Una venta anterior a septiembre, cuyo movimiento perdió su
+     marca de origen, **no** se señala si hay un movimiento del mismo valor.
+  6. **El total del pedido contra su cotización de origen** (aviso).
+  7. **Lo que hay en la papelera:** un pedido o movimiento en los dos lados, o separado
+     de lo que lo originó (aviso).
+  8. **Comisión ya pagada contra la fórmula de hoy:** aviso **informativo**; la app
+     nunca cambia lo ya pagado.
+  Además, **«Cada abono y reembolso…» ahora compara también la fecha** (aviso si el
+  monto coincide y la fecha no; si el monto también difiere, el mismo hallazgo la dice).
+- **Decisiones del dueño** (se le preguntaron antes de escribir código): nómina solo del
+  periodo en curso y solo si es de **más**; la comisión contra la fórmula, como aviso
+  informativo; costo estimado + compras reales, como **error**; la fecha de un abono y la
+  de su movimiento **siempre iguales**.
+- **Sin falsos positivos con datos viejos:** no se señalan la cotización abierta con
+  cambios sin guardar, la que tiene el estimado registrado (ahí las compras no se
+  llevan a propósito), los pagos de deuda sin `txId`, las cuotas que se bajaron al editar,
+  ni lo que otra verificación ya dice (un problema, un hallazgo).
+- Para no repetir una cuenta, subieron a `core/calc.js`: `calcComprasDesfasadasConFinanzas`
+  (antes privada de Cotizaciones), `calcDifTotalesCotizacionPedido` (el total y el descuento
+  de `calcDesfaseCotizacionPedido`) y `calcPagosNominaEmpleado`.
+- Ver CONTABILIDAD.md, Hallazgo #66. Pruebas: `node test/salud.mjs` (251, sin jsdom).
+
 ## Registro de cambios — octubre 2026 (centésima decimocuarta ronda: la nómina y las cuotas de deuda en pesos enteros)
 
 - **Nómina:** un salario que se convierte de base (ej. mensual que se paga por semana,

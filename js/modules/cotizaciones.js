@@ -1,7 +1,7 @@
 import { state, persist, notify, mostrarToast } from "../core/store.js";
 import { exigirMesAbierto, bloqueoMesCerrado, fechasCambiadas } from "../core/cierre.js";
 import { esc, opt, num, uid, todayStr, val, fmt, norm, generarNumeroOp, parseDetalleCSV, parseDetalleFilas, codigoPublico, exigirCampos } from "../core/utils.js";
-import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcDesglosePedido, descuentoVigente, descuentoDesdeForm, parchearDescuento, repartirProporcional, calcMontoDescuento, calcPrecioServicio, textoDescuento, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado } from "../core/calc.js";
+import { movimientosGeneradosPorCotizacion, calcCotizacionTotales, calcRefTotales, calcRefTotalesConGlobales, calcDesglosePedido, descuentoVigente, descuentoDesdeForm, parchearDescuento, repartirProporcional, calcMontoDescuento, calcPrecioServicio, textoDescuento, calcCostoGlobalPorPrenda, calcCostoPrenda, calcCotResultadoReal, calcListaCompras, calcCotGastoVariacion, calcCotGastoEstimadoBase, calcComisionValorCot, clienteById, estadoAgregadoDeCot, productoById, validarStockLineas, proveedoresDeContactos, calcCostosGlobales, calcResumenCompras, compraDeLinea, calcUnidadesCotizacion, calcCostoPrendaGlobal, calcServiciosCobrados, etapasDe, insumoCambioDeCatalogo, estadoCompra, esInsumoServicio, estadoLineaCompra, marcasConocidas, serviciosQueQuedanNegativosSiSeBorra, costoRealPedido, cantidadRealPedido, costoExcedenteCompra, cantidadExcedenteCompra, calcReservaCompraConjunta, cantidadEfectivaInsumo, categoriasUsadasPorInsumos , pedidoIdDeCotParaTx, esMiembroRecibo, reconciliarTxRecibo, verificarRecibo, calcCaja, reservasDeCompra, ajustarCantidadMiembro, calcRecibo, devolverPartesPorEliminar, retomarPartesPorRestaurar, migrarComprasARecibos, lineaSinCantidad, desperdicioCompra, estimadoTxDeCot, comprasEnFinanzas, estadoComisionCot, cotSobrePedidoCancelado, cotizacionAceptada, cotConPedidoEliminado, calcComprasDesfasadasConFinanzas, calcDifTotalesCotizacionPedido } from "../core/calc.js";
 import { renderDescuentoCampo, renderTipoCostoOptions, renderEnlacePanel, renderCeldaCantidadInsumo, renderHelp, renderToggleSeccion, renderComboUnidad, renderClienteSeleccionCampo, renderClientePicker, renderExploradorInsumos } from "../core/components.js";
 import { generarPDFCotizacion, generarPDFInternoCotizacion } from "../core/pdf.js";
 import { subirImagenReferencia } from "../core/drive.js";
@@ -709,7 +709,7 @@ function renderTablaCompras(c, compras, hayProveedor) {
   // Compras "Sí" que todavía no están en Finanzas (p. ej. marcadas antes
   // del Hallazgo #58, cuando solo las llevaba el botón): se dice en vez de
   // dejar que la caja y "pagado" cuenten cosas distintas sin aviso.
-  var desfasadas = comprasDesfasadasConFinanzas(c);
+  var desfasadas = calcComprasDesfasadasConFinanzas(c);
   if (desfasadas.length) {
     html += '<div class="section-sub" style="margin:6px 0 0;color:var(--warning-ink);">⚠ ' + desfasadas.length + (desfasadas.length === 1 ? " compra no coincide" : " compras no coinciden") + " con Finanzas: " +
       (estimadoTxDeCot(c, state.tx) ? "este pedido tiene el estimado completo registrado, así que no se actualizan solas (contaría el costo dos veces)."
@@ -3445,13 +3445,15 @@ export function calcDesfaseCotizacionPedido(cot) {
   var ped = state.pedidos.filter(function (p) { return p.id === pedidoId; })[0];
   if (!ped) return null;
   var datos = datosPedidoDesdeCot(cot);
-  var difTotal = num(datos.total) - num(ped.total);
+  // El total y el descuento salen de core/calc.js (los usa también «Salud de
+  // los datos»). El descuento cuenta: cambiarlo de un ítem a la orden (mismo
+  // total) reparte distinto la comisión y los reportes, así que el pedido debe
+  // enterarse aunque el total no se mueva (Hallazgo #61).
+  var dif = calcDifTotalesCotizacionPedido(cot, ped);
+  var difTotal = dif.difTotal;
+  var difDescuento = dif.difDescuento;
   var difCosto = num(datos.costo) - num(ped.costo);
   var difCantidad = num(datos.cantidad) - num(ped.cantidad);
-  // El descuento también cuenta: cambiarlo de un ítem a la orden (mismo total)
-  // reparte distinto la comisión y los reportes, así que el pedido debe
-  // enterarse aunque el total no se mueva (Hallazgo #61).
-  var difDescuento = calcCotizacionTotales(cot).descuento - calcDesglosePedido(ped).descuento;
   if (!difTotal && !difCosto && !difCantidad && !difDescuento) return null;
   return {
     pedido: ped, datos: datos,
@@ -3603,20 +3605,9 @@ function partesLlevarCompras(llevado) {
   if (r.huerfanas) partes.push(r.huerfanas + " compra(s) vieja(s) limpiada(s) (su insumo/línea ya no existe)");
   return partes;
 }
-// Las compras de una cotización cuya plata en Finanzas no coincide con lo
-// que dicen: una "Sí" sin su movimiento o con otro monto, o una que dejó de
-// ser "Sí" y conserva el suyo. Las de un recibo siempre coinciden (las arma
-// el recibo). Solo compras con su línea viva: la sincronización no toca
-// las demás, y prometer que se arreglan al guardar sería mentir.
-function comprasDesfasadasConFinanzas(cot) {
-  var lineas = calcListaCompras(cot);
-  return ((cot && cot.compras) || []).filter(function (c) {
-    if (esMiembroRecibo(c)) return false;
-    if (!lineas.some(function (l) { return l.clave === c.clave; })) return false;
-    var esperado = estadoCompra(c) === "si" ? costoRealPedido(c) : 0;
-    return Math.abs(comprasEnFinanzas(cot, state.tx, c.clave).costoPedido - esperado) >= 0.5;
-  });
-}
+// (Las compras cuya plata en Finanzas no coincide con lo que dicen: ver
+// calcComprasDesfasadasConFinanzas en core/calc.js, que también usa «Salud de
+// los datos».)
 
 // Guarda de verdad y vuelve a dejar la cotización "limpia". Cualquier acción
 // transaccional la llama, así que después de registrar un costo real o pagar
@@ -3649,7 +3640,7 @@ function guardarCotizaciones(opts) {
   var avisos = [];
   if (cotAbierta && !(opts && opts.sinLlevarCompras)) {
     if (estimadoTxDeCot(cotAbierta, state.tx)) {
-      var pendientes = comprasDesfasadasConFinanzas(cotAbierta);
+      var pendientes = calcComprasDesfasadasConFinanzas(cotAbierta);
       if (pendientes.length) avisos.push("⚠ " + pendientes.length + " compra(s) no coinciden con Finanzas y no se actualizaron: este pedido tiene su costo estimado completo registrado. Bórralo en Finanzas, o usa \"Actualizar movimientos financieros\".");
     } else {
       var llevado = llevarComprasAFinanzas(cotAbierta.id);

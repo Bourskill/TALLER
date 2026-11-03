@@ -26,6 +26,7 @@ globalThis.window.jspdf = { jsPDF: function () { return new Proxy({}, { get: () 
 
 const R = new URL("../js/", import.meta.url).href;
 const calc = await import(R + "core/calc.js");
+const utils = await import(R + "core/utils.js");
 const store = await import(R + "core/store.js");
 const salud = await import(R + "core/salud.js");
 const ui = await import(R + "modules/salud.js");
@@ -43,6 +44,19 @@ const fakeEl = (attrs) => ({ value: "", getAttribute: k => (k in attrs ? attrs[k
 // viejo (con su base sin respaldo), gasto fijo pagado y de un periodo cerrado,
 // cuotas de deuda, un servicio con lo gastado, y un recibo de compra.
 const HOY = "2026-10-29";
+// La nómina se mira en el periodo EN CURSO, que sale de la fecha de hoy de
+// verdad (no de HOY): sus pagos de prueba llevan esta fecha.
+const HOY_REAL = utils.todayStr();
+// Una cotización con un insumo («Tela») que sí aparece en la lista de compras.
+function cotConInsumo(id, extra) {
+  return Object.assign({
+    id, cliente: "Cliente", descripcion: "Pedido " + id, fecha: HOY, estado: "convertida", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: id,
+    referencias: [{ id: "ref-" + id, nombre: "Camiseta", imagenUrl: "", consumoAprox: 1, cantidadPedida: 10, precioVenta: 20000, origen: "taller", costoCompra: 0, proveedorId: "",
+      insumos: [{ id: "ins-" + id, nombre: "Tela", unidad: "mt", costo: 9000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" }], detalle: [], estado: "nuevo", estadosDef: null }],
+    costosGlobales: [], serviciosCobrados: [], compras: []
+  }, extra || {});
+}
+const claveTela = (c) => calc.calcListaCompras(c).filter(l => l.nombre === "Tela")[0].clave;
 function datosLimpios() {
   const pedidos = [
     { id: "P1", numeroOp: "OP-1", cliente: "Ana", descripcion: "Camisetas", total: 200000, abono: 100000, iva: { activo: false, porcentaje: 19 },
@@ -56,7 +70,20 @@ function datosLimpios() {
       lineas: [{ id: "l3", cantidad: 2, precioUnitario: 100000 }],
       vendedor: { nombre: "Ana V", tipo: "fijo", valor: 10000, estado: "pagado" } },
     // Pedido VIEJO: sin líneas y con lo abonado sin ninguna fila de abono detrás.
-    { id: "P4", numeroOp: "OP-0", cliente: "Marta", descripcion: "Pedido de antes", total: 80000, abono: 50000, iva: { activo: false, porcentaje: 19 } }
+    { id: "P4", numeroOp: "OP-0", cliente: "Marta", descripcion: "Pedido de antes", total: 80000, abono: 50000, iva: { activo: false, porcentaje: 19 } },
+    // Un vendedor por PORCENTAJE (10 %) con su comisión ya pagada por lo que da hoy la fórmula.
+    { id: "P8", numeroOp: "OP-8", cliente: "Leo", descripcion: "Bolsos", total: 100000, abono: 100000, iva: { activo: false, porcentaje: 19 },
+      lineas: [{ id: "l8", cantidad: 1, precioUnitario: 100000 }], abonos: [{ id: "a8", monto: 100000, fecha: "2026-10-27" }],
+      vendedor: { nombre: "Zoe V", tipo: "porcentaje", valor: 10, estado: "pagado" } },
+    // Consignación: el punto reportó tres ventas. v1 con su comisión ya pagada; v2 con la
+    // comisión pendiente; v3 es de ANTES de septiembre (su ingreso perdió la marca de origen).
+    { id: "P6", numeroOp: "OP-6", cliente: "Punto Sur", descripcion: "Consignación", total: 0, abono: 0, abonos: [], iva: { activo: false, porcentaje: 19 },
+      consignacion: { puntoId: "", comisionTipo: "porcentaje", comisionValor: 10, precioUnitario: 50000, cantidadEnviada: 0, retiros: [], remisiones: [],
+        ventas: [
+          { id: "v1", cantidad: 2, fecha: "2026-10-24", montoTotal: 100000, comisionMonto: 10000, comisionPagada: true },
+          { id: "v2", cantidad: 1, fecha: "2026-10-25", montoTotal: 50000, comisionMonto: 5000, comisionPagada: false },
+          { id: "v3", cantidad: 1, fecha: "2026-08-10", montoTotal: 30000, comisionMonto: 3000, comisionPagada: false }
+        ] } }
   ];
   const cotServ = {
     id: "cot-serv", cliente: "Cliente", descripcion: "Servicios", fecha: HOY, estado: "convertida", pedidoId: "", gastosReales: [], iva: { activo: false, porcentaje: 19 }, vendedor: null, codigoPublico: "cs1",
@@ -78,6 +105,14 @@ function datosLimpios() {
     [{ id: "cotA-rc", descripcion: "Uniformes A", pedidoId: "pA-rc", compras: [] }, { id: "cotB-rc", descripcion: "Uniformes B", pedidoId: "pB-rc", compras: [] }],
     "R1", { fecha: "2026-09-23", proveedorId: "", numero: "4411", servicios: [], etiquetas: [] }, [{ grupo, reparto }]);
   const txRecibo = calc.reconciliarTxRecibo([], "R1", cotsRc).tx;
+  // Hallazgo #66: una compra «Sí» ya llevada a Finanzas; un pedido con el costo ESTIMADO completo
+  // registrado (y una compra «Sí» que por eso NO se llevó, a propósito); y una cotización ya
+  // convertida en el pedido P1, con su mismo total.
+  const cotCompra = cotConInsumo("cot-compra");
+  cotCompra.compras = [{ clave: claveTela(cotCompra), estado: "si", costoReal: 90000, cantidadReal: 10, txId: "t-tela" }];
+  const cotEst = cotConInsumo("cot-est", { estimadoTxId: "t-est" });
+  cotEst.compras = [{ clave: claveTela(cotEst), estado: "si", costoReal: 80000, cantidadReal: 10 }];
+  const cotLink = cotConInsumo("cot-link", { pedidoId: "P1" });
 
   const tx = [
     { id: "t-a1", tipo: "ingreso", concepto: "Abono — Camisetas", monto: 100000, fecha: "2026-10-20", pedidoId: "P1", origenAbonoId: "a1" },
@@ -92,18 +127,69 @@ function datosLimpios() {
     { id: "t-gf0", tipo: "gasto", concepto: "Arriendo septiembre", monto: 150000, fecha: "2026-09-01", gastoFijoId: "gf1", origenGastoFijoPeriodo: "gf1|2026-09" },
     { id: "t-d1", tipo: "gasto", concepto: "Cuota préstamo 1", monto: 250000, fecha: "2026-09-15", deudaId: "d1" },
     { id: "t-d2", tipo: "gasto", concepto: "Cuota préstamo 2", monto: 250000, fecha: "2026-10-15", deudaId: "d1" },
-    { id: "t-botones", tipo: "gasto", concepto: "Botones", monto: 60000, fecha: "2026-10-26", serviciosDescuento: [{ nombre: "Confección", monto: 50000 }] }
+    { id: "t-botones", tipo: "gasto", concepto: "Botones", monto: 60000, fecha: "2026-10-26", serviciosDescuento: [{ nombre: "Confección", monto: 50000 }] },
+    // Hallazgo #66 ----------------------------------------------------------
+    // el abono de P8 y su comisión (10 %), pagada por lo que da hoy la fórmula
+    { id: "t-a8", tipo: "ingreso", concepto: "Abono — Bolsos", monto: 100000, fecha: "2026-10-27", pedidoId: "P8", origenAbonoId: "a8" },
+    { id: "t-c8", tipo: "comision", concepto: "Comisión — Zoe V", monto: 10000, contraparte: "Zoe V", fecha: "2026-10-28", pedidoId: "P8", origenComisionPedidoId: "P8" },
+    // nómina del periodo en curso (y un pago viejo, del sueldo de antes del aumento)
+    { id: "t-n1", tipo: "nomina", concepto: "Nómina — Luis", monto: 1300000, contraparte: "Luis", empleadoId: "e1", fecha: HOY_REAL },
+    { id: "t-n0", tipo: "nomina", concepto: "Nómina enero — Luis", monto: 1100000, contraparte: "Luis", empleadoId: "e1", fecha: "2026-01-15" },
+    { id: "t-n2", tipo: "nomina", concepto: "Nómina — Marta (+$50.000 bono)", monto: 450000, contraparte: "Marta", empleadoId: "e2", fecha: HOY_REAL },
+    { id: "t-n3", tipo: "nomina", concepto: "Nómina — Teo (−$100.000 descuento)", monto: 700000, contraparte: "Teo", empleadoId: "e3", fecha: HOY_REAL },
+    // deudas: una con su historial enlazado, una saldada y una condonada (se le bajaron las cuotas)
+    { id: "t-e1", tipo: "gasto", concepto: "Cuota 1/3 — Crédito proveedor", monto: 200000, fecha: "2026-10-05", deudaId: "d2" },
+    { id: "t-f1", tipo: "gasto", concepto: "Cuota 1/2 — Préstamo viejo", monto: 150000, fecha: "2026-09-15", deudaId: "d3" },
+    { id: "t-f2", tipo: "gasto", concepto: "Cuota 2/2 — Préstamo viejo", monto: 150000, fecha: "2026-09-30", deudaId: "d3" },
+    { id: "t-g1", tipo: "gasto", concepto: "Cuota 1 — Deuda condonada", monto: 100000, fecha: "2026-06-30", deudaId: "d4" },
+    { id: "t-g2", tipo: "gasto", concepto: "Cuota 2 — Deuda condonada", monto: 100000, fecha: "2026-07-31", deudaId: "d4" },
+    { id: "t-g3", tipo: "gasto", concepto: "Cuota 3 — Deuda condonada", monto: 100000, fecha: "2026-08-15", deudaId: "d4" },
+    // compra «Sí» llevada a Finanzas, y el costo estimado completo de OTRO pedido
+    { id: "t-tela", tipo: "gasto", concepto: "Compra — Tela — Pedido cot-compra", monto: 90000, fecha: "2026-10-12", cotizacionId: "cot-compra", esInsumo: "1", origenCompraClave: claveTela(cotCompra) },
+    { id: "t-est", tipo: "gasto", concepto: "Estimado completo del pedido — Pedido cot-est", monto: 500000, fecha: "2026-10-13", cotizacionId: "cot-est" },
+    // consignación: v1 y su comisión, v2, y v3 (de antes: el ingreso SIN marca)
+    { id: "t-v1", tipo: "ingreso", concepto: "Venta consignación", monto: 100000, fecha: "2026-10-24", pedidoId: "P6", origenVentaConsignacionId: "v1" },
+    { id: "t-vc1", tipo: "gasto", concepto: "Comisión consignación", monto: 10000, fecha: "2026-10-26", pedidoId: "P6", origenComisionConsignacionId: "v1" },
+    { id: "t-v2", tipo: "ingreso", concepto: "Venta consignación", monto: 50000, fecha: "2026-10-25", pedidoId: "P6", origenVentaConsignacionId: "v2" },
+    { id: "t-v3", tipo: "ingreso", concepto: "Venta consignación (de antes)", monto: 30000, fecha: "2026-08-10", pedidoId: "P6" }
   ].concat(txRecibo);
+  // Lo que ya estaba en la papelera, en regla: un pedido eliminado con su abono (los dos
+  // lados), un gasto borrado a mano, el gasto de una cotización eliminada, y la fila de un
+  // recibo anulado (que conserva el id de la viva, porque al registrarlo otra vez se reusa).
+  const pedidosPapelera = [
+    { id: "P7", numeroOp: "OP-7", cliente: "Eva", descripcion: "Pedido borrado", total: 100000, abono: 100000, iva: { activo: false, porcentaje: 19 }, abonos: [{ id: "a7", monto: 100000, fecha: "2026-10-02" }], eliminadoEl: "2026-10-03" }
+  ];
+  const txPapelera = [
+    { id: "tp-a7", tipo: "ingreso", concepto: "Abono — Pedido borrado", monto: 100000, fecha: "2026-10-02", pedidoId: "P7", origenAbonoId: "a7", eliminadoEl: "2026-10-03", eliminadoConPedido: "P7" },
+    { id: "tp-hilo", tipo: "gasto", concepto: "Gasto borrado a mano", monto: 5000, fecha: "2026-10-04", eliminadoEl: "2026-10-04" },
+    { id: "tp-cot", tipo: "gasto", concepto: "Compra de una cotización eliminada", monto: 7000, fecha: "2026-10-05", cotizacionId: "cot-borrada", origenCompraClave: "k", eliminadoEl: "2026-10-06", eliminadoConCotizacion: "cot-borrada" },
+    Object.assign({}, txRecibo[0], { eliminadoConRecibo: "R1", eliminadoEl: HOY })
+  ];
   return {
-    pedidos, tx, cotizaciones: [cotServ, cotComision].concat(cotsRc),
-    deudas: [{ id: "d1", concepto: "Préstamo", monto: 1000000, cuotas: 4, cuotasPagadas: 2 }],
+    pedidos, tx, cotizaciones: [cotServ, cotComision].concat(cotsRc, [cotCompra, cotEst, cotLink]),
+    deudas: [
+      { id: "d1", concepto: "Préstamo", monto: 1000000, cuotas: 4, cuotasPagadas: 2 }, // de antes del historial: sin líneas
+      { id: "d2", concepto: "Crédito proveedor", contraparte: "Telas SA", monto: 600000, cuotas: 3, cuotasPagadas: 1, historial: [{ fecha: "2026-10-05", monto: 200000, txId: "t-e1" }] }
+    ],
+    deudasHistorial: [
+      { id: "d3", concepto: "Préstamo viejo", monto: 300000, cuotas: 2, cuotasPagadas: 2, fechaCompletada: "2026-09-30", historial: [{ fecha: "2026-09-15", monto: 150000, txId: "t-f1" }, { fecha: "2026-09-30", monto: 150000, txId: "t-f2" }] },
+      // se le bajaron las cuotas de 4 a 2 después de tres pagos: queda con todas pagadas y más pagos que cuotas
+      { id: "d4", concepto: "Deuda condonada", monto: 400000, cuotas: 2, cuotasPagadas: 2, fechaCompletada: "2026-08-31", historial: [{ fecha: "2026-06-30", monto: 100000, txId: "t-g1" }, { fecha: "2026-07-31", monto: 100000, txId: "t-g2" }, { fecha: "2026-08-15", monto: 100000, txId: "t-g3" }] }
+    ],
+    nomina: [
+      { id: "e1", nombre: "Luis", salario: 1300000, salarioPeriodo: "mensual", periodo: "mensual" },
+      { id: "e2", nombre: "Marta", salario: 400000, salarioPeriodo: "semanal", periodo: "semanal" },
+      { id: "e3", nombre: "Teo", salario: 800000, salarioPeriodo: "mensual", periodo: "mensual" }
+    ],
+    pedidosPapelera, txPapelera,
     gastosFijos: [{ id: "gf1", nombre: "Arriendo", pagadoHasta: "2026-10" }]
   };
 }
 function cargar(d) {
   state.pedidos = d.pedidos; state.tx = d.tx; state.cotizaciones = d.cotizaciones;
-  state.deudas = d.deudas; state.deudasHistorial = []; state.pedidosPapelera = []; state.txPapelera = [];
+  state.deudas = d.deudas; state.deudasHistorial = d.deudasHistorial || []; state.pedidosPapelera = d.pedidosPapelera || []; state.txPapelera = d.txPapelera || [];
   state.clientes = []; state.config.gastosFijos = d.gastosFijos; state.config.colchonMovimientos = [];
+  state.config.nomina = d.nomina || []; state.cotSucia = d.cotSucia || "";
 }
 const t = (d, id) => d.tx.filter(x => x.id === id)[0];
 const p = (d, id) => d.pedidos.filter(x => x.id === id)[0];
@@ -182,7 +268,7 @@ escenario("dos compras con la misma clave EN la misma cotización sí son duplic
 escenario("varias cuotas de la misma deuda NO son duplicado (ya están en los datos limpios)", d => {}, []);
 escenario("la comisión de un pedido que ya no existe queda suelta (aviso)", d => { d.pedidos = d.pedidos.filter(x => x.id !== "P3"); }, ["origen-huerfano:aviso"],
   hs => ok(hs[0].afectados[0].id === "t-c3", "y señala el movimiento suelto"));
-escenario("las cuotas de una deuda que ya no existe quedan sueltas (un aviso por cuota)", d => { d.deudas = []; }, ["origen-huerfano:aviso", "origen-huerfano:aviso"]);
+escenario("las cuotas de una deuda que ya no existe quedan sueltas (un aviso por cuota)", d => { d.deudas = d.deudas.filter(x => x.id !== "d1"); }, ["origen-huerfano:aviso", "origen-huerfano:aviso"]);
 escenario("el pago de un gasto fijo de un periodo ya cerrado NO es un hallazgo", d => { d.gastosFijos = []; }, []);
 
 console.log("== 4. comisiones");
@@ -204,7 +290,7 @@ escenario("monto negativo", d => { t(d, "t-hilo").monto = -25000; }, ["movimient
 escenario("monto en cero (aviso)", d => { t(d, "t-hilo").monto = 0; }, ["movimiento-datos:aviso"]);
 escenario("monto con centavos (aviso): no va a coincidir con el banco", d => { t(d, "t-hilo").monto = 25000.5; }, ["movimiento-datos:aviso"],
   hs => ok(hs[0].detalle.indexOf("25.000,5") !== -1 || hs[0].detalle.indexOf("25,000.5") !== -1 || hs[0].detalle.indexOf("25000") !== -1, "y dice el monto CON sus centavos"));
-escenario("la comisión con centavos de coma flotante (16071.375)", d => { t(d, "t-c3").monto = 16071.375; }, ["movimiento-datos:aviso"]);
+escenario("la comisión con centavos de coma flotante (10000.375)", d => { t(d, "t-c3").monto = 10000.375; }, ["movimiento-datos:aviso"]);
 escenario("fecha inválida", d => { t(d, "t-hilo").fecha = "2026-13-45"; }, ["movimiento-datos:error"]);
 escenario("fecha vacía", d => { t(d, "t-hilo").fecha = ""; }, ["movimiento-datos:error"]);
 escenario("fecha que no existe (30 de febrero)", d => { t(d, "t-hilo").fecha = "2026-02-30"; }, ["movimiento-datos:error"]);
@@ -260,6 +346,141 @@ console.log("== 11. las cuentas contra la Caja (Hallazgo #63)");
   ok(salud.VERIFICACIONES_SALUD.some(v => v.id === "cuentas" && v.porque && v.donde), "la verificación «cuentas» está registrada con su porqué y su dónde");
   state.config.cuentas = []; state.transferencias = []; // no contaminar lo que sigue
 }
+
+// ======================= Hallazgo #66: lo que antes no se revisaba =======================
+console.log("== 12. la fecha de un abono contra la de su movimiento (aviso)");
+escenario("el abono y su movimiento tienen fechas distintas, el monto sí coincide", d => { t(d, "t-a1").fecha = "2026-10-22"; }, ["abono-movimiento:aviso"],
+  hs => ok(hs[0].detalle.indexOf("2026-10-20") !== -1 && hs[0].detalle.indexOf("2026-10-22") !== -1 && hs[0].detalle.indexOf("meses distintos") === -1 && hs[0].afectados.some(a => a.tipo === "movimiento" && a.id === "t-a1"), "dice las dos fechas, no dice «meses distintos» y señala el movimiento"));
+escenario("fechas en meses distintos (31 de octubre contra 1 de noviembre): lo dice", d => { p(d, "P1").abonos[0].fecha = "2026-10-31"; t(d, "t-a1").fecha = "2026-11-01"; }, ["abono-movimiento:aviso"],
+  hs => ok(hs[0].detalle.indexOf("meses distintos") !== -1, "dice que caen en meses distintos"));
+escenario("el reembolso y su movimiento con fechas distintas", d => { t(d, "t-r2").fecha = "2026-10-23"; }, ["abono-movimiento:aviso"],
+  hs => ok(hs[0].titulo.indexOf("reembolso") !== -1, "habla del reembolso"));
+escenario("monto Y fecha distintos: UN solo hallazgo (el del monto), que también dice la fecha", d => { t(d, "t-a1").monto = 90000; t(d, "t-a1").fecha = "2026-10-22"; }, ["abono-movimiento:error"],
+  hs => ok(hs[0].detalle.indexOf("2026-10-22") !== -1, "el error del monto menciona la fecha distinta"));
+escenario("un abono viejo SIN fecha no se compara", d => { delete p(d, "P1").abonos[0].fecha; }, []);
+escenario("la fecha del abono con hora no es una diferencia (mismo día)", d => { p(d, "P1").abonos[0].fecha = "2026-10-20T14:30:00"; }, []);
+
+console.log("== 13. nómina: lo pagado en el periodo en curso");
+escenario("a Luis se le pagó $200.000 de más y el pago no lo explica", d => { t(d, "t-n1").monto = 1500000; }, ["nomina-periodo:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "empleado" && a.id === "e1") && hs[0].afectados.some(a => a.tipo === "movimiento" && a.id === "t-n1") && hs[0].detalle.indexOf("200.000") !== -1, "señala a la persona y su pago, y dice cuánto sobra ($200.000)"));
+escenario("el mismo pago registrado dos veces en el periodo", d => { d.tx.push(Object.assign({}, t(d, "t-n1"), { id: "t-n1-bis" })); }, ["nomina-periodo:aviso"]);
+escenario("un pago de más con el bono escrito en el concepto NO se señala", d => { t(d, "t-n1").monto = 1500000; t(d, "t-n1").concepto = "Nómina — Luis (+$200.000 bono)"; }, []);
+escenario("un bono escrito que no alcanza a explicarlo SÍ se señala", d => { t(d, "t-n1").monto = 1500000; t(d, "t-n1").concepto = "Nómina — Luis (+$50.000 bono)"; }, ["nomina-periodo:aviso"]);
+escenario("un pago de MÁS de un periodo pasado NO se señala (pudo subirle el sueldo)", d => { t(d, "t-n0").monto = 9999999; }, []);
+escenario("un pago de MENOS NO se señala (eso ya sale en Pendientes como «falta pagar»)", d => { t(d, "t-n1").monto = 100000; }, []);
+escenario("el sueldo pagado en dos partes (anticipo + resto) NO se señala", d => { t(d, "t-n1").monto = 500000; d.tx.push(Object.assign({}, t(d, "t-n1"), { id: "t-n1b", monto: 800000, concepto: "Nómina — Luis (resto)" })); }, []);
+escenario("centavos de un pago de antes del #62 (menos de un peso de más) NO se señalan como nómina", d => { t(d, "t-n1").monto = 1300000.4; }, ["movimiento-datos:aviso"]);
+escenario("una persona sin sueldo cargado NO se compara", d => { d.nomina[0].salario = 0; t(d, "t-n1").monto = 500000; }, []);
+escenario("un pago a mano en Finanzas (con el nombre, sin el id) también cuenta", d => { delete t(d, "t-n1").empleadoId; t(d, "t-n1").monto = 1500000; }, ["nomina-periodo:aviso"]);
+escenario("el pago a alguien que ya no está en la nómina NO se señala", d => { d.nomina = d.nomina.filter(x => x.id !== "e1"); t(d, "t-n1").monto = 9999999; }, []);
+escenario("un salario mensual que se paga por semana (convertido) se compara con la semana", d => { d.nomina[0].periodo = "semanal"; t(d, "t-n1").monto = 325000; }, []);
+
+console.log("== 14. deudas: cuotas pagadas y sus movimientos");
+escenario("el movimiento de un pago enlazado ya no está en Finanzas", d => sinTx(d, "t-e1"), ["deuda-pagos:error"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "deuda" && a.id === "d2") && hs[0].detalle.indexOf("ya no está en Finanzas") !== -1, "señala la deuda y dice que el pago ya no está en Finanzas"));
+escenario("…y el movimiento está en la papelera: lo dice", d => { const x = t(d, "t-e1"); sinTx(d, "t-e1"); d.txPapelera.push(Object.assign({}, x, { eliminadoEl: HOY })); }, ["deuda-pagos:error"],
+  hs => ok(hs[0].detalle.indexOf("papelera") !== -1, "dice que su movimiento está en la papelera"));
+escenario("el movimiento tiene otro monto que el pago del historial", d => { t(d, "t-e1").monto = 190000; }, ["deuda-pagos:error"]);
+escenario("Finanzas tiene un pago más de los que la deuda registra", d => { d.tx.push({ id: "t-e2", tipo: "gasto", concepto: "Cuota repetida", monto: 200000, fecha: "2026-10-06", deudaId: "d2" }); }, ["deuda-pagos:error"],
+  hs => ok(hs[0].detalle.indexOf("cobraría una cuota que ya se pagó") !== -1, "avisa que el siguiente «Pagar» cobraría una cuota ya pagada"));
+escenario("el historial tiene más pagos que cuotas pagadas (sin que se hayan bajado las cuotas)", d => { d.deudas[1].cuotasPagadas = 0; }, ["deuda-pagos:aviso"]);
+escenario("una deuda de ANTES dice más cuotas pagadas que movimientos de pago → aviso", d => { d.deudas[0].cuotasPagadas = 3; }, ["deuda-pagos:aviso"]);
+escenario("se pagó más de lo que vale la deuda (el monto se cambió después) → aviso", d => { d.deudas[1].monto = 100000; }, ["deuda-pagos:aviso"]);
+escenario("una deuda activa que ya tiene todas sus cuotas pagadas: UN hallazgo con todos sus motivos", d => { d.deudas[0].cuotasPagadas = 4; }, ["deuda-pagos:aviso"],
+  hs => ok(hs[0].detalle.indexOf("Por pagar") !== -1 && hs[0].detalle.indexOf("2 movimientos") !== -1, "dice que «Por pagar» sigue contando una cuota Y que falta respaldo (dos motivos, un hallazgo)"));
+escenario("una deuda saldada que dice tener cuotas pendientes: UN hallazgo", d => { d.deudasHistorial[0].cuotasPagadas = 1; }, ["deuda-pagos:aviso"]);
+escenario("una deuda que está a la vez entre las activas y las saldadas", d => { d.deudas.push(Object.assign({}, d.deudasHistorial[0])); }, ["deuda-pagos:aviso"],
+  hs => ok(hs.length === 1 && hs[0].detalle.indexOf("también en el historial") !== -1, "un solo hallazgo, no uno por cada copia"));
+escenario("pagos de ANTES de que se guardara el txId (historial sin enlace) NO se señalan", d => { d.deudas[1].historial = [{ fecha: "2026-10-05", monto: 200000 }]; }, []);
+escenario("una deuda sin historial ni movimientos y sin cuotas pagadas NO se señala", d => { d.deudas.push({ id: "d9", concepto: "Nueva", monto: 500000, cuotas: 2, cuotasPagadas: 0 }); }, []);
+escenario("una deuda condonada (se le bajaron las cuotas) NO se señala (ya está en los datos limpios)", d => {}, []);
+
+console.log("== 15. compras «Sí» de una cotización contra su movimiento");
+escenario("una compra «Sí» sin su movimiento en Finanzas", d => sinTx(d, "t-tela"), ["compras-finanzas:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "cotizacion" && a.id === "cot-compra") && hs[0].detalle.indexOf("Tela") !== -1 && hs[0].detalle.indexOf("90.000") !== -1, "señala la cotización y dice la compra y cuánto debería haber"));
+escenario("el movimiento de la compra tiene otro monto", d => { t(d, "t-tela").monto = 80000; }, ["compras-finanzas:aviso"]);
+escenario("una compra que dejó de ser «Sí» y conserva su movimiento", d => { d.cotizaciones.filter(c => c.id === "cot-compra")[0].compras[0].estado = "no"; }, ["compras-finanzas:aviso"]);
+escenario("la cotización con cambios sin guardar NO se señala (se pone al día al guardar)", d => { sinTx(d, "t-tela"); d.cotSucia = "cot-compra"; }, []);
+escenario("con el costo estimado registrado, una compra «Sí» sin movimiento NO se señala (no se lleva a propósito; ya está en los datos limpios)", d => {}, []);
+escenario("dos movimientos para la misma compra: solo lo dice «Movimientos duplicados»", d => { d.tx.push(Object.assign({}, t(d, "t-tela"), { id: "t-tela-bis" })); }, ["movimiento-duplicado:error"]);
+escenario("una compra marcada «Sí» cuya línea ya no existe (insumo renombrado) NO se compara", d => { d.cotizaciones.filter(c => c.id === "cot-compra")[0].compras.push({ clave: "insumo viejo|mt|tela", estado: "si", costoReal: 5000 }); }, []);
+escenario("una compra de un RECIBO no se compara contra un movimiento suelto (las arma el recibo)", d => {}, []);
+{
+  cargar(datosLimpios());
+  ok(Array.isArray(calc.calcComprasDesfasadasConFinanzas(state.cotizaciones.filter(c => c.id === "cot-compra")[0])) && calc.calcComprasDesfasadasConFinanzas(state.cotizaciones.filter(c => c.id === "cot-compra")[0]).length === 0, "(la cuenta compartida con la cotización da vacío con datos sanos)");
+}
+
+console.log("== 16. el costo estimado completo y las compras reales a la vez");
+escenario("el estimado completo Y una compra real llevada a Finanzas → ERROR", d => {
+  const cot = d.cotizaciones.filter(c => c.id === "cot-est")[0];
+  cot.compras[0].txId = "t-est-compra";
+  d.tx.push({ id: "t-est-compra", tipo: "gasto", concepto: "Compra — Tela", monto: 80000, fecha: "2026-10-14", cotizacionId: "cot-est", esInsumo: "1", origenCompraClave: cot.compras[0].clave });
+}, ["estimado-doble:error"],
+  hs => ok(hs[0].afectados.some(a => a.id === "cot-est") && hs[0].afectados.some(a => a.id === "t-est") && hs[0].afectados.some(a => a.id === "t-est-compra") && hs[0].detalle.indexOf("dos veces") !== -1, "señala la cotización, el estimado y la compra, y dice «dos veces»"));
+escenario("el estimado Y la parte de un recibo de compra también se cuenta doble", d => {
+  const cot = d.cotizaciones.filter(c => c.id === "cotA-rc")[0];
+  cot.estimadoTxId = "t-est-rc";
+  d.tx.push({ id: "t-est-rc", tipo: "gasto", concepto: "Estimado completo del pedido — Uniformes A", monto: 400000, fecha: "2026-10-14", cotizacionId: "cotA-rc" });
+}, ["estimado-doble:error"]);
+escenario("el estimado solo (sin compras reales en Finanzas) NO se señala (ya está en los datos limpios)", d => {}, []);
+escenario("un estimado cuyo movimiento ya no existe: su compra «Sí» sin llevar vuelve a contar como pendiente (aviso, no el error del estimado)", d => { sinTx(d, "t-est"); }, ["compras-finanzas:aviso"]);
+
+console.log("== 17. consignación: ventas y comisión del punto");
+escenario("una venta reportada sin su ingreso en Finanzas", d => sinTx(d, "t-v1"), ["consignacion:error"],
+  hs => ok(hs[0].afectados[0].id === "P6" && hs[0].detalle.indexOf("100.000") !== -1, "señala el pedido y el monto de la venta"));
+escenario("la venta y su ingreso tienen montos distintos", d => { t(d, "t-v1").monto = 90000; }, ["consignacion:error"]);
+escenario("la comisión figura pagada pero no está en Finanzas", d => sinTx(d, "t-vc1"), ["consignacion:error"]);
+escenario("la comisión pagada y su gasto tienen montos distintos", d => { t(d, "t-vc1").monto = 9000; }, ["consignacion:error"]);
+escenario("Finanzas ya tiene la comisión pagada y la venta la muestra pendiente (se puede pagar otra vez)", d => { p(d, "P6").consignacion.ventas[0].comisionPagada = false; }, ["consignacion:error"]);
+escenario("una venta de ANTES, con su ingreso sin marca de origen, NO se señala", d => { t(d, "t-v1").origenVentaConsignacionId = ""; }, []);
+escenario("la comisión de antes, pagada con un gasto sin marca, NO se señala", d => { t(d, "t-vc1").origenComisionConsignacionId = ""; }, []);
+escenario("dos ventas del mismo valor y UN solo movimiento sin marca: una queda sin respaldo", d => {
+  p(d, "P6").consignacion.ventas.push({ id: "v4", cantidad: 1, fecha: "2026-08-11", montoTotal: 30000, comisionMonto: 3000, comisionPagada: false });
+}, ["consignacion:error"]);
+escenario("el ingreso de una venta aparece dos veces: solo lo dice «Movimientos duplicados»", d => { d.tx.push(Object.assign({}, t(d, "t-v1"), { id: "t-v1-bis" })); }, ["movimiento-duplicado:error"]);
+escenario("el ingreso de una venta cuelga de OTRO pedido: solo lo dice «origen que ya no existe»", d => { t(d, "t-v1").pedidoId = "P1"; }, ["origen-huerfano:aviso"]);
+escenario("una venta con $0 de comisión pagada no exige un gasto", d => { p(d, "P6").consignacion.ventas[0].comisionMonto = 0; sinTx(d, "t-vc1"); }, []);
+
+console.log("== 18. el total del pedido contra su cotización de origen");
+escenario("la cotización cambió (de $200.000 a $220.000) y el pedido no", d => { d.cotizaciones.filter(c => c.id === "cot-link")[0].referencias[0].precioVenta = 22000; }, ["total-cotizacion:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "pedido" && a.id === "P1") && hs[0].afectados.some(a => a.tipo === "cotizacion" && a.id === "cot-link") && hs[0].detalle.indexOf("220.000") !== -1, "señala el pedido y la cotización y dice cuánto suma la cotización"));
+escenario("el total del pedido está mal escrito: UN solo hallazgo (el de las líneas), no también el de la cotización", d => { p(d, "P1").total = 250000; }, ["total-pedido:aviso"]);
+escenario("la cotización abierta con cambios sin guardar NO se señala", d => { d.cotizaciones.filter(c => c.id === "cot-link")[0].referencias[0].precioVenta = 22000; d.cotSucia = "cot-link"; }, []);
+escenario("una cotización ESCALADA (solo pedidoOrigenId) es un borrador: no se compara", d => {
+  const c = d.cotizaciones.filter(x => x.id === "cot-link")[0]; c.pedidoId = ""; c.pedidoOrigenId = "P1"; c.referencias[0].precioVenta = 22000;
+}, []);
+escenario("una cotización cuyo pedido ya no existe NO se señala", d => { d.cotizaciones.filter(c => c.id === "cot-link")[0].pedidoId = "P-borrado"; }, []);
+escenario("un pedido viejo sin líneas, ligado a su cotización, también se compara", d => { delete p(d, "P1").lineas; d.cotizaciones.filter(c => c.id === "cot-link")[0].referencias[0].precioVenta = 22000; }, ["total-cotizacion:aviso"]);
+
+console.log("== 19. lo que hay en la papelera");
+escenario("un pedido está a la vez entre los activos y en la papelera", d => { d.pedidosPapelera.push(Object.assign({}, p(d, "P1"), { eliminadoEl: HOY })); }, ["papelera:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "pedido" && a.id === "P1") && hs[0].afectados.some(a => a.tipo === "papelera-pedido"), "señala el pedido vivo y su copia en la papelera"));
+escenario("un movimiento está a la vez en Finanzas y en la papelera", d => { d.txPapelera.push(Object.assign({}, t(d, "t-hilo"), { eliminadoEl: HOY })); }, ["papelera:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.tipo === "movimiento" && a.id === "t-hilo") && hs[0].afectados.some(a => a.tipo === "papelera-movimiento" && a.id === "t-hilo"), "señala el movimiento vivo y el de la papelera"));
+escenario("un movimiento de la papelera perdió su pedido (ya no está ni activo ni en la papelera)", d => { d.pedidosPapelera = []; }, ["papelera:aviso"]);
+escenario("un pedido restaurado cuyo abono quedó sin movimiento: solo lo dice «Cada abono…» (error), no la papelera", d => {
+  const x = Object.assign({}, d.pedidosPapelera[0]); delete x.eliminadoEl; d.pedidos.push(x); d.pedidosPapelera = [];
+}, ["abono-movimiento:error"]);
+escenario("un movimiento de la papelera de un pedido ya restaurado, que no explica nada más", d => {
+  const x = Object.assign({}, d.pedidosPapelera[0], { abonos: [], abono: 0 }); delete x.eliminadoEl; d.pedidos.push(x); d.pedidosPapelera = [];
+}, ["papelera:aviso"]);
+escenario("un movimiento de la papelera de una cotización que SIGUE existiendo", d => { d.txPapelera[2].eliminadoConCotizacion = "cot-compra"; }, ["papelera:aviso"]);
+escenario("la fila de un recibo anulado, con el id de la fila viva, NO se señala (ya está en los datos limpios)", d => {}, []);
+escenario("un movimiento de la papelera sin pedido ni cotización (borrado a mano) NO se señala", d => { d.txPapelera.push({ id: "tp-otro", tipo: "gasto", concepto: "Otro", monto: 1000, fecha: HOY, eliminadoEl: HOY }); }, []);
+escenario("la papelera no cambia la caja", d => {}, [],
+  () => { const antes = calc.calcCaja(); state.txPapelera.push({ id: "tp-x", tipo: "gasto", concepto: "x", monto: 999999, fecha: HOY, eliminadoEl: HOY }); ok(calc.calcCaja() === antes, "(un movimiento en la papelera no se suma a la caja)"); state.txPapelera.pop(); });
+
+console.log("== 20. comisión ya pagada contra la fórmula de hoy (informativo)");
+escenario("el vendedor pasó del 10 % al 12 % después de pagar la comisión", d => { p(d, "P8").vendedor.valor = 12; }, ["comision-formula:aviso"],
+  hs => ok(hs[0].afectados.some(a => a.id === "P8") && hs[0].afectados.some(a => a.id === "t-c8") && hs[0].detalle.indexOf("10.000") !== -1 && hs[0].detalle.indexOf("12.000") !== -1 && hs[0].detalle.indexOf("informativo") !== -1, "dice lo pagado ($10.000) y lo de hoy ($12.000), y que es informativo"));
+escenario("el pedido bajó de total (un descuento) después de pagar la comisión", d => {
+  const x = p(d, "P8"); x.total = 90000; x.lineas[0].precioUnitario = 90000; x.abono = 90000; x.abonos[0].monto = 90000; t(d, "t-a8").monto = 90000;
+}, ["comision-formula:aviso"],
+  hs => ok(hs[0].detalle.indexOf("sobrarían") !== -1 && hs[0].detalle.indexOf("1.000") !== -1, "dice que sobraron $1.000 (le pagaste $10.000 y hoy daría $9.000)"));
+escenario("centavos de antes del #62 (menos de un peso de diferencia) NO se señalan como comisión", d => { t(d, "t-c8").monto = 10000.4; }, ["movimiento-datos:aviso"]);
+escenario("la comisión de una cotización pagada por otro valor", d => { d.cotizaciones.filter(c => c.id === "C1")[0].vendedor.valor = 6000; }, ["comision-formula:aviso"]);
+escenario("una comisión pagada dos veces no se repite como «fórmula»", d => { d.tx.push(Object.assign({}, t(d, "t-c8"), { id: "t-c8-bis" })); p(d, "P8").vendedor.valor = 12; }, ["movimiento-duplicado:error"]);
+escenario("una comisión por valor FIJO que coincide NO se señala (ya está en los datos limpios)", d => {}, []);
 
 console.log("== combinaciones y orden");
 {
@@ -409,6 +630,29 @@ console.log("== el panel «Salud de los datos»");
   ok(state.tab === "finanzas" && state.filtroTx === "todos" && state.buscarTx === "" && state.txEnfocados.join() === "t-c3,t-c3-bis", "ir a movimientos: Finanzas se queda solo con esos");
   accion["salud-ir"](fakeEl({ "data-tipo": "recibo", "data-id": "R1" }));
   ok(state.tab === "finanzas" && state.reciboExpandido.R1 === true, "ir a un recibo: abre su tarjeta en Finanzas");
+  // Hallazgo #66: los enlaces nuevos
+  accion["salud-ir"](fakeEl({ "data-tipo": "deuda", "data-id": "d2" }));
+  ok(state.tab === "pendientes" && state.deudasVista === "activas", "ir a una deuda activa: Pendientes, pestaña Deudas");
+  accion["salud-ir"](fakeEl({ "data-tipo": "deuda", "data-id": "d3" }));
+  ok(state.tab === "pendientes" && state.deudasVista === "historial", "ir a una deuda saldada: Pendientes, pestaña Historial de deudas");
+  state.tab = "inicio";
+  accion["salud-ir"](fakeEl({ "data-tipo": "empleado", "data-id": "e1" }));
+  ok(state.tab === "pendientes", "ir a una persona de la nómina: Pendientes");
+  accion["salud-ir"](fakeEl({ "data-tipo": "papelera-pedido", "data-id": "P7" }));
+  ok(state.tab === "pedidos" && state.pedidosVista === "historial" && state.filtroPedidosVista === "papelera", "ir a un pedido de la papelera: Pedidos, vista Papelera");
+  accion["salud-ir"](fakeEl({ "data-tipo": "papelera-movimiento", "data-id": "tp-a7" }));
+  ok(state.tab === "finanzas" && state.filtroTxVista === "papelera" && state.txEnfocados.length === 0, "ir a un movimiento de la papelera: Finanzas, vista Papelera");
+  state.filtroTxVista = "activos"; state.filtroPedidosVista = "activos";
+  {
+    const foto = { pedidos: state.pedidos, tx: state.tx, cotizaciones: state.cotizaciones, deudas: state.deudas, deudasHistorial: state.deudasHistorial, pedidosPapelera: state.pedidosPapelera, txPapelera: state.txPapelera, nomina: state.config.nomina, gastosFijos: state.config.gastosFijos, cotSucia: state.cotSucia };
+    const d2 = datosLimpios(); t(d2, "t-n1").monto = 1500000; sinTx(d2, "t-e1"); d2.pedidosPapelera.push(Object.assign({}, p(d2, "P1"))); cargar(d2);
+    state.saludFiltro = "todos"; state.saludBuscar = "";
+    const h = ui.renderSalud();
+    ok(h.indexOf('data-tipo="empleado" data-id="e1"') !== -1 && h.indexOf("↗ Nómina") !== -1, "el hallazgo de nómina trae su botón «↗ Nómina»");
+    ok(h.indexOf('data-tipo="deuda" data-id="d2"') !== -1 && h.indexOf("↗ Deuda") !== -1, "el de la deuda trae «↗ Deuda»");
+    ok(h.indexOf('data-tipo="papelera-pedido"') !== -1 && h.indexOf("↗ Papelera de pedidos") !== -1, "el de la papelera trae «↗ Papelera de pedidos»");
+    cargar(foto); // vuelve a los datos de antes para lo que sigue
+  }
   state.txEnfocados = []; state.saludFiltro = "todos";
 
   console.log("== copiar el informe");
@@ -436,11 +680,33 @@ console.log("== con un taller grande");
     d.tx.push({ id: "tx" + i, tipo: "ingreso", concepto: "Abono " + i, monto: 100000, fecha: "2026-10-01", pedidoId: id, origenAbonoId: "ax" + i });
   }
   for (let i = 0; i < 2500; i++) d.tx.push({ id: "tg" + i, tipo: "gasto", concepto: "Gasto " + i, monto: 1000 + i, fecha: "2026-09-15" });
+  // Hallazgo #66: 300 cotizaciones de 6 compras «Sí», cada una ya llevada a Finanzas (1.800 movimientos más),
+  // 40 deudas con su historial, 30 personas en la nómina y 200 cosas en la papelera.
+  for (let i = 0; i < 300; i++) {
+    const cot = cotConInsumo("cx" + i, { pedidoId: "PX" + i }); // ya convertida en su pedido (también se compara su total)
+    cot.referencias[0].precioVenta = 10000; // 10 x $10.000 = los $100.000 del pedido
+    for (let j = 1; j <= 5; j++) cot.referencias[0].insumos.push({ id: "ins" + i + "-" + j, nombre: "Insumo " + j, unidad: "u", costo: 1000, tipo: "por_prenda", cantidad: 1, categoriaId: "", proveedorId: "" });
+    cot.compras = calc.calcListaCompras(cot).map((l, k) => {
+      const txId = "tc" + i + "-" + k;
+      d.tx.push({ id: txId, tipo: "gasto", concepto: "Compra", monto: 1000 + k, fecha: "2026-09-10", cotizacionId: cot.id, origenCompraClave: l.clave });
+      return { clave: l.clave, estado: "si", costoReal: 1000 + k, cantidadReal: 10, txId };
+    });
+    d.cotizaciones.push(cot);
+  }
+  for (let i = 0; i < 40; i++) {
+    d.tx.push({ id: "td" + i, tipo: "gasto", concepto: "Cuota", monto: 100000, fecha: "2026-09-12", deudaId: "dx" + i });
+    d.deudas.push({ id: "dx" + i, concepto: "Deuda " + i, monto: 400000, cuotas: 4, cuotasPagadas: 1, historial: [{ fecha: "2026-09-12", monto: 100000, txId: "td" + i }] });
+  }
+  for (let i = 0; i < 30; i++) {
+    d.nomina.push({ id: "ex" + i, nombre: "Persona " + i, salario: 1000000, salarioPeriodo: "mensual", periodo: "mensual" });
+    d.tx.push({ id: "tn" + i, tipo: "nomina", concepto: "Nómina", monto: 1000000, contraparte: "Persona " + i, empleadoId: "ex" + i, fecha: HOY_REAL });
+  }
+  for (let i = 0; i < 200; i++) d.txPapelera.push({ id: "tpx" + i, tipo: "gasto", concepto: "Borrado " + i, monto: 1000, fecha: "2026-09-01", eliminadoEl: "2026-09-02" });
   cargar(d);
   const t0 = Date.now();
   const hs = salud.calcSaludDatos();
   const ms = Date.now() - t0;
-  ok(hs.length === 0, "800 pedidos y 3.300 movimientos sanos siguen dando cero hallazgos");
+  ok(hs.length === 0, "800 pedidos, 300 cotizaciones con compras, 40 deudas, 30 personas en nómina y 5.000 movimientos sanos siguen dando cero hallazgos" + (hs.length ? "  (hay: " + hs.slice(0, 3).map(h => h.id).join(", ") + ")" : ""));
   ok(ms < 1500, "y la revisión completa tarda " + ms + " ms (se corre en cada render para el insignia del menú)");
 }
 

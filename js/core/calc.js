@@ -879,6 +879,43 @@ export function comprasEnFinanzas(cot, tx, clave) {
   });
   return res;
 }
+// Las compras de una cotización cuya plata en Finanzas no coincide con lo que
+// dicen: una "Sí" sin su movimiento o con otro monto, o una que dejó de ser
+// "Sí" y conserva el suyo. Las de un recibo siempre coinciden (las arma el
+// recibo). Solo compras con su línea viva: la sincronización no toca las
+// demás, y prometer que se arreglan al guardar sería mentir.
+//
+// Vivía en modules/cotizaciones.js (para el aviso de la compra); sube aquí para
+// que «Salud de los datos» use LA MISMA cuenta (Hallazgo #66) y no una copia.
+// Devuelve [{ compra, nombre, esperado, enFinanzas }]. `tx` (opcional) son los
+// movimientos donde buscar: «Salud de los datos» pasa solo los de esta
+// cotización para no recorrer toda la caja por cada compra.
+export function calcComprasDesfasadasConFinanzas(cot, tx) {
+  var lineas = calcListaCompras(cot);
+  var res = [];
+  ((cot && cot.compras) || []).forEach(function (c) {
+    if (esMiembroRecibo(c)) return;
+    var linea = lineas.filter(function (l) { return l.clave === c.clave; })[0];
+    if (!linea) return;
+    var esperado = estadoCompra(c) === "si" ? costoRealPedido(c) : 0;
+    var enFinanzas = comprasEnFinanzas(cot, tx || state.tx, c.clave).costoPedido;
+    if (Math.abs(enFinanzas - esperado) >= 0.5) res.push({ compra: c, nombre: linea.nombre, esperado: esperado, enFinanzas: enFinanzas });
+  });
+  return res;
+}
+// Cuánto se separan el TOTAL (y el descuento al total) de un pedido de lo que
+// hoy dice su cotización. Es la cuenta de calcDesfaseCotizacionPedido
+// (modules/cotizaciones.js), sacada aquí para que «Salud de los datos» la use
+// tal cual (Hallazgo #66). El total de la cotización es el mismo número que
+// copia el pedido al convertir (precioTotal, ya con descuentos).
+export function calcDifTotalesCotizacionPedido(cot, ped) {
+  var totales = calcCotizacionTotales(cot);
+  return {
+    difTotal: num(totales.precioTotal) - num(ped && ped.total),
+    difDescuento: totales.descuento - calcDesglosePedido(ped).descuento,
+    totalCot: num(totales.precioTotal)
+  };
+}
 // "Por cobrar": el saldo pendiente de TODOS los pedidos (total - abono, cuando
 // es positivo). Ya no se suman "ingresos pendientes sueltos" — un ingreso que
 // aún no se recibió no es un movimiento de Finanzas, es saldo de un pedido.
@@ -1795,13 +1832,17 @@ export function rangoPeriodoActual(periodo) {
 // "Pagar" creaba un pago duplicado sin ningún aviso. Auditoría financiera
 // 2026-09-20.
 export function calcNominaPagadaEmpleado(e, periodo) {
+  return calcPagosNominaEmpleado(e, periodo).reduce(function (a, t) { return a + num(t.monto); }, 0);
+}
+// Los movimientos de nómina de UNA persona dentro de su periodo actual: la
+// lista de donde sale lo "ya pagado" de arriba. Una sola fuente también para
+// «Salud de los datos», que los necesita uno por uno (Hallazgo #66).
+export function calcPagosNominaEmpleado(e, periodo) {
   var miPeriodo = periodoKey(todayStr(), periodo);
-  return state.tx
-    .filter(function (t) {
-      if (t.tipo !== "nomina" || periodoKey(t.fecha, periodo) !== miPeriodo) return false;
-      return t.empleadoId ? t.empleadoId === e.id : t.contraparte === e.nombre;
-    })
-    .reduce(function (a, t) { return a + num(t.monto); }, 0);
+  return state.tx.filter(function (t) {
+    if (t.tipo !== "nomina" || periodoKey(t.fecha, periodo) !== miPeriodo) return false;
+    return t.empleadoId ? t.empleadoId === e.id : t.contraparte === e.nombre;
+  });
 }
 // Cada gasto fijo tiene su propio periodo (mensual/quincenal/semanal) y guarda
 // en qué periodo se marcó "pagado" por última vez (pagadoHasta). Si ese periodo

@@ -4079,18 +4079,15 @@ si cuadra. Cada marca nueva de `MARCAS_ORIGEN_SISTEMA` tiene que clasificarse co
   pendientes). **No compara nada contra el extracto bancario**: solo que la app sea
   coherente consigo misma; la comparación con el banco es la conciliación de Cuentas,
   que hace el dueño a mano.
-- Que el **monto de una comisión ya pagada** sea el que daría hoy la fórmula (si el
-  total cambió después, el movimiento conserva lo que se pagó, por regla del #62).
-- Las **ventas de consignación** y la comisión del punto contra sus movimientos (solo
-  se mira que su origen exista y que no estén duplicadas).
-- Los pagos de **nómina, gastos fijos y deudas**: que cada cuota o pago tenga el monto
-  correcto, y que `cuotasPagadas` de una deuda coincida con sus movimientos.
-- Las **compras de una cotización** marcadas «Sí» contra su movimiento (fuera de los
-  recibos), y el costo estimado completo registrado dos veces.
-- Que el **total del pedido coincida con su cotización** de origen (`desfase`), y
-  los pedidos **sin líneas** (los viejos): su total no tiene contra qué compararse.
-- La **fecha** de un abono contra la de su movimiento (solo se compara el monto).
-- Lo que está en la **papelera** (`pedidosPapelera`, `txPapelera`).
+- ~~Que el monto de una comisión ya pagada sea el que daría hoy la fórmula; las ventas
+  de consignación y la comisión del punto; los pagos de nómina y las cuotas de deuda; las
+  compras «Sí» de una cotización y el costo estimado registrado dos veces; el total del
+  pedido contra su cotización; la fecha de un abono; y la papelera~~ → **ya se verifican,
+  ver el Hallazgo #66** (21 verificaciones en total).
+- Lo que **todavía no se verifica** de esa lista: los pagos de **gastos fijos** (solo
+  que no estén duplicados en un periodo), el costo y la cantidad de un pedido contra su
+  cotización (no son plata de la caja), y los pedidos **sin líneas** (los viejos): su
+  total no tiene contra qué compararse (salvo que vengan de una cotización).
 - Que lo que ve la app sea **lo mismo que hay en la hoja de Google** (conflictos
   entre dispositivos, copia local vieja): eso lo cubren `core/guardado.js` y el aviso
   de «Sin conexión».
@@ -4258,6 +4255,117 @@ escritura** (18 casos con las acciones reales, incluido un recibo de compra) es 
 cerrado sin cambiar nada, que reabrir exige motivo y solo lo hace el admin, y que la
 verificación de salud detecta un mes cerrado que cambió. Se comprobó que las pruebas
 **fallan** si se quita una guarda.
+
+### 🟡 Hallazgo #66 — «Salud de los datos» revisa ocho cosas más: nómina, deudas, compras, consignación, papelera… ✅ IMPLEMENTADO (pedido del dueño)
+
+**Qué se pidió:** ampliar el panel del #64 con lo que su lista «Qué NO verifica todavía»
+reconocía como pendiente, sin cambiar su naturaleza: **verifica y reporta, no repara ni
+escribe nada**. La exigencia de fondo es **no dar falsos positivos**: la app tiene datos
+viejos con formas distintas (pedidos sin líneas, movimientos de antes de un campo nuevo,
+pagos con centavos de antes del #62) y usos normales que se parecen a un problema. Ante la
+duda, **aviso**; **error** solo si la plata de la app y la de la realidad ya no coinciden.
+**Un problema da UN hallazgo** (no se repite en dos verificaciones).
+
+**Decisiones del dueño** (se le preguntaron antes de escribir código, con ejemplos en pesos):
+
+| Pregunta | Respuesta | Cómo quedó |
+|---|---|---|
+| Nómina: ¿cuándo avisar si un pago no es el sueldo? | **Solo el periodo en curso y solo si es de MÁS** | No se comparan los pagos de meses pasados (si subió un sueldo, los viejos son distintos y están bien) ni los pagos de menos (ya salen en Pendientes como «falta pagar») |
+| Comisión ya pagada contra la fórmula de hoy | **Aviso informativo** | Siempre aviso; la app nunca cambia lo ya pagado (regla del #62) |
+| Costo estimado completo + compras reales a la vez | **Error** | Ese costo está dos veces en la caja |
+| Fecha del abono contra la de su movimiento | **Deben ser siempre iguales** | Se avisa cualquier diferencia de día (y se dice si caen en meses distintos) |
+
+**Qué se agregó** (`core/salud.js`; todas con su porqué y su «dónde se arregla»):
+
+| # | Verificación (`id`) | Qué compara | Gravedad |
+|---|---|---|---|
+| 2 (ampliada) | `abono-movimiento` | La **fecha** de cada abono/reembolso contra la de su movimiento. Si el monto también difiere, el mismo hallazgo del monto la dice (no se abre un segundo aviso) | aviso |
+| 13 | `nomina-periodo` | Lo pagado a cada persona en el periodo en curso (`calcPagosNominaEmpleado`) contra su sueldo del periodo **más los bonos escritos en el concepto** («(+$X bono)», que es como lo escribe «Confirmar pago»). Menos de un peso de más no cuenta (centavos de antes del #62) | aviso |
+| 14 | `deuda-pagos` | Por deuda, **un solo hallazgo** que junta: pagos del historial cuyo movimiento (`txId`) ya no está / está en otra deuda / tiene otro monto, y más pagos en Finanzas (`deudaId`) que los que la deuda registra → **error**; dice N cuotas pagadas pero Finanzas tiene menos movimientos, historial con más pagos que cuotas pagadas, pagado de más que el monto, activa con todas las cuotas pagadas (sigue sumando en «Por pagar»), saldada con cuotas pendientes, o a la vez activa y saldada → **aviso** | error / aviso |
+| 15 | `compras-finanzas` | Compras «Sí» (fuera de recibos) contra su movimiento, con **la misma cuenta que el aviso de la cotización** (`calcComprasDesfasadasConFinanzas`, movida a `calc.js`). Un hallazgo por cotización | aviso |
+| 16 | `estimado-doble` | El costo estimado completo (`estimadoTxDeCot`) **y** compras reales en Finanzas (`comprasEnFinanzas`: sueltas o de un recibo) en la misma cotización | **error** |
+| 17 | `consignacion` | Cada venta con su ingreso y su monto (`origenVentaConsignacionId`); cada comisión «pagada» con su gasto y su monto (`origenComisionConsignacionId`); un gasto de comisión con la venta aún pendiente (se podría pagar otra vez) | error |
+| 18 | `total-cotizacion` | El total (y el descuento) de un pedido contra su cotización de origen (`calcDifTotalesCotizacionPedido`, sacada de `calcDesfaseCotizacionPedido`). Solo con `pedidoId`, nunca `pedidoOrigenId` | aviso |
+| 19 | `papelera` | Un pedido o un movimiento a la vez vivo y en la papelera; un movimiento de la papelera cuyo pedido ya no existe, cuyo pedido ya fue restaurado, o cuya cotización sigue existiendo | aviso |
+| 20 | `comision-formula` | Una comisión ya pagada (un solo movimiento) contra `calcComisionValor`/`calcComisionValorCot` de hoy. Menos de un peso de diferencia no cuenta | aviso (informativo) |
+
+**Cómo se evitaron los falsos positivos** (cada punto tiene su prueba en `test/salud.mjs`):
+- **Datos viejos que NO se señalan:** pagos de una deuda anteriores al `txId` (sin enlace);
+  una deuda a la que se le bajaron las cuotas (queda con todas pagadas y más pagos que
+  cuotas); un pago de nómina de un periodo pasado con otro sueldo; un sueldo pagado en dos
+  partes; un pedido sin líneas; una cotización «escalada» (es un borrador hasta «Aplicar a
+  pedido»); la fila de un recibo anulado que está en la papelera con el **mismo id** que la
+  viva (los ids de un recibo son fijos y se reusan al volver a registrarlo).
+- **Consignación y la marca que se perdía:** hasta septiembre de 2026 las marcas
+  `origenVentaConsignacionId` y `origenComisionConsignacionId` **se perdían en cada recarga**
+  (les faltaba la columna, Hallazgo #19). Una venta de antes puede tener su movimiento
+  **sin marca**: si hay un movimiento del mismo pedido, del mismo tipo y del mismo monto,
+  la venta se da por respaldada (y un movimiento sin marca respalda **una sola** venta).
+- **Estado transitorio:** la cotización abierta con cambios sin guardar no se compara (se
+  pone al día al guardar), ni la que tiene el estimado registrado (ahí las compras «Sí» no se
+  llevan a Finanzas **a propósito**; si además hay compras en Finanzas lo dice
+  `estimado-doble`).
+- **Un problema, un hallazgo:** una compra con dos movimientos es del duplicado, no de
+  `compras-finanzas`; el movimiento de una venta en otro pedido es de «origen que ya no
+  existe», no de `consignacion`; un total de pedido que no sale de sus líneas es de
+  `total-pedido` y no se repite contra la cotización; un pedido restaurado cuyo abono quedó
+  sin movimiento lo dice «Cada abono y reembolso…» y no la papelera; una comisión pagada dos
+  veces es de «Comisiones», no de la fórmula; las deudas juntan todos sus motivos en un
+  hallazgo (y una deuda que está en dos listas se cuenta una vez).
+
+**Por qué «aviso» y no «error» en cada caso dudoso:**
+- **Nómina:** la caja sí coincide con lo que salió; lo dudoso es si se debía pagar.
+- **Compras «Sí» sin movimiento:** una cotización marcada antes del #58 nunca llevó sus
+  compras; y si ese gasto se anotó a mano en Finanzas, «ponerla al día» lo contaría dos veces
+  (por eso el aviso lo dice).
+- **Total del pedido contra su cotización:** la cotización pudo cambiarse a propósito y
+  faltar la sincronización; el pedido pudo recibir un descuento por su lado.
+- **Fecha del abono:** el monto sí coincide; no se sabe cuál de las dos fechas es la buena.
+- **Deudas con menos movimientos que cuotas pagadas:** una deuda de antes del historial tiene
+  cuotas pagadas sin movimiento enlazado; se dice, pero no se grita. Solo es error lo que prueba
+  una falla: un pago enlazado que ya no está, o más pagos en Finanzas que los que la deuda registra.
+- **Papelera:** no cuenta en la caja ni en los reportes; el riesgo es restaurar algo que
+  duplique o quede sin respaldo.
+
+**Refactor mínimo para tener «una sola fuente por fórmula»** (`core/calc.js`; cero cambio de
+comportamiento, `descuentos.mjs`, `cuentas.mjs` y `bitacora.mjs` siguen en verde):
+`calcComprasDesfasadasConFinanzas(cot, tx?)` (antes función privada de `cotizaciones.js`),
+`calcDifTotalesCotizacionPedido(cot, ped)` (las dos cuentas de `calcDesfaseCotizacionPedido`) y
+`calcPagosNominaEmpleado(e, periodo)` (la lista que `calcNominaPagadaEmpleado` suma).
+
+**Pantalla:** `modules/salud.js` ya existía; solo se agregaron los botones «↗ Deuda», «↗ Nómina»,
+«↗ Papelera de pedidos» y «↗ Papelera de movimientos» (llevan a Pendientes → Deudas o su historial,
+a Pendientes, a la papelera de Pedidos y a la de Finanzas).
+
+**Qué NO verifica todavía:**
+- Los pagos de **gastos fijos** (solo que no estén duplicados en un periodo) y el **costo y la
+  cantidad** de un pedido contra su cotización (no son plata de la caja).
+- Una nómina **de menos** o de **periodos pasados** (decisión del dueño; lo primero ya sale en
+  Pendientes). Tampoco se sabe qué sueldo tenía alguien cuando se le pagó: no se guarda.
+- Compras «Sí» **con la cotización abierta sin guardar**, o un **excedente** de compra contra su
+  propio movimiento (solo se compara el costo del pedido).
+- Que la **fecha** de una venta de consignación coincida con la de su ingreso (la comisión
+  se paga otro día, por diseño).
+- Lo de siempre: que la app sea lo mismo que hay en la hoja de Google, y el historial de lo
+  corregido al cargar (ver #64).
+
+**Verificado:** `test/salud.mjs` (251 pruebas, `node test/salud.mjs`, sin jsdom): los datos
+limpios ampliados (con nómina del periodo, bono y descuento, un pago de un sueldo anterior, deudas
+con historial enlazado, saldada y condonada, compras «Sí», estimado, consignación con una venta de
+antes sin marca, cotización ligada a su pedido, comisión por porcentaje y una papelera en regla)
+dan **cero** hallazgos; cada corrupción da **exactamente** su hallazgo (un problema = uno); una
+treintena de casos de datos viejos o usos normales (los de arriba) **no** se señalan; la
+navegación a los enlaces nuevos; y 800 pedidos,
+300 cotizaciones con 1.800 compras, 40 deudas, 30 personas en nómina y 5.000 movimientos sanos
+dan cero hallazgos en unos 60 ms (la revisión corre en cada pintado por el insignia del menú).
+`test/smoke.mjs` (jsdom) **no se corrió** en este equipo: la CI debe correrlo (toca el aviso de
+compras de la cotización, que ahora sale de `calc.js` con el mismo texto).
+
+**Límites:** nada se probó con la hoja real del dueño; las reglas de datos viejos (sobre todo
+la de las marcas perdidas de consignación y la de los pagos de deuda sin `txId`) salen de leer
+el código y la historia de los hallazgos, no de ver sus datos. Si el panel muestra avisos de más al
+abrirlo por primera vez con la hoja real, es información valiosa: revisar qué forma de dato viejo
+falta contemplar antes de ignorarlos.
 
 ---
 
