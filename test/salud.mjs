@@ -246,6 +246,14 @@ escenario("el movimiento tiene otro monto que el abono", d => { t(d, "t-a1").mon
 escenario("un movimiento apunta a un abono que ya no existe", d => { p(d, "P1").abonos = []; p(d, "P1").abono = 0; }, ["abono-movimiento:error"],
   hs => ok(hs[0].titulo.indexOf("ya no tiene") !== -1, "dice que el pedido ya no lo tiene"));
 escenario("un reembolso en Finanzas cuyo reembolso ya no existe", d => { p(d, "P2").abonos = p(d, "P2").abonos.filter(a => a.id !== "r2"); p(d, "P2").abono = 300000; }, ["abono-movimiento:error"]);
+// Los reembolsos de antes de septiembre de 2026 perdían su marca de origen (Hallazgo #19): su gasto existe, sin marca.
+escenario("un reembolso de ANTES, con su gasto sin marca de origen, NO se señala", d => { t(d, "t-r2").origenReembolsoId = ""; }, []);
+escenario("dos reembolsos del mismo valor y UN solo gasto sin marca: uno queda sin respaldo", d => {
+  t(d, "t-r2").origenReembolsoId = "";
+  p(d, "P2").abonos.push({ id: "r3", monto: 50000, tipo: "reembolso", fecha: "2026-10-23" }); p(d, "P2").abono = 200000;
+}, ["abono-movimiento:error"]);
+escenario("un gasto sin marca de OTRO pedido no respalda un reembolso", d => { t(d, "t-r2").origenReembolsoId = ""; t(d, "t-r2").pedidoId = "P1"; }, ["abono-movimiento:error"]);
+escenario("un gasto sin marca del mismo pedido pero de OTRO monto no respalda un reembolso", d => { t(d, "t-r2").origenReembolsoId = ""; t(d, "t-r2").monto = 40000; }, ["abono-movimiento:error"]);
 escenario("el movimiento de un abono es de OTRO pedido (una sola falla, un solo hallazgo)", d => { t(d, "t-a1").pedidoId = "P3"; }, ["abono-movimiento:error"],
   hs => ok(hs[0].titulo.indexOf("otro pedido") !== -1 && hs[0].afectados.length === 2, "dice que quedó en otro pedido y señala el pedido y el movimiento"));
 

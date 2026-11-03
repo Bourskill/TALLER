@@ -97,12 +97,11 @@ claude/elastic-leavitt-ae29c7 `851e4de`).
   panel con la hoja REAL**, mirar si salen avisos de más (sobre todo consignación de antes
   de septiembre, que perdía sus marcas, y deudas sin `txId`): es información, no ruido,
   para afinar las reglas de datos viejos.
-  *Pendiente menor, de #64 (no se tocó):* `verificarAbonosYMovimientos` da ERROR a un
-  reembolso sin movimiento marcado, y no busca un movimiento SIN marca como sí se hizo con
-  la consignación. Los reembolsos anteriores a septiembre de 2026 perdían su marca
-  `origenReembolsoId` en cada recarga (Hallazgo #19): si la hoja real tiene reembolsos
-  viejos, saldrán como error falso (y prenderán la insignia roja). Arreglo probable: el
-  mismo respaldo «movimiento sin marca, mismo pedido y mismo monto» de `verificarConsignacion`.
+  *Corregido de paso (#64):* `verificarAbonosYMovimientos` daba ERROR a un reembolso cuyo
+  gasto había perdido la marca `origenReembolsoId` (los reembolsos anteriores a septiembre
+  de 2026 la perdían en cada recarga, Hallazgo #19). Ahora busca un gasto SIN marca del mismo
+  pedido y monto, igual que `verificarConsignacion`. Los **abonos** no lo necesitan (su marca
+  siempre tuvo columna).
 - **Convertir las 12 reparaciones silenciosas de `loadAll()`** (`js/core/store.js`,
   `REPARACIONES_AL_CARGAR`) en verificaciones que avisen, cuando se sepa que ya no
   hacen falta. Hoy solo anotan cuántas cosas corrigieron.
@@ -176,7 +175,7 @@ real es a quién se le da acceso de edición a la Google Sheet.**
   con la variable `ELECTRON_RUN_AS_NODE=1`; su salida se pierde si no se redirige con
   `Start-Process -RedirectStandardOutput`, y los scripts deben terminar con `process.exit`).
 - Cuatro archivos corren **sin jsdom** y se pueden correr aquí (conteos al 2026-11-03):
-  `test/descuentos.mjs` (250), `test/cuentas.mjs` (270), `test/salud.mjs` (251, con el #66),
+  `test/descuentos.mjs` (250), `test/cuentas.mjs` (270), `test/salud.mjs` (255, con el #66),
   `test/bitacora.mjs` (236). Úsalos como modelo para pruebas nuevas.
 - **`test/smoke.mjs`** (≈9.000 líneas, necesita jsdom) **solo corre en GitHub Actions**
   (pestaña Actions → «Pruebas»). Verifica con la CI, no localmente. Los mensajes
