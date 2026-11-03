@@ -5,7 +5,8 @@ quedó todo, qué sigue, cómo se trabaja en este proyecto y qué NO está
 comprobado. Al terminar tu parte, actualiza la sección "Dónde quedó todo" y la
 fecha de abajo (es el único sitio que envejece).
 
-> Última actualización: **2026-10-30**, `main` en `2cb236e`, pruebas de GitHub en verde.
+> Última actualización: **2026-11-03**, `main` en `dd9c4ca`, pruebas de GitHub en verde.
+> (El último commit de código fue `2cb236e`; los siguientes solo tocan documentación.)
 
 ---
 
@@ -68,13 +69,15 @@ Pasos que le propuse al dueño (pendientes de que los haga y reporte):
 Si algo se ve raro: **no tocar nada**, restaurar desde el respaldo es la salida
 (`README.md`, sección "🆘 Si el login da error de Google Sheets").
 
-### B. Limpiar ramas (pide permiso al dueño: toca el repositorio compartido)
-Todas estas ya están dentro de `main` y no hacen falta:
-`bitacora-y-cierre-de-mes`, `salud-de-los-datos`, `claude/dreamy-lalande-419844`,
-`claude/elastic-leavitt-ae29c7` (también en GitHub) y, solo locales,
-`descuentos-por-item-y-orden`, `redondeo-pesos-enteros`, `redondeo-nomina-y-cuotas`,
-`integracion`. Comprobar con `git branch --merged main` y borrar con
-`git branch -d <rama>` / `git push origin --delete <rama>`.
+### B. Limpiar ramas — HECHO el 2026-11-03
+Se borraron, ya integradas en `main`, las 7 ramas locales y las 4 de GitHub. Solo quedan
+`main` y, como copias de trabajo que administra la aplicación (no borrar a mano con
+`git branch -d`: están abiertas en `.claude/worktrees/`), las ramas locales
+`claude/dreamy-lalande-419844` y `claude/elastic-leavitt-ae29c7`. Para limpiar esas dos hay
+que quitar primero su copia de trabajo desde la aplicación. Si hiciera falta recuperar una
+rama borrada de GitHub: `git push origin <sha>:refs/heads/<nombre>` (bitacora-y-cierre-de-mes
+`0e1f3eb`, salud-de-los-datos `ec67e54`, claude/dreamy-lalande-419844 `a85313a`,
+claude/elastic-leavitt-ae29c7 `851e4de`).
 
 ### C. Mejoras pequeñas ya identificadas (ninguna empezada)
 - **Ampliar «Salud de los datos»** con lo que hoy NO revisa (lista completa en
