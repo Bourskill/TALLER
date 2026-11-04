@@ -7,6 +7,11 @@ fecha de abajo (es el único sitio que envejece).
 
 > Última actualización: **2026-11-03**, `main` en `34517e8`, pruebas de GitHub en verde.
 > (El último commit de código en `main` fue `2cb236e`; los siguientes solo tocan documentación.)
+> **Mapa técnico (Hallazgo #67, ronda 116) — rama local `mapa-tecnico`, sin empujar ni integrar:**
+> carpeta `docs/` (arquitectura, mapa del código y del dinero, escenarios de falla, reglas), la
+> herramienta `tools/mapa.mjs` (`npm run mapa`) y la prueba `test/arquitectura.mjs`. No cambia la app.
+> **Al integrar cualquier rama que toque `js/`, corre `npm run mapa` y sube los documentos**: la CI
+> falla si quedaron viejos. Los 11 riesgos que encontró están en la sección C2.
 > **Pendiente de integrar:** la rama local `salud-ampliada` (Hallazgo #66, ronda 115: «Salud de
 > los datos» pasa de 13 a 21 verificaciones). Está commiteada, **sin empujar** y sin que la CI
 > haya corrido `smoke.mjs` sobre ella; hasta integrarla, `main` no la tiene.
@@ -118,6 +123,27 @@ claude/elastic-leavitt-ae29c7 `851e4de`).
   más estilo; un campo "distintivo" en contactos (ej. equipo al que pertenece); lector
   de facturas.
 
+### C2. Tareas que salen del mapa técnico (Hallazgo #67) — cada una es una tarea aparte
+El mapa **no arregló nada**: documentó 11 riesgos con su gravedad (`CONTABILIDAD.md`, #67, tabla
+«Los riesgos que encontró el mapa»; dónde se defiende cada uno: `docs/ESCENARIOS-DE-FALLA.md`).
+Orden sugerido (de mayor a menor daño posible, y de más barato a más caro):
+1. **#67-1 (alta)** — que una pestaña vacía NO se vuelva a llenar con la copia congelada de `kv`
+   (`js/core/store.js:1209`). Marca «ya migrado» + error visible + prueba nueva.
+2. **#67-2 (alta)** — medir el tamaño de cada clave de `kv` al guardar y avisar al 70 % del
+   límite de 50.000 caracteres; después mover `pedidos` y `txPapelera` a pestaña propia.
+3. **#67-5 (media, una línea)** — `if (!proximaRonda[clave]) delete enCola[clave]` en
+   `js/core/guardado.js:330`, con prueba.
+4. **#67-6 (media)** — lista blanca de claves/campos al aprobar una propuesta.
+5. **#67-3 (media)** — al volver la red, releer las claves que vinieron del espejo antes del primer guardado.
+6. **#67-7, #67-8, #67-9, #67-10 (baja/media-baja)** — fecha obligatoria y válida; consignación en pesos
+   enteros; vistas previas con `calcComisionValor`; reintento con la misma coalescencia que `guardarClave`.
+7. **#67-4 (media, grande)** — escrituras de varias claves sin transacción: empezar por detectar y
+   marcar el hecho «a medias». **#67-11** es el punto D de abajo.
+Al arreglar uno: borrar su entrada de `docs/reglas-baseline.json` (si la tiene), correr
+`npm run mapa` y actualizar su escenario en `docs/ESCENARIOS-DE-FALLA.md`. También pendiente del
+mapa: pasar las citas de los documentos de «avisa» a «bloquea» cuando se estabilicen, y la pantalla
+dentro de la app (decisión del dueño: queda para después).
+
 ### D. El #6 original: base de datos real y permisos reales — proyecto GRANDE, solo cuando haga falta
 Por qué existe: (1) los permisos de rol son **solo de pantalla**; el acceso de Google de
 un vendedor cubre toda la hoja y todo el Drive, así que cualquiera con conocimientos
@@ -136,9 +162,9 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 
 - **Antes de tocar dinero, lee `CONTABILIDAD.md`** (principios y reglas por área). Todo
   cambio financiero se documenta ahí como un **Hallazgo nuevo (el siguiente libre es
-  el #67)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 116**).
-  (El #66 y la ronda 115 son los de la rama `salud-ampliada`: si se integra otra rama
-  antes, ajusta los números.)
+  el #68)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 117**).
+  (El #66 y la ronda 115 son los de la rama `salud-ampliada`; el #67 y la ronda 116, los de
+  `mapa-tecnico`: si se integra otra rama antes, ajusta los números.)
 - **Pregunta al dueño ANTES de escribir código** cuando haya decisiones de negocio:
   él lo pidió así desde el principio. Habla español, no es técnico: explica en
   palabras simples, con ejemplos en pesos.
@@ -152,6 +178,10 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 - **Toda acción nueva que escriba dinero con fecha debe llamar a `exigirMesAbierto`**
   (`js/core/cierre.js`); si no, se salta el cierre de mes.
 - **Reutiliza antes de crear** (`js/core/components.js`, ver reglas de UX en `README.md`).
+- **Si cambias código de `js/`, corre `npm run mapa`** y sube los documentos de `docs/` junto con el
+  cambio; `test/arquitectura.mjs` (CI) falla si quedaron viejos y también si una acción nueva
+  escribe movimientos sin `exigirMesAbierto`, un porcentaje sin `redondearPesos`, etc. (ver
+  `docs/REGLAS-DE-ARQUITECTURA.md`: qué hacer cuando la CI falla por una regla).
 - **Una prueba nueva en `test/` se agrega EN DOS SITIOS**: `.github/workflows/test.yml`
   y el script `test` de `package.json` (listan cada archivo a mano; si no, la CI no la
   corre).
@@ -182,6 +212,9 @@ real es a quién se le da acceso de edición a la Google Sheet.**
   (pestaña Actions → «Pruebas»). Verifica con la CI, no localmente. Los mensajes
   «No se pudo guardar … sin red (prueba)» al correr `bitacora.mjs` son esperados.
 - Git Bash convierte rutas: para `git show rama:ruta` usa `MSYS_NO_PATHCONV=1`.
+- `test/arquitectura.mjs` (reglas y documentos al día; 77 comprobaciones al 2026-11-04) también corre
+  **sin jsdom** y sin npm, con el mismo Node de Photoshop; `npm run mapa` es `node tools/mapa.mjs`
+  (con ese Node: `"C:\Program Files\Adobe\Adobe Photoshop 2026\node.exe" tools/mapa.mjs`).
 - Para ver pantallas sin el login de Google se armó, en una carpeta temporal, un
   servidor estático mínimo y una página que importa los módulos con datos de ejemplo.
   No existe en el repositorio; `.claude/launch.json` (config "panel", `npx http-server`)
@@ -202,6 +235,7 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 | PDF (cotización, cuenta de cobro, recibo, reportes) | `js/core/pdf.js` |
 | Pedidos / cotizaciones / finanzas / pendientes (nómina, deudas, gastos fijos) | `js/modules/pedidos.js`, `cotizaciones.js`, `finanzas.js`, `pendientes.js` |
 | Respaldo diario de la hoja | `js/core/backup.js` |
+| **Mapa técnico** (arquitectura, mapa del código y del dinero, escenarios de falla, reglas) | `docs/` — se regenera con `npm run mapa` (`tools/mapa.mjs`, `tools/analisis.mjs`, `tools/reglas.mjs`); lo vigila `test/arquitectura.mjs` |
 
 ---
 

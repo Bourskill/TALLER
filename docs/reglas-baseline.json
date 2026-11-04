@@ -1,0 +1,108 @@
+{
+  "descripcion": "Lista base de las reglas de arquitectura (Hallazgo #67): lo que YA incumple una regla el día que se escribieron. Cada entrada solo AVISA; cualquier caso que NO esté aquí hace fallar la CI (test/arquitectura.mjs). 'clasificacion' es excepcion-legitima (a propósito, con su motivo) o riesgo-real (hay que arreglarlo; lleva su hallazgo en CONTABILIDAD.md). Al arreglar un riesgo real se borra su entrada.",
+  "reglas": {
+    "R1-mes-cerrado": [
+      {
+        "clave": "js/modules/cuentas.js::accion:toggle-conciliado",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Solo marca o desmarca «lo vi en el extracto del banco» (conciliadoEn / conciliadoDe / conciliadoA). No cambia monto, fecha, tipo ni cuenta, así que no mueve plata de ningún mes. Decisión del Hallazgo #65: las conciliaciones no se bloquean."
+      }
+    ],
+    "R2-porcentaje-redondeado": [
+      {
+        "clave": "js/core/bitacora.js::n::function n(v) { return Math.round(num(v) * 100) / 100; }",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Normaliza a 2 decimales para comparar el antes y el después de la bitácora; no calcula un monto que se cobre ni se pague."
+      },
+      {
+        "clave": "js/core/calc.js::calcMontoDescuento::var bruto = d.tipo === \"fijo\" ? num(d.valor) : base * Math.min(100, num(d.valor)) / 100;",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Es la única fórmula del descuento y redondea en la línea siguiente con Math.round (el mismo redondeo que redondearPesos: el medio peso sube). Podría llamar a redondearPesos por claridad."
+      },
+      {
+        "clave": "js/core/pdf.js::generarPDFInternoCotizacion::(hayCantReal ? numFmt(Math.round((cantidadRealPedido(compra) - despCant) * 100) / 100) + (c.unidad ? \" \" + c.u",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Redondea a 2 decimales una CANTIDAD de material (metros, unidades), no dinero."
+      },
+      {
+        "clave": "js/core/salud.js::verificarCaja::var independiente = centavos / 100;",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "La verificación de la Caja suma en centavos enteros a propósito, por un camino distinto al de calcCaja, para poder compararlos."
+      },
+      {
+        "clave": "js/core/utils.js::redondear2::return Math.round((num(n) + Number.EPSILON) * 100) / 100;",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Redondeo a 2 decimales para cantidades enlazadas y para la conciliación, donde el extracto del banco sí puede traer centavos (calcConciliacion)."
+      },
+      {
+        "clave": "js/modules/cotizaciones.js::renderFilaCompraRecibo::var usado = Math.round((num(compra.cantidadReal) - desperdicio + faltante) * 100) / 100;",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Redondea a 2 decimales una cantidad de material que se muestra en la fila del recibo."
+      },
+      {
+        "clave": "js/modules/pedidos.js::renderCondicionesConsignacion::: precioPublico * (num(f.consignacionComisionValor) / 100);",
+        "clasificacion": "riesgo-real",
+        "severidad": "baja",
+        "hallazgo": "#67-9",
+        "motivo": "La vista previa de la comisión del punto de consignación calcula el porcentaje por su cuenta, sin redondearPesos ni calcComisionValor (una sola fuente por fórmula). Solo es pantalla, pero puede mostrar $1 distinto al valor real."
+      },
+      {
+        "clave": "js/modules/pedidos.js::renderVendedorPedido::var comision = f.vendedorTipo === \"fijo\" ? num(f.vendedorValor) : totales.precioTotal * (num(f.vendedorValor)",
+        "clasificacion": "riesgo-real",
+        "severidad": "baja",
+        "hallazgo": "#67-9",
+        "motivo": "La vista previa de la comisión del vendedor en «Nuevo pedido» calcula el porcentaje por su cuenta (sin redondear); el monto real sale de calcComisionValor. Solo pantalla, puede diferir en $1 en medios pesos."
+      }
+    ],
+    "R3-iva-una-fuente": [],
+    "R4-marca-de-origen": [
+      {
+        "clave": "js/modules/cotizaciones.js::accion:add-cot-estimado-movimiento",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "El costo estimado se referencia desde la cotización (estimadoTxId), no desde una marca del movimiento. Que se pueda borrar suelto en Finanzas es a propósito: la propia pantalla recomienda borrarlo para quedarse con las compras reales (cotizaciones.js:2271-2274)."
+      },
+      {
+        "clave": "js/modules/finanzas.js::accion:add-tx",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Es el movimiento que una persona escribe a mano en Finanzas: no tiene otro registro de origen."
+      },
+      {
+        "clave": "js/modules/finanzas.js::accion:restaurar-tx",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Devuelve una copia que estaba en la papelera; conserva las marcas que ya tenía."
+      },
+      {
+        "clave": "js/modules/pedidos.js::accion:restaurar-pedido",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Devuelve a Finanzas las copias de los movimientos del pedido que estaban en la papelera; conservan sus marcas."
+      },
+      {
+        "clave": "js/modules/pendientes.js::accion:pagar-nomina",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "El movimiento de nómina ES el registro del pago (no hay otro lado que descuadrar); se reconoce por empleadoId. Se puede borrar suelto desde Finanzas y Pendientes vuelve a mostrarlo pendiente. Si algún día se quiere protegerlo, se agrega empleadoId a MARCAS_ORIGEN_SISTEMA."
+      }
+    ],
+    "R5-esquemas-solo-crecen": [],
+    "R6-pruebas-en-ci": [],
+    "R7-persist-clave-valida": [
+      {
+        "clave": "js/core/pdf.js::asegurarCodigoPublico::dinamico:persistKey",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "La clave la pasan sus tres llamadas con un texto fijo: «cotizaciones» o «pedidos» (pdf.js:318, :1383, :1430)."
+      },
+      {
+        "clave": "js/core/store.js::aprobarPropuesta::dinamico:propuesta.key",
+        "clasificacion": "riesgo-real",
+        "severidad": "media",
+        "hallazgo": "#67-6",
+        "motivo": "La clave sale de la propuesta guardada en la hoja y no se comprueba contra APPROVAL_REQUIRED_KEYS: una propuesta manipulada con key «tx» reemplazaría todos los movimientos al aprobarla."
+      },
+      {
+        "clave": "js/core/store.js::recuperarDelEspejo::dinamico:clave",
+        "clasificacion": "excepcion-legitima",
+        "motivo": "Solo se persiste si la clave está en CLAVES_PERSISTIBLES (store.js:1725); un borrador sin fila propia (formPedido…) se restaura en pantalla y no se guarda."
+      }
+    ],
+    "R8-acciones-unicas": []
+  }
+}

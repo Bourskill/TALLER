@@ -1,0 +1,512 @@
+{
+  "Bitacora": [
+    {
+      "key": "id",
+      "header": "id",
+      "tipo": "texto"
+    },
+    {
+      "key": "fecha",
+      "header": "fecha_hora",
+      "tipo": "texto"
+    },
+    {
+      "key": "usuario",
+      "header": "usuario",
+      "tipo": "texto"
+    },
+    {
+      "key": "nombre",
+      "header": "nombre",
+      "tipo": "texto"
+    },
+    {
+      "key": "rol",
+      "header": "rol",
+      "tipo": "texto"
+    },
+    {
+      "key": "origen",
+      "header": "origen",
+      "tipo": "texto"
+    },
+    {
+      "key": "clave",
+      "header": "clave",
+      "tipo": "texto"
+    },
+    {
+      "key": "registroId",
+      "header": "registro_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "subId",
+      "header": "sub_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "aspecto",
+      "header": "aspecto",
+      "tipo": "texto"
+    },
+    {
+      "key": "accion",
+      "header": "accion",
+      "tipo": "texto"
+    },
+    {
+      "key": "etiqueta",
+      "header": "etiqueta",
+      "tipo": "texto"
+    },
+    {
+      "key": "cambios",
+      "header": "cambios",
+      "tipo": "texto"
+    },
+    {
+      "key": "antes",
+      "header": "antes_json",
+      "tipo": "json"
+    },
+    {
+      "key": "despues",
+      "header": "despues_json",
+      "tipo": "json"
+    },
+    {
+      "key": "meses",
+      "header": "meses",
+      "tipo": "texto"
+    },
+    {
+      "key": "enMesCerrado",
+      "header": "en_mes_cerrado",
+      "tipo": "texto"
+    }
+  ],
+  "Cierres": [
+    {
+      "key": "mes",
+      "header": "mes",
+      "tipo": "texto"
+    },
+    {
+      "key": "estado",
+      "header": "estado",
+      "tipo": "texto"
+    },
+    {
+      "key": "cerradoPor",
+      "header": "cerrado_por",
+      "tipo": "texto"
+    },
+    {
+      "key": "cerradoPorNombre",
+      "header": "cerrado_por_nombre",
+      "tipo": "texto"
+    },
+    {
+      "key": "cerradoEn",
+      "header": "cerrado_en",
+      "tipo": "texto"
+    },
+    {
+      "key": "resumen",
+      "header": "resumen_json",
+      "tipo": "json"
+    },
+    {
+      "key": "historial",
+      "header": "historial_json",
+      "tipo": "json"
+    }
+  ],
+  "Clientes": [
+    {
+      "key": "id",
+      "header": "id",
+      "tipo": "texto"
+    },
+    {
+      "key": "nombre",
+      "header": "nombre",
+      "tipo": "texto"
+    },
+    {
+      "key": "cedula",
+      "header": "cedula",
+      "tipo": "texto"
+    },
+    {
+      "key": "direccion",
+      "header": "direccion",
+      "tipo": "texto"
+    },
+    {
+      "key": "ciudad",
+      "header": "ciudad",
+      "tipo": "texto"
+    },
+    {
+      "key": "cp",
+      "header": "codigo_postal",
+      "tipo": "texto"
+    },
+    {
+      "key": "cuenta",
+      "header": "cuenta_bancaria",
+      "tipo": "texto"
+    },
+    {
+      "key": "entidad",
+      "header": "entidad_bancaria",
+      "tipo": "texto"
+    },
+    {
+      "key": "telefono",
+      "header": "telefono",
+      "tipo": "texto"
+    },
+    {
+      "key": "correo",
+      "header": "correo",
+      "tipo": "texto"
+    },
+    {
+      "key": "usuarioWhatsapp",
+      "header": "whatsapp_usuario",
+      "tipo": "texto"
+    },
+    {
+      "key": "contactResourceName",
+      "header": "google_contacts_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "contactResourceNames",
+      "header": "google_contacts_ids_json",
+      "tipo": "json"
+    },
+    {
+      "key": "tipoRelacion",
+      "header": "tipo_relacion",
+      "tipo": "texto"
+    },
+    {
+      "key": "comisionDefaultTipo",
+      "header": "comision_tipo",
+      "tipo": "texto"
+    },
+    {
+      "key": "comisionDefaultValor",
+      "header": "comision_valor",
+      "tipo": "numero"
+    },
+    {
+      "key": "roster",
+      "header": "roster_json",
+      "tipo": "json"
+    },
+    {
+      "key": "categoriasInsumo",
+      "header": "categorias_insumo_json",
+      "tipo": "json"
+    },
+    {
+      "key": "descripcion",
+      "header": "descripcion",
+      "tipo": "texto"
+    },
+    {
+      "key": "puntuacion",
+      "header": "puntuacion",
+      "tipo": "numero"
+    },
+    {
+      "key": "preciosPorInsumo",
+      "header": "precios_por_insumo_json",
+      "tipo": "json"
+    },
+    {
+      "key": "fechaCreacion",
+      "header": "fecha_creacion",
+      "tipo": "texto"
+    }
+  ],
+  "Cotizaciones": [
+    {
+      "key": "id",
+      "header": "id",
+      "tipo": "texto"
+    },
+    {
+      "key": "clienteId",
+      "header": "cliente_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "cliente",
+      "header": "cliente",
+      "tipo": "texto"
+    },
+    {
+      "key": "descripcion",
+      "header": "descripcion",
+      "tipo": "texto"
+    },
+    {
+      "key": "fecha",
+      "header": "fecha",
+      "tipo": "texto"
+    },
+    {
+      "key": "fechaEntrega",
+      "header": "fecha_entrega",
+      "tipo": "texto"
+    },
+    {
+      "key": "marca",
+      "header": "marca",
+      "tipo": "texto"
+    },
+    {
+      "key": "estado",
+      "header": "estado",
+      "tipo": "texto"
+    },
+    {
+      "key": "pedidoId",
+      "header": "pedido_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "pedidoOrigenId",
+      "header": "pedido_origen_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "codigoPublico",
+      "header": "codigo_publico",
+      "tipo": "texto"
+    },
+    {
+      "key": "estimadoTxId",
+      "header": "estimado_tx_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "iva",
+      "header": "iva_json",
+      "tipo": "json"
+    },
+    {
+      "key": "vendedor",
+      "header": "vendedor_json",
+      "tipo": "json"
+    },
+    {
+      "key": "referencias",
+      "header": "referencias_json",
+      "tipo": "json"
+    },
+    {
+      "key": "costosGlobales",
+      "header": "costos_globales_json",
+      "tipo": "json"
+    },
+    {
+      "key": "serviciosCobrados",
+      "header": "servicios_cobrados_json",
+      "tipo": "json"
+    },
+    {
+      "key": "gastosReales",
+      "header": "gastos_reales_json",
+      "tipo": "json"
+    },
+    {
+      "key": "compras",
+      "header": "compras_json",
+      "tipo": "json"
+    },
+    {
+      "key": "descuento",
+      "header": "descuento_json",
+      "tipo": "json"
+    }
+  ],
+  "Movimientos": [
+    {
+      "key": "id",
+      "header": "id",
+      "tipo": "texto"
+    },
+    {
+      "key": "fecha",
+      "header": "fecha",
+      "tipo": "texto"
+    },
+    {
+      "key": "tipo",
+      "header": "tipo",
+      "tipo": "texto"
+    },
+    {
+      "key": "concepto",
+      "header": "concepto",
+      "tipo": "texto"
+    },
+    {
+      "key": "monto",
+      "header": "monto",
+      "tipo": "numero"
+    },
+    {
+      "key": "contraparte",
+      "header": "contraparte",
+      "tipo": "texto"
+    },
+    {
+      "key": "pedidoId",
+      "header": "pedido_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "cotizacionId",
+      "header": "cotizacion_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "gastoFijoId",
+      "header": "gasto_fijo_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "deudaId",
+      "header": "deuda_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenAbonoId",
+      "header": "origen_abono_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenReembolsoId",
+      "header": "origen_reembolso_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenVentaConsignacionId",
+      "header": "origen_venta_consignacion_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenComisionConsignacionId",
+      "header": "origen_comision_consignacion_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenCompraClave",
+      "header": "origen_compra_clave",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenGastoFijoPeriodo",
+      "header": "origen_gasto_fijo_periodo",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenComisionCotId",
+      "header": "origen_comision_cotizacion_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenComisionPedidoId",
+      "header": "origen_comision_pedido_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenGastoId",
+      "header": "origen_gasto_real_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenDeudaIngresoId",
+      "header": "origen_deuda_ingreso_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenColchonId",
+      "header": "origen_colchon_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "esInsumo",
+      "header": "es_compra_insumo",
+      "tipo": "texto"
+    },
+    {
+      "key": "proveedorId",
+      "header": "proveedor_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "insumoNombre",
+      "header": "insumo_nombre",
+      "tipo": "texto"
+    },
+    {
+      "key": "cantidad",
+      "header": "cantidad",
+      "tipo": "numero"
+    },
+    {
+      "key": "unidad",
+      "header": "unidad",
+      "tipo": "texto"
+    },
+    {
+      "key": "serviciosDescuento",
+      "header": "servicios_descuento",
+      "tipo": "json"
+    },
+    {
+      "key": "empleadoId",
+      "header": "empleado_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "origenCompraExcedenteClave",
+      "header": "origen_compra_excedente_clave",
+      "tipo": "texto"
+    },
+    {
+      "key": "reciboCompraId",
+      "header": "recibo_compra_id",
+      "tipo": "texto"
+    },
+    {
+      "key": "reciboCompraRol",
+      "header": "recibo_compra_rol",
+      "tipo": "texto"
+    },
+    {
+      "key": "reciboCompraLinea",
+      "header": "recibo_compra_linea",
+      "tipo": "texto"
+    },
+    {
+      "key": "cuenta",
+      "header": "cuenta",
+      "tipo": "texto"
+    },
+    {
+      "key": "conciliadoEn",
+      "header": "conciliado_en",
+      "tipo": "texto"
+    }
+  ]
+}

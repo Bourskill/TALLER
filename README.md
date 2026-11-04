@@ -22,12 +22,22 @@ en vez de adivinar.
 las decisiones del dueño que no hay que volver a preguntar y qué NO está
 comprobado todavía.
 
+**¿Quieres entender cómo está armada la app, o buscar riesgos antes de leer el
+código?** Mira la carpeta [docs/](docs/): [ARQUITECTURA.md](docs/ARQUITECTURA.md)
+(capas, cómo viaja un dato hasta la hoja de Google, roles),
+[MAPA-DEL-DINERO.md](docs/MAPA-DEL-DINERO.md) (quién escribe dinero y con qué
+candados), [ESCENARIOS-DE-FALLA.md](docs/ESCENARIOS-DE-FALLA.md) («¿qué pasa
+si…?» y qué lo defiende), [REGLAS-DE-ARQUITECTURA.md](docs/REGLAS-DE-ARQUITECTURA.md)
+y el [MAPA-DEL-CODIGO.md](docs/MAPA-DEL-CODIGO.md) generado. Si cambias código,
+`npm run mapa` los pone al día (la CI avisa si quedaron viejos).
+
 ## Pruebas automáticas
 
-Hay cinco pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+Hay seis pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
 `test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
-conciliación), `test/salud.mjs` («Salud de los datos») y `test/bitacora.mjs`
-(bitácora de cambios y cierre de mes). **Corren solas en GitHub** (pestaña Actions, workflow
+conciliación), `test/salud.mjs` («Salud de los datos»), `test/bitacora.mjs`
+(bitácora de cambios y cierre de mes) y `test/arquitectura.mjs` (reglas de
+arquitectura y documentos de `docs/` al día; no necesita jsdom). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
 
@@ -281,6 +291,41 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — noviembre 2026 (centésima decimosexta ronda: el mapa técnico de la app y las reglas de arquitectura)
+
+- **No cambia nada de lo que hace la app**: es análisis, documentos, una herramienta y una
+  prueba. Pedido del dueño: «una estructura limpia del programa y el funcionamiento de cada
+  función […] para detectar vulnerabilidades desde el esqueleto antes de leer/corregir el
+  código». Escrito para él, en español simple, con glosario; vive en el repositorio como
+  Markdown con diagramas (carpeta [docs/](docs/)).
+- **Cinco documentos:** `ARQUITECTURA.md` (capas, cómo viaja un dato de la pantalla a la hoja
+  de Google, qué se guarda y dónde, roles y permisos, «cómo auditar una vulnerabilidad»),
+  `MAPA-DEL-CODIGO.md` (**generado**: cada archivo, sus funciones, quién las usa, las 405
+  acciones de la interfaz), `MAPA-DEL-DINERO.md` (quién crea, cambia o quita dinero, con su
+  marca de origen y su candado de mes, y el ciclo de vida de cada tipo de movimiento),
+  `ESCENARIOS-DE-FALLA.md` (23 «¿qué pasa si…?» con qué lo defiende y qué prueba lo cubre, o
+  **SIN DEFENSA**) y `REGLAS-DE-ARQUITECTURA.md`.
+- **Una herramienta, sin npm:** `npm run mapa` (`tools/mapa.mjs`) lee el código sin ejecutarlo y
+  regenera lo generado; es determinista (sin fechas, orden fijo). No se agregó ninguna
+  dependencia.
+- **Nueve reglas que corre la CI** (`test/arquitectura.mjs`, sin jsdom): toda acción que escribe
+  movimientos llama a `exigirMesAbierto` (y antes de escribir); todo porcentaje de dinero pasa
+  por `redondearPesos`/`calcIvaDeBase`; el IVA solo sale de `calcIvaDeBase`; todo movimiento del
+  sistema lleva marca de origen; las columnas de las hojas solo crecen al final (con una foto en
+  `docs/esquemas.snapshot.json`); todo `test/*.mjs` está en el workflow y en `package.json`; todo
+  `persist("x")` usa una clave que existe; ninguna acción repetida. **Primero avisan:** lo que ya
+  incumple está en `docs/reglas-baseline.json` con su motivo; **solo lo nuevo hace fallar la CI**.
+  La misma prueba comprueba que los documentos generados estén al día y que las citas
+  `archivo:línea` sigan apuntando a lo que apuntaban (si el código se movió, `npm run mapa`
+  las reancla solas), y tiene una «prueba de las pruebas» (un archivo inventado
+  con un defecto de cada tipo, que cada regla debe señalar).
+- **Lo que encontró** (no se arregló nada aquí; cada uno es una tarea aparte): 11 riesgos, los
+  dos más graves: una pestaña que queda vacía se vuelve a llenar con la copia congelada de
+  `kv` (`store.js:1209`), y el tamaño de las claves que viven en una celda (50.000 caracteres)
+  no lo vigila nadie. Lista completa, con severidad y arreglo propuesto: CONTABILIDAD.md,
+  Hallazgo #67.
+- Ver CONTABILIDAD.md, Hallazgo #67. Pruebas: `node test/arquitectura.mjs` (sin jsdom).
 
 ## Registro de cambios — noviembre 2026 (centésima decimoquinta ronda: «Salud de los datos» revisa ocho cosas más)
 

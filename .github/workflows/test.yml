@@ -40,3 +40,8 @@ jobs:
 
       - name: Prueba de bitácora y cierre de mes (test/bitacora.mjs)
         run: node test/bitacora.mjs
+
+      # Reglas de arquitectura y documentos al día (docs/). Si falla por «documentos
+      # viejos», corre `npm run mapa` en local y sube los documentos.
+      - name: Reglas de arquitectura y mapa al día (test/arquitectura.mjs)
+        run: node test/arquitectura.mjs
