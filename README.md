@@ -354,6 +354,9 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
      nunca cambia lo ya pagado.
   Además, **«Cada abono y reembolso…» ahora compara también la fecha** (aviso si el
   monto coincide y la fecha no; si el monto también difiere, el mismo hallazgo la dice).
+  De paso se corrigió un **error falso** de esa misma verificación: un reembolso de antes de
+  septiembre de 2026 cuyo gasto perdió su marca de origen ya no sale como «no está en
+  Finanzas» si hay un gasto sin marca del mismo pedido y monto.
 - **Decisiones del dueño** (se le preguntaron antes de escribir código): nómina solo del
   periodo en curso y solo si es de **más**; la comisión contra la fórmula, como aviso
   informativo; costo estimado + compras reales, como **error**; la fecha de un abono y la
@@ -365,7 +368,7 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
 - Para no repetir una cuenta, subieron a `core/calc.js`: `calcComprasDesfasadasConFinanzas`
   (antes privada de Cotizaciones), `calcDifTotalesCotizacionPedido` (el total y el descuento
   de `calcDesfaseCotizacionPedido`) y `calcPagosNominaEmpleado`.
-- Ver CONTABILIDAD.md, Hallazgo #66. Pruebas: `node test/salud.mjs` (251, sin jsdom).
+- Ver CONTABILIDAD.md, Hallazgo #66. Pruebas: `node test/salud.mjs` (255, sin jsdom).
 
 ## Registro de cambios — octubre 2026 (centésima decimocuarta ronda: la nómina y las cuotas de deuda en pesos enteros)
 

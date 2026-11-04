@@ -134,6 +134,20 @@ function verificarAbonosYMovimientos() {
     if (t.origenReembolsoId) (porReembolso[t.origenReembolsoId] = porReembolso[t.origenReembolsoId] || []).push(t);
   });
   var yaReportados = {}; // movimientos ya explicados en un hallazgo: el otro sentido no los repite
+  // OJO, datos viejos: la marca `origenReembolsoId` se PERDÍA en cada recarga
+  // hasta septiembre de 2026 (le faltaba la columna en la hoja, Hallazgo #19).
+  // Un reembolso anterior puede tener su gasto en Finanzas SIN marca; dar eso por
+  // «no está en Finanzas» sería un error falso (y prendería la insignia roja
+  // para siempre). Si no hay un gasto marcado, se busca uno SIN marca del mismo
+  // pedido y el mismo monto, y cada uno respalda UN solo reembolso. Los abonos no
+  // lo necesitan: su marca siempre tuvo columna.
+  var sinMarca = agruparTx(function (t) { return t.pedidoId && t.tipo === "gasto" && sinMarcaDeOrigen(t) ? t.pedidoId : ""; });
+  var usados = {};
+  function respaldoReembolsoSinMarca(p, a) {
+    var c = (sinMarca[p.id] || []).filter(function (t) { return !usados[t.id] && !distinto(t.monto, a.monto); })[0];
+    if (c) usados[c.id] = true;
+    return !!c;
+  }
   state.pedidos.forEach(function (p) {
     (p.abonos || []).forEach(function (a) {
       var esReembolso = a.tipo === "reembolso";
@@ -154,6 +168,7 @@ function verificarAbonosYMovimientos() {
         return;
       }
       if (!propios.length) {
+        if (esReembolso && respaldoReembolsoSinMarca(p, a)) return; // un reembolso de antes: su gasto perdió la marca
         out.push({
           clave: "sin-movimiento:" + a.id, severidad: "error",
           titulo: esReembolso ? "Un reembolso del pedido no está en Finanzas" : "Un abono del pedido no está en Finanzas",

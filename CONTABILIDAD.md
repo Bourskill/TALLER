@@ -4279,7 +4279,7 @@ duda, **aviso**; **error** solo si la plata de la app y la de la realidad ya no 
 
 | # | Verificación (`id`) | Qué compara | Gravedad |
 |---|---|---|---|
-| 2 (ampliada) | `abono-movimiento` | La **fecha** de cada abono/reembolso contra la de su movimiento. Si el monto también difiere, el mismo hallazgo del monto la dice (no se abre un segundo aviso) | aviso |
+| 2 (ampliada) | `abono-movimiento` | La **fecha** de cada abono/reembolso contra la de su movimiento. Si el monto también difiere, el mismo hallazgo del monto la dice (no se abre un segundo aviso). Además, un **reembolso de antes de septiembre de 2026** cuyo gasto perdió la marca `origenReembolsoId` (Hallazgo #19) ya no da «no está en Finanzas»: si hay un gasto SIN marca del mismo pedido y el mismo monto, se da por respaldado (cada gasto respalda un solo reembolso) | aviso (la fecha) |
 | 13 | `nomina-periodo` | Lo pagado a cada persona en el periodo en curso (`calcPagosNominaEmpleado`) contra su sueldo del periodo **más los bonos escritos en el concepto** («(+$X bono)», que es como lo escribe «Confirmar pago»). Menos de un peso de más no cuenta (centavos de antes del #62) | aviso |
 | 14 | `deuda-pagos` | Por deuda, **un solo hallazgo** que junta: pagos del historial cuyo movimiento (`txId`) ya no está / está en otra deuda / tiene otro monto, y más pagos en Finanzas (`deudaId`) que los que la deuda registra → **error**; dice N cuotas pagadas pero Finanzas tiene menos movimientos, historial con más pagos que cuotas pagadas, pagado de más que el monto, activa con todas las cuotas pagadas (sigue sumando en «Por pagar»), saldada con cuotas pendientes, o a la vez activa y saldada → **aviso** | error / aviso |
 | 15 | `compras-finanzas` | Compras «Sí» (fuera de recibos) contra su movimiento, con **la misma cuenta que el aviso de la cotización** (`calcComprasDesfasadasConFinanzas`, movida a `calc.js`). Un hallazgo por cotización | aviso |
@@ -4296,11 +4296,13 @@ duda, **aviso**; **error** solo si la plata de la app y la de la realidad ya no 
   partes; un pedido sin líneas; una cotización «escalada» (es un borrador hasta «Aplicar a
   pedido»); la fila de un recibo anulado que está en la papelera con el **mismo id** que la
   viva (los ids de un recibo son fijos y se reusan al volver a registrarlo).
-- **Consignación y la marca que se perdía:** hasta septiembre de 2026 las marcas
-  `origenVentaConsignacionId` y `origenComisionConsignacionId` **se perdían en cada recarga**
-  (les faltaba la columna, Hallazgo #19). Una venta de antes puede tener su movimiento
-  **sin marca**: si hay un movimiento del mismo pedido, del mismo tipo y del mismo monto,
-  la venta se da por respaldada (y un movimiento sin marca respalda **una sola** venta).
+- **Consignación, reembolsos y la marca que se perdía:** hasta septiembre de 2026 las marcas
+  `origenVentaConsignacionId`, `origenComisionConsignacionId` y `origenReembolsoId` **se
+  perdían en cada recarga** (les faltaba la columna, Hallazgo #19). Una venta o un reembolso de
+  antes puede tener su movimiento **sin marca**: si hay un movimiento del mismo pedido, del
+  mismo tipo y del mismo monto, se da por respaldado (y un movimiento sin marca respalda **uno
+  solo**). Esto último también corrigió, a pedido del dueño, un error falso que ya traía la
+  verificación del #64 para los reembolsos viejos.
 - **Estado transitorio:** la cotización abierta con cambios sin guardar no se compara (se
   pone al día al guardar), ni la que tiene el estimado registrado (ahí las compras «Sí» no se
   llevan a Finanzas **a propósito**; si además hay compras en Finanzas lo dice
@@ -4349,7 +4351,7 @@ a Pendientes, a la papelera de Pedidos y a la de Finanzas).
 - Lo de siempre: que la app sea lo mismo que hay en la hoja de Google, y el historial de lo
   corregido al cargar (ver #64).
 
-**Verificado:** `test/salud.mjs` (251 pruebas, `node test/salud.mjs`, sin jsdom): los datos
+**Verificado:** `test/salud.mjs` (255 pruebas, `node test/salud.mjs`, sin jsdom): los datos
 limpios ampliados (con nómina del periodo, bono y descuento, un pago de un sueldo anterior, deudas
 con historial enlazado, saldada y condonada, compras «Sí», estimado, consignación con una venta de
 antes sin marca, cotización ligada a su pedido, comisión por porcentaje y una papelera en regla)
