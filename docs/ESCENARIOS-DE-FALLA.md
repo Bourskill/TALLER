@@ -77,7 +77,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 - **Qué queda abierto (dos cosas verificadas):**
   1. **La promesa «se actualiza sola» no se cumple para lo que se lee:** `loadAll` se llama una sola vez, al entrar (`js/app.js:50`); al volver la red solo se reintentan escrituras pendientes (`js/core/guardado.js:269`). Los datos siguen siendo la copia local hasta recargar.
   2. **Esas claves no tienen revisión conocida:** `fijarRevConocida` solo corre para lo que sí se leyó de la red (`js/core/store.js:1266-1267`) y `verificarConflicto` **deja pasar** una clave sin base (`js/core/store.js:109`). Resultado: si otro computador guardó cambios mientras tanto, **el primer guardado de este los sobrescribe sin aviso**.
-- **Prueba:** `test/smoke.mjs:3371-3457` (la carga cae al espejo y la migración se salta). `test/smoke.mjs:4265` fija como comportamiento esperado que el primer guardado de la sesión no se marca conflicto: **documenta la brecha, no la cubre**.
+- **Prueba:** `test/smoke.mjs:3371-3457` (la carga cae al espejo y la migración se salta). **Ninguna prueba ejerce la brecha** (arrancar sin red y guardar una clave sin revisión conocida): `test/smoke.mjs:4265` prueba otro caso, el primer guardado tras una carga **normal**, donde sí hay revisión.
 - **Estado:** **PARCIAL — severidad media.** Riesgo **#67-3**.
 
 ## 5. Vence el acceso de Google

@@ -33,9 +33,11 @@ Todo lo de la tabla está integrado en `main` y publicado en GitHub, con la CI c
 | **#64** | Panel «Salud de los datos»: verifica y REPORTA (no repara) 13 cosas, y dice lo que la app corrigió sola al cargar. | Arriba de todo en Configuración (solo admin), insignia roja en el menú | `test/salud.mjs` |
 | **#65** | Bitácora de cambios del dinero y cierre de mes. | Finanzas → 📒 Bitácora y 🔒 Cierre de mes (solo admin) | `test/bitacora.mjs` |
 | **#66** | «Salud de los datos» revisa 8 cosas más (21 en total): nómina del periodo, deudas (`cuotasPagadas` contra sus movimientos), compras «Sí», estimado + compras reales, consignación, total del pedido contra su cotización, papelera, comisión pagada contra la fórmula de hoy; y la fecha de cada abono. | El mismo panel; botones «↗» nuevos a Deuda, Nómina y Papelera | `test/salud.mjs` |
+| **#67** | **Mapa técnico** del código y del dinero, 23 escenarios de falla, 9 reglas de arquitectura que vigila la CI y **11 riesgos encontrados** (sin arreglar). No cambia la app. | Carpeta `docs/` (empieza por `docs/ARQUITECTURA.md`); se regenera con `npm run mapa` | `test/arquitectura.mjs` |
 
-Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#66) y
-el registro de cambios de **`README.md`** (rondas 109–115).
+Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#67) y
+el registro de cambios de **`README.md`** (rondas 109–116). **Plan para arreglar los 11
+riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md).**
 
 ### Decisiones del dueño que NO hay que volver a preguntar
 - Descuento: lo puede dar **cualquiera** (admin o vendedor); el cliente lo **ve** en
