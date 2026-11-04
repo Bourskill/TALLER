@@ -13,7 +13,7 @@
 import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, reconocerTablasVacias, ETIQUETA_CLAVE } from "./store.js";
 import { esc, esUrlImagen } from "./utils.js";
 import { calcNotificaciones } from "./calc.js";
-import { calcResumenSalud } from "./salud.js";
+import { calcResumenSalud, calcEspacioHoja } from "./salud.js";
 import { ICONS } from "./icons.js";
 import { getSession, logout, haySesionPorVencer, renovarSesionAhora } from "./auth.js";
 import { estadoGuardado, reintentarPendientes } from "./guardado.js";
@@ -885,6 +885,7 @@ function renderTopbar() {
     '<div class="topbar-date">' + esc(fecha) + "</div>" +
     renderIndicadorConexion() +
     renderAvisoSesionPorVencer() +
+    renderChipEspacio() +
     renderIndicadorGuardado() +
     renderCampanita() +
     (session && session.email ? '<div class="topbar-user" title="Sesión iniciada">' + esc(session.email) + "</div>" : "") +
@@ -915,6 +916,31 @@ function sinConexion() {
 function renderIndicadorConexion() {
   if (!sinConexion()) return "";
   return '<span class="guardado-chip offline" title="Sin conexión a internet. Podés seguir trabajando: lo que hagas se guarda en este dispositivo y se sube solo en cuanto vuelva la señal.">📶 Sin conexión</span>';
+}
+
+// ---------- espacio en la hoja ----------
+// Aviso PROACTIVO (Hallazgo #70): Google no deja guardar más de 50.000
+// caracteres en una celda y la pestaña «kv» se lee solo hasta la fila 5.000.
+// Mientras todo esté por debajo del 70 % no aparece nada; después, un chip
+// discreto (amarillo, y rojo desde el 90 %) que lleva a Configuración, donde
+// «Salud de los datos» dice qué área es y qué hacer. Solo lo ve quien puede
+// hacer algo (no el vendedor). Es de ayuda: si el cálculo fallara, no pinta.
+function renderChipEspacio() {
+  var session = getSession();
+  if (session && session.rol === "vendedor") return "";
+  var e;
+  try { e = calcEspacioHoja(); } catch (err) { console.error("Espacio en la hoja", err); return ""; }
+  if (e.nivel === "ok") return "";
+  var candidatos = e.claves.filter(function (c) { return c.nivel === e.nivel; });
+  var que, pct;
+  if (candidatos.length) {
+    que = "«" + candidatos[0].etiqueta + "» ocupa el " + candidatos[0].porcentaje + " % de su celda en la hoja de Google (el límite es de 50.000 caracteres por celda; al llegar al 100 % esa área deja de guardarse)";
+    pct = candidatos[0].porcentaje;
+  } else {
+    que = "La pestaña «kv» de la hoja llega a la fila " + e.filas.usadas.toLocaleString("es-CO") + " de " + e.filas.limite.toLocaleString("es-CO") + " (la app solo lee hasta la 5.000)";
+    pct = e.filas.porcentaje;
+  }
+  return '<button class="guardado-chip espacio' + (e.nivel === "error" ? " malo" : "") + '" data-action="tab" data-tab="config" title="' + esc(que + ". Clic para ver qué hacer en Configuración → Salud de los datos.") + '">▲ Hoja al ' + pct + " %</button>";
 }
 
 // ---------- estado del guardado ----------

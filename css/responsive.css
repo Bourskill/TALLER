@@ -118,6 +118,10 @@
      pantalla la campanita, el tema y CERRAR SESIÓN, sin scroll disponible. */
   .guardado-chip.offline{font-size:0;padding:5px;gap:0;}
   .guardado-chip.offline::before{content:"📶";font-size:11px;}
+  /* Igual que el de sin conexión: en celular solo el ícono (el porcentaje está
+     en el título y en Configuración → Salud de los datos). */
+  .guardado-chip.espacio{font-size:0;padding:5px;gap:0;}
+  .guardado-chip.espacio::before{content:"▲";font-size:11px;}
 
   .aviso-barra{flex-direction:column;align-items:stretch;padding:var(--sp-3);}
   .aviso-barra .btn{width:100%;}

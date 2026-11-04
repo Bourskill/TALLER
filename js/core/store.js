@@ -149,6 +149,18 @@ export function decidirLecturaTabla(o) {
 
 function claveMigrado(key) { return "__migrado__:" + key; }
 
+// ---------- espacio en la hoja: medir sin mover nada ----------
+// (Hallazgo #70, riesgo #67-2.) Solo anota números en memoria para que Salud de
+// los datos y la barra superior puedan avisar ANTES de que una celda se llene;
+// no cambia lo que se guarda ni cómo.
+function anotarTamanoClave(key, caracteres) {
+  state.tamanosClaves[key] = caracteres;
+}
+function refrescarFilasKv() {
+  try { state.filasKv = typeof window.storage.filasUsadas === "function" ? window.storage.filasUsadas() : null; }
+  catch (e) { state.filasKv = null; }
+}
+
 // ¿Ya existe la marca? Si no se puede leer, se supone que SÍ: es el lado
 // seguro (nunca sembrar desde el blob congelado ante la duda).
 async function leerMarcaMigrado(key) {
@@ -317,6 +329,14 @@ export const state = {
   // (el «está bien así» del usuario). Hallazgo #69 — ver renderAvisoTablaVacia
   // en core/dom.js.
   avisoTablaVacia: null,
+  // Cuánto mide (en caracteres) lo que hay en la celda de «kv» de cada área que
+  // vive en una sola celda: { pedidos: 12345, deudas: 800, ... }. Google no deja
+  // más de 50.000 por celda; se llena al cargar (lo que HAY en la hoja) y al
+  // guardar (lo que se acaba de mandar). Solo en memoria. `filasKv` es hasta
+  // qué fila llega la pestaña «kv» (se lee solo hasta la 5.000), o null si no
+  // se sabe. Hallazgo #70 — ver calcEspacioHoja en core/salud.js.
+  tamanosClaves: {},
+  filasKv: null,
   // Panel de la campanita desplegado o no — estado de UI, nunca se persiste.
   notificacionesAbiertas: false,
   // Panel con la lista de atajos de teclado (tecla "?" o el botón del teclado
@@ -1239,7 +1259,10 @@ export async function loadAll() {
           // reciente. INCIDENTE 2026-09-21, detectado al migrar
           // "cotizaciones" (mismo riesgo ya latente para tx/clientes desde
           // que se migraron, solo que ninguna prueba lo había ejercitado).
-          if (n !== "configNombreLegacy" && !TABLAS_SHEET[n]) espejar(n, r.value.value);
+          if (n !== "configNombreLegacy" && !TABLAS_SHEET[n]) {
+            espejar(n, r.value.value);
+            anotarTamanoClave(n, String(r.value.value == null ? "" : r.value.value).length);
+          }
         } else {
           // La Sheet SÍ respondió (no es un fallo de red) pero esta clave no
           // tiene fila todavía — es un "no hay nada guardado aún" legítimo,
@@ -1406,6 +1429,7 @@ export async function loadAll() {
     // así que esto no cuesta ninguna lectura de red extra.
     await Promise.all(clavesOkRed.concat(Object.keys(TABLAS_SHEET).filter(function (k) { return tablaOk[k]; }))
       .map(function (key) { return fijarRevConocida(key); }));
+    refrescarFilasKv();
 
     // Migración: el detalle de tallas/observaciones vivía en el PEDIDO; ahora
     // vive en la REFERENCIA de la cotización de origen (así se puede
@@ -2028,7 +2052,14 @@ export function revisarBorradoresSinGuardar() {
 async function escribirClave(key) {
   await verificarConflicto(key);
   if (TABLAS_SHEET[key]) { await TABLAS_SHEET[key].escribir(state[key]); }
-  else { await window.storage.set(KEYS[key], JSON.stringify(state[key]), false); }
+  else {
+    var json = JSON.stringify(state[key]);
+    // Se anota ANTES de escribir: si Google la rechaza por llena, el tamaño que
+    // no cupo igual queda a la vista (Hallazgo #70).
+    anotarTamanoClave(key, json.length);
+    await window.storage.set(KEYS[key], json, false);
+    refrescarFilasKv();
+  }
   await fijarRevNueva(key);
   if (syncChannel) { try { syncChannel.postMessage({ key: key, tabId: TAB_ID }); } catch (e) {} }
 }

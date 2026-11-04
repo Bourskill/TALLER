@@ -7,7 +7,7 @@
 import { state, notify, mostrarToast } from "../core/store.js";
 import { esc, norm, todayStr } from "../core/utils.js";
 import { renderHelp, renderBuscador } from "../core/components.js";
-import { calcResumenSalud, calcReparacionesAlCargar, textoInformeSalud } from "../core/salud.js";
+import { calcResumenSalud, calcReparacionesAlCargar, textoInformeSalud, calcEspacioHoja, textoEspacioHoja, LIMITE_CELDA_KV } from "../core/salud.js";
 import { irARecibo } from "./finanzas.js";
 import { cargarBitacora, estadoLecturaBitacora } from "../core/bitacora.js";
 
@@ -65,6 +65,20 @@ function renderReparaciones() {
     "<ul>" + rep.filas.map(function (f) { return "<li><b>" + f.cantidad + "</b> " + esc(f.texto) + "</li>"; }).join("") + "</ul>" + (sinRed ? "<div>" + sinRed.trim() + "</div>" : "") + "</div>";
 }
 
+// Cuánto ocupa cada área en su celda de la hoja (Hallazgo #70). Siempre se
+// muestra —aunque todo esté bien— porque es la única forma de ver el número
+// ANTES de que haya un aviso. Es informativo: solo lee state.tamanosClaves.
+function renderEspacio() {
+  var e = calcEspacioHoja();
+  if (!e.medido) return '<div class="salud-rep">' + esc(textoEspacioHoja()) + "</div>";
+  var lista = e.claves.map(function (c) {
+    return "<li><b>" + esc(c.etiqueta) + ":</b> " + c.caracteres.toLocaleString("es-CO") + " de " + LIMITE_CELDA_KV.toLocaleString("es-CO") +
+      " (" + c.porcentaje + " %)" + (c.nivel === "ok" ? "" : (c.nivel === "error" ? " — casi llena" : " — se está llenando")) + "</li>";
+  }).join("");
+  return '<div class="salud-rep' + (e.nivel === "ok" ? "" : " aviso") + '">' + esc(textoEspacioHoja()) +
+    (lista ? "<details><summary>Ver el espacio de cada área</summary><ul>" + lista + "</ul></details>" : "") + "</div>";
+}
+
 export function renderSalud() {
   // «Meses cerrados» compara contra la bitácora: si hay algún mes cerrado y aún
   // no se leyó (ni falló), se pide ahora; al terminar vuelve a pintar sola.
@@ -102,6 +116,7 @@ export function renderSalud() {
   }
 
   html += renderReparaciones();
+  html += renderEspacio();
   html += '<div class="pedido-actions"><button class="btn ghost small" data-action="copiar-informe-salud">Copiar informe</button></div>';
   return html + "</div>";
 }

@@ -21,7 +21,7 @@
 // producirlo en su uso normal (un saldo a favor, centavos de una nómina) o es
 // una decisión pendiente del dueño.
 
-import { state, REPARACIONES_AL_CARGAR } from "./store.js";
+import { state, REPARACIONES_AL_CARGAR, ETIQUETA_CLAVE } from "./store.js";
 import { num, fmt } from "./utils.js";
 import {
   calcAbonadoDeLista, calcCaja, calcResumenMovimientos, calcDesglosePedido,
@@ -1300,6 +1300,107 @@ registrarVerificacion({
   correr: verificarComisionContraFormula
 });
 
+// ---------------------------------------------------------------------------
+// 22. Espacio en la hoja (Hallazgo #70, riesgo #67-2)
+// ---------------------------------------------------------------------------
+// Google no deja guardar más de 50.000 caracteres en UNA celda, y casi todas las
+// áreas de datos (pedidos, papeleras, deudas, configuración…) viven en una sola
+// celda de la pestaña «kv». Cuando una crece de más, TODO guardado de esa área
+// falla; ya pasó con Cotizaciones (Hallazgo #42). Además «kv» solo se lee hasta
+// la fila 5.000: lo que se escriba más abajo no se vuelve a cargar. Esto solo
+// MIDE y AVISA, antes de que pase; no mueve ningún dato. Los números salen de
+// state.tamanosClaves / state.filasKv, que store.js anota al cargar y al
+// guardar (nada se mide aquí: esta revisión corre en cada pintado).
+export var LIMITE_CELDA_KV = 50000;
+export var LIMITE_FILAS_KV = 5000;
+// Aviso desde el 70 % de la celda y error desde el 90 %; en caracteres para no
+// depender de redondeos de coma flotante.
+var AVISO_CELDA_KV = 35000;
+var ERROR_CELDA_KV = 45000;
+// Las filas de «kv»: aviso desde la 4.000 (80 %) y error desde la 4.750 (95 %).
+var AVISO_FILAS_KV = 4000;
+var ERROR_FILAS_KV = 4750;
+
+function miles(n) { return Number(n).toLocaleString("es-CO"); }
+function nivelPorTope(valor, aviso, error) { return valor >= error ? "error" : (valor >= aviso ? "aviso" : "ok"); }
+
+// Cuánto ocupa cada área y cuántas filas usa «kv». `claves` va de la más llena a
+// la menos; `nivel` es el peor de todos. Sin medir nada, todo vacío y «ok».
+export function calcEspacioHoja() {
+  var t = state.tamanosClaves || {};
+  var claves = Object.keys(t).map(function (k) {
+    var n = Math.max(0, Math.floor(Number(t[k]) || 0));
+    return {
+      clave: k, etiqueta: ETIQUETA_CLAVE[k] || k, caracteres: n,
+      porcentaje: Math.floor(n * 100 / LIMITE_CELDA_KV),
+      nivel: nivelPorTope(n, AVISO_CELDA_KV, ERROR_CELDA_KV)
+    };
+  }).sort(function (a, b) { return b.caracteres - a.caracteres; });
+  var filas = null;
+  if (state.filasKv != null && isFinite(Number(state.filasKv))) {
+    var u = Math.max(0, Math.floor(Number(state.filasKv)));
+    filas = { usadas: u, limite: LIMITE_FILAS_KV, porcentaje: Math.floor(u * 100 / LIMITE_FILAS_KV), nivel: nivelPorTope(u, AVISO_FILAS_KV, ERROR_FILAS_KV) };
+  }
+  var peor = "ok";
+  claves.concat(filas ? [filas] : []).forEach(function (x) {
+    if (x.nivel === "error") peor = "error";
+    else if (x.nivel === "aviso" && peor === "ok") peor = "aviso";
+  });
+  return { medido: claves.length > 0 || !!filas, claves: claves, masLlena: claves[0] || null, filas: filas, nivel: peor };
+}
+
+// Las áreas que tienen papelera: vaciarla («borrar para siempre») es lo único
+// que el dueño puede hacer él mismo para liberar espacio.
+var PAPELERAS_ESPACIO = {
+  txPapelera: { tipo: "papelera-movimiento", donde: "Finanzas → Historial → Papelera: «borrar para siempre» lo que ya no necesites" },
+  pedidosPapelera: { tipo: "papelera-pedido", donde: "Pedidos → Historial → Papelera: «borrar para siempre» lo que ya no necesites" }
+};
+
+function verificarEspacioHoja() {
+  var e = calcEspacioHoja();
+  var out = [];
+  e.claves.forEach(function (c) {
+    if (c.nivel === "ok") return;
+    var pap = PAPELERAS_ESPACIO[c.clave];
+    out.push({
+      clave: c.clave, severidad: c.nivel === "error" ? "error" : "aviso",
+      titulo: "«" + c.etiqueta + "» ocupa el " + c.porcentaje + " % de su celda en la hoja",
+      detalle: "Google no deja guardar más de " + miles(LIMITE_CELDA_KV) + " caracteres en una celda. «" + c.etiqueta + "» ya ocupa " + miles(c.caracteres) +
+        " (" + c.porcentaje + " %). Cuando llegue al 100 %, esa área deja de guardarse: lo que registres ahí se queda solo en este computador y la barra roja de «no se pudo guardar» no se va." +
+        (pap ? " Vaciar esa papelera («borrar para siempre» lo que ya no necesites) libera espacio." : " La salida de fondo es pasar esa área a su propia pestaña de la hoja, como ya se hizo con las cotizaciones (trabajo del desarrollador: paquete 8 de docs/PLAN-DE-CORRECCION.md)."),
+      afectados: pap ? [{ tipo: pap.tipo, id: "papelera", etiqueta: "Papelera" }] : [],
+      donde: pap ? pap.donde : "Trabajo del desarrollador: pasar «" + c.etiqueta + "» a su propia pestaña de la hoja (docs/PLAN-DE-CORRECCION.md, paquete 8)"
+    });
+  });
+  if (e.filas && e.filas.nivel !== "ok") {
+    out.push({
+      clave: "kv-filas", severidad: e.filas.nivel === "error" ? "error" : "aviso",
+      titulo: "La pestaña «kv» de la hoja llega a la fila " + miles(e.filas.usadas) + " de " + miles(e.filas.limite),
+      detalle: "La app solo lee las primeras " + miles(e.filas.limite) + " filas de «kv»: lo que se escriba más abajo no se vuelve a cargar al abrir la app. Hoy llega a la fila " + miles(e.filas.usadas) +
+        ". Cada borrador de cotización en la nube deja una fila que nunca se elimina (solo se vacía), así que el número solo crece.",
+      afectados: [],
+      donde: "Trabajo del desarrollador: limpiar las filas vacías de borradores en la pestaña «kv» de la hoja (docs/PLAN-DE-CORRECCION.md, paquete 3)"
+    });
+  }
+  return out;
+}
+registrarVerificacion({
+  id: "espacio-hoja", titulo: "Espacio que queda en la hoja de datos",
+  porque: "Google no deja guardar más de 50.000 caracteres en una celda. Las áreas que viven en una sola celda (pedidos, papeleras, deudas, configuración…) crecen con el uso; cuando una se llena, deja de guardarse y lo que registres ahí se queda solo en tu computador. Aquí se avisa antes de que pase.",
+  donde: "Papeleras de Finanzas y de Pedidos (borrar para siempre lo que ya no sirva); el resto lo resuelve el desarrollador",
+  correr: verificarEspacioHoja
+});
+
+// Una línea para el informe copiado y el panel: lo más lleno y las filas.
+export function textoEspacioHoja() {
+  var e = calcEspacioHoja();
+  if (!e.medido) return "Espacio en la hoja: todavía no se midió (se mide al cargar y al guardar).";
+  var partes = [];
+  if (e.masLlena) partes.push("lo más lleno es «" + e.masLlena.etiqueta + "» con " + miles(e.masLlena.caracteres) + " de " + miles(LIMITE_CELDA_KV) + " caracteres (" + e.masLlena.porcentaje + " %)");
+  if (e.filas) partes.push("la pestaña «kv» llega a la fila " + miles(e.filas.usadas) + " de " + miles(e.filas.limite));
+  return "Espacio en la hoja: " + partes.join("; ") + ".";
+}
+
 function correrVerificacion(v) {
   var encontrados;
   try {
@@ -1390,5 +1491,6 @@ export function textoInformeSalud(fecha) {
     rep.filas.forEach(function (f) { lineas.push("- " + f.cantidad + " " + f.texto); });
   }
   if (rep.omitidas) lineas.push("Esta carga usó la copia sin conexión: las demás correcciones se saltaron y se reintentan al cargar con señal.");
+  lineas.push(textoEspacioHoja());
   return lineas.join("\n");
 }

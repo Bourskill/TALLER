@@ -77,6 +77,16 @@ export var sheetsStorage = {
     var m = rango && /![A-Z]+(\d+):/.exec(rango);
     if (m) rowByKey[key] = Number(m[1]);
   },
+  // Hasta qué fila de la hoja llega lo que esta pestaña "kv" tiene escrito (la
+  // última fila conocida, contando el encabezado como fila 1). Se lee solo
+  // hasta la fila 5.000 (ver cargar): lo que se escriba más abajo NO se vuelve
+  // a cargar, así que este número tiene que mantenerse lejos de 5.000. No
+  // cuesta ninguna lectura de red: sale de lo que cargar()/set() ya anotaron.
+  filasUsadas: function () {
+    var max = 1;
+    Object.keys(rowByKey).forEach(function (k) { if (rowByKey[k] > max) max = rowByKey[k]; });
+    return max;
+  },
   // Claves de "kv" que empiezan con un prefijo dado. No cuesta ninguna
   // lectura de red aparte: cargar() ya trae TODA la pestaña "kv" a memoria
   // para cualquier get/set normal, esto solo filtra lo que ya está en

@@ -33,11 +33,11 @@ y el [MAPA-DEL-CODIGO.md](docs/MAPA-DEL-CODIGO.md) generado. Si cambias código,
 
 ## Pruebas automáticas
 
-Hay ocho pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+Hay nueve pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
 `test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
 conciliación), `test/salud.mjs` («Salud de los datos»), `test/bitacora.mjs`
 (bitácora de cambios y cierre de mes), `test/guardado.mjs` (la cola de guardado y
-sus reintentos), `test/pestanas.mjs` (una pestaña propia que aparece vacía) y `test/arquitectura.mjs` (reglas de
+sus reintentos), `test/pestanas.mjs` (una pestaña propia que aparece vacía), `test/espacio.mjs` (cuánto se llena la hoja) y `test/arquitectura.mjs` (reglas de
 arquitectura y documentos de `docs/` al día; no necesita jsdom). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
@@ -292,6 +292,27 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — noviembre 2026 (centésima decimonovena ronda: la app avisa antes de que la hoja se llene)
+
+- **Tercer paquete del plan de corrección** ([docs/PLAN-DE-CORRECCION.md](docs/PLAN-DE-CORRECCION.md)),
+  primer paso del riesgo **#67-2**: **solo mide y avisa, no mueve ningún dato.** Google no deja
+  guardar más de 50.000 caracteres en una celda, y casi todo (pedidos, las papeleras, deudas,
+  configuración…) vive cada área en una sola celda. Cuando una se llena, esa área deja de
+  guardarse y lo registrado queda solo en el computador. Antes nada lo medía ni lo avisaba.
+- **Qué se ve ahora:** la app mide cuánto ocupa cada área (al cargar y al guardar) y cuántas
+  filas usa la pestaña «kv» (solo se leen las primeras 5.000). Desde el **70 %** avisa y desde el
+  **90 %** marca error, en tres lugares: un **chip arriba** («▲ Hoja al 78 %», amarillo; rojo desde
+  el 90 %; el vendedor no lo ve), una **verificación nueva en Salud de los datos** (ahora 22) y un
+  bloque **«Espacio en la hoja»** siempre visible en ese panel con el número de cada área. Si la
+  que se llena es una papelera, el aviso lleva un botón a ella y dice que «borrar para siempre»
+  libera espacio.
+- **Para el dueño, tras publicar:** abrir la app y mirar Configuración → Salud de los datos →
+  «Espacio en la hoja». Es la primera vez que se podrá ver cuánto margen queda con los datos
+  reales; si algo ya pasa del 70 %, mover esa área a su propia pestaña pasa a ser urgente.
+- Prueba nueva: `node test/espacio.mjs` (61 comprobaciones, sin jsdom); el chip y el panel en
+  `test/smoke.mjs`, que no se corrió en este equipo (necesita jsdom); la CI lo corre.
+- Ver CONTABILIDAD.md, Hallazgo #70.
 
 ## Registro de cambios — noviembre 2026 (centésima decimoctava ronda: una pestaña vacía ya no se rellena con datos viejos)
 
@@ -5093,6 +5114,7 @@ test/
   salud.mjs            «Salud de los datos» y lo corregido al cargar (Node solo, sin jsdom)
   guardado.mjs         la cola de guardado: marca en disco y reintentos (Node solo, sin jsdom)
   pestanas.mjs         pestañas propias que aparecen vacías y la marca «ya migrado» (Node solo, sin jsdom)
+  espacio.mjs          cuánto se llena la hoja: celdas de 50.000 caracteres y filas de «kv» (Node solo, sin jsdom)
 ```
 
 ## Cómo trabajar sobre un área sin romper las demás

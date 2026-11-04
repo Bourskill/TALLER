@@ -34,7 +34,7 @@ Son cinco documentos y cada uno responde una pregunta:
 **Orden de lectura recomendado:** este documento (10 minutos) → `ESCENARIOS-DE-FALLA.md` (para ver qué está defendido y qué no) → `MAPA-DEL-DINERO.md` (la tabla «quién escribe dinero»). `MAPA-DEL-CODIGO.md` es de consulta: se busca una función y se mira de qué depende.
 
 **Convenciones:**
-- `archivo:línea` = ruta dentro del proyecto y número de línea. Ejemplo: `js/core/store.js:2039` es la función `persist`.
+- `archivo:línea` = ruta dentro del proyecto y número de línea. Ejemplo: `js/core/store.js:2070` es la función `persist`.
 - **✔ / ✘** en las tablas generadas: ✔ = tiene el candado; ✘ = no lo tiene.
 - **SIN DEFENSA** = nadie lo vigila (ni el código ni una prueba). Siempre va con una **severidad** (alta / media / baja) según cuánta plata puede dañar.
 - **Límites del análisis** (aplican a las tablas generadas): el mapa lee el texto del código, no lo ejecuta; no ve una función llamada por un nombre armado en tiempo de ejecución ni un cambio hecho a través de una variable que apunta a un movimiento. Esos casos se listan aparte, a mano, en `MAPA-DEL-DINERO.md`.
@@ -45,9 +45,9 @@ Cada término técnico, una vez, en simple.
 
 | Término | Qué es |
 |---|---|
-| **`state`** | La «memoria de trabajo» de la app: un objeto en el navegador con todos los datos mientras la app está abierta (`js/core/store.js:288`). Si se cierra la pestaña, lo que no se guardó en la hoja se pierde (por eso existe el *espejo local*). |
+| **`state`** | La «memoria de trabajo» de la app: un objeto en el navegador con todos los datos mientras la app está abierta (`js/core/store.js:300`). Si se cierra la pestaña, lo que no se guardó en la hoja se pierde (por eso existe el *espejo local*). |
 | **Clave** | El nombre de un grupo de datos dentro de `state`: `tx` (movimientos de dinero), `pedidos`, `cotizaciones`, `config`… Guardar siempre manda **la clave completa**, nunca un cambio suelto. |
-| **`persist("clave")`** | La orden «guarda esta clave en la hoja de Google» (`js/core/store.js:2039`). Toda acción que cambia datos termina llamándola. |
+| **`persist("clave")`** | La orden «guarda esta clave en la hoja de Google» (`js/core/store.js:2070`). Toda acción que cambia datos termina llamándola. |
 | **Hoja / pestaña / celda** | La base de datos es una **Google Sheet** (hoja de cálculo). Tiene **pestañas** (Movimientos, Cotizaciones, kv…) y cada pestaña filas y celdas. |
 | **`kv`** | Una pestaña de dos columnas (`key`, `value`): cada clave se guarda **entera como un texto JSON dentro de una sola celda** (`js/core/sheetsStorage.js:1`). |
 | **Pestaña propia** | Movimientos, Clientes, Cotizaciones, Cierres y Bitácora tienen su propia pestaña con **una fila por registro y una columna por campo** (`js/core/sheetsTabular.js:1`). |
@@ -55,11 +55,11 @@ Cada término técnico, una vez, en simple.
 | **Marca de origen** | Un campo del movimiento (`origenAbonoId`…) que dice «este movimiento lo creó la app a partir de tal cosa». Sirve para que nadie lo borre suelto mientras su origen exista (`js/core/calc.js:654`). |
 | **Espejo local** | Una copia de cada clave guardada en el navegador (`localStorage`) cada vez que se intenta guardar (`js/core/guardado.js:133`). Es la segunda copia si falla la red. |
 | **Cola de reintento** | La lista de claves que no se pudieron escribir; se reintenta sola cada 15 s y al volver la red (`js/core/guardado.js:306`). |
-| **Conflicto** | Otro computador guardó la misma clave mientras tanto; la app **no sobrescribe** y avisa (`js/core/store.js:216`). |
+| **Conflicto** | Otro computador guardó la misma clave mientras tanto; la app **no sobrescribe** y avisa (`js/core/store.js:228`). |
 | **Mes cerrado** | Un mes que el admin cerró: la app no deja crear, cambiar ni borrar dinero con fecha en él hasta que lo reabra con un motivo (`js/core/cierre.js:78`). |
 | **Bitácora** | Pestaña `Bitacora` donde cada cambio de dinero queda con quién, cuándo y cómo estaba antes (`js/core/bitacora.js:300`). |
-| **Salud de los datos** | Panel (solo admin) que **verifica y reporta** si algo de dinero dejó de cuadrar. No repara nada (`js/core/salud.js:1337`). |
-| **Acción** | Lo que hace un botón o campo de la pantalla: tiene un nombre (`data-action="add-abono"`) y una función en `modules/*` (`js/core/dom.js:1271`). |
+| **Salud de los datos** | Panel (solo admin) que **verifica y reporta** si algo de dinero dejó de cuadrar. No repara nada (`js/core/salud.js:1438`). |
+| **Acción** | Lo que hace un botón o campo de la pantalla: tiene un nombre (`data-action="add-abono"`) y una función en `modules/*` (`js/core/dom.js:1297`). |
 | **Token** | La «llave» temporal (≈ 1 hora) que Google da al iniciar sesión y que la app usa para leer y escribir la hoja (`js/core/auth.js:256`). |
 | **Rol** | `admin` o `vendedor`, según la pestaña `roles` de la hoja (`js/core/auth.js:317`). |
 | **Peso entero** | Todo monto que la app **calcula** (IVA, comisión, saldo, cuota) se redondea al peso con `redondearPesos` (`js/core/calc.js:993`) para que cuadre con el banco. |
@@ -107,9 +107,9 @@ Consecuencias que importan para el riesgo:
 | Capa | Archivos | Líneas de JavaScript |
 | --- | --- | --- |
 | `js/app.js` | 1 | 123 |
-| `js/core/` | 28 | 16776 |
-| `js/modules/` | 16 | 15338 |
-| **Total** | 45 | 32237 |
+| `js/core/` | 28 | 16945 |
+| `js/modules/` | 16 | 15353 |
+| **Total** | 45 | 32421 |
 
 <!-- GENERADO:fin capas -->
 
@@ -120,21 +120,21 @@ La app son tres capas (detalle archivo por archivo en [`MAPA-DEL-CODIGO.md`](MAP
 
 | Archivo | Responsabilidad | Por qué importa |
 |---|---|---|
-| `store.js` | El `state`, `persist`, la carga (`loadAll`), conflictos entre dispositivos, recuperación | Es la única puerta de salida de los datos (`js/core/store.js:2039`) |
+| `store.js` | El `state`, `persist`, la carga (`loadAll`), conflictos entre dispositivos, recuperación | Es la única puerta de salida de los datos (`js/core/store.js:2070`) |
 | `guardado.js` | Espejo local, cola de reintento, aviso al cerrar la pestaña | Lo que evita perder trabajo si falla la red (`js/core/guardado.js:382`) |
 | `calc.js` | **Toda** fórmula (caja, IVA, saldos, comisiones, descuentos, cuentas, nómina, deudas) | «Una sola fuente por fórmula»: ninguna pantalla calcula por su cuenta |
 | `sheetsStorage.js`, `sheetsTabular.js`, `sheetsEsquemas.js`, `googleRest.js` | Cómo se lee y se escribe la hoja: pestaña `kv`, pestañas propias, esquemas de columnas | Aquí se decide qué se pierde si algo falla a mitad de camino (§5) |
 | `cierre.js`, `bitacora.js`, `salud.js` | Mes cerrado, historial de cambios y verificación de los datos | Los tres «candados blandos» del dinero (§5.6 a §5.8) |
 | `auth.js` | Login con Google, rol, renovación del token | Lo único que sabe quién es la persona (§7) |
 | `backup.js` | Copia diaria de toda la hoja en el Drive del admin | La última red de seguridad (§5.9) |
-| `dom.js` | Arma la pantalla y **reparte cada clic a su acción** | `js/core/dom.js:1271` |
+| `dom.js` | Arma la pantalla y **reparte cada clic a su acción** | `js/core/dom.js:1297` |
 | `pdf.js`, `gmail.js`, `drive.js`, `calendar.js`, `contacts.js`, `components.js`, `graficas.js`, `utils.js`, `constants.js`, … | Documentos, correo, imágenes, agenda, piezas de pantalla | Ver «Siguiente fase» (§10) |
 
 3. **`js/modules/` — una pantalla por pestaña.** Cada módulo exporta `render()` (dibuja) y `actions` (lo que hacen sus botones). Todo el dinero se escribe desde cinco: `pedidos.js` (abonos, reembolsos, comisiones, consignación), `pendientes.js` (nómina, gastos fijos, deudas), `cotizaciones.js` (compras, estimado, comisión de cotización, recibos), `finanzas.js` (movimientos a mano, papelera, recibos), `resumen.js` (Colchón); además `cuentas.js` (transferencias y conciliación) y `cierres.js` (cerrar/reabrir mes).
 
 **Ciclos de importación.** Tres pares de archivos se importan mutuamente (`auth ↔ googleRest`, `store ↔ calc ↔ bitacora`, `cotizaciones ↔ pedidos`; lista generada en [`MAPA-DEL-CODIGO.md`](MAPA-DEL-CODIGO.md), §2.4). Funcionan porque lo importado solo se usa **cuando se ejecuta una función**, nunca mientras el archivo se está leyendo (ver el comentario de `js/core/store.js:15-22`). **Un ciclo nuevo es una señal de alerta**: puede dejar una función sin definir en el arranque.
 
-**Cómo se junta todo.** `dom.js` importa las 16 pantallas y arma el *registro de acciones* con todas sus `actions` en un solo objeto (`js/core/dom.js:485`); un clic en cualquier botón con `data-action="nombre"` termina en `dispatch` (`js/core/dom.js:1271`). **Si dos módulos definen la misma acción, gana la última sin avisar**: la regla `R8` lo vigila (hoy no hay ninguna repetida).
+**Cómo se junta todo.** `dom.js` importa las 16 pantallas y arma el *registro de acciones* con todas sus `actions` en un solo objeto (`js/core/dom.js:485`); un clic en cualquier botón con `data-action="nombre"` termina en `dispatch` (`js/core/dom.js:1297`). **Si dos módulos definen la misma acción, gana la última sin avisar**: la regla `R8` lo vigila (hoy no hay ninguna repetida).
 
 ## 5. Cómo viaja un dato: de la pantalla a la hoja de Google
 
@@ -166,15 +166,15 @@ sequenceDiagram
 
 Paso a paso, con dónde está cada uno:
 
-1. **El clic llega a `dispatch`** y se busca la acción por su nombre; **no se comprueba el rol** (`js/core/dom.js:1271-1274`).
+1. **El clic llega a `dispatch`** y se busca la acción por su nombre; **no se comprueba el rol** (`js/core/dom.js:1297-1300`).
 2. **La acción cambia `state` en memoria** y, si toca dinero con fecha, **antes de escribir** llama a `exigirMesAbierto` (`js/core/cierre.js:78`). La regla `R1` vigila que toda acción que escribe movimientos lo haga.
-3. **`persist(clave)`** (`js/core/store.js:2039`): le pone cuenta a los movimientos nuevos (`asegurarCuentaEnMovimientos`, `js/core/calc.js:247`), **anota el cambio en la bitácora** antes de cualquier espera, desvía a «propuesta» si es un vendedor tocando el catálogo, y llama a `guardarClave`.
+3. **`persist(clave)`** (`js/core/store.js:2070`): le pone cuenta a los movimientos nuevos (`asegurarCuentaEnMovimientos`, `js/core/calc.js:247`), **anota el cambio en la bitácora** antes de cualquier espera, desvía a «propuesta» si es un vendedor tocando el catálogo, y llama a `guardarClave`.
 4. **`guardarClave`** (`js/core/guardado.js:382`) hace **dos cosas al instante**: copia el JSON en el *espejo local* y marca la clave «en cola» (también en disco). Solo la escritura por red se agrupa: si ya hay una escritura de esa clave en vuelo, los clics siguientes comparten **una sola** ronda posterior.
-5. **`escribirRonda`** (`js/core/guardado.js:334`) llama a `escribirClave` (`js/core/store.js:2028`), que:
-   - **`verificarConflicto`** (`js/core/store.js:216`): relee la «revisión» de esa clave en la hoja y la compara con la que esta pestaña recuerda. Si es distinta, **aborta antes de tocar el dato real**.
+5. **`escribirRonda`** (`js/core/guardado.js:334`) llama a `escribirClave` (`js/core/store.js:2052`), que:
+   - **`verificarConflicto`** (`js/core/store.js:228`): relee la «revisión» de esa clave en la hoja y la compara con la que esta pestaña recuerda. Si es distinta, **aborta antes de tocar el dato real**.
    - **Escribe**: si la clave tiene pestaña propia (`tx`, `clientes`, `cotizaciones`, `cierres`; `js/core/store.js:35`), `escribir` **borra todo el rango de datos y lo reescribe completo** (`js/core/sheetsTabular.js:141-151`); si no, `set` reemplaza **una celda** de `kv` (`js/core/sheetsStorage.js:67-79`).
-   - **`fijarRevNueva`** (`js/core/store.js:236`): sella una revisión nueva (`uid():hora`) en la fila `__rev__:<clave>` de `kv`.
-   - Avisa a las otras pestañas del mismo navegador por `BroadcastChannel` (`js/core/store.js:49-60`, `:2033`).
+   - **`fijarRevNueva`** (`js/core/store.js:248`): sella una revisión nueva (`uid():hora`) en la fila `__rev__:<clave>` de `kv`.
+   - Avisa a las otras pestañas del mismo navegador por `BroadcastChannel` (`js/core/store.js:49-60`, `:2064`).
 6. **Si algo falla**, la clave pasa a «pendiente» (lo que ve el dueño en la barra: chip rojo), se reintenta cada 15 s, al volver la red y al volver a la pestaña (`js/core/guardado.js:306-312`, `:265-303`). **Un conflicto no se reintenta solo**: pide recargar (`js/core/guardado.js:349-355`).
 
 **Dos propiedades de diseño que explican casi todo lo demás:**
@@ -183,7 +183,7 @@ Paso a paso, con dónde está cada uno:
 
 ### 5.2 Espejo local
 
-Cada intento de guardado deja el JSON de esa clave en `localStorage` bajo `taller_espejo_v1:<clave>` (`js/core/guardado.js:38`, `:133`). Además de ser la segunda copia, es de donde sale la app cuando **no puede leer la hoja al abrir**: `loadAll` cae a la última copia local de **esa** clave (`js/core/store.js:1243-1258`) y avisa con un toast (`:1606`). Si la cuota del navegador se llena, el espejo se omite en silencio y el guardado real sigue (`js/core/guardado.js:136-138`).
+Cada intento de guardado deja el JSON de esa clave en `localStorage` bajo `taller_espejo_v1:<clave>` (`js/core/guardado.js:38`, `:133`). Además de ser la segunda copia, es de donde sale la app cuando **no puede leer la hoja al abrir**: `loadAll` cae a la última copia local de **esa** clave (`js/core/store.js:1266-1281`) y avisa con un toast (`:1630`). Si la cuota del navegador se llena, el espejo se omite en silencio y el guardado real sigue (`js/core/guardado.js:136-138`).
 
 ### 5.3 Cola de reintento y aviso al cerrar
 
@@ -191,15 +191,15 @@ Hay **dos listas**: `enCola` (hay una escritura en curso o fallida; se anota en 
 
 ### 5.4 Conflicto entre dispositivos
 
-Control optimista: cada clave tiene una fila `__rev__:<clave>` en la pestaña kv (`js/core/store.js:91`); la pestaña recuerda la última que vio (`revConocida`, `:89`). **No es un merge**: si dos computadores editan lo mismo, el segundo en guardar **no pierde nada de la hoja** pero tampoco guarda; debe recargar y rehacer. Quedan dos huecos documentados (escenarios 3 y 4): entre el chequeo y la escritura hay una ventana angosta, y una clave **sin revisión conocida no se chequea** (`js/core/store.js:217`).
+Control optimista: cada clave tiene una fila `__rev__:<clave>` en la pestaña kv (`js/core/store.js:91`); la pestaña recuerda la última que vio (`revConocida`, `:89`). **No es un merge**: si dos computadores editan lo mismo, el segundo en guardar **no pierde nada de la hoja** pero tampoco guarda; debe recargar y rehacer. Quedan dos huecos documentados (escenarios 3 y 4): entre el chequeo y la escritura hay una ventana angosta, y una clave **sin revisión conocida no se chequea** (`js/core/store.js:229`).
 
 ### 5.5 Dos pestañas del mismo navegador
 
-Cuando una pestaña guarda, las demás recargan esa clave de la hoja antes de volver a guardar (`js/core/store.js:54-60`, `reloadKey` en `:245`). No sincroniza entre computadores.
+Cuando una pestaña guarda, las demás recargan esa clave de la hoja antes de volver a guardar (`js/core/store.js:54-60`, `reloadKey` en `:257`). No sincroniza entre computadores.
 
 ### 5.6 Bitácora
 
-`persist` compara el estado nuevo con una **foto** del anterior y anota la diferencia (quién, cuándo, antes, después) en la pestaña llamada Bitacora (`js/core/bitacora.js:300`, llamado desde `js/core/store.js:2054`). Solo **agrega** filas al final (`js/core/sheetsTabular.js:165-177`). Si no hay red, la acción **sigue** y la anotación espera en una cola en disco que se reintenta (`js/core/bitacora.js:436-495`). Las claves que se anotan son `CLAVES_BITACORA`: movimientos, papelera, pedidos, cotizaciones, transferencias, deudas y la parte de dinero de `config` (`js/core/bitacora.js:146-154`).
+`persist` compara el estado nuevo con una **foto** del anterior y anota la diferencia (quién, cuándo, antes, después) en la pestaña llamada Bitacora (`js/core/bitacora.js:300`, llamado desde `js/core/store.js:2085`). Solo **agrega** filas al final (`js/core/sheetsTabular.js:165-177`). Si no hay red, la acción **sigue** y la anotación espera en una cola en disco que se reintenta (`js/core/bitacora.js:436-495`). Las claves que se anotan son `CLAVES_BITACORA`: movimientos, papelera, pedidos, cotizaciones, transferencias, deudas y la parte de dinero de `config` (`js/core/bitacora.js:146-154`).
 
 ### 5.7 Cierre de mes
 
@@ -207,7 +207,7 @@ El admin cierra un mes ya terminado (`cerrarMes`, `js/core/cierre.js:129`): se g
 
 ### 5.8 Salud de los datos
 
-Es solo de lectura: recorre `state` y devuelve hallazgos con severidad (error / aviso) y un enlace al caso (`js/core/salud.js:728`, `:1337`). **Compara la app contra sí misma**, no contra la hoja ni contra el banco. Se calcula en cada pintado para la insignia roja del menú.
+Es solo de lectura: recorre `state` y devuelve hallazgos con severidad (error / aviso) y un enlace al caso (`js/core/salud.js:728`, `:1438`). **Compara la app contra sí misma**, no contra la hoja ni contra el banco. Se calcula en cada pintado para la insignia roja del menú.
 
 ### 5.9 Respaldo
 
@@ -215,7 +215,7 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 
 ### 5.10 Al abrir la app: lectura y reparaciones
 
-`loadAll` (`js/core/store.js:1155`): congela una foto del espejo; lee **todas las claves** de la hoja; lo que falla cae al espejo; fija la revisión conocida de lo que sí se leyó; y corre **doce reparaciones automáticas** de datos viejos (`REPARACIONES_AL_CARGAR`, `js/core/store.js:721-734`) que se anotan en la bitácora como «automático» y se muestran en Salud. Solo corren **con lectura completa de la red** (`!huboFalloDeRed`). Luego `detectarRecuperacion` ofrece (nunca restaura sola) recuperar lo que quedó sin guardar en la sesión anterior (`js/core/store.js:1754`).
+`loadAll` (`js/core/store.js:1175`): congela una foto del espejo; lee **todas las claves** de la hoja; lo que falla cae al espejo; fija la revisión conocida de lo que sí se leyó; y corre **doce reparaciones automáticas** de datos viejos (`REPARACIONES_AL_CARGAR`, `js/core/store.js:741-754`) que se anotan en la bitácora como «automático» y se muestran en Salud. Solo corren **con lectura completa de la red** (`!huboFalloDeRed`). Luego `detectarRecuperacion` ofrece (nunca restaura sola) recuperar lo que quedó sin guardar en la sesión anterior (`js/core/store.js:1778`).
 
 ## 6. Qué se guarda y dónde
 
@@ -252,7 +252,7 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 
 - **Una celda de `kv`** (todo menos Movimientos, Clientes, Cotizaciones y Cierres): el contenido completo de la clave es **un solo texto de hasta 50.000 caracteres** (límite de Google, `js/core/sheetsEsquemas.js:166-171`). Si crece más, **todo guardado de esa clave falla** (Hallazgo #42). Nada vigila el tamaño (escenario 8).
 - **Una pestaña propia**: una fila por registro. Se **lee por posición de columna**, no por el nombre del encabezado (`js/core/sheetsEsquemas.js:11-24`): por eso las columnas nuevas **solo van al final** (regla `R5`, Hallazgos #15–#19).
-- Aparte de la lista de arriba: la pestaña `roles` (correo, rol, nombre de vendedor; la lee `js/core/auth.js:313`), la pestaña Bitacora (definida en `js/core/sheetsEsquemas.js:233`) y las filas `__rev__:*` y `borrador:*` de la pestaña kv (`js/core/store.js:91` y `:1674`).
+- Aparte de la lista de arriba: la pestaña `roles` (correo, rol, nombre de vendedor; la lee `js/core/auth.js:313`), la pestaña Bitacora (definida en `js/core/sheetsEsquemas.js:233`) y las filas `__rev__:*` y `borrador:*` de la pestaña kv (`js/core/store.js:91` y `:1698`).
 
 <!-- GENERADO:inicio esquemas -->
 
@@ -387,23 +387,23 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 | Qué | Dónde se decide | Tipo |
 |---|---|---|
 | Un vendedor ve solo Mis ventas, Pedidos, Cotizaciones, Catálogo, Contactos, Insumos y Plantillas | `NAV_GROUPS_VENDEDOR`, `js/core/dom.js:79-87` | **Solo pantalla** (el botón no se dibuja; la acción sigue existiendo) |
-| Despachar una acción | `dispatch`, `js/core/dom.js:1271` | **Sin comprobación de rol** |
+| Despachar una acción | `dispatch`, `js/core/dom.js:1297` | **Sin comprobación de rol** |
 | Cerrar / reabrir un mes | la comprobación `esAdmin()` está en `js/core/cierre.js:122` (cerrar) y `:156` (reabrir) | Se comprueba, pero con el rol de `sessionStorage` |
 | Bitácora y Cierre de mes: solo admin | `js/modules/bitacora.js:87`, `js/modules/cierres.js:80` | Solo pantalla |
-| Cambios del vendedor a catálogo (insumos y categorías) | `persist` los desvía a «propuesta» (`js/core/store.js:2061`, claves en `js/core/constants.js:71`); precio y movimiento de stock de Catálogo: `js/modules/productos.js:522`, `:752` | Se comprueba al guardar, **no se comprueba al aprobar** (escenario 17) |
+| Cambios del vendedor a catálogo (insumos y categorías) | `persist` los desvía a «propuesta» (`js/core/store.js:2092`, claves en `js/core/constants.js:71`); precio y movimiento de stock de Catálogo: `js/modules/productos.js:522`, `:752` | Se comprueba al guardar, **no se comprueba al aprobar** (escenario 17) |
 | Respaldo, carpeta de imágenes, sincronizar con Calendar | `js/core/backup.js:89`, `js/core/drive.js:49`, `:160`, `js/modules/pendientes.js:524`, `:555` | Decide **quién usa su Google**, no un permiso sobre el dinero |
 | Todo el dinero: abonos, movimientos a mano, nómina, deudas… | — | **Sin ninguna comprobación de rol en la acción** |
 
-**Fail-open.** Varias pantallas tratan «no hay sesión» como admin: `!session || session.rol !== "vendedor"` (por ejemplo `js/core/dom.js:785`, `:1074`, `js/modules/config.js:25`). En el uso normal siempre hay sesión; es la razón por la que `test/smoke.mjs` (que nunca hace login) ve todo como admin (`js/core/dom.js:66-71`).
+**Fail-open.** Varias pantallas tratan «no hay sesión» como admin: `!session || session.rol !== "vendedor"` (por ejemplo `js/core/dom.js:785`, `:1100`, `js/modules/config.js:25`). En el uso normal siempre hay sesión; es la razón por la que `test/smoke.mjs` (que nunca hace login) ve todo como admin (`js/core/dom.js:66-71`).
 
 **La protección real** de los datos es **a quién se le da acceso de edición a la Google Sheet** y a la cuenta de Drive: con ese acceso, cualquiera puede leer o editar todo, incluida la bitácora, los cierres y la pestaña `roles`. Es el «punto D» de `CONTINUIDAD.md` (base de datos con permisos por rol), un proyecto grande aparte.
 
 <!-- GENERADO:inicio roles -->
 
-El código mira el rol del usuario en **25 sitios** (`esAdmin()` o `session.rol`). Casi todos deciden **qué se dibuja**; solo unos pocos deciden **qué se permite hacer**. `persist` además desvía a «propuesta» los cambios de un vendedor a `catalogoInsumos` y `catalogoCategorias` (`APPROVAL_REQUIRED_KEYS`).
+El código mira el rol del usuario en **26 sitios** (`esAdmin()` o `session.rol`). Casi todos deciden **qué se dibuja**; solo unos pocos deciden **qué se permite hacer**. `persist` además desvía a «propuesta» los cambios de un vendedor a `catalogoInsumos` y `catalogoCategorias` (`APPROVAL_REQUIRED_KEYS`).
 
 <details>
-<summary>Los 25 sitios donde se mira el rol</summary>
+<summary>Los 26 sitios donde se mira el rol</summary>
 
 | Dónde | En |
 | --- | --- |
@@ -418,10 +418,11 @@ El código mira el rol del usuario en **25 sitios** (`esAdmin()` o `session.rol`
 | core/dom.js:86 | `navGroupsActivo` |
 | core/dom.js:456 | `toggle-notificaciones` |
 | core/dom.js:785 | `renderSidebar` |
-| core/dom.js:1074 | `renderCampanita` |
+| core/dom.js:930 | `renderChipEspacio` |
+| core/dom.js:1100 | `renderCampanita` |
 | core/drive.js:49 | `obtenerCarpetaCompartida` |
 | core/drive.js:160 | `subirImagenReferencia` |
-| core/store.js:2061 | `persist` |
+| core/store.js:2092 | `persist` |
 | modules/bitacora.js:87 | `renderBitacora` |
 | modules/catalogo.js:24 | `renderPropuestasPendientes` |
 | modules/cierres.js:80 | `renderCierre` |

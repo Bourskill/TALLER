@@ -2,7 +2,7 @@
 
 **Para qué sirve:** es la hoja de ruta para corregir en el código los riesgos del Hallazgo #67 (`CONTABILIDAD.md`). Cada riesgo se identifica como **#67-N**; sus escenarios están en [`ESCENARIOS-DE-FALLA.md`](ESCENARIOS-DE-FALLA.md). Está escrito para que una sesión de trabajo pueda tomar **un paquete** y hacerlo de principio a fin sin volver a preguntar lo que ya se decidió.
 
-**Estado (2026-11-04):** arreglados **#67-5 y #67-10** (paquete 1, Hallazgo #68) y **#67-1** (paquete 2, Hallazgo #69). Los otros 8 siguen abiertos. Cada paquete que se hace se marca aquí como **HECHO** con su Hallazgo.
+**Estado (2026-11-04):** arreglados **#67-5 y #67-10** (paquete 1, Hallazgo #68) y **#67-1** (paquete 2, Hallazgo #69); **#67-2 a medias** (paso 1 hecho, Hallazgo #70: se mide y se avisa; el paso 2, mover las áreas grandes a su pestaña, es el paquete 8). Los otros 7 siguen abiertos. Cada paquete que se hace se marca aquí como **HECHO** con su Hallazgo.
 
 **Cómo se verificó antes de escribirlo (2026-11-04):** cada riesgo se volvió a comprobar leyendo el código citado; los 11 son reales. Se corrigieron tres imprecisiones del texto del #67 (una prueba mal descrita, los borradores en la nube que se *vacían* y no se borran, y el conteo de entradas de la lista base). Las citas con número de línea de los otros documentos se mueven; **este plan cita funciones por nombre**, que no se mueven.
 
@@ -21,7 +21,7 @@
 |---|---|---|---|---|---|
 | 1 | Que no se pierda la marca de «guardando» y que dos escrituras no se pisen | #67-5, #67-10 | **S** | no | ✅ **HECHO** (Hallazgo #68) |
 | 2 | Que una pestaña vacía no se vuelva a llenar con datos viejos | #67-1 | **M** | sí (qué mostrar) | ✅ **HECHO** (Hallazgo #69) |
-| 3 | Vigilar el tamaño de lo que se guarda en la hoja | #67-2 (paso 1) | **S–M** | sí (el umbral) | 3.º |
+| 3 | Vigilar el tamaño de lo que se guarda en la hoja | #67-2 (paso 1) | **S–M** | sí (el umbral) | ✅ **HECHO** (Hallazgo #70) |
 | 4 | Validar lo que entra: propuestas, fechas, consignación | #67-6, #67-7, #67-8 | **S** (cada uno) | sí (#67-7) | 4.º |
 | 5 | Una sola fórmula de la comisión | #67-9 | **S** | no | 5.º |
 | 6 | Arrancar sin red sin pisar el trabajo de otro computador | #67-3 | **M** | no | 6.º |
@@ -76,6 +76,8 @@
 ---
 
 ## Paquete 3 — Vigilar el tamaño de lo que se guarda en la hoja
+**✅ HECHO (2026-11-04, Hallazgo #70).** Cómo quedó: (1) `state.tamanosClaves` se llena al cargar (`loadAll`, lo que HAY en la hoja) y al guardar (`escribirClave`, antes de escribir, así que un guardado que Google rechaza por llena igual se ve), solo para las áreas de una sola celda (no las pestañas propias); `state.filasKv` sale de la nueva `filasUsadas()` de `sheetsStorage.js`. (2) `calcEspacioHoja` (`js/core/salud.js`) pone los umbrales: **aviso desde el 70 % y error desde el 90 %** de la celda (35.000 y 45.000 caracteres); filas de `kv`: **aviso desde la 4.000 y error desde la 4.750** de las 5.000. (3) Se muestra en **tres lugares**: un chip arriba («▲ Hoja al 78 %», amarillo; rojo desde el 90 %; el vendedor no lo ve), la verificación nueva «Espacio que queda en la hoja de datos» de Salud (la 22.ª) y un bloque «Espacio en la hoja» **siempre visible** en el panel de Salud con el número de cada área (es lo que hace posible «medir hoy»; el plan hablaba de una acción de admin o de la verificación, y se hizo lo segundo más ese bloque). (4) Para las dos papeleras el aviso lleva un botón a la papelera y dice que borrar para siempre libera espacio. **Decisión del dueño aplicada:** aviso desde el 70 % (la recomendada). **Falta lo que solo el dueño puede hacer:** abrir la app tras publicar y mirar Configuración → Salud de los datos → «Espacio en la hoja» (con los datos reales), para decidir si el paquete 8 hace falta ya. Pruebas: `test/espacio.mjs` (61) y el chip y el panel en `test/smoke.mjs`. Lo que sigue aquí abajo es el plan original, tal como se escribió.
+
 **Riesgo:** #67-2, **paso 1** (**alta**). **Archivos:** `js/core/store.js`, `js/core/guardado.js`, `js/core/salud.js`. **Tamaño:** S–M.
 
 **Qué pasa hoy:** Google no acepta más de **50.000 caracteres por celda**. Solo `Movimientos`, `Clientes`, `Cotizaciones`, `Cierres` y `Bitacora` tienen una fila por registro; **todo lo demás es un único texto por clave** (`pedidos`, `pedidosPapelera`, `txPapelera`, `deudas`, `deudasHistorial`, `config`, `pendientes`, `productos`, catálogo, plantillas…). Cuando una crece de más, **todo guardado de esa clave falla** (ya pasó con Cotizaciones, #42). Nada mide el tamaño ni avisa antes. Además `kv` solo se lee hasta la fila 5.000 y los borradores en la nube se **vacían** pero su fila nunca se elimina.

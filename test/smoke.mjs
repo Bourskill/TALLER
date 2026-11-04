@@ -2112,6 +2112,35 @@ window.localStorage.removeItem("taller_tabla_vacia_ok_v1"); // limpio para no in
 render();
 assert(document.body.textContent.indexOf("apareció vacía") === -1, "y la barra desaparece en el siguiente render");
 
+// Hallazgo #70 (riesgo #67-2, paso 1): el espacio que queda en la hoja. Google
+// no deja más de 50.000 caracteres por celda; la barra superior avisa desde el
+// 70 % (amarillo) y desde el 90 % (rojo), y el panel de Salud muestra el
+// número siempre. (La lógica de los umbrales está probada sin jsdom en
+// test/espacio.mjs; acá solo se ven el chip y el panel.)
+const tamanosAntesEspacio = state.tamanosClaves, filasAntesEspacio = state.filasKv;
+state.tamanosClaves = { pedidos: 20000 }; state.filasKv = null;
+render();
+assert(document.querySelector(".guardado-chip.espacio") === null, "con todo por debajo del 70 % no aparece el chip de espacio");
+state.tamanosClaves = { pedidos: 40000 };
+render();
+var chipEspacio = document.querySelector(".guardado-chip.espacio");
+assert(!!chipEspacio && chipEspacio.textContent.indexOf("80 %") !== -1, "al 80 % aparece el chip «Hoja al 80 %»");
+assert(!chipEspacio.classList.contains("malo"), "...en amarillo, no en rojo");
+assert(chipEspacio.getAttribute("data-action") === "tab" && chipEspacio.getAttribute("data-tab") === "config", "...y lleva a Configuración (donde está Salud de los datos)");
+assert(chipEspacio.getAttribute("title").indexOf("pedidos") !== -1, "...y su título dice qué área es");
+state.tamanosClaves = { pedidos: 46000 };
+render();
+chipEspacio = document.querySelector(".guardado-chip.espacio");
+assert(!!chipEspacio && chipEspacio.textContent.indexOf("92 %") !== -1 && chipEspacio.classList.contains("malo"), "al 92 % el chip pasa a rojo");
+state.tamanosClaves = { pedidos: 40000 }; state.filasKv = 4100;
+const { renderSalud: renderSaludEspacio } = await import("../js/modules/salud.js");
+const htmlSaludEspacio = renderSaludEspacio();
+assert(htmlSaludEspacio.indexOf("Espacio en la hoja") !== -1, "el panel de Salud de los datos muestra «Espacio en la hoja»");
+assert(htmlSaludEspacio.indexOf("40.000 de 50.000") !== -1, "...con los caracteres que usa cada área contra el límite");
+state.tamanosClaves = tamanosAntesEspacio; state.filasKv = filasAntesEspacio;
+render();
+assert(document.querySelector(".guardado-chip.espacio") === null, "al volver a lo normal el chip desaparece");
+
 // ---------------------------------------------------------------------------
 // Servicios que se le cobran aparte al cliente (el diseño). Lo que se prueba
 // no es que cada cálculo funcione por separado, sino que los MISMOS números

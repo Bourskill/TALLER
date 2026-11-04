@@ -18,9 +18,9 @@
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
 | app | 1 | 123 | 6 | 0 | 0 | 0 |
-| core | 28 | 16776 | 619 | 370 | 38 | 45 |
-| modules | 16 | 15338 | 347 | 34 | 368 | 167 |
-| **Total** | 45 | 32237 | 972 | 404 | 406 | 212 |
+| core | 28 | 16945 | 627 | 372 | 38 | 45 |
+| modules | 16 | 15353 | 348 | 34 | 368 | 167 |
+| **Total** | 45 | 32421 | 981 | 406 | 406 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -808,7 +808,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_dom_js"></a>
 
-#### `core/dom.js` — 1326 líneas
+#### `core/dom.js` — 1352 líneas
 
 **Para qué sirve:** Este es el único archivo que conoce a la vez el estado y el DOM. Ensambla el layout fijo (sidebar categorizada + topbar + KPIs) + el contenido de la pestaña activa, y arma un "registro de acciones" combinando lo que cada módulo expone en `actions`.
 
@@ -828,7 +828,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 </details>
 
-<sub>Funciones internas (no exportadas): 34.</sub>
+<sub>Funciones internas (no exportadas): 35.</sub>
 
 <a id="f-core_drive_js"></a>
 
@@ -1048,33 +1048,37 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_salud_js"></a>
 
-#### `core/salud.js` — 1395 líneas
+#### `core/salud.js` — 1497 líneas
 
 **Para qué sirve:** Salud de los datos: un chequeo de integridad que VERIFICA Y REPORTA. No repara nada y no escribe nada: solo lee `state` y dice cuándo algo de dinero deja de cuadrar. Es el espejo de verificarRecibo (core/calc.js), que hasta ahora era la única verificación que avisaba: el resto se arreglaba en silencio al cargar (ver REPARACIONES_AL_CARGAR en core/store.js) o no se miraba nunca.
 
 - **Depende de:** `core/bitacora.js`, `core/calc.js`, `core/cierre.js`, `core/store.js`, `core/utils.js`
 - **Lo usan:** `core/dom.js`, `modules/salud.js`
 - **Claves de `state` que escribe:** ninguna
-- **Claves de `state` que solo lee:** `cierres`, `clientes`, `config.nomina`, `cotSucia`, `cotizaciones`, `deudas`, `deudasHistorial`, `pedidos`, `pedidosPapelera`, `reparacionesAlCargar`, `reparacionesOmitidas`, `tx`, `txPapelera`
+- **Claves de `state` que solo lee:** `cierres`, `clientes`, `config.nomina`, `cotSucia`, `cotizaciones`, `deudas`, `deudasHistorial`, `filasKv`, `pedidos`, `pedidosPapelera`, `reparacionesAlCargar`, `reparacionesOmitidas`, `tamanosClaves`, `tx` y 1 más
 - **`persist(...)`:** ninguno
 
 <details>
-<summary>Exportado (8)</summary>
+<summary>Exportado (12)</summary>
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
 | `registrarVerificacion(v)` | core/salud.js:728 | Para sumar una verificación nueva sin tocar nada de lo demás. Si el id ya | — | nadie |
-| `calcSaludDatos()` | core/salud.js:1326 | La lista de hallazgos: errores primero, avisos después, y dentro de cada | — | solo este archivo |
-| `calcResumenSalud()` | core/salud.js:1337 | Lo que necesita la pantalla y el informe: los hallazgos ya contados y qué se | — | core/dom.js, modules/salud.js |
-| `calcReparacionesAlCargar()` | core/salud.js:1356 | Lo que las reparaciones de loadAll() corrigieron en silencio en esta carga, | — | modules/salud.js |
-| `textoInformeSalud(fecha)` | core/salud.js:1370 | El informe como texto plano, para pegarlo en un mensaje o un correo. | — | modules/salud.js |
+| `calcEspacioHoja()` | core/salud.js:1329 | Cuánto ocupa cada área y cuántas filas usa «kv». `claves` va de la más llena a | — | core/dom.js, modules/salud.js |
+| `textoEspacioHoja()` | core/salud.js:1395 | Una línea para el informe copiado y el panel: lo más lleno y las filas. | — | modules/salud.js |
+| `calcSaludDatos()` | core/salud.js:1427 | La lista de hallazgos: errores primero, avisos después, y dentro de cada | — | solo este archivo |
+| `calcResumenSalud()` | core/salud.js:1438 | Lo que necesita la pantalla y el informe: los hallazgos ya contados y qué se | — | core/dom.js, modules/salud.js |
+| `calcReparacionesAlCargar()` | core/salud.js:1457 | Lo que las reparaciones de loadAll() corrigieron en silencio en esta carga, | — | modules/salud.js |
+| `textoInformeSalud(fecha)` | core/salud.js:1471 | El informe como texto plano, para pegarlo en un mensaje o un correo. | — | modules/salud.js |
 | `MARCAS_UNICAS` _(objeto)_ | core/salud.js:268 | (dato exportado) | — | nadie |
 | `MARCAS_REPETIBLES` _(arreglo)_ | core/salud.js:275 | (dato exportado) | — | nadie |
 | `VERIFICACIONES_SALUD` _(arreglo)_ | core/salud.js:651 | (dato exportado) | — | nadie |
+| `LIMITE_CELDA_KV` _(valor)_ | core/salud.js:1314 | (dato exportado) | — | modules/salud.js |
+| `LIMITE_FILAS_KV` _(valor)_ | core/salud.js:1315 | (dato exportado) | — | nadie |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 41.</sub>
+<sub>Funciones internas (no exportadas): 44.</sub>
 
 <a id="f-core_seed_data_js"></a>
 
@@ -1132,7 +1136,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_sheetsStorage_js"></a>
 
-#### `core/sheetsStorage.js` — 92 líneas
+#### `core/sheetsStorage.js` — 102 líneas
 
 **Para qué sirve:** Adaptador de storage que habla contra la pestaña "kv" de la Google Sheet (columnas key, value) en vez de contra el `window.storage` que la app esperaba encontrar inyectado (y que en producción nunca existió: ver README). Implementa el mismo contrato que store.js y pdf.js ya usan (`get(key) -> {value}|null`, `set(key, value)`), así que ningún otro archivo necesita cambiar para hablar con Sheets en vez de con la memor…
 
@@ -1203,13 +1207,13 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_store_js"></a>
 
-#### `core/store.js` — 2125 líneas
+#### `core/store.js` — 2156 líneas
 
 **Para qué sirve:** Fuente única de verdad del estado + persistencia.
 
 - **Depende de:** `core/auth.js`, `core/bitacora.js`, `core/calc.js`, `core/constants.js`, `core/guardado.js`, `core/seed-data.js`, `core/sheetsEsquemas.js`, `core/utils.js`
 - **Lo usan:** `app.js`, `core/appIcon.js`, `core/backup.js`, `core/calc.js`, `core/cierre.js`, `core/dom.js`, `core/drive.js`, `core/pdf.js`, `core/salud.js`, `core/stock.js`, `core/teclado.js`, `modules/bitacora.js`, `modules/catalogo.js`, `modules/cierres.js`, `modules/clientes.js`, `modules/config.js`, `modules/cotizaciones.js`, `modules/cuentas.js`, `modules/finanzas.js`, `modules/notas.js`, `modules/pedidos.js`, `modules/pendientes.js`, `modules/plantillas.js`, `modules/productos.js`, `modules/resumen.js`, `modules/salud.js`
-- **Claves de `state` que escribe:** `avisoTablaSheetFallo`, `avisoTablaVacia`, `catalogoCategorias`, `catalogoInsumos`, `catalogoPropuestas`, `cierres`, `clientes`, `config`, `config.meta`, `config.nombre`, `cotizaciones`, `deudas`, `deudasHistorial`, `formPedido`, `migracionRecibos`, `pedidos`, `pedidosPapelera`, `pendientes`, `plantillasEstados`, `plantillasPrendas`, `productoPropuestas`, `productos`, `recuperacion`, `reparacionesAlCargar`, `reparacionesOmitidas`, `toast`, `transferencias`, `tx`, `txPapelera`, `ui`
+- **Claves de `state` que escribe:** `avisoTablaSheetFallo`, `avisoTablaVacia`, `catalogoCategorias`, `catalogoInsumos`, `catalogoPropuestas`, `cierres`, `clientes`, `config`, `config.meta`, `config.nombre`, `cotizaciones`, `deudas`, `deudasHistorial`, `filasKv`, `formPedido`, `migracionRecibos`, `pedidos`, `pedidosPapelera`, `pendientes`, `plantillasEstados`, `plantillasPrendas`, `productoPropuestas`, `productos`, `recuperacion`, `reparacionesAlCargar`, `reparacionesOmitidas`, `tamanosClaves`, `toast`, `transferencias`, `tx`, `txPapelera`, `ui`
 - **Claves de `state` que solo lee:** `cotSnapshot`, `cotSucia`
 - **`persist(...)`:** (clave), (propuesta.key), catalogoPropuestas ×3, cotizaciones ×7, pedidos ×2, plantillasPrendas ×3, productos ×3, tx ×5
 
@@ -1219,34 +1223,34 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
 | `decidirLecturaTabla(o)` | core/store.js:123 | (Hallazgo #69, riesgo #67-1 del mapa técnico.) | — | solo este archivo |
-| `reconocerTablasVacias()` | core/store.js:191 | El usuario dice «está bien así, la vacié yo» sobre el aviso rojo de una | — | core/dom.js |
-| `anotarReparacion(clave, cantidad)` | core/store.js:737 | Suma `cantidad` cosas corregidas a la bitácora de esta carga. No hace nada | — | core/calc.js |
-| `repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos)` | core/store.js:762 | Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin | — | solo este archivo |
-| `repararVendedorPerdido(pedidos, tx)` | core/store.js:817 | Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío | — | solo este archivo |
-| `repararMarcasOrigenInconsistentes(tx)` | core/store.js:879 | Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que | — | solo este archivo |
-| `repararPedidoIdExcedente(tx)` | core/store.js:929 | Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44 | — | solo este archivo |
-| `repararMarcaExcedentePerdida(tx, cotizaciones)` | core/store.js:961 | Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un | — | solo este archivo |
-| `repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1000 | Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`) | — | solo este archivo |
-| `repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1044 | Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a | — | solo este archivo |
-| `repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)` | core/store.js:1096 | (sin comentario) | — | solo este archivo |
-| `repararReferenciasProveedorAInsumo(cotizaciones)` | core/store.js:1128 | Repara, mutando en el sitio, una referencia que todavía usa el modelo | — | solo este archivo |
-| `loadAll()` | core/store.js:1155 | Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave | cotizaciones, pedidos, plantillasPrendas, productos, tx | app.js |
-| `recuperarDelEspejo()` | core/store.js:1828 | Vuelca el espejo local sobre el estado. Las claves que de verdad viven en | ? | core/dom.js |
-| `descartarRecuperacion()` | core/store.js:1888 | (sin comentario) | — | core/dom.js |
-| `revisarBorradoresSinGuardar()` | core/store.js:1958 | Se llama en CADA render (ver core/dom.js) — no en cada acción de edición | — | core/dom.js |
-| `persist(key)` | core/store.js:2039 | key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...). | — | core/backup.js, core/cierre.js, core/dom.js, core/drive.js, core/pdf.js (+14) |
-| `aprobarPropuesta(id)` | core/store.js:2088 | Admin aprueba: la propuesta pasa a ser el valor real de esa clave (ya | ?, catalogoPropuestas | modules/catalogo.js |
-| `descartarPropuesta(id)` | core/store.js:2100 | Admin descarta: desaparece de la lista sin tocar el catálogo real (el | catalogoPropuestas | modules/catalogo.js |
-| `notify()` | core/store.js:2107 | Cualquier módulo llama a notify() tras mutar `state` para pedir un re-render, | — | core/cierre.js, core/dom.js, core/pdf.js, core/teclado.js, modules/bitacora.js (+14) |
-| `mostrarToast(msg)` | core/store.js:2116 | Aviso flotante que se muestra unos segundos y desaparece solo — para | — | modules/cierres.js, modules/clientes.js, modules/cotizaciones.js, modules/cuentas.js, modules/finanzas.js (+2) |
+| `reconocerTablasVacias()` | core/store.js:203 | El usuario dice «está bien así, la vacié yo» sobre el aviso rojo de una | — | core/dom.js |
+| `anotarReparacion(clave, cantidad)` | core/store.js:757 | Suma `cantidad` cosas corregidas a la bitácora de esta carga. No hace nada | — | core/calc.js |
+| `repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos)` | core/store.js:782 | Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin | — | solo este archivo |
+| `repararVendedorPerdido(pedidos, tx)` | core/store.js:837 | Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío | — | solo este archivo |
+| `repararMarcasOrigenInconsistentes(tx)` | core/store.js:899 | Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que | — | solo este archivo |
+| `repararPedidoIdExcedente(tx)` | core/store.js:949 | Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44 | — | solo este archivo |
+| `repararMarcaExcedentePerdida(tx, cotizaciones)` | core/store.js:981 | Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un | — | solo este archivo |
+| `repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1020 | Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`) | — | solo este archivo |
+| `repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1064 | Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a | — | solo este archivo |
+| `repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)` | core/store.js:1116 | (sin comentario) | — | solo este archivo |
+| `repararReferenciasProveedorAInsumo(cotizaciones)` | core/store.js:1148 | Repara, mutando en el sitio, una referencia que todavía usa el modelo | — | solo este archivo |
+| `loadAll()` | core/store.js:1175 | Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave | cotizaciones, pedidos, plantillasPrendas, productos, tx | app.js |
+| `recuperarDelEspejo()` | core/store.js:1852 | Vuelca el espejo local sobre el estado. Las claves que de verdad viven en | ? | core/dom.js |
+| `descartarRecuperacion()` | core/store.js:1912 | (sin comentario) | — | core/dom.js |
+| `revisarBorradoresSinGuardar()` | core/store.js:1982 | Se llama en CADA render (ver core/dom.js) — no en cada acción de edición | — | core/dom.js |
+| `persist(key)` | core/store.js:2070 | key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...). | — | core/backup.js, core/cierre.js, core/dom.js, core/drive.js, core/pdf.js (+14) |
+| `aprobarPropuesta(id)` | core/store.js:2119 | Admin aprueba: la propuesta pasa a ser el valor real de esa clave (ya | ?, catalogoPropuestas | modules/catalogo.js |
+| `descartarPropuesta(id)` | core/store.js:2131 | Admin descarta: desaparece de la lista sin tocar el catálogo real (el | catalogoPropuestas | modules/catalogo.js |
+| `notify()` | core/store.js:2138 | Cualquier módulo llama a notify() tras mutar `state` para pedir un re-render, | — | core/cierre.js, core/dom.js, core/pdf.js, core/teclado.js, modules/bitacora.js (+14) |
+| `mostrarToast(msg)` | core/store.js:2147 | Aviso flotante que se muestra unos segundos y desaparece solo — para | — | modules/cierres.js, modules/clientes.js, modules/cotizaciones.js, modules/cuentas.js, modules/finanzas.js (+2) |
 | `STORAGE_OK` _(valor)_ | core/store.js:37 | (dato exportado) | — | nadie |
-| `state` _(objeto)_ | core/store.js:288 | (dato exportado) | — | app.js, core/appIcon.js, core/backup.js, core/calc.js, core/cierre.js (+21) |
-| `REPARACIONES_AL_CARGAR` _(objeto)_ | core/store.js:721 | (dato exportado) | — | core/salud.js |
-| `ETIQUETA_CLAVE` _(objeto)_ | core/store.js:1617 | (dato exportado) | — | core/dom.js |
+| `state` _(objeto)_ | core/store.js:300 | (dato exportado) | — | app.js, core/appIcon.js, core/backup.js, core/calc.js, core/cierre.js (+21) |
+| `REPARACIONES_AL_CARGAR` _(objeto)_ | core/store.js:741 | (dato exportado) | — | core/salud.js |
+| `ETIQUETA_CLAVE` _(objeto)_ | core/store.js:1641 | (dato exportado) | — | core/dom.js, core/salud.js |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 25.</sub>
+<sub>Funciones internas (no exportadas): 27.</sub>
 
 <a id="f-core_teclado_js"></a>
 
@@ -1711,7 +1715,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-modules_salud_js"></a>
 
-#### `modules/salud.js` — 205 líneas
+#### `modules/salud.js` — 220 líneas
 
 **Para qué sirve:** Panel «Salud de los datos» (solo admin, vive dentro de Configuración, ver modules/config.js). Es de SOLO LECTURA: muestra lo que calcSaludDatos() y calcReparacionesAlCargar() (core/salud.js) encuentran y lleva a cada caso; no corrige nada ni escribe ningún dato. La lógica está en core/salud.js, acá solo se pinta y se navega.
 
@@ -1727,12 +1731,12 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `renderSalud()` | modules/salud.js:68 | (sin comentario) | — | modules/config.js |
-| `actions` _(objeto)_ | modules/salud.js:142 | (dato exportado) | — | modules/config.js |
+| `renderSalud()` | modules/salud.js:82 | (sin comentario) | — | modules/config.js |
+| `actions` _(objeto)_ | modules/salud.js:157 | (dato exportado) | — | modules/config.js |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 8.</sub>
+<sub>Funciones internas (no exportadas): 9.</sub>
 
 ## 4. Registro de acciones de la interfaz
 
@@ -1748,7 +1752,7 @@ Cada botón o campo de la pantalla lleva `data-action="nombre"` (o `data-action-
 
 | Acción | Dónde | Qué hace | Guarda | Mes cerrado | Rol | Pantalla |
 | --- | --- | --- | --- | --- | --- | --- |
-| `tab` | core/dom.js:152 | (sin comentario) | — | · | — | 2 |
+| `tab` | core/dom.js:152 | (sin comentario) | — | · | — | 3 |
 | `toggle-enlace-panel` | core/dom.js:163 | Panel de "Enlace" de un insumo (ver renderEnlacePanel en | — | · | — | 0 |
 | `set-enlace-busqueda` | core/dom.js:170 | (sin comentario) | — | · | — | 0 |
 | `kpi-nav` | core/dom.js:177 | (sin comentario) | — | · | — | 11 |
@@ -2287,9 +2291,9 @@ Cada botón o campo de la pantalla lleva `data-action="nombre"` (o `data-action-
 
 | Acción | Dónde | Qué hace | Guarda | Mes cerrado | Rol | Pantalla |
 | --- | --- | --- | --- | --- | --- | --- |
-| `salud-filtro` | modules/salud.js:143 | (sin comentario) | — | · | — | 1 |
-| `copiar-informe-salud` | modules/salud.js:147 | (sin comentario) | — | · | — | 1 |
-| `salud-ir` | modules/salud.js:152 | (sin comentario) | — | · | — | 3 |
+| `salud-filtro` | modules/salud.js:158 | (sin comentario) | — | · | — | 1 |
+| `copiar-informe-salud` | modules/salud.js:162 | (sin comentario) | — | · | — | 1 |
+| `salud-ir` | modules/salud.js:167 | (sin comentario) | — | · | — | 3 |
 
 </details>
 

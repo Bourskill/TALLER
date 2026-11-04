@@ -22,6 +22,9 @@
   font-family:'Inter',sans-serif;}
 .guardado-chip.ok{color:var(--success-ink);background:var(--success-soft);}
 .guardado-chip.guardando{color:var(--ink-faint);background:var(--surface-2);}
+/* La hoja de datos se está llenando (Hallazgo #70): amarillo; si además lleva
+   .malo (desde el 90 %), manda el rojo de abajo. */
+.guardado-chip.espacio{color:var(--warning-ink);background:var(--warning-soft);border-color:var(--warning);cursor:pointer;}
 .guardado-chip.malo{color:var(--danger-ink);background:var(--danger-soft);border-color:var(--danger);cursor:pointer;}
 .guardado-chip.malo:hover{filter:brightness(1.12);}
 /* Tono informativo, no de alerta: estar sin conexión es un estado normal y
