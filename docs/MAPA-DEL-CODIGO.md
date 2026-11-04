@@ -18,9 +18,9 @@
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
 | app | 1 | 123 | 6 | 0 | 0 | 0 |
-| core | 28 | 16564 | 607 | 368 | 37 | 45 |
+| core | 28 | 16579 | 607 | 368 | 37 | 45 |
 | modules | 16 | 15338 | 347 | 34 | 368 | 167 |
-| **Total** | 45 | 32025 | 960 | 402 | 405 | 212 |
+| **Total** | 45 | 32040 | 960 | 402 | 405 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -1048,7 +1048,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_salud_js"></a>
 
-#### `core/salud.js` — 1380 líneas
+#### `core/salud.js` — 1395 líneas
 
 **Para qué sirve:** Salud de los datos: un chequeo de integridad que VERIFICA Y REPORTA. No repara nada y no escribe nada: solo lee `state` y dice cuándo algo de dinero deja de cuadrar. Es el espejo de verificarRecibo (core/calc.js), que hasta ahora era la única verificación que avisaba: el resto se arreglaba en silencio al cargar (ver REPARACIONES_AL_CARGAR en core/store.js) o no se miraba nunca.
 
@@ -1063,14 +1063,14 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `registrarVerificacion(v)` | core/salud.js:713 | Para sumar una verificación nueva sin tocar nada de lo demás. Si el id ya | — | nadie |
-| `calcSaludDatos()` | core/salud.js:1311 | La lista de hallazgos: errores primero, avisos después, y dentro de cada | — | solo este archivo |
-| `calcResumenSalud()` | core/salud.js:1322 | Lo que necesita la pantalla y el informe: los hallazgos ya contados y qué se | — | core/dom.js, modules/salud.js |
-| `calcReparacionesAlCargar()` | core/salud.js:1341 | Lo que las reparaciones de loadAll() corrigieron en silencio en esta carga, | — | modules/salud.js |
-| `textoInformeSalud(fecha)` | core/salud.js:1355 | El informe como texto plano, para pegarlo en un mensaje o un correo. | — | modules/salud.js |
-| `MARCAS_UNICAS` _(objeto)_ | core/salud.js:253 | (dato exportado) | — | nadie |
-| `MARCAS_REPETIBLES` _(arreglo)_ | core/salud.js:260 | (dato exportado) | — | nadie |
-| `VERIFICACIONES_SALUD` _(arreglo)_ | core/salud.js:636 | (dato exportado) | — | nadie |
+| `registrarVerificacion(v)` | core/salud.js:728 | Para sumar una verificación nueva sin tocar nada de lo demás. Si el id ya | — | nadie |
+| `calcSaludDatos()` | core/salud.js:1326 | La lista de hallazgos: errores primero, avisos después, y dentro de cada | — | solo este archivo |
+| `calcResumenSalud()` | core/salud.js:1337 | Lo que necesita la pantalla y el informe: los hallazgos ya contados y qué se | — | core/dom.js, modules/salud.js |
+| `calcReparacionesAlCargar()` | core/salud.js:1356 | Lo que las reparaciones de loadAll() corrigieron en silencio en esta carga, | — | modules/salud.js |
+| `textoInformeSalud(fecha)` | core/salud.js:1370 | El informe como texto plano, para pegarlo en un mensaje o un correo. | — | modules/salud.js |
+| `MARCAS_UNICAS` _(objeto)_ | core/salud.js:268 | (dato exportado) | — | nadie |
+| `MARCAS_REPETIBLES` _(arreglo)_ | core/salud.js:275 | (dato exportado) | — | nadie |
+| `VERIFICACIONES_SALUD` _(arreglo)_ | core/salud.js:651 | (dato exportado) | — | nadie |
 
 </details>
 

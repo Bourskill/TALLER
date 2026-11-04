@@ -58,7 +58,7 @@ Cada término técnico, una vez, en simple.
 | **Conflicto** | Otro computador guardó la misma clave mientras tanto; la app **no sobrescribe** y avisa (`js/core/store.js:108`). |
 | **Mes cerrado** | Un mes que el admin cerró: la app no deja crear, cambiar ni borrar dinero con fecha en él hasta que lo reabra con un motivo (`js/core/cierre.js:78`). |
 | **Bitácora** | Pestaña `Bitacora` donde cada cambio de dinero queda con quién, cuándo y cómo estaba antes (`js/core/bitacora.js:300`). |
-| **Salud de los datos** | Panel (solo admin) que **verifica y reporta** si algo de dinero dejó de cuadrar. No repara nada (`js/core/salud.js:1322`). |
+| **Salud de los datos** | Panel (solo admin) que **verifica y reporta** si algo de dinero dejó de cuadrar. No repara nada (`js/core/salud.js:1337`). |
 | **Acción** | Lo que hace un botón o campo de la pantalla: tiene un nombre (`data-action="add-abono"`) y una función en `modules/*` (`js/core/dom.js:1246`). |
 | **Token** | La «llave» temporal (≈ 1 hora) que Google da al iniciar sesión y que la app usa para leer y escribir la hoja (`js/core/auth.js:256`). |
 | **Rol** | `admin` o `vendedor`, según la pestaña `roles` de la hoja (`js/core/auth.js:317`). |
@@ -107,9 +107,9 @@ Consecuencias que importan para el riesgo:
 | Capa | Archivos | Líneas de JavaScript |
 | --- | --- | --- |
 | `js/app.js` | 1 | 123 |
-| `js/core/` | 28 | 16564 |
+| `js/core/` | 28 | 16579 |
 | `js/modules/` | 16 | 15338 |
-| **Total** | 45 | 32025 |
+| **Total** | 45 | 32040 |
 
 <!-- GENERADO:fin capas -->
 
@@ -203,11 +203,11 @@ Cuando una pestaña guarda, las demás recargan esa clave de la hoja antes de vo
 
 ### 5.7 Cierre de mes
 
-El admin cierra un mes ya terminado (`cerrarMes`, `js/core/cierre.js:129`): se guarda una fila en `Cierres` con quién, cuándo y un **resumen** (ingresos, gastos, Caja al final, saldo por cuenta). Desde ahí, `exigirMesAbierto([fechas], "qué haría")` rechaza cualquier escritura con fecha en ese mes (`js/core/cierre.js:78-83`). La pregunta única es `periodoCerrado` (`js/core/calc.js:341`). **Un movimiento cuya fecha no empieza con `AAAA-MM` no pertenece a ningún mes y escapa al candado** (`js/core/calc.js:333-336`); lo detecta después «Salud de los datos» (`js/core/salud.js:421`), no lo impide. El cierre solo vigila el dinero **con fecha** (movimientos, abonos, reembolsos, ventas de consignación, transferencias): **no** bloquea pedidos y cotizaciones (totales, descuentos), conciliaciones, deudas ni cuentas (Hallazgo #65, «Qué NO cubre»; la lista de acciones que lo evitan está en `MAPA-DEL-DINERO.md`, §4 y §7).
+El admin cierra un mes ya terminado (`cerrarMes`, `js/core/cierre.js:129`): se guarda una fila en `Cierres` con quién, cuándo y un **resumen** (ingresos, gastos, Caja al final, saldo por cuenta). Desde ahí, `exigirMesAbierto([fechas], "qué haría")` rechaza cualquier escritura con fecha en ese mes (`js/core/cierre.js:78-83`). La pregunta única es `periodoCerrado` (`js/core/calc.js:341`). **Un movimiento cuya fecha no empieza con `AAAA-MM` no pertenece a ningún mes y escapa al candado** (`js/core/calc.js:333-336`); lo detecta después «Salud de los datos» (`js/core/salud.js:436`), no lo impide. El cierre solo vigila el dinero **con fecha** (movimientos, abonos, reembolsos, ventas de consignación, transferencias): **no** bloquea pedidos y cotizaciones (totales, descuentos), conciliaciones, deudas ni cuentas (Hallazgo #65, «Qué NO cubre»; la lista de acciones que lo evitan está en `MAPA-DEL-DINERO.md`, §4 y §7).
 
 ### 5.8 Salud de los datos
 
-Es solo de lectura: recorre `state` y devuelve hallazgos con severidad (error / aviso) y un enlace al caso (`js/core/salud.js:713`, `:1322`). **Compara la app contra sí misma**, no contra la hoja ni contra el banco. Se calcula en cada pintado para la insignia roja del menú.
+Es solo de lectura: recorre `state` y devuelve hallazgos con severidad (error / aviso) y un enlace al caso (`js/core/salud.js:728`, `:1337`). **Compara la app contra sí misma**, no contra la hoja ni contra el banco. Se calcula en cada pintado para la insignia roja del menú.
 
 ### 5.9 Respaldo
 

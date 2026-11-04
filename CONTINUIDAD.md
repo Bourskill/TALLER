@@ -5,16 +5,13 @@ quedó todo, qué sigue, cómo se trabaja en este proyecto y qué NO está
 comprobado. Al terminar tu parte, actualiza la sección "Dónde quedó todo" y la
 fecha de abajo (es el único sitio que envejece).
 
-> Última actualización: **2026-11-03**, `main` en `34517e8`, pruebas de GitHub en verde.
-> (El último commit de código en `main` fue `2cb236e`; los siguientes solo tocan documentación.)
-> **Mapa técnico (Hallazgo #67, ronda 116) — rama local `mapa-tecnico`, sin empujar ni integrar:**
-> carpeta `docs/` (arquitectura, mapa del código y del dinero, escenarios de falla, reglas), la
-> herramienta `tools/mapa.mjs` (`npm run mapa`) y la prueba `test/arquitectura.mjs`. No cambia la app.
+> Última actualización: **2026-11-04**. Todo está integrado en `main` y publicado en GitHub
+> (consulta la pestaña Actions para el resultado de la CI sobre el último commit).
+> **Mapa técnico (Hallazgo #67, ronda 116):** carpeta `docs/` (arquitectura, mapa del código y del
+> dinero, escenarios de falla, reglas), la herramienta `tools/mapa.mjs` (`npm run mapa`) y la prueba
+> `test/arquitectura.mjs`. No cambia la app.
 > **Al integrar cualquier rama que toque `js/`, corre `npm run mapa` y sube los documentos**: la CI
 > falla si quedaron viejos. Los 11 riesgos que encontró están en la sección C2.
-> **Pendiente de integrar:** la rama local `salud-ampliada` (Hallazgo #66, ronda 115: «Salud de
-> los datos» pasa de 13 a 21 verificaciones). Está commiteada, **sin empujar** y sin que la CI
-> haya corrido `smoke.mjs` sobre ella; hasta integrarla, `main` no la tiene.
 
 ---
 
@@ -25,9 +22,8 @@ no le cause más, que sea rigurosa con el dinero y que **todo lo que se vea sea
 verdad, para que cuadre al peso con sus cuentas bancarias**. Todo lo de abajo
 nació de un análisis de Finanzas pedido por él (2026-10-29).
 
-Todo lo de la tabla, salvo el #66, está integrado en `main`, publicado en GitHub y con la
-CI en verde (los 5 archivos de prueba, `smoke.mjs` incluido). El #66 está en la rama
-`salud-ampliada` (ver arriba). No hay ningún PR en curso.
+Todo lo de la tabla está integrado en `main` y publicado en GitHub, con la CI corriendo los
+6 archivos de prueba (`smoke.mjs` incluido). No hay ningún PR en curso.
 
 | Hallazgo | Qué es | Dónde se ve en la app | Prueba |
 |---|---|---|---|
@@ -36,7 +32,7 @@ CI en verde (los 5 archivos de prueba, `smoke.mjs` incluido). El #66 está en la
 | **#63** | Cuentas (Efectivo, Banco, Nequi), saldo por cuenta, transferencias entre cuentas, conciliación contra el extracto. | Finanzas → 🏦 Cuentas, Configuración → Cuentas, saldo en Resumen | `test/cuentas.mjs` |
 | **#64** | Panel «Salud de los datos»: verifica y REPORTA (no repara) 13 cosas, y dice lo que la app corrigió sola al cargar. | Arriba de todo en Configuración (solo admin), insignia roja en el menú | `test/salud.mjs` |
 | **#65** | Bitácora de cambios del dinero y cierre de mes. | Finanzas → 📒 Bitácora y 🔒 Cierre de mes (solo admin) | `test/bitacora.mjs` |
-| **#66** *(rama `salud-ampliada`, sin integrar)* | «Salud de los datos» revisa 8 cosas más (21 en total): nómina del periodo, deudas (`cuotasPagadas` contra sus movimientos), compras «Sí», estimado + compras reales, consignación, total del pedido contra su cotización, papelera, comisión pagada contra la fórmula de hoy; y la fecha de cada abono. | El mismo panel; botones «↗» nuevos a Deuda, Nómina y Papelera | `test/salud.mjs` |
+| **#66** | «Salud de los datos» revisa 8 cosas más (21 en total): nómina del periodo, deudas (`cuotasPagadas` contra sus movimientos), compras «Sí», estimado + compras reales, consignación, total del pedido contra su cotización, papelera, comisión pagada contra la fórmula de hoy; y la fecha de cada abono. | El mismo panel; botones «↗» nuevos a Deuda, Nómina y Papelera | `test/salud.mjs` |
 
 Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#66) y
 el registro de cambios de **`README.md`** (rondas 109–115).
@@ -90,8 +86,7 @@ rama borrada de GitHub: `git push origin <sha>:refs/heads/<nombre>` (bitacora-y-
 claude/elastic-leavitt-ae29c7 `851e4de`).
 
 ### C. Mejoras pequeñas ya identificadas
-- **Ampliar «Salud de los datos» — HECHO en la rama `salud-ampliada` (Hallazgo #66,
-  ronda 115), falta integrarla.** Ahora revisa también nómina del periodo, deudas, compras
+- **Ampliar «Salud de los datos» — HECHO e integrado (Hallazgo #66, ronda 115).** Ahora revisa también nómina del periodo, deudas, compras
   «Sí», estimado + compras reales, consignación, total del pedido contra su cotización,
   papelera y la comisión pagada contra la fórmula de hoy (informativa), y compara la fecha de
   cada abono. Reglas que el dueño ya decidió (no volver a preguntar): nómina solo del periodo
@@ -162,8 +157,7 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 - **Antes de tocar dinero, lee `CONTABILIDAD.md`** (principios y reglas por área). Todo
   cambio financiero se documenta ahí como un **Hallazgo nuevo (el siguiente libre es
   el #68)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 117**).
-  (El #66 y la ronda 115 son los de la rama `salud-ampliada`; el #67 y la ronda 116, los de
-  `mapa-tecnico`: si se integra otra rama antes, ajusta los números.)
+  (Ya usados: #66 y ronda 115 = salud de los datos ampliada; #67 y ronda 116 = mapa técnico.)
 - **Pregunta al dueño ANTES de escribir código** cuando haya decisiones de negocio:
   él lo pidió así desde el principio. Habla español, no es técnico: explica en
   palabras simples, con ejemplos en pesos.

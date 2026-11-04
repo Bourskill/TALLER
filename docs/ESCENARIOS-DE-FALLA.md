@@ -55,7 +55,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** un abono toca `tx` (el movimiento) y `pedidos` (la fila del abono); se guardan con **dos `persist` seguidos, sin transacción** (`js/modules/pedidos.js:2521`). Pasa igual con `cobrar`, `add-reembolso`, comisiones, gastos fijos, deudas, Colchón. El caso máximo es `remove-pedido`: **cuatro** claves (`js/modules/pedidos.js:2706-2708`). `add-pedido` con abono inicial escribe `tx` → `productos` → `pedidos`, en este orden: `js/modules/pedidos.js:1933`, `js/core/stock.js:53` y `js/modules/pedidos.js:1984`.
 - **Qué ve el dueño:** si la segunda escritura falla por red, el chip rojo; la cola la reintenta y normalmente las dos terminan en la hoja. Si falla por **conflicto** (escenario 3) o si la pestaña se cierra antes, la hoja queda con **un lado sin el otro**: el movimiento está en Finanzas pero el pedido no lo tiene (o al revés).
-- **Qué lo defiende:** la cola reintenta cada clave por separado (`js/core/guardado.js:395-425`); el espejo guarda las dos; al recargar, `detectarRecuperacion` ofrece restaurar (`js/core/store.js:1613`); y **«Salud de los datos» lo detecta después**: «Cada abono y reembolso en Finanzas…» (`js/core/salud.js:129`), orígenes que ya no existen (`:219`).
+- **Qué lo defiende:** la cola reintenta cada clave por separado (`js/core/guardado.js:395-425`); el espejo guarda las dos; al recargar, `detectarRecuperacion` ofrece restaurar (`js/core/store.js:1613`); y **«Salud de los datos» lo detecta después**: «Cada abono y reembolso en Finanzas…» (`js/core/salud.js:129`), orígenes que ya no existen (`:234`).
 - **Qué queda abierto:** nada impide el estado a medias ni lo repara solo. Si se vuelve a pulsar el botón antes de enterarse (por ejemplo «pagar comisión»), se crea un **segundo** movimiento: `toggle-comision` decide por el estado del pedido (`js/modules/pedidos.js:2348`) y ese estado no llegó a la hoja.
 - **Prueba:** `test/salud.mjs:239` (la verificación de abonos y movimientos). **SIN PRUEBA** de la falla a mitad de una escritura doble.
 - **Estado:** **PARCIAL — severidad media.** Riesgo **#67-4**.
@@ -102,7 +102,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 - **Qué lo causa:** (a) el «borrar y escribir» falló en el medio (escenario 1); (b) alguien borra las filas o la pestaña `Movimientos`, `Clientes` o `Cotizaciones`.
 - **Qué pasa en el código:** `asegurarPestana` recrea la pestaña vacía (`js/core/sheetsTabular.js:53-62`). Luego `loadAll` lee 0 filas y, **si la pestaña `kv` todavía trae el texto viejo de esa clave**, lo trata como «primera migración» y **lo copia a la pestaña** (`js/core/store.js:1209-1217`). Ese texto de `kv` **quedó congelado el día que la clave migró** (`js/core/store.js:1112-1126`: desde entonces `persist` ya no lo actualiza). Resultado: la hoja pasa a mostrar la foto de hace meses.
 - **Qué ve el dueño:** movimientos viejos, sin los de los últimos meses; la Caja cambia de golpe. En el mismo computador, si había algo en cola, la recuperación ofrece restaurar la copia local (`js/core/store.js:1613`); en otro computador no hay nada que ofrecer.
-- **Qué lo defiende:** solo parcialmente: la cola y el espejo del computador que estaba guardando (si sigue abierto, su reintento reescribe lo correcto), «Salud de los datos» (la Caja contra los reportes, `js/core/salud.js:527`) y el respaldo diario. **Nada distingue «pestaña nueva que hay que migrar» de «pestaña que se vació».**
+- **Qué lo defiende:** solo parcialmente: la cola y el espejo del computador que estaba guardando (si sigue abierto, su reintento reescribe lo correcto), «Salud de los datos» (la Caja contra los reportes, `js/core/salud.js:542`) y el respaldo diario. **Nada distingue «pestaña nueva que hay que migrar» de «pestaña que se vació».**
 - **Prueba:** **SIN PRUEBA** (no hay ninguna prueba que ejerza una pestaña vacía con `kv` poblado).
 - **Estado:** **SIN DEFENSA — severidad alta.** Riesgo **#67-1**. Arreglo propuesto (tarea aparte): guardar una marca «ya migrado» en `kv` la primera vez y, desde ahí, no volver a sembrar jamás desde el blob; si la pestaña está vacía y la marca existe, mostrar un error rojo en vez de seguir.
 
@@ -120,8 +120,8 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 - **Qué lo causa:** abrir la Sheet y cambiar un monto, borrar una fila, escribir texto en un número, o editar la pestaña `roles`.
 - **Qué pasa en el código:** la app solo se entera al **recargar**. Mientras una pestaña de la app está abierta con su copia en memoria, el siguiente guardado **reescribe el rango completo** desde memoria (`js/core/sheetsTabular.js:144-150`) y borra la edición manual, y `verificarConflicto` **no lo nota** porque solo mira la fila `__rev__:<clave>`, no las celdas de datos (`js/core/store.js:108-121`).
 - **Qué ve el dueño:** al recargar, los números cambian sin rastro en la bitácora (la bitácora solo anota cambios hechos desde la app, `js/core/bitacora.js:33-35`).
-- **Qué lo defiende (detectando, no impidiendo):** «Salud de los datos»: un monto que no es número «la caja lo cuenta como $0» (`js/core/salud.js:382-391`), una fecha inválida (`:421`), la Caja contra los reportes (`:527`) y, si cambió un mes cerrado, «Meses cerrados» compara contra el resumen guardado al cerrar (`js/core/salud.js:733`).
-- **Prueba:** `test/bitacora.mjs:526-591` (Salud detecta un mes cerrado que cambió), `test/salud.mjs:286` (monto, fecha y tipo).
+- **Qué lo defiende (detectando, no impidiendo):** «Salud de los datos»: un monto que no es número «la caja lo cuenta como $0» (`js/core/salud.js:397-406`), una fecha inválida (`:436`), la Caja contra los reportes (`:542`) y, si cambió un mes cerrado, «Meses cerrados» compara contra el resumen guardado al cerrar (`js/core/salud.js:748`).
+- **Prueba:** `test/bitacora.mjs:526-591` (Salud detecta un mes cerrado que cambió), `test/salud.mjs:294` (monto, fecha y tipo).
 - **Estado:** PARCIAL. Es el «punto D» de `CONTINUIDAD.md` (base de datos con permisos por rol): mientras no se haga, **la protección real es a quién se da acceso de edición a la Google Sheet**.
 
 ## 10. El navegador se cierra con un guardado en vuelo
@@ -137,7 +137,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** meses de historia: columnas que se corrieron (Hallazgos #15–#19), marcas de origen que se perdían al guardar, pedidos sin líneas, movimientos de antes de las cuentas.
 - **Qué lo defiende:** una celda vacía de una columna nueva se lee como valor por defecto (`cuenta` vacía = «sin asignar», `js/core/sheetsEsquemas.js:105-110`); al cargar, los movimientos sin cuenta pasan a «Sin asignar» sin tocar la Caja (`js/core/store.js:1245-1251`); doce reparaciones automáticas anotadas (`js/core/store.js:606-619`); y «Salud de los datos» está diseñada para **no dar falsos positivos** con datos viejos (`CONTABILIDAD.md`, #66, «Cómo se evitaron los falsos positivos»).
-- **Prueba:** `test/cuentas.mjs:85` (migración a «Sin asignar»), `test/salud.mjs:527-585` (lo corregido al cargar), `test/salud.mjs:211` (datos limpios: cero hallazgos).
+- **Prueba:** `test/cuentas.mjs:85` (migración a «Sin asignar»), `test/salud.mjs:535-593` (lo corregido al cargar), `test/salud.mjs:211` (datos limpios: cero hallazgos).
 - **Qué queda abierto:** las reparaciones **pueden tocar un mes cerrado** (quedan anotadas y señaladas, no frenadas; `CONTINUIDAD.md`, §6). Nada de esto se ha probado con la hoja real del dueño.
 - **Estado:** DEFENDIDO — baja.
 
@@ -145,7 +145,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** un vendedor registra un abono, edita un movimiento o elimina un pedido con fecha en un mes cerrado.
 - **Qué ve:** «No se puede <qué haría>: <mes> está cerrado (lo cerró <nombre> el <fecha>). Pídele al administrador que lo reabra (queda registrado quién y por qué)» (`js/core/cierre.js:63-71`). El admin ve además cómo reabrirlo.
-- **Qué lo defiende:** `exigirMesAbierto` en toda acción que escribe movimientos (regla `R1`; `js/core/cierre.js:78`), con la fecha vieja **y** la nueva cuando algo cambia de fecha (por ejemplo `js/modules/pedidos.js:2555`); `ejecutarAccionRecibo` y `llevarComprasAFinanzas` comparan antes y después para lo masivo (`js/modules/cotizaciones.js:3275`, `:3569`); solo el admin cierra o reabre (`js/core/cierre.js:122`, `:156`); la bitácora marca `enMesCerrado` y «Meses cerrados» de Salud lo señala (`js/core/salud.js:733`).
+- **Qué lo defiende:** `exigirMesAbierto` en toda acción que escribe movimientos (regla `R1`; `js/core/cierre.js:78`), con la fecha vieja **y** la nueva cuando algo cambia de fecha (por ejemplo `js/modules/pedidos.js:2555`); `ejecutarAccionRecibo` y `llevarComprasAFinanzas` comparan antes y después para lo masivo (`js/modules/cotizaciones.js:3275`, `:3569`); solo el admin cierra o reabre (`js/core/cierre.js:122`, `:156`); la bitácora marca `enMesCerrado` y «Meses cerrados» de Salud lo señala (`js/core/salud.js:748`).
 - **Qué queda abierto:** es un candado **de pantalla**. Desde la consola del navegador o editando la hoja se salta; si pasa por la app queda en la bitácora, si pasa por la hoja solo lo señala Salud después. No bloquea pedidos/cotizaciones, conciliaciones ni a un movimiento sin fecha válida (`MAPA-DEL-DINERO.md`, §7).
 - **Prueba:** `test/bitacora.mjs:426-468` (un mes cerrado bloquea CADA tipo de escritura), `:387` (solo el admin cierra), `:477` (el mensaje le habla a cada rol), `:489` (reabrir exige motivo).
 - **Estado:** DEFENDIDO en la app; **SIN DEFENSA** ante acceso directo a la hoja (conocido).
@@ -172,8 +172,8 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** `add-tx` no exige fecha (solo concepto y monto, `js/modules/finanzas.js:854`) y un campo de fecha se puede dejar vacío.
 - **Qué pasa:** `mesDeFecha` devuelve `""` si la fecha no empieza con `AAAA-MM`, y `periodoCerrado` responde «no hay cierre» (`js/core/calc.js:333-343`). El movimiento **no pertenece a ningún mes**: cuenta en la Caja total pero no en el resumen de ningún cierre, y el candado de mes no lo ve.
-- **Qué ve el dueño:** «Salud de los datos» lo marca como **error**: «Un movimiento tiene una fecha inválida» (`js/core/salud.js:421`). La Caja de un mes cerrado frente al resumen del cierre dejaría de coincidir.
-- **Prueba:** `test/salud.mjs:286` (se detecta). **SIN PRUEBA** de prevención (no existe).
+- **Qué ve el dueño:** «Salud de los datos» lo marca como **error**: «Un movimiento tiene una fecha inválida» (`js/core/salud.js:436`). La Caja de un mes cerrado frente al resumen del cierre dejaría de coincidir.
+- **Prueba:** `test/salud.mjs:294` (se detecta). **SIN PRUEBA** de prevención (no existe).
 - **Estado:** PARCIAL (detecta, no previene) — media-baja. Riesgo **#67-7**.
 
 ## 16. Un vendedor usa la consola o cambia su rol
@@ -224,7 +224,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 ## 22. Un pedido pagado completo queda con «saldo fantasma» de centavos
 
 - **Qué lo causó:** el IVA y la comisión se calculaban con centavos (Hallazgo #62).
-- **Qué lo defiende:** una sola fórmula del IVA, `calcIvaDeBase` (`js/core/calc.js:998`), y el saldo a pesos enteros (`calcSaldoPedido`, `js/core/calc.js:1010`); las reglas `R2` y `R3` vigilan que nadie vuelva a calcularlo aparte; Salud avisa montos con centavos (`js/core/salud.js:414`).
+- **Qué lo defiende:** una sola fórmula del IVA, `calcIvaDeBase` (`js/core/calc.js:998`), y el saldo a pesos enteros (`calcSaldoPedido`, `js/core/calc.js:1010`); las reglas `R2` y `R3` vigilan que nadie vuelva a calcularlo aparte; Salud avisa montos con centavos (`js/core/salud.js:429`).
 - **Prueba:** `test/descuentos.mjs:495-587` (IVA a pesos enteros, pedido pagado = saldo cero, comisión por %, PDF con el mismo IVA).
 - **Estado:** DEFENDIDO.
 

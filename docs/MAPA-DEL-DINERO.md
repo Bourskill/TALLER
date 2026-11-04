@@ -286,7 +286,7 @@ Formato de cada ficha: **Nace** (acción) · **Marca** · **Lo toca** · **Se de
 - **Prueba:** `test/smoke.mjs:5323` (un recibo que deja la caja distinta de lo esperado no se guarda).
 
 ### 5.10 Costo estimado completo de una cotización
-- `add-cot-estimado-movimiento` (`js/modules/cotizaciones.js:2558`): **un** gasto por cotización (idempotente: el segundo clic actualiza el mismo, `:2578-2585`), referenciado desde la cotización por `estimadoTxId` (`:2597`). **Sin marca de origen.** Avisa el doble conteo si ya hay compras reales (`:2574-2576`); si hay ambos, «Salud de los datos» lo marca como **error** (`estimado-doble`, `js/core/salud.js:1011`).
+- `add-cot-estimado-movimiento` (`js/modules/cotizaciones.js:2558`): **un** gasto por cotización (idempotente: el segundo clic actualiza el mismo, `:2578-2585`), referenciado desde la cotización por `estimadoTxId` (`:2597`). **Sin marca de origen.** Avisa el doble conteo si ya hay compras reales (`:2574-2576`); si hay ambos, «Salud de los datos» lo marca como **error** (`estimado-doble`, `js/core/salud.js:1026`).
 
 ### 5.11 Movimiento a mano, papelera y restaurar
 - `add-tx` (`js/modules/finanzas.js:852`): solo ingreso, gasto o nómina. **Sin marca.** No exige fecha (solo concepto y monto, `:854`).
@@ -354,8 +354,8 @@ Es una decisión del Hallazgo #65, no un olvido; pero hay que saberlo (la lista 
 |---|---|---|---|
 | **Recibos de compra** | Cada recibo contra sus pedidos y la caja, al peso, **antes** de guardar | `js/modules/cotizaciones.js:3246` | Solo recibos |
 | **Cuentas** | La suma de los saldos de cada cuenta contra la Caja | `js/core/calc.js:295` | Compara la app contra sí misma |
-| **Salud de los datos** | 21 verificaciones: abonos vs movimientos, comisiones, nómina, deudas, consignación, papelera, caja, fechas, montos… | `js/core/salud.js:713`, `:1322` | No compara con la hoja ni con el banco; avisa, no impide |
-| **Cierre de mes** | Un mes cerrado contra el resumen que tenía al cerrarse | `js/core/salud.js:791` (`meses-cerrados`) | Solo mira ingresos, gastos, Caja y saldo por cuenta |
+| **Salud de los datos** | 21 verificaciones: abonos vs movimientos, comisiones, nómina, deudas, consignación, papelera, caja, fechas, montos… | `js/core/salud.js:728`, `:1337` | No compara con la hoja ni con el banco; avisa, no impide |
+| **Cierre de mes** | Un mes cerrado contra el resumen que tenía al cerrarse | `js/core/salud.js:806` (`meses-cerrados`) | Solo mira ingresos, gastos, Caja y saldo por cuenta |
 | **Bitácora** | Antes y después de cada guardado de dinero | `js/core/bitacora.js:300` | Solo cambios hechos desde la app |
 | **Conciliación** | El saldo calculado contra el que dice el extracto, escrito a mano | `js/modules/cuentas.js:377` | Manual |
 | **Respaldo diario** | Una copia completa de la hoja | `js/core/backup.js:87` | Solo si el admin abre la app |
