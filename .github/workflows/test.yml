@@ -44,6 +44,9 @@ jobs:
       - name: Prueba de la cola de guardado (test/guardado.mjs)
         run: node test/guardado.mjs
 
+      - name: Prueba de pestañas propias vacías (test/pestanas.mjs)
+        run: node test/pestanas.mjs
+
       # Reglas de arquitectura y documentos al día (docs/). Si falla por «documentos
       # viejos», corre `npm run mapa` en local y sube los documentos.
       - name: Reglas de arquitectura y mapa al día (test/arquitectura.mjs)

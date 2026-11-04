@@ -18,9 +18,9 @@
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
 | app | 1 | 123 | 6 | 0 | 0 | 0 |
-| core | 28 | 16610 | 609 | 368 | 37 | 45 |
+| core | 28 | 16776 | 619 | 370 | 38 | 45 |
 | modules | 16 | 15338 | 347 | 34 | 368 | 167 |
-| **Total** | 45 | 32071 | 962 | 402 | 405 | 212 |
+| **Total** | 45 | 32237 | 972 | 404 | 406 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -808,27 +808,27 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_dom_js"></a>
 
-#### `core/dom.js` — 1301 líneas
+#### `core/dom.js` — 1326 líneas
 
 **Para qué sirve:** Este es el único archivo que conoce a la vez el estado y el DOM. Ensambla el layout fijo (sidebar categorizada + topbar + KPIs) + el contenido de la pestaña activa, y arma un "registro de acciones" combinando lo que cada módulo expone en `actions`.
 
 - **Depende de:** `core/appIcon.js`, `core/auth.js`, `core/calc.js`, `core/drive.js`, `core/guardado.js`, `core/icons.js`, `core/salud.js`, `core/store.js`, `core/teclado.js`, `core/utils.js`, `modules/bitacora.js`, `modules/catalogo.js`, `modules/cierres.js`, `modules/clientes.js`, `modules/config.js`, `modules/cotizaciones.js`, `modules/cuentas.js`, `modules/finanzas.js`, `modules/mis-ventas.js`, `modules/notas.js`, `modules/pedidos.js`, `modules/pendientes.js`, `modules/plantillas.js`, `modules/productos.js`, `modules/resumen.js`
 - **Lo usan:** `app.js`
 - **Claves de `state` que escribe:** `config.logoUrl`, `config.nombre`, `configLogoSubiendo`, `cotizacionesVista`, `enlaceBusqueda`, `enlacePanelAbierto`, `filtroPedidosSoloSaldo`, `filtroPedidosVista`, `filtroTx`, `filtroTxVista`, `finanzasVista`, `formAbono`, `historialServicioAbierto`, `imagenPreview`, `insumoPickerAbierto`, `insumoPickerBusqueda`, `insumoPickerCategoria`, `insumoPickerCotId`, `insumoPickerPlantillaId`, `insumoPickerProductoId`, `insumoPickerRefId`, `insumoPickerSeleccion`, `lastError`, `notificacionesAbiertas`, `pdfPreview`, `pedidosVista`, `sidebarMobileOpen`, `tab`, `txEditando`, `txEnfocados`, `ui`
-- **Claves de `state` que solo lee:** `avisoTablaSheetFallo`, `recuperacion`, `toast`
+- **Claves de `state` que solo lee:** `avisoTablaSheetFallo`, `avisoTablaVacia`, `recuperacion`, `toast`
 - **`persist(...)`:** config ×2, ui ×4
-- **Acciones de la interfaz:** 35 (tabla en la sección 4)
+- **Acciones de la interfaz:** 36 (tabla en la sección 4)
 
 <details>
 <summary>Exportado (1)</summary>
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `render()` | core/dom.js:635 | (sin comentario) | — | app.js |
+| `render()` | core/dom.js:640 | (sin comentario) | — | app.js |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 33.</sub>
+<sub>Funciones internas (no exportadas): 34.</sub>
 
 <a id="f-core_drive_js"></a>
 
@@ -1203,48 +1203,50 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_store_js"></a>
 
-#### `core/store.js` — 1984 líneas
+#### `core/store.js` — 2125 líneas
 
 **Para qué sirve:** Fuente única de verdad del estado + persistencia.
 
 - **Depende de:** `core/auth.js`, `core/bitacora.js`, `core/calc.js`, `core/constants.js`, `core/guardado.js`, `core/seed-data.js`, `core/sheetsEsquemas.js`, `core/utils.js`
 - **Lo usan:** `app.js`, `core/appIcon.js`, `core/backup.js`, `core/calc.js`, `core/cierre.js`, `core/dom.js`, `core/drive.js`, `core/pdf.js`, `core/salud.js`, `core/stock.js`, `core/teclado.js`, `modules/bitacora.js`, `modules/catalogo.js`, `modules/cierres.js`, `modules/clientes.js`, `modules/config.js`, `modules/cotizaciones.js`, `modules/cuentas.js`, `modules/finanzas.js`, `modules/notas.js`, `modules/pedidos.js`, `modules/pendientes.js`, `modules/plantillas.js`, `modules/productos.js`, `modules/resumen.js`, `modules/salud.js`
-- **Claves de `state` que escribe:** `avisoTablaSheetFallo`, `catalogoCategorias`, `catalogoInsumos`, `catalogoPropuestas`, `cierres`, `clientes`, `config`, `config.meta`, `config.nombre`, `cotizaciones`, `deudas`, `deudasHistorial`, `formPedido`, `migracionRecibos`, `pedidos`, `pedidosPapelera`, `pendientes`, `plantillasEstados`, `plantillasPrendas`, `productoPropuestas`, `productos`, `recuperacion`, `reparacionesAlCargar`, `reparacionesOmitidas`, `toast`, `transferencias`, `tx`, `txPapelera`, `ui`
+- **Claves de `state` que escribe:** `avisoTablaSheetFallo`, `avisoTablaVacia`, `catalogoCategorias`, `catalogoInsumos`, `catalogoPropuestas`, `cierres`, `clientes`, `config`, `config.meta`, `config.nombre`, `cotizaciones`, `deudas`, `deudasHistorial`, `formPedido`, `migracionRecibos`, `pedidos`, `pedidosPapelera`, `pendientes`, `plantillasEstados`, `plantillasPrendas`, `productoPropuestas`, `productos`, `recuperacion`, `reparacionesAlCargar`, `reparacionesOmitidas`, `toast`, `transferencias`, `tx`, `txPapelera`, `ui`
 - **Claves de `state` que solo lee:** `cotSnapshot`, `cotSucia`
 - **`persist(...)`:** (clave), (propuesta.key), catalogoPropuestas ×3, cotizaciones ×7, pedidos ×2, plantillasPrendas ×3, productos ×3, tx ×5
 
 <details>
-<summary>Exportado (23)</summary>
+<summary>Exportado (25)</summary>
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `anotarReparacion(clave, cantidad)` | core/store.js:622 | Suma `cantidad` cosas corregidas a la bitácora de esta carga. No hace nada | — | core/calc.js |
-| `repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos)` | core/store.js:647 | Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin | — | solo este archivo |
-| `repararVendedorPerdido(pedidos, tx)` | core/store.js:702 | Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío | — | solo este archivo |
-| `repararMarcasOrigenInconsistentes(tx)` | core/store.js:764 | Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que | — | solo este archivo |
-| `repararPedidoIdExcedente(tx)` | core/store.js:814 | Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44 | — | solo este archivo |
-| `repararMarcaExcedentePerdida(tx, cotizaciones)` | core/store.js:846 | Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un | — | solo este archivo |
-| `repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:885 | Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`) | — | solo este archivo |
-| `repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:929 | Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a | — | solo este archivo |
-| `repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)` | core/store.js:981 | (sin comentario) | — | solo este archivo |
-| `repararReferenciasProveedorAInsumo(cotizaciones)` | core/store.js:1013 | Repara, mutando en el sitio, una referencia que todavía usa el modelo | — | solo este archivo |
-| `loadAll()` | core/store.js:1040 | Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave | cotizaciones, pedidos, plantillasPrendas, productos, tx | app.js |
-| `recuperarDelEspejo()` | core/store.js:1687 | Vuelca el espejo local sobre el estado. Las claves que de verdad viven en | ? | core/dom.js |
-| `descartarRecuperacion()` | core/store.js:1747 | (sin comentario) | — | core/dom.js |
-| `revisarBorradoresSinGuardar()` | core/store.js:1817 | Se llama en CADA render (ver core/dom.js) — no en cada acción de edición | — | core/dom.js |
-| `persist(key)` | core/store.js:1898 | key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...). | — | core/backup.js, core/cierre.js, core/dom.js, core/drive.js, core/pdf.js (+14) |
-| `aprobarPropuesta(id)` | core/store.js:1947 | Admin aprueba: la propuesta pasa a ser el valor real de esa clave (ya | ?, catalogoPropuestas | modules/catalogo.js |
-| `descartarPropuesta(id)` | core/store.js:1959 | Admin descarta: desaparece de la lista sin tocar el catálogo real (el | catalogoPropuestas | modules/catalogo.js |
-| `notify()` | core/store.js:1966 | Cualquier módulo llama a notify() tras mutar `state` para pedir un re-render, | — | core/cierre.js, core/dom.js, core/pdf.js, core/teclado.js, modules/bitacora.js (+14) |
-| `mostrarToast(msg)` | core/store.js:1975 | Aviso flotante que se muestra unos segundos y desaparece solo — para | — | modules/cierres.js, modules/clientes.js, modules/cotizaciones.js, modules/cuentas.js, modules/finanzas.js (+2) |
+| `decidirLecturaTabla(o)` | core/store.js:123 | (Hallazgo #69, riesgo #67-1 del mapa técnico.) | — | solo este archivo |
+| `reconocerTablasVacias()` | core/store.js:191 | El usuario dice «está bien así, la vacié yo» sobre el aviso rojo de una | — | core/dom.js |
+| `anotarReparacion(clave, cantidad)` | core/store.js:737 | Suma `cantidad` cosas corregidas a la bitácora de esta carga. No hace nada | — | core/calc.js |
+| `repararTxHuerfanosDeCotEscalada(tx, cotizaciones, pedidos)` | core/store.js:762 | Repara, mutando en el sitio, cualquier tx con `cotizacionId` pero sin | — | solo este archivo |
+| `repararVendedorPerdido(pedidos, tx)` | core/store.js:817 | Repara, mutando en el sitio, el vendedor de un pedido que quedó vacío | — | solo este archivo |
+| `repararMarcasOrigenInconsistentes(tx)` | core/store.js:879 | Repara, mutando en el sitio, cualquier tx cuyo `tipo` haga IMPOSIBLE que | — | solo este archivo |
+| `repararPedidoIdExcedente(tx)` | core/store.js:929 | Auto-reparación: un movimiento de excedente creado ANTES del Hallazgo #44 | — | solo este archivo |
+| `repararMarcaExcedentePerdida(tx, cotizaciones)` | core/store.js:961 | Repara, mutando en el sitio, la marca `origenCompraExcedenteClave` de un | — | solo este archivo |
+| `repararOrigenCatalogoInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1000 | Repara, mutando en el sitio, el vínculo con el catálogo (`origenCatalogoId`) | — | solo este archivo |
+| `repararCategoriaIdInsumos(catalogoInsumos, plantillas, productos,…)` | core/store.js:1044 | Repara, mutando en el sitio, `categoriaId` perdido en un insumo copiado a | — | solo este archivo |
+| `repararConsumoTelaPorInsumo(plantillas, productos, cotizaciones)` | core/store.js:1096 | (sin comentario) | — | solo este archivo |
+| `repararReferenciasProveedorAInsumo(cotizaciones)` | core/store.js:1128 | Repara, mutando en el sitio, una referencia que todavía usa el modelo | — | solo este archivo |
+| `loadAll()` | core/store.js:1155 | Carga todas las áreas de datos en paralelo. Cada área vive en su propia clave | cotizaciones, pedidos, plantillasPrendas, productos, tx | app.js |
+| `recuperarDelEspejo()` | core/store.js:1828 | Vuelca el espejo local sobre el estado. Las claves que de verdad viven en | ? | core/dom.js |
+| `descartarRecuperacion()` | core/store.js:1888 | (sin comentario) | — | core/dom.js |
+| `revisarBorradoresSinGuardar()` | core/store.js:1958 | Se llama en CADA render (ver core/dom.js) — no en cada acción de edición | — | core/dom.js |
+| `persist(key)` | core/store.js:2039 | key es una clave de `state` que también existe en KEYS (tx, pedidos, clientes...). | — | core/backup.js, core/cierre.js, core/dom.js, core/drive.js, core/pdf.js (+14) |
+| `aprobarPropuesta(id)` | core/store.js:2088 | Admin aprueba: la propuesta pasa a ser el valor real de esa clave (ya | ?, catalogoPropuestas | modules/catalogo.js |
+| `descartarPropuesta(id)` | core/store.js:2100 | Admin descarta: desaparece de la lista sin tocar el catálogo real (el | catalogoPropuestas | modules/catalogo.js |
+| `notify()` | core/store.js:2107 | Cualquier módulo llama a notify() tras mutar `state` para pedir un re-render, | — | core/cierre.js, core/dom.js, core/pdf.js, core/teclado.js, modules/bitacora.js (+14) |
+| `mostrarToast(msg)` | core/store.js:2116 | Aviso flotante que se muestra unos segundos y desaparece solo — para | — | modules/cierres.js, modules/clientes.js, modules/cotizaciones.js, modules/cuentas.js, modules/finanzas.js (+2) |
 | `STORAGE_OK` _(valor)_ | core/store.js:37 | (dato exportado) | — | nadie |
-| `state` _(objeto)_ | core/store.js:180 | (dato exportado) | — | app.js, core/appIcon.js, core/backup.js, core/calc.js, core/cierre.js (+21) |
-| `REPARACIONES_AL_CARGAR` _(objeto)_ | core/store.js:606 | (dato exportado) | — | core/salud.js |
-| `ETIQUETA_CLAVE` _(objeto)_ | core/store.js:1476 | (dato exportado) | — | core/dom.js |
+| `state` _(objeto)_ | core/store.js:288 | (dato exportado) | — | app.js, core/appIcon.js, core/backup.js, core/calc.js, core/cierre.js (+21) |
+| `REPARACIONES_AL_CARGAR` _(objeto)_ | core/store.js:721 | (dato exportado) | — | core/salud.js |
+| `ETIQUETA_CLAVE` _(objeto)_ | core/store.js:1617 | (dato exportado) | — | core/dom.js |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 18.</sub>
+<sub>Funciones internas (no exportadas): 25.</sub>
 
 <a id="f-core_teclado_js"></a>
 
@@ -1742,7 +1744,7 @@ Cada botón o campo de la pantalla lleva `data-action="nombre"` (o `data-action-
 - **Pantalla** = cuántas veces aparece su nombre escrito en un `data-action` del código (0 = solo se arma dinámicamente o no se usa).
 
 <details>
-<summary><b>core/dom.js</b> — 35 acciones</summary>
+<summary><b>core/dom.js</b> — 36 acciones</summary>
 
 | Acción | Dónde | Qué hace | Guarda | Mes cerrado | Rol | Pantalla |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1775,12 +1777,13 @@ Cada botón o campo de la pantalla lleva `data-action="nombre"` (o `data-action-
 | `logout` | core/dom.js:405 | (sin comentario) | — | · | — | 1 |
 | `reintentar-guardado` | core/dom.js:414 | (sin comentario) | — | · | — | 2 |
 | `recargar-pagina` | core/dom.js:431 | (sin comentario) | — | · | — | 2 |
-| `renovar-sesion` | core/dom.js:434 | (sin comentario) | — | · | — | 1 |
-| `recuperar-espejo` | core/dom.js:439 | (sin comentario) | ?clave | · | — | 1 |
-| `descartar-recuperacion` | core/dom.js:442 | (sin comentario) | — | · | — | 1 |
-| `toggle-notificaciones` | core/dom.js:446 | (sin comentario) | ui | · | sí | 1 |
-| `cerrar-notificaciones` | core/dom.js:455 | (sin comentario) | — | · | — | 1 |
-| `ir-a-notificacion` | core/dom.js:462 | Cada aviso lleva a donde se resuelve. Las entregas, además, hacen scroll | — | · | — | 1 |
+| `confirmar-tabla-vacia` | core/dom.js:436 | «Está bien así» sobre el aviso de una pestaña vacía (Hallazgo #69): solo | — | · | — | 1 |
+| `renovar-sesion` | core/dom.js:439 | (sin comentario) | — | · | — | 1 |
+| `recuperar-espejo` | core/dom.js:444 | (sin comentario) | ?clave | · | — | 1 |
+| `descartar-recuperacion` | core/dom.js:447 | (sin comentario) | — | · | — | 1 |
+| `toggle-notificaciones` | core/dom.js:451 | (sin comentario) | ui | · | sí | 1 |
+| `cerrar-notificaciones` | core/dom.js:460 | (sin comentario) | — | · | — | 1 |
+| `ir-a-notificacion` | core/dom.js:467 | Cada aviso lleva a donde se resuelve. Las entregas, además, hacen scroll | — | · | — | 1 |
 
 </details>
 

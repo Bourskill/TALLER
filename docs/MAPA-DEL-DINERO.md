@@ -34,9 +34,9 @@ Salen de `CONTABILIDAD.md` (principios 1 a 8). Las que más pesan para esta revi
 
 | Quién | Dónde | Qué hace | Marca de origen | Mes cerrado | Guarda (persist) | La llaman |
 | --- | --- | --- | --- | --- | --- | --- |
-| función `loadAll` | core/store.js:1250 | reemplaza la lista movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
-| función `loadAll` | core/store.js:1251 | reemplaza la lista papelera de movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
-| función `loadAll` | core/store.js:1390 | reemplaza la lista movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
+| función `loadAll` | core/store.js:1389 | reemplaza la lista movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
+| función `loadAll` | core/store.js:1390 | reemplaza la lista papelera de movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
+| función `loadAll` | core/store.js:1531 | reemplaza la lista movimientos | — | no es una acción: corre al abrir la app | cotizaciones, pedidos, plantillasPrendas, productos, tx | carga de la app |
 | acción `remove-cotizacion` | modules/cotizaciones.js:1673 | quita movimientos | — | sí, en la misma función (línea 1653) | cotizaciones, tx, txPapelera | — |
 | acción `remove-cotizacion` | modules/cotizaciones.js:1675 | crea papelera de movimientos | — | sí, en la misma función (línea 1653) | cotizaciones, tx, txPapelera | — |
 | acción `remove-cotizacion` | modules/cotizaciones.js:1683 | reemplaza la lista movimientos | — | sí, en la misma función (línea 1653) | cotizaciones, tx, txPapelera | — |
@@ -111,7 +111,7 @@ Salen de `CONTABILIDAD.md` (principios 1 a 8). Las que más pesan para esta revi
 - **Crea** = aparece un movimiento nuevo en la caja. **Quita** = desaparece de la caja (a la papelera o del todo). **Cambia** = el mismo movimiento con otros valores. **Reemplaza la lista** = se asigna una lista entera (recibos, copias de seguridad, reparaciones al cargar).
 - **Marca de origen**: la que ponen (o buscan) esas líneas. En las filas que no «crean», son las marcas mencionadas en el filtro (por ejemplo `eliminar-abono` quita los movimientos con `origenAbonoId` o `origenReembolsoId` del abono que anula).
 - **Mes cerrado**: dónde está la guarda. «En el camino de quien la llama» es aproximado: el mapa ve que la guarda existe en el camino de la acción, no que cubra todas las ramas. Para los **recibos** es exacto: `ejecutarAccionRecibo` compara la lista de movimientos antes y después y rechaza todo si algún cambio cae en un mes cerrado (`js/modules/cotizaciones.js:3273-3276`).
-- Las filas de `loadAll` son lo que la app hace **sola al abrir** (migraciones y reparaciones, `js/core/store.js:1250-1251`, `:1343-1396`): no son una acción de una persona.
+- Las filas de `loadAll` son lo que la app hace **sola al abrir** (migraciones y reparaciones, `js/core/store.js:1389-1390`, `:1484-1537`): no son una acción de una persona.
 
 **Qué muestra esta tabla de un vistazo** (verificado contra el código):
 - **19 sitios crean un movimiento nuevo** en la caja, repartidos en cinco archivos: `pedidos.js` (8: `add-pedido`, `registrar-venta-consignacion`, `pagar-comision-consignacion`, `toggle-comision`, `cobrar`, `add-reembolso`, `add-abono`, `restaurar-pedido`), `pendientes.js` (4: nómina, gasto fijo, ingreso de deuda, pago de deuda), `cotizaciones.js` (4: comisión de cotización, estimado y los dos de `sincronizarComprasFinanzasDe`), `finanzas.js` (2: `add-tx`, `restaurar-tx`) y `resumen.js` (1: aporte al Colchón).
@@ -283,7 +283,7 @@ Formato de cada ficha: **Nace** (acción) · **Marca** · **Lo toca** · **Se de
 - **Compras sueltas.** Cada compra marcada «Sí» genera un gasto con `origenCompraClave`, y lo comprado de más su propio movimiento con `origenCompraExcedenteClave`, **sin pedido** a propósito (`js/modules/cotizaciones.js:3118-3158`, `:3182-3208`). `sincronizarComprasFinanzasDe` (`:2978`) es idempotente: adopta el movimiento que ya existe y borra los sobrantes. Corre solo al **Guardar** la cotización (`guardarCotizaciones`, `:3616`) o con el botón (`sincronizar-compras-finanzas`, `:2264` → `llevarComprasAFinanzas`, `:3561`), que toma una foto y **deshace todo si algo cae en un mes cerrado** (`:3567-3573`).
 - **Recibo de compra** (una compra para varios pedidos): `registrar-recibo-compra` (`js/modules/finanzas.js:1127`). Todo ocurre dentro de `ejecutarAccionRecibo` (`js/modules/cotizaciones.js:3246`): toma una foto, ejecuta, y **solo guarda si** cada recibo cuadra al peso (`verificarRecibo`, `js/core/calc.js:3818`), la caja se movió exactamente lo esperado y ningún cambio cae en un mes cerrado; si no, restaura la foto y no guarda nada (`js/modules/cotizaciones.js:3281-3288`).
 - **Se deshace:** `anular-recibo` (`js/modules/finanzas.js:1263`) manda sus filas a la papelera, de donde **no se restauran sueltas** (`:1020`); `completar-movimientos-recibo` (`:1272`) y `devolver-parte-recibo` (`:1287`) también pasan por `ejecutarAccionRecibo`.
-- **Prueba:** `test/smoke.mjs:5323` (un recibo que deja la caja distinta de lo esperado no se guarda).
+- **Prueba:** `test/smoke.mjs:5340` (un recibo que deja la caja distinta de lo esperado no se guarda).
 
 ### 5.10 Costo estimado completo de una cotización
 - `add-cot-estimado-movimiento` (`js/modules/cotizaciones.js:2558`): **un** gasto por cotización (idempotente: el segundo clic actualiza el mismo, `:2578-2585`), referenciado desde la cotización por `estimadoTxId` (`:2597`). **Sin marca de origen.** Avisa el doble conteo si ya hay compras reales (`:2574-2576`); si hay ambos, «Salud de los datos» lo marca como **error** (`estimado-doble`, `js/core/salud.js:1026`).
@@ -297,13 +297,13 @@ Formato de cada ficha: **Nace** (acción) · **Marca** · **Lo toca** · **Se de
 - `cancelar-pedido` (`:2802`) es «sí existió»: **no toca ningún movimiento**; solo deja de contar hacia adelante (saldo, comisión pendiente). **No tiene candado de mes** (no escribe movimientos).
 
 ### 5.13 Transferencias entre cuentas (no son movimientos)
-- `registrar-transferencia` (`js/modules/cuentas.js:316`) agrega a `state.transferencias`; **no** crea un `tx`, así ningún reporte la cuenta como ingreso ni gasto y la Caja no se mueve (`js/core/store.js:212-216`). Se «anula» poniéndole fecha (`toggle-anular-transferencia`, `js/modules/cuentas.js:336`); nunca se borra. Exigen mes abierto (`:325`, `:340`). `calcSaldosPorCuenta().cuadra` comprueba que la suma de las cuentas sea la Caja (`js/core/calc.js:295`).
+- `registrar-transferencia` (`js/modules/cuentas.js:316`) agrega a `state.transferencias`; **no** crea un `tx`, así ningún reporte la cuenta como ingreso ni gasto y la Caja no se mueve (`js/core/store.js:327-331`). Se «anula» poniéndole fecha (`toggle-anular-transferencia`, `js/modules/cuentas.js:336`); nunca se borra. Exigen mes abierto (`:325`, `:340`). `calcSaldosPorCuenta().cuadra` comprueba que la suma de las cuentas sea la Caja (`js/core/calc.js:295`).
 
 ### 5.14 Cambios de cuenta y conciliación
 - `asignar-cuenta-tx` (`js/modules/cuentas.js:395`) mueve plata **entre cuentas** (no cambia la Caja); exige mes abierto (`:400`). `toggle-conciliado` (`:360`) y `guardar-conciliacion` (`:377`) solo marcan lo que el dueño vio en su extracto: **sin candado de mes** a propósito.
 
 ### 5.15 Lo que la app corrige sola al abrir
-- `loadAll` (`js/core/store.js:1040`) corre doce reparaciones sobre datos viejos, entre ellas devolver marcas de origen perdidas (`:1343`), enlazar movimientos al pedido de su cotización (`:1346`), y convertir compras viejas en recibos (`:1386-1396`), que es **la única que reescribe plata** y exige verificar cada grupo al peso. Corren solo con lectura completa de la red; quedan anotadas como «automático» en la bitácora y en Salud. **Pueden tocar un mes cerrado** (anotado, señalado, no frenado: `CONTINUIDAD.md`, §6).
+- `loadAll` (`js/core/store.js:1155`) corre doce reparaciones sobre datos viejos, entre ellas devolver marcas de origen perdidas (`:1484`), enlazar movimientos al pedido de su cotización (`:1487`), y convertir compras viejas en recibos (`:1527-1537`), que es **la única que reescribe plata** y exige verificar cada grupo al peso. Corren solo con lectura completa de la red; quedan anotadas como «automático» en la bitácora y en Salud. **Pueden tocar un mes cerrado** (anotado, señalado, no frenado: `CONTINUIDAD.md`, §6).
 
 ## 6. Lo que el análisis no ve: cambios por referencia
 
@@ -330,7 +330,7 @@ El análisis no puede seguir una variable que apunta a un movimiento. Estos son 
 <!-- GENERADO:fin alias -->
 
 Revisados a mano, ninguno de los de dinero escapa a un candado:
-- `core/calc.js:253` (`asegurarCuentaEnMovimientos`): pone la cuenta predeterminada a un movimiento nuevo; la llama `persist` en `js/core/store.js:1904`.
+- `core/calc.js:253` (`asegurarCuentaEnMovimientos`): pone la cuenta predeterminada a un movimiento nuevo; la llama `persist` en `js/core/store.js:2045`.
 - `modules/cotizaciones.js:3037` (`aplicarAMovimiento`): actualiza el movimiento de una compra; solo corre dentro de `sincronizarComprasFinanzasDe`, cuya llamada deshace todo si toca un mes cerrado.
 - `modules/pendientes.js:946-947`: el ingreso de la deuda (candado condicional, `:921-923`).
 - `modules/finanzas.js:930` y `modules/pedidos.js:2592`: quitan la marca de conciliado al editar (lo que se compara contra el extracto cambió).

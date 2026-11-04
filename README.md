@@ -33,11 +33,11 @@ y el [MAPA-DEL-CODIGO.md](docs/MAPA-DEL-CODIGO.md) generado. Si cambias código,
 
 ## Pruebas automáticas
 
-Hay siete pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+Hay ocho pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
 `test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
 conciliación), `test/salud.mjs` («Salud de los datos»), `test/bitacora.mjs`
 (bitácora de cambios y cierre de mes), `test/guardado.mjs` (la cola de guardado y
-sus reintentos) y `test/arquitectura.mjs` (reglas de
+sus reintentos), `test/pestanas.mjs` (una pestaña propia que aparece vacía) y `test/arquitectura.mjs` (reglas de
 arquitectura y documentos de `docs/` al día; no necesita jsdom). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
@@ -292,6 +292,27 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — noviembre 2026 (centésima decimoctava ronda: una pestaña vacía ya no se rellena con datos viejos)
+
+- **Segundo paquete del plan de corrección** ([docs/PLAN-DE-CORRECCION.md](docs/PLAN-DE-CORRECCION.md)):
+  arregla el riesgo **#67-1**, el más grave que dependía solo del código. Los movimientos,
+  contactos, cotizaciones y cierres viven cada uno en su propia pestaña de la hoja de Google;
+  «kv» todavía guardaba la foto que tenían el día que migraron. Si una de esas pestañas llegaba
+  vacía (alguien la vació, o un guardado falló justo a la mitad), la app la **volvía a llenar sola
+  con esa foto de hace meses**, sin avisar.
+- **Ahora la app distingue la primera migración de una pestaña vaciada.** Anota una marca «ya
+  migrado» (una fila más de «kv») la primera vez que ve la pestaña con datos, y además mira la
+  copia que este computador guardó. Si la pestaña aparece vacía habiendo tenido datos, **no la
+  rellena, no toca nada** y muestra una **barra roja** que dice qué pestaña está vacía y que
+  restaure el respaldo del día si no la vació él. Si la vació a propósito, el botón **«Está bien
+  así»** quita la barra en ese computador.
+- **Importante al publicar:** la marca se escribe en la primera carga normal después de publicar.
+  Conviene abrir la app como administrador apenas se publique.
+- Pruebas nuevas: `node test/pestanas.mjs` (64 comprobaciones, sin jsdom; antes del arreglo 22 de
+  ellas fallaban) y la barra en `test/smoke.mjs`. `test/smoke.mjs` no se corrió en este equipo
+  (necesita jsdom); la CI lo corre.
+- Ver CONTABILIDAD.md, Hallazgo #69.
 
 ## Registro de cambios — noviembre 2026 (centésima decimoséptima ronda: la cola de guardado, dos riesgos del mapa arreglados)
 
@@ -5071,6 +5092,7 @@ test/
   cuentas.mjs          cuentas, transferencias y conciliación (Node solo, sin jsdom)
   salud.mjs            «Salud de los datos» y lo corregido al cargar (Node solo, sin jsdom)
   guardado.mjs         la cola de guardado: marca en disco y reintentos (Node solo, sin jsdom)
+  pestanas.mjs         pestañas propias que aparecen vacías y la marca «ya migrado» (Node solo, sin jsdom)
 ```
 
 ## Cómo trabajar sobre un área sin romper las demás

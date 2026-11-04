@@ -90,6 +90,114 @@ var revConocida = {}; // { [clave]: revisión de esta clave que esta pestaña sa
 
 function claveRev(key) { return "__rev__:" + key; }
 
+// ---------- pestaña propia vacía: que no se rellene con una copia vieja ----------
+// (Hallazgo #69, riesgo #67-1 del mapa técnico.)
+//
+// EL PROBLEMA: tx, clientes y cotizaciones viven en su propia pestaña (ver
+// TABLAS_SHEET), pero "kv" todavía guarda el blob que tenían el día que
+// migraron — CONGELADO desde entonces (persist() ya no le escribe). Al cargar,
+// si la pestaña propia venía con 0 filas y ese blob traía datos, loadAll() lo
+// tomaba por "primera migración" y lo copiaba a la pestaña: la hoja pasaba a
+// mostrar la foto de hace meses, sin ningún aviso. Una pestaña con 0 filas
+// puede ser legítima (primera migración) o un desastre (alguien la vació, o
+// "borrar y escribir" falló entre sus dos pasos — escenario 1 de
+// docs/ESCENARIOS-DE-FALLA.md); nada las distinguía.
+//
+// LA SOLUCIÓN: una marca «ya migrado» por clave, guardada como una fila más de
+// "kv" ("__migrado__:<clave>"), que se escribe la primera vez que la pestaña
+// propia se ve con datos. Con la marca, una pestaña vacía NUNCA se vuelve a
+// sembrar desde el blob congelado: se muestra un aviso rojo y no se toca nada.
+//
+// Esta función solo DECIDE (no lee ni escribe nada), para poder probarla sola.
+//   items  — lo que se leyó de la pestaña propia
+//   blob   — lo que trajo "kv" para esa clave (o la copia local si "kv" falló)
+//   marca  — ¿ya existe la marca «ya migrado»?
+//   espejo — el texto JSON del espejo local de ESTA clave (o null)
+//   acuse  — ¿el usuario ya dijo «está bien así» para esta clave en este equipo?
+// Devuelve { accion, marcar }:
+//   "usar"             la pestaña manda tal cual (aunque esté vacía)
+//   "sembrar"          primera migración de verdad: copiar el blob a la pestaña
+//   "vacia-sospechosa" la pestaña está vacía pero antes tuvo datos: NO sembrar,
+//                      NO tocar el espejo, y avisar
+//   marcar — si hay que escribir la marca «ya migrado» (best effort)
+export function decidirLecturaTabla(o) {
+  var items = Array.isArray(o.items) ? o.items : [];
+  if (items.length) return { accion: "usar", marcar: !o.marca };
+
+  var blobConDatos = Array.isArray(o.blob) && o.blob.length > 0;
+  var espejoLista = null; // null = no hay espejo (o no se puede leer)
+  if (o.espejo != null) {
+    var p = safeParse(o.espejo, undefined);
+    if (Array.isArray(p)) espejoLista = p;
+  }
+  var espejoConDatos = !!(espejoLista && espejoLista.length);
+
+  // Nunca se vio con datos (ni la marca, ni una copia local con datos): es la
+  // primera migración de verdad, o una instalación sin nada que migrar.
+  if (!o.marca && !espejoConDatos) {
+    return blobConDatos ? { accion: "sembrar", marcar: true } : { accion: "usar", marcar: false };
+  }
+
+  // Ya estuvo migrada (marca) o este equipo la vio con datos (espejo). ¿Hay
+  // evidencia de que tenía datos? El espejo de este equipo manda si existe
+  // (es lo último que ESTE equipo vio o guardó: si dice vacía, la vació él);
+  // si no hay espejo, la evidencia es el blob congelado.
+  var habiaDatos = espejoLista ? espejoConDatos : blobConDatos;
+  if (!habiaDatos || o.acuse) return { accion: "usar", marcar: false };
+  return { accion: "vacia-sospechosa", marcar: false };
+}
+
+function claveMigrado(key) { return "__migrado__:" + key; }
+
+// ¿Ya existe la marca? Si no se puede leer, se supone que SÍ: es el lado
+// seguro (nunca sembrar desde el blob congelado ante la duda).
+async function leerMarcaMigrado(key) {
+  try {
+    var r = await window.storage.get(claveMigrado(key), false);
+    return !!(r && r.value);
+  } catch (e) { return true; }
+}
+
+// Best effort: si falla, no pasa nada grave — se vuelve a intentar en la
+// próxima carga en la que la pestaña se vea con datos.
+async function escribirMarcaMigrado(key) {
+  try { await window.storage.set(claveMigrado(key), new Date().toISOString(), false); }
+  catch (e) { console.warn("No se pudo anotar que " + key + " ya migró a su pestaña propia", e); }
+}
+
+// El «está bien así»: por clave y por equipo (no viaja a la hoja), en
+// localStorage. Se borra solo cuando la pestaña vuelve a verse con datos, para
+// que una próxima vez que se vacíe sí avise.
+var ACUSE_VACIA_KEY = "taller_tabla_vacia_ok_v1";
+function leerAcusesVacia() {
+  try { var o = JSON.parse(window.localStorage.getItem(ACUSE_VACIA_KEY) || "{}"); return o && typeof o === "object" ? o : {}; }
+  catch (e) { return {}; }
+}
+function guardarAcusesVacia(o) {
+  try {
+    if (Object.keys(o).length) window.localStorage.setItem(ACUSE_VACIA_KEY, JSON.stringify(o));
+    else window.localStorage.removeItem(ACUSE_VACIA_KEY);
+  } catch (e) { /* sin almacenamiento: el aviso vuelve a salir, que es lo seguro */ }
+}
+function tablaVaciaAcusada(key) { return !!leerAcusesVacia()[key]; }
+function limpiarAcuseTablaVacia(key) {
+  var o = leerAcusesVacia();
+  if (o[key]) { delete o[key]; guardarAcusesVacia(o); }
+}
+
+// El usuario dice «está bien así, la vacié yo» sobre el aviso rojo de una
+// pestaña vacía (ver state.avisoTablaVacia y renderAvisoTablaVacia en dom.js).
+// No escribe nada en la hoja ni toca ningún dato.
+export function reconocerTablasVacias() {
+  var aviso = state.avisoTablaVacia;
+  if (!aviso) return;
+  var o = leerAcusesVacia();
+  aviso.claves.forEach(function (k) { o[k] = true; });
+  guardarAcusesVacia(o);
+  state.avisoTablaVacia = null;
+  notify();
+}
+
 // Fija la revisión conocida de una clave a lo que HAY DE VERDAD en la hoja
 // ahora mismo (se llama tras una carga o relectura exitosa de esa clave, para
 // que el chequeo de conflicto compare contra un punto de partida real, no
@@ -202,6 +310,13 @@ export const state = {
   // `toast`, esto no se debe poder ignorar por accidente. null el resto
   // del tiempo — ver renderAvisoTablaSheetFallo en core/dom.js.
   avisoTablaSheetFallo: null,
+  // { claves: [...] } si la pestaña propia de tx/clientes/cotizaciones/cierres
+  // se leyó bien pero apareció VACÍA y antes tenía datos (ver
+  // decidirLecturaTabla): no se rellenó con la copia vieja de "kv" y no se tocó
+  // nada. Se recalcula en cada carga; se quita con reconocerTablasVacias()
+  // (el «está bien así» del usuario). Hallazgo #69 — ver renderAvisoTablaVacia
+  // en core/dom.js.
+  avisoTablaVacia: null,
   // Panel de la campanita desplegado o no — estado de UI, nunca se persiste.
   notificacionesAbiertas: false,
   // Panel con la lista de atajos de teclado (tecla "?" o el botón del teclado
@@ -1206,19 +1321,43 @@ export async function loadAll() {
     // antes de la migración a pestaña propia) sin ningún aviso visible.
     // Auditoría financiera 2026-09-20.
     var tablaFallo = {};
+    // Claves cuya pestaña propia se leyó bien pero apareció vacía habiendo
+    // tenido datos (ver decidirLecturaTabla): NO se rellenan con el blob
+    // congelado de "kv". Hallazgo #69.
+    var tablasVacias = [];
+    state.avisoTablaVacia = null;
     await Promise.allSettled(Object.keys(TABLAS_SHEET).map(function (key) {
-      return TABLAS_SHEET[key].leer().then(function (items) {
-        if (items.length === 0 && state[key] && state[key].length) {
-          // Pestaña nueva vacía pero "kv" ya tenía datos: primera vez que se
-          // activa esta migración para esta clave — se copian una sola vez
-          // (sin borrar el blob de "kv", que queda como respaldo).
-          return TABLAS_SHEET[key].escribir(state[key]).then(function () { tablaOk[key] = true; });
+      return TABLAS_SHEET[key].leer().then(async function (items) {
+        var marca = await leerMarcaMigrado(key);
+        var decision = decidirLecturaTabla({
+          items: items, blob: state[key], marca: marca,
+          espejo: leerEspejo(key), acuse: tablaVaciaAcusada(key)
+        });
+        if (decision.accion === "sembrar") {
+          // Pestaña nueva vacía pero "kv" ya tenía datos y nunca se vio con
+          // datos: primera vez que se activa esta migración para esta clave —
+          // se copian una sola vez (sin borrar el blob de "kv", que queda como
+          // respaldo).
+          await TABLAS_SHEET[key].escribir(state[key]);
+          tablaOk[key] = true;
+        } else if (decision.accion === "vacia-sospechosa") {
+          // Vacía, pero ya había migrado y tenía datos: lo que había en "kv"
+          // es una foto de hace meses, NO se vuelve a copiar a la pestaña. Lo
+          // que se muestra es lo que la hoja dice (vacío), no esa foto. Tampoco
+          // se pisa el espejo local: puede ser la única copia buena.
+          state[key] = items;
+          tablaOk[key] = true;
+          tablasVacias.push(key);
+          console.error("La pestaña de " + key + " apareció vacía habiendo tenido datos — no se rellenó con la copia vieja de 'kv'");
+        } else {
+          state[key] = items;
+          // Copia local, igual que con las claves de "kv" arriba — esta es la
+          // que se usa si el próximo intento de leer esta pestaña falla.
+          espejar(key, JSON.stringify(items));
+          tablaOk[key] = true;
+          if (items.length) limpiarAcuseTablaVacia(key);
         }
-        state[key] = items;
-        // Copia local, igual que con las claves de "kv" arriba — esta es la
-        // que se usa si el próximo intento de leer esta pestaña falla.
-        espejar(key, JSON.stringify(items));
-        tablaOk[key] = true;
+        if (decision.marcar) await escribirMarcaMigrado(key);
       }).catch(function (e) {
         var detalle = e && e.message ? e.message : String(e);
         console.error("No se pudo leer la hoja estructurada de " + key + " — se intenta con la última copia local", e);
@@ -1249,6 +1388,8 @@ export async function loadAll() {
     // columna se llena en la Sheet con el próximo guardado normal de "tx".
     state.tx = migrarCuentasMovimientos(state.tx).tx;
     state.txPapelera = migrarCuentasMovimientos(state.txPapelera).tx;
+
+    if (tablasVacias.length) state.avisoTablaVacia = { claves: tablasVacias };
 
     if (Object.keys(tablaFallo).length) {
       state.avisoTablaSheetFallo = {

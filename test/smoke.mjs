@@ -2095,6 +2095,23 @@ state.avisoTablaSheetFallo = null;
 render();
 assert(document.body.textContent.indexOf("Google Sheets API 500: fallo simulado") === -1, "quitar avisoTablaSheetFallo hace desaparecer la barra en el siguiente render");
 
+// Hallazgo #69 (riesgo #67-1): una pestaña propia que apareció VACÍA habiendo
+// tenido datos ya no se rellena sola con la copia vieja de "kv"; se avisa con
+// una barra fija y un «Está bien así». (La lógica de decidir está probada sin
+// jsdom en test/pestanas.mjs; acá solo se ve la barra y el botón.)
+state.avisoTablaVacia = { claves: ["clientes"] };
+render();
+var avisosVacia = Array.from(document.querySelectorAll(".aviso-barra.malo")).filter(function (el) { return el.textContent.indexOf("apareció vacía") !== -1; });
+assert(avisosVacia.length === 1, "con avisoTablaVacia puesto, aparece la barra fija de «pestaña vacía»");
+assert(avisosVacia[0].textContent.indexOf("contactos") !== -1, "...nombra el área legible (ETIQUETA_CLAVE), no la clave interna \"clientes\"");
+assert(!!avisosVacia[0].querySelector('[data-action="confirmar-tabla-vacia"]'), "...con el botón «Está bien así»");
+click('[data-action="confirmar-tabla-vacia"]');
+assert(state.avisoTablaVacia === null, "pulsar «Está bien así» quita el aviso");
+assert(String(window.localStorage.getItem("taller_tabla_vacia_ok_v1") || "").indexOf("clientes") !== -1, "...y lo anota en este navegador (no en la hoja) para no volver a avisar de lo mismo");
+window.localStorage.removeItem("taller_tabla_vacia_ok_v1"); // limpio para no interferir con lo que sigue
+render();
+assert(document.body.textContent.indexOf("apareció vacía") === -1, "y la barra desaparece en el siguiente render");
+
 // ---------------------------------------------------------------------------
 // Servicios que se le cobran aparte al cliente (el diseño). Lo que se prueba
 // no es que cada cálculo funcione por separado, sino que los MISMOS números

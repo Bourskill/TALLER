@@ -2,7 +2,7 @@
 
 **Para qué sirve:** es la hoja de ruta para corregir en el código los riesgos del Hallazgo #67 (`CONTABILIDAD.md`). Cada riesgo se identifica como **#67-N**; sus escenarios están en [`ESCENARIOS-DE-FALLA.md`](ESCENARIOS-DE-FALLA.md). Está escrito para que una sesión de trabajo pueda tomar **un paquete** y hacerlo de principio a fin sin volver a preguntar lo que ya se decidió.
 
-**Estado (2026-11-04):** arreglados **#67-5 y #67-10** (paquete 1, Hallazgo #68). Los otros 9 siguen abiertos. Cada paquete que se hace se marca aquí como **HECHO** con su Hallazgo.
+**Estado (2026-11-04):** arreglados **#67-5 y #67-10** (paquete 1, Hallazgo #68) y **#67-1** (paquete 2, Hallazgo #69). Los otros 8 siguen abiertos. Cada paquete que se hace se marca aquí como **HECHO** con su Hallazgo.
 
 **Cómo se verificó antes de escribirlo (2026-11-04):** cada riesgo se volvió a comprobar leyendo el código citado; los 11 son reales. Se corrigieron tres imprecisiones del texto del #67 (una prueba mal descrita, los borradores en la nube que se *vacían* y no se borran, y el conteo de entradas de la lista base). Las citas con número de línea de los otros documentos se mueven; **este plan cita funciones por nombre**, que no se mueven.
 
@@ -20,7 +20,7 @@
 | # | Paquete | Riesgos | Tamaño | Decide el dueño | Orden |
 |---|---|---|---|---|---|
 | 1 | Que no se pierda la marca de «guardando» y que dos escrituras no se pisen | #67-5, #67-10 | **S** | no | ✅ **HECHO** (Hallazgo #68) |
-| 2 | Que una pestaña vacía no se vuelva a llenar con datos viejos | #67-1 | **M** | sí (qué mostrar) | 2.º |
+| 2 | Que una pestaña vacía no se vuelva a llenar con datos viejos | #67-1 | **M** | sí (qué mostrar) | ✅ **HECHO** (Hallazgo #69) |
 | 3 | Vigilar el tamaño de lo que se guarda en la hoja | #67-2 (paso 1) | **S–M** | sí (el umbral) | 3.º |
 | 4 | Validar lo que entra: propuestas, fechas, consignación | #67-6, #67-7, #67-8 | **S** (cada uno) | sí (#67-7) | 4.º |
 | 5 | Una sola fórmula de la comisión | #67-9 | **S** | no | 5.º |
@@ -55,9 +55,11 @@
 ---
 
 ## Paquete 2 — Que una pestaña vacía no se vuelva a llenar con datos viejos
+**✅ HECHO (2026-11-04, Hallazgo #69).** Cómo quedó, con las decisiones que se tomaron al implementarlo: (1) la marca `__migrado__:<clave>` en `kv` se escribe la primera vez que la pestaña se ve con datos (también para `cierres`); (2) una función pura, `decidirLecturaTabla`, decide entre «usar», «sembrar» y «vacía sospechosa»; (3) se agregó una segunda señal que el plan no tenía: **la copia local de este computador** — si ella vio la pestaña con datos, tampoco se siembra aunque aún no haya marca (cubre las pestañas que se vaciaron antes de publicar este arreglo) y, si ella dice «vacía», se entiende que la vació este computador y no se avisa; (4) el aviso rojo (`state.avisoTablaVacia`) lleva un botón **«Está bien así»** (por computador, en `localStorage`) para el caso de que se vacíe a propósito, porque sin él el aviso no se podría quitar; (5) **no se bloquea guardar** mientras el aviso esté puesto, y **no se tocó el Salud de los datos** (queda como mejora). Se aplicó la opción (a) de la decisión del dueño: avisar y no tocar nada, no restaurar solo. Pruebas: `test/pestanas.mjs` (64) y la barra en `test/smoke.mjs`. Lo que sigue aquí abajo es el plan original, tal como se escribió.
+
 **Riesgo:** #67-1 (**alta**). **Archivos:** `js/core/store.js` (`loadAll`), quizá `js/core/sheetsStorage.js`. **Tamaño:** M.
 
-**Qué pasa hoy:** al cargar, si `Movimientos`, `Clientes` o `Cotizaciones` vienen con **0 filas** y la pestaña `kv` aún trae el texto de esa clave, `loadAll` lo toma por «primera migración» y lo copia a la pestaña. Ese texto de `kv` **quedó congelado el día que la clave migró**: la hoja pasa a mostrar una foto de hace meses. Puede ocurrir si «borrar y escribir» falla entre sus dos pasos (escenario 1) o si alguien vacía la pestaña. Nada distingue «pestaña nueva que hay que migrar» de «pestaña que se vació».
+**Qué pasaba:** al cargar, si `Movimientos`, `Clientes` o `Cotizaciones` vienen con **0 filas** y la pestaña `kv` aún trae el texto de esa clave, `loadAll` lo toma por «primera migración» y lo copia a la pestaña. Ese texto de `kv` **quedó congelado el día que la clave migró**: la hoja pasa a mostrar una foto de hace meses. Puede ocurrir si «borrar y escribir» falla entre sus dos pasos (escenario 1) o si alguien vacía la pestaña. Nada distingue «pestaña nueva que hay que migrar» de «pestaña que se vació».
 
 **Qué hacer**
 1. Una **marca «ya migrado»** por clave, guardada en `kv` (por ejemplo `__migrado__:tx`), que se escribe la primera vez que la pestaña propia se lee **con datos** (o cuando se completa la siembra inicial).

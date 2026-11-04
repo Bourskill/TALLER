@@ -12,7 +12,7 @@ fecha de abajo (es el único sitio que envejece).
 > `test/arquitectura.mjs`. No cambia la app.
 > **Al integrar cualquier rama que toque `js/`, corre `npm run mapa` y sube los documentos**: la CI
 > falla si quedaron viejos. Los 11 riesgos que encontró están en la sección C2 (el #67-5 y el
-> #67-10 ya están arreglados: Hallazgo #68).
+> #67-10 ya están arreglados: Hallazgo #68; el #67-1: Hallazgo #69).
 
 ---
 
@@ -23,8 +23,8 @@ no le cause más, que sea rigurosa con el dinero y que **todo lo que se vea sea
 verdad, para que cuadre al peso con sus cuentas bancarias**. Todo lo de abajo
 nació de un análisis de Finanzas pedido por él (2026-10-29).
 
-Todo lo de la tabla hasta el #67 está integrado en `main` y publicado en GitHub; el #68 está en su
-rama hasta que se integre. La CI corre los 7 archivos de prueba (`smoke.mjs` incluido). No hay ningún PR en curso.
+Todo lo de la tabla hasta el #68 está integrado en `main` y publicado en GitHub; el #69 está en su
+rama (`marca-ya-migrado`) hasta que se integre. La CI corre los 8 archivos de prueba (`smoke.mjs` incluido). No hay ningún PR en curso.
 
 | Hallazgo | Qué es | Dónde se ve en la app | Prueba |
 |---|---|---|---|
@@ -36,11 +36,12 @@ rama hasta que se integre. La CI corre los 7 archivos de prueba (`smoke.mjs` inc
 | **#66** | «Salud de los datos» revisa 8 cosas más (21 en total): nómina del periodo, deudas (`cuotasPagadas` contra sus movimientos), compras «Sí», estimado + compras reales, consignación, total del pedido contra su cotización, papelera, comisión pagada contra la fórmula de hoy; y la fecha de cada abono. | El mismo panel; botones «↗» nuevos a Deuda, Nómina y Papelera | `test/salud.mjs` |
 | **#67** | **Mapa técnico** del código y del dinero, 23 escenarios de falla, 9 reglas de arquitectura que vigila la CI y **11 riesgos encontrados**. No cambia la app. | Carpeta `docs/` (empieza por `docs/ARQUITECTURA.md`); se regenera con `npm run mapa` | `test/arquitectura.mjs` |
 | **#68** | **Cola de guardado** (paquete 1 del plan de corrección): arregla **#67-5** (la marca «pendiente» de disco ya no se borra con un cambio esperando) y **#67-10** (el reintento ya no escribe a la vez que otro guardado de la misma clave). | Invisible cuando todo va bien | `test/guardado.mjs` |
+| **#69** | **Pestaña propia vacía** (paquete 2): arregla **#67-1**. Una pestaña de movimientos, contactos, cotizaciones o cierres que aparece vacía habiendo tenido datos ya NO se rellena con la foto vieja de «kv»; marca «ya migrado» + copia local + barra roja con botón «Está bien así». | Barra roja arriba solo si pasa | `test/pestanas.mjs` (+ la barra en `test/smoke.mjs`) |
 
-Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#68) y
-el registro de cambios de **`README.md`** (rondas 109–117). **Plan para arreglar los 11
-riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md)** (9 paquetes; el 1 ya
-está hecho).
+Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#69) y
+el registro de cambios de **`README.md`** (rondas 109–118). **Plan para arreglar los 11
+riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md)** (9 paquetes; el 1 y
+el 2 ya están hechos).
 
 ### Decisiones del dueño que NO hay que volver a preguntar
 - Descuento: lo puede dar **cualquiera** (admin o vendedor); el cliente lo **ve** en
@@ -126,8 +127,10 @@ claude/elastic-leavitt-ae29c7 `851e4de`).
 El mapa **no arregló nada**: documentó 11 riesgos con su gravedad (`CONTABILIDAD.md`, #67, tabla
 «Los riesgos que encontró el mapa»; dónde se defiende cada uno: `docs/ESCENARIOS-DE-FALLA.md`).
 Orden sugerido (de mayor a menor daño posible, y de más barato a más caro):
-1. **#67-1 (alta)** — que una pestaña vacía NO se vuelva a llenar con la copia congelada de `kv`
-   (`js/core/store.js:1209`). Marca «ya migrado» + error visible + prueba nueva.
+1. ~~**#67-1 (alta)** — que una pestaña vacía NO se vuelva a llenar con la copia congelada de `kv`~~ —
+   **HECHO** (Hallazgo #69: marca «ya migrado» + barra roja + «Está bien así», `js/core/store.js`
+   `decidirLecturaTabla`, `test/pestanas.mjs`). **Al publicarlo, abrir la app como admin** para que
+   se escriban las marcas.
 2. **#67-2 (alta)** — medir el tamaño de cada clave de `kv` al guardar y avisar al 70 % del
    límite de 50.000 caracteres; después mover `pedidos` y `txPapelera` a pestaña propia.
 3. ~~**#67-5** (marca «pendiente» de disco)~~ y ~~**#67-10** (reintento en paralelo)~~ — **HECHOS**
@@ -161,9 +164,9 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 
 - **Antes de tocar dinero, lee `CONTABILIDAD.md`** (principios y reglas por área). Todo
   cambio financiero se documenta ahí como un **Hallazgo nuevo (el siguiente libre es
-  el #69)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 118**).
+  el #70)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 119**).
   (Ya usados: #66 y ronda 115 = salud de los datos ampliada; #67 y ronda 116 = mapa técnico;
-  #68 y ronda 117 = cola de guardado.)
+  #68 y ronda 117 = cola de guardado; #69 y ronda 118 = pestaña propia vacía.)
 - **Pregunta al dueño ANTES de escribir código** cuando haya decisiones de negocio:
   él lo pidió así desde el principio. Habla español, no es técnico: explica en
   palabras simples, con ejemplos en pesos.

@@ -10,7 +10,7 @@
 // si también debe verla un vendedor), y darle un ícono en core/icons.js.
 // Nada más necesita cambiar.
 
-import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, ETIQUETA_CLAVE } from "./store.js";
+import { state, persist, notify, recuperarDelEspejo, descartarRecuperacion, revisarBorradoresSinGuardar, reconocerTablasVacias, ETIQUETA_CLAVE } from "./store.js";
 import { esc, esUrlImagen } from "./utils.js";
 import { calcNotificaciones } from "./calc.js";
 import { calcResumenSalud } from "./salud.js";
@@ -431,6 +431,11 @@ var coreActions = {
   "recargar-pagina": function () {
     window.location.reload();
   },
+  // «Está bien así» sobre el aviso de una pestaña vacía (Hallazgo #69): solo
+  // anota en este navegador que ya se vio; no escribe nada en la hoja.
+  "confirmar-tabla-vacia": function () {
+    reconocerTablasVacias();
+  },
   "renovar-sesion": function () {
     renovarSesionAhora().catch(function () {
       window.alert("No se pudo renovar la sesión sola.\n\nGuarda lo que puedas y recarga la página para iniciar sesión de nuevo — no vas a perder tu trabajo: se te va a ofrecer recuperarlo al volver a entrar.");
@@ -677,6 +682,7 @@ export function render() {
     mainInner += renderAvisoRecuperacion();
     mainInner += renderAvisoSinGuardar();
     mainInner += renderAvisoTablaSheetFallo();
+    mainInner += renderAvisoTablaVacia();
     mainInner += '<div class="tab-panel">' + tabHtml + "</div>";
 
     var html = "" +
@@ -975,6 +981,25 @@ function renderAvisoTablaSheetFallo() {
     '<div class="aviso-barra-sub">Lo que ves de esa área puede ser una copia vieja de este dispositivo, no lo más reciente de la hoja — revisa Caja/Balance con cuidado antes de confiar en ellos. ' +
     (a.detalle ? "(" + esc(a.detalle) + ")" : "") + "</div></div>" +
     '<button class="btn" data-action="recargar-pagina">Recargar ahora</button>' +
+    "</div>";
+}
+
+// Barra fija cuando la pestaña propia de movimientos, contactos, cotizaciones o
+// cierres apareció VACÍA en Google Sheets habiendo tenido datos (ver
+// decidirLecturaTabla en core/store.js, Hallazgo #69). Antes la app la volvía a
+// llenar sola con una copia vieja de "kv" (de hace meses) sin avisar; ahora no
+// la toca y lo dice. No se calla sola: si fue por accidente, lo que se ve de
+// esa área es lo que la hoja tiene AHORA (nada) y Caja/Balance no son de fiar.
+function renderAvisoTablaVacia() {
+  var a = state.avisoTablaVacia;
+  if (!a) return "";
+  var etiquetas = a.claves.map(function (c) { return ETIQUETA_CLAVE[c] || c; }).join(", ");
+  return '<div class="aviso-barra malo">' +
+    '<div><b>En Google Sheets la pestaña de ' + esc(etiquetas) + " apareció vacía.</b>" +
+    '<div class="aviso-barra-sub">Antes tenía datos. La app NO la rellenó con una copia vieja ni tocó nada. ' +
+    "Si no la vaciaste tú, no sigas registrando en esa área: restaura el respaldo del día en la hoja (o pide ayuda) antes de seguir. " +
+    "Si la vaciaste a propósito, pulsa «Está bien así».</div></div>" +
+    '<button class="btn" data-action="confirmar-tabla-vacia">Está bien así</button>' +
     "</div>";
 }
 
