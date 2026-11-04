@@ -107,9 +107,9 @@ Consecuencias que importan para el riesgo:
 | Capa | Archivos | Líneas de JavaScript |
 | --- | --- | --- |
 | `js/app.js` | 1 | 123 |
-| `js/core/` | 28 | 16579 |
+| `js/core/` | 28 | 16610 |
 | `js/modules/` | 16 | 15338 |
-| **Total** | 45 | 32040 |
+| **Total** | 45 | 32071 |
 
 <!-- GENERADO:fin capas -->
 
@@ -121,7 +121,7 @@ La app son tres capas (detalle archivo por archivo en [`MAPA-DEL-CODIGO.md`](MAP
 | Archivo | Responsabilidad | Por qué importa |
 |---|---|---|
 | `store.js` | El `state`, `persist`, la carga (`loadAll`), conflictos entre dispositivos, recuperación | Es la única puerta de salida de los datos (`js/core/store.js:1898`) |
-| `guardado.js` | Espejo local, cola de reintento, aviso al cerrar la pestaña | Lo que evita perder trabajo si falla la red (`js/core/guardado.js:371`) |
+| `guardado.js` | Espejo local, cola de reintento, aviso al cerrar la pestaña | Lo que evita perder trabajo si falla la red (`js/core/guardado.js:382`) |
 | `calc.js` | **Toda** fórmula (caja, IVA, saldos, comisiones, descuentos, cuentas, nómina, deudas) | «Una sola fuente por fórmula»: ninguna pantalla calcula por su cuenta |
 | `sheetsStorage.js`, `sheetsTabular.js`, `sheetsEsquemas.js`, `googleRest.js` | Cómo se lee y se escribe la hoja: pestaña `kv`, pestañas propias, esquemas de columnas | Aquí se decide qué se pierde si algo falla a mitad de camino (§5) |
 | `cierre.js`, `bitacora.js`, `salud.js` | Mes cerrado, historial de cambios y verificación de los datos | Los tres «candados blandos» del dinero (§5.6 a §5.8) |
@@ -169,13 +169,13 @@ Paso a paso, con dónde está cada uno:
 1. **El clic llega a `dispatch`** y se busca la acción por su nombre; **no se comprueba el rol** (`js/core/dom.js:1246-1249`).
 2. **La acción cambia `state` en memoria** y, si toca dinero con fecha, **antes de escribir** llama a `exigirMesAbierto` (`js/core/cierre.js:78`). La regla `R1` vigila que toda acción que escribe movimientos lo haga.
 3. **`persist(clave)`** (`js/core/store.js:1898`): le pone cuenta a los movimientos nuevos (`asegurarCuentaEnMovimientos`, `js/core/calc.js:247`), **anota el cambio en la bitácora** antes de cualquier espera, desvía a «propuesta» si es un vendedor tocando el catálogo, y llama a `guardarClave`.
-4. **`guardarClave`** (`js/core/guardado.js:371`) hace **dos cosas al instante**: copia el JSON en el *espejo local* y marca la clave «en cola» (también en disco). Solo la escritura por red se agrupa: si ya hay una escritura de esa clave en vuelo, los clics siguientes comparten **una sola** ronda posterior.
-5. **`escribirRonda`** (`js/core/guardado.js:323`) llama a `escribirClave` (`js/core/store.js:1887`), que:
+4. **`guardarClave`** (`js/core/guardado.js:382`) hace **dos cosas al instante**: copia el JSON en el *espejo local* y marca la clave «en cola» (también en disco). Solo la escritura por red se agrupa: si ya hay una escritura de esa clave en vuelo, los clics siguientes comparten **una sola** ronda posterior.
+5. **`escribirRonda`** (`js/core/guardado.js:334`) llama a `escribirClave` (`js/core/store.js:1887`), que:
    - **`verificarConflicto`** (`js/core/store.js:108`): relee la «revisión» de esa clave en la hoja y la compara con la que esta pestaña recuerda. Si es distinta, **aborta antes de tocar el dato real**.
    - **Escribe**: si la clave tiene pestaña propia (`tx`, `clientes`, `cotizaciones`, `cierres`; `js/core/store.js:35`), `escribir` **borra todo el rango de datos y lo reescribe completo** (`js/core/sheetsTabular.js:141-151`); si no, `set` reemplaza **una celda** de `kv` (`js/core/sheetsStorage.js:67-79`).
    - **`fijarRevNueva`** (`js/core/store.js:128`): sella una revisión nueva (`uid():hora`) en la fila `__rev__:<clave>` de `kv`.
    - Avisa a las otras pestañas del mismo navegador por `BroadcastChannel` (`js/core/store.js:49-60`, `:1892`).
-6. **Si algo falla**, la clave pasa a «pendiente» (lo que ve el dueño en la barra: chip rojo), se reintenta cada 15 s, al volver la red y al volver a la pestaña (`js/core/guardado.js:306-312`, `:265-303`). **Un conflicto no se reintenta solo**: pide recargar (`js/core/guardado.js:338-344`).
+6. **Si algo falla**, la clave pasa a «pendiente» (lo que ve el dueño en la barra: chip rojo), se reintenta cada 15 s, al volver la red y al volver a la pestaña (`js/core/guardado.js:306-312`, `:265-303`). **Un conflicto no se reintenta solo**: pide recargar (`js/core/guardado.js:349-355`).
 
 **Dos propiedades de diseño que explican casi todo lo demás:**
 - **Cada escritura manda la clave completa**, no un cambio. Reintentar es volver a escribir el estado de AHORA; una sola escritura buena arregla las anteriores que fallaron (`js/core/guardado.js:24-29`).

@@ -2,7 +2,7 @@
 
 **Para qué sirve:** es la hoja de ruta para corregir en el código los riesgos del Hallazgo #67 (`CONTABILIDAD.md`). Cada riesgo se identifica como **#67-N**; sus escenarios están en [`ESCENARIOS-DE-FALLA.md`](ESCENARIOS-DE-FALLA.md). Está escrito para que una sesión de trabajo pueda tomar **un paquete** y hacerlo de principio a fin sin volver a preguntar lo que ya se decidió.
 
-**Estado:** ningún riesgo está arreglado. Este plan **no cambia código**.
+**Estado (2026-11-04):** arreglados **#67-5 y #67-10** (paquete 1, Hallazgo #68). Los otros 9 siguen abiertos. Cada paquete que se hace se marca aquí como **HECHO** con su Hallazgo.
 
 **Cómo se verificó antes de escribirlo (2026-11-04):** cada riesgo se volvió a comprobar leyendo el código citado; los 11 son reales. Se corrigieron tres imprecisiones del texto del #67 (una prueba mal descrita, los borradores en la nube que se *vacían* y no se borran, y el conteo de entradas de la lista base). Las citas con número de línea de los otros documentos se mueven; **este plan cita funciones por nombre**, que no se mueven.
 
@@ -11,7 +11,7 @@
 1. **Rama propia** (`git switch -c <nombre>`), nunca directo en `main`. Un paquete = un commit (o pocos), mensaje en español sin tildes con `(Hallazgo #67-N)` y la línea `Co-Authored-By`.
 2. **Releer el riesgo contra el código de hoy antes de tocar nada** (los números de línea envejecen) y confirmar que sigue siendo cierto.
 3. **Primero la prueba que falla, después el arreglo.** Cada paquete escribe una prueba que reproduce el defecto y comprueba que el arreglo la pone en verde. Sin jsdom, como `test/descuentos.mjs`; si es un archivo nuevo, se agrega a `.github/workflows/test.yml` **y** al script `test` de `package.json` (regla `R6`, la CI la vigila).
-4. **Al terminar:** `npm run mapa` (los documentos generados quedan al día, la CI lo exige); borrar de `docs/reglas-baseline.json` la entrada del riesgo arreglado (si tenía); actualizar el estado del escenario en `ESCENARIOS-DE-FALLA.md` y marcar el riesgo como **ARREGLADO** en la tabla del #67; documentar en `CONTABILIDAD.md` (hallazgo nuevo, el siguiente libre es el #68) y en el registro de cambios del `README.md`.
+4. **Al terminar:** `npm run mapa` (los documentos generados quedan al día, la CI lo exige); borrar de `docs/reglas-baseline.json` la entrada del riesgo arreglado (si tenía); actualizar el estado del escenario en `ESCENARIOS-DE-FALLA.md` y marcar el riesgo como **ARREGLADO** en la tabla del #67; documentar en `CONTABILIDAD.md` (hallazgo nuevo; el siguiente número libre está en `CONTINUIDAD.md`) y en el registro de cambios del `README.md`.
 5. **Antes de publicar** cualquier paquete que toque `js/core/store.js`, `js/core/guardado.js` o `js/core/sheetsTabular.js` (paquetes 1, 2, 3, 6, 7): confirmar que existe el **respaldo del día** (se hace al abrir la app como admin) y publicar en un momento tranquilo. Lo que se prueba con datos de ejemplo **no** se ha probado con la hoja real del dueño.
 6. **Si algo se ve raro después de publicar:** no tocar nada, revertir el commit (`git revert`) y, si hiciera falta, restaurar desde el respaldo.
 
@@ -19,7 +19,7 @@
 
 | # | Paquete | Riesgos | Tamaño | Decide el dueño | Orden |
 |---|---|---|---|---|---|
-| 1 | Que no se pierda la marca de «guardando» y que dos escrituras no se pisen | #67-5, #67-10 | **S** | no | 1.º |
+| 1 | Que no se pierda la marca de «guardando» y que dos escrituras no se pisen | #67-5, #67-10 | **S** | no | ✅ **HECHO** (Hallazgo #68) |
 | 2 | Que una pestaña vacía no se vuelva a llenar con datos viejos | #67-1 | **M** | sí (qué mostrar) | 2.º |
 | 3 | Vigilar el tamaño de lo que se guarda en la hoja | #67-2 (paso 1) | **S–M** | sí (el umbral) | 3.º |
 | 4 | Validar lo que entra: propuestas, fechas, consignación | #67-6, #67-7, #67-8 | **S** (cada uno) | sí (#67-7) | 4.º |
@@ -36,9 +36,11 @@
 ---
 
 ## Paquete 1 — Que no se pierda la marca de «guardando» y que dos escrituras no se pisen
+**✅ HECHO (2026-11-04, Hallazgo #68).** Cómo quedó: `liberarMarcaDeCola` (la marca de disco se borra solo si no hay `proximaRonda`) y `reintentarClave`, que se anota como la ronda en vuelo; `reintentarPendientes` espera la ronda que ya exista para la clave en vez de escribir otra vez. En lugar de una función única `escribirCoalescido`, el reintento comparte con `guardarClave` el mismo registro de rondas (`enVueloClave`/`proximaRonda`): era el cambio más pequeño que cierra el hueco sin alterar lo que devuelve `reintentarPendientes` ni los avisos. Pruebas: `test/guardado.mjs` (47). Lo que sigue aquí abajo es el plan original, tal como se escribió.
+
 **Riesgos:** #67-5 (media) y #67-10 (baja). **Archivo:** `js/core/guardado.js`. **Tamaño:** S.
 
-**Qué pasa hoy**
+**Qué pasaba**
 - **#67-5:** cuando una escritura termina bien, `escribirRonda` borra la marca «esta clave está en cola» del disco aunque ya haya un cambio más nuevo esperando su propia ronda (`proximaRonda`). Si el navegador muere durante esa segunda ronda, al reabrir no se ofrece recuperar y el cambio queda solo en el espejo.
 - **#67-10:** `reintentarPendientes` (el temporizador de 15 s y el evento «volvió la red») lanza su propia escritura sin mirar si ya hay una ronda en vuelo para esa clave (`enVueloClave`), mientras que `guardarClave` sí las agrupa. Dos escrituras completas de la misma pestaña pueden entrelazarse y dejar un falso conflicto.
 

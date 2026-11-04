@@ -2,7 +2,7 @@
 
 **Para qué sirve:** antes de que algo falle de verdad, saber **qué lo causa, qué vería el dueño, qué lo defiende y qué prueba lo cubre**. Si no hay defensa, se dice **SIN DEFENSA** con su severidad.
 
-Cada afirmación cita `archivo:línea`. Los números de línea se verificaron contra el código el día que se escribió este documento; `test/arquitectura.mjs` avisa cuando una cita quedó vieja. Contexto: [`ARQUITECTURA.md`](ARQUITECTURA.md) (cómo viaja un dato) y [`MAPA-DEL-DINERO.md`](MAPA-DEL-DINERO.md). Los riesgos nuevos tienen su Hallazgo (#67) en `CONTABILIDAD.md`; aquí se identifican como **#67-N**.
+Cada afirmación cita `archivo:línea`. Los números de línea se verificaron contra el código el día que se escribió este documento; `test/arquitectura.mjs` avisa cuando una cita quedó vieja. Contexto: [`ARQUITECTURA.md`](ARQUITECTURA.md) (cómo viaja un dato) y [`MAPA-DEL-DINERO.md`](MAPA-DEL-DINERO.md). Los riesgos nuevos tienen su Hallazgo (#67) en `CONTABILIDAD.md`; aquí se identifican como **#67-N**; los que ya se arreglaron dicen en qué Hallazgo (el plan para el resto está en [`PLAN-DE-CORRECCION.md`](PLAN-DE-CORRECCION.md)).
 
 **Cómo leer el estado:**
 - **DEFENDIDO** — hay un mecanismo en el código **y** una prueba automática.
@@ -23,7 +23,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 | 7 | Una pestaña de datos queda vacía o la borran | **SIN DEFENSA** | **alta** (#67-1) |
 | 8 | La hoja se llena (celda de 50.000 caracteres, límite de filas) | **SIN DEFENSA** | **alta** (#67-2) |
 | 9 | Alguien edita la hoja de Google directamente | PARCIAL (detecta, no previene) | media |
-| 10 | El navegador se cierra con un guardado en vuelo | PARCIAL | media (#67-5) |
+| 10 | El navegador se cierra con un guardado en vuelo | DEFENDIDO (#67-5 arreglado en el #68) | — |
 | 11 | Datos viejos con formas antiguas | DEFENDIDO | baja |
 | 12 | Un vendedor intenta tocar un mes cerrado | DEFENDIDO en la app; SIN DEFENSA ante la hoja | media |
 | 13 | Una columna nueva (o una insertada en medio) en una hoja | DEFENDIDO en el código; SIN DEFENSA si se inserta a mano en la hoja | media |
@@ -36,7 +36,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 | 20 | Un recibo de compra descuadra o falla a mitad | DEFENDIDO | — |
 | 21 | Dos pestañas del mismo navegador | SIN PRUEBA | baja |
 | 22 | Un pedido pagado queda con «saldo fantasma» de centavos | DEFENDIDO | — |
-| 23 | Dos escrituras de la misma clave al mismo tiempo | **SIN DEFENSA** | baja (#67-10) |
+| 23 | Dos escrituras de la misma clave al mismo tiempo | DEFENDIDO (#67-10 arreglado en el #68) | — |
 
 ---
 
@@ -45,8 +45,8 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 - **Qué lo causa:** el wifi se cae, o Google no responde, mientras `escribirClave` está escribiendo (`js/core/store.js:1887`).
 - **Qué ve el dueño:** sus datos siguen en pantalla (el estado en memoria ya cambió). La barra muestra el chip rojo «Sin guardar» y el mensaje «Sin conexión — se reintenta solo en cuanto vuelva» (`js/core/guardado.js:125-129`).
 - **Qué lo defiende:**
-  - `espejar` copia el JSON en el navegador **antes** de intentar la red (`js/core/guardado.js:133`, llamada en `:372`).
-  - `escribirRonda` deja la clave «pendiente» si falla y programa el reintento (`js/core/guardado.js:336-350`); se reintenta cada 15 s, al volver la red y al volver a la pestaña (`js/core/guardado.js:306`, `:265-303`). Como cada escritura manda la clave completa, **una sola escritura buena arregla todas las anteriores** (`js/core/guardado.js:24-29`).
+  - `espejar` copia el JSON en el navegador **antes** de intentar la red (`js/core/guardado.js:133`, llamada en `:383`).
+  - `escribirRonda` deja la clave «pendiente» si falla y programa el reintento (`js/core/guardado.js:347-361`); se reintenta cada 15 s, al volver la red y al volver a la pestaña (`js/core/guardado.js:306`, `:265-303`). Como cada escritura manda la clave completa, **una sola escritura buena arregla todas las anteriores** (`js/core/guardado.js:24-29`).
   - Al cerrar la pestaña, `beforeunload` pregunta (`js/core/guardado.js:270-297`).
 - **Qué queda abierto:** en una pestaña propia (Movimientos, Clientes, Cotizaciones, Cierres) guardar es **«borrar todo el rango y escribir de nuevo»** (`js/core/sheetsTabular.js:144-150`). Si el borrado funciona y la escritura falla, **la pestaña queda vacía en la hoja** hasta el siguiente guardado bueno. Mientras tanto la copia local y la cola la reparan; si en ese lapso se abre la app (otro computador, o este tras recargar sin que la cola se haya vaciado), pasa lo del escenario 7.
 - **Prueba:** `test/smoke.mjs:3852-3910` (aviso al cerrar con un guardado en vuelo o fallido), `:3371-3383` (la carga cae al espejo). **No verificado:** ninguna prueba simula un fallo **entre** el borrado y la escritura de una pestaña propia.
@@ -55,7 +55,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** un abono toca `tx` (el movimiento) y `pedidos` (la fila del abono); se guardan con **dos `persist` seguidos, sin transacción** (`js/modules/pedidos.js:2521`). Pasa igual con `cobrar`, `add-reembolso`, comisiones, gastos fijos, deudas, Colchón. El caso máximo es `remove-pedido`: **cuatro** claves (`js/modules/pedidos.js:2706-2708`). `add-pedido` con abono inicial escribe `tx` → `productos` → `pedidos`, en este orden: `js/modules/pedidos.js:1933`, `js/core/stock.js:53` y `js/modules/pedidos.js:1984`.
 - **Qué ve el dueño:** si la segunda escritura falla por red, el chip rojo; la cola la reintenta y normalmente las dos terminan en la hoja. Si falla por **conflicto** (escenario 3) o si la pestaña se cierra antes, la hoja queda con **un lado sin el otro**: el movimiento está en Finanzas pero el pedido no lo tiene (o al revés).
-- **Qué lo defiende:** la cola reintenta cada clave por separado (`js/core/guardado.js:395-425`); el espejo guarda las dos; al recargar, `detectarRecuperacion` ofrece restaurar (`js/core/store.js:1613`); y **«Salud de los datos» lo detecta después**: «Cada abono y reembolso en Finanzas…» (`js/core/salud.js:129`), orígenes que ya no existen (`:234`).
+- **Qué lo defiende:** la cola reintenta cada clave por separado (`js/core/guardado.js:440-457`); el espejo guarda las dos; al recargar, `detectarRecuperacion` ofrece restaurar (`js/core/store.js:1613`); y **«Salud de los datos» lo detecta después**: «Cada abono y reembolso en Finanzas…» (`js/core/salud.js:129`), orígenes que ya no existen (`:234`).
 - **Qué queda abierto:** nada impide el estado a medias ni lo repara solo. Si se vuelve a pulsar el botón antes de enterarse (por ejemplo «pagar comisión»), se crea un **segundo** movimiento: `toggle-comision` decide por el estado del pedido (`js/modules/pedidos.js:2348`) y ese estado no llegó a la hoja.
 - **Prueba:** `test/salud.mjs:239` (la verificación de abonos y movimientos). **SIN PRUEBA** de la falla a mitad de una escritura doble.
 - **Estado:** **PARCIAL — severidad media.** Riesgo **#67-4**.
@@ -63,7 +63,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 ## 3. Dos computadores editan a la vez
 
 - **Qué lo causa:** el mismo taller abierto en dos computadores; ambos guardan la misma clave.
-- **Qué ve el dueño:** el **segundo** en guardar recibe «Alguien más guardó un cambio distinto en <área> mientras tanto — para no perder ni pisar nada, no se sobrescribió» (`js/core/store.js:117`) y un botón **Recargar ahora** (`js/core/dom.js:947`). El chip no insiste solo: un conflicto **no se reintenta** (`js/core/guardado.js:338-344`, `:396`).
+- **Qué ve el dueño:** el **segundo** en guardar recibe «Alguien más guardó un cambio distinto en <área> mientras tanto — para no perder ni pisar nada, no se sobrescribió» (`js/core/store.js:117`) y un botón **Recargar ahora** (`js/core/dom.js:947`). El chip no insiste solo: un conflicto **no se reintenta** (`js/core/guardado.js:349-355`, `:441`).
 - **Qué lo defiende:** `verificarConflicto` relee la revisión de la clave en caliente y compara con la que recuerda (`js/core/store.js:108-121`); si difiere, **aborta antes de tocar el dato**. `fijarRevNueva` sella la revisión tras cada escritura buena (`js/core/store.js:128`). El cambio del segundo sigue en el espejo y se ofrece recuperar al recargar (`js/core/store.js:1613`).
 - **Qué queda abierto:** (a) no es un merge: el segundo debe recargar y **rehacer** su trabajo; (b) hay una ventana angosta entre el chequeo y la escritura (`js/core/store.js:82-88`); (c) con un hecho de dos claves (escenario 2) una puede guardarse y la otra chocar; (d) editar una **celda** de la hoja a mano no cambia la revisión (escenario 9).
 - **Prueba:** `test/smoke.mjs:4257-4300` (el guardado se marca conflicto, no se sobrescribe, no se reintenta solo, y recargar lo resuelve).
@@ -128,10 +128,10 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 - **Qué lo causa:** se cierra la pestaña, se acaba la batería, se cae el navegador mientras una escritura viaja por la red.
 - **Qué ve el dueño:** si fue un cierre normal, el navegador pregunta «¿salir del sitio?» (`js/core/guardado.js:270-297`: avisa con un guardado fallido, una edición sin guardar **o una escritura en vuelo**). Si el cierre fue brusco, al reabrir aparece «cambios sin guardar de la sesión anterior: **Restaurar / Descartar**» (`js/core/store.js:1613`, `:1687`, `:1747`): nunca se restaura sola, porque el espejo es de ESTE navegador y podría pisar algo hecho en otro.
-- **Qué lo defiende:** el espejo (`js/core/guardado.js:133`) y la marca «en cola» que se anota **en disco** al instante (`js/core/guardado.js:215-223`, `:373-374`); los borradores de cotización y de formularios se espejan 1,5 s después de la última tecla (`js/core/guardado.js:164`) y los de cotización también viajan a la nube cada 4 s (`js/core/store.js:1529`).
-- **Qué queda abierto:** al terminar bien una ronda, `escribirRonda` **borra la marca en disco** (`js/core/guardado.js:330`) aunque ya haya un cambio más nuevo esperando su propia ronda (`js/core/guardado.js:376-383`). Si el navegador muere justo durante esa segunda ronda, la sesión siguiente **no sabe que había algo pendiente** y no ofrece recuperar. El cambio queda solo en el espejo.
-- **Prueba:** `test/smoke.mjs:3852-3910` (el aviso), `:3939-4073` (restaurar un espejo y un borrador). **SIN PRUEBA** del caso de la marca borrada.
-- **Estado:** PARCIAL. Riesgo **#67-5**.
+- **Qué lo defiende:** el espejo (`js/core/guardado.js:133`) y la marca «en cola» que se anota **en disco** al instante (`js/core/guardado.js:215-223`, `:384-385`); los borradores de cotización y de formularios se espejan 1,5 s después de la última tecla (`js/core/guardado.js:164`) y los de cotización también viajan a la nube cada 4 s (`js/core/store.js:1529`).
+- **Lo que antes quedaba abierto (arreglado, Hallazgo #68):** al terminar bien una ronda, `escribirRonda` borraba la marca en disco aunque ya hubiera un cambio más nuevo esperando su propia ronda; si el navegador moría durante esa segunda ronda, la sesión siguiente no sabía que había algo pendiente. Ahora la marca se borra solo cuando no queda una ronda agendada (`liberarMarcaDeCola`, `js/core/guardado.js:328`); la ronda agendada la borra cuando ella termina.
+- **Prueba:** `test/smoke.mjs:3852-3910` (el aviso), `:3939-4073` (restaurar un espejo y un borrador) y `test/guardado.mjs` (la marca sigue en disco mientras corre la segunda ronda, también con varios cambios seguidos y con la primera ronda fallando).
+- **Estado:** DEFENDIDO. Riesgo **#67-5**, arreglado en el Hallazgo #68.
 
 ## 11. Datos viejos con formas antiguas
 
@@ -164,7 +164,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 ## 14. Doble clic o acción repetida
 
 - **Qué lo causa:** doble clic en el celular, un clic mientras una lectura de comprobante sigue en curso, una cola de clics seguidos sobre la misma clave.
-- **Qué lo defiende:** un segundo «agregar abono» del mismo pedido se ignora mientras el primero lee su comprobante (`state.abonosProcesando`, `js/modules/pedidos.js:2471`); pagar comisiones, gastos fijos y deudas **pide confirmación** (`js/modules/pedidos.js:2360`, `js/modules/pendientes.js:818`, `:1001`) y las acciones son **bidireccionales** (el mismo botón crea y deshace, sin duplicar: `js/modules/pendientes.js:797-802`); `sincronizarComprasFinanzasDe` es idempotente (adopta el movimiento existente y borra los sobrantes, `js/modules/cotizaciones.js:3146-3157`); y varios clics seguidos sobre la misma clave comparten **una** ronda de red (`js/core/guardado.js:371-389`).
+- **Qué lo defiende:** un segundo «agregar abono» del mismo pedido se ignora mientras el primero lee su comprobante (`state.abonosProcesando`, `js/modules/pedidos.js:2471`); pagar comisiones, gastos fijos y deudas **pide confirmación** (`js/modules/pedidos.js:2360`, `js/modules/pendientes.js:818`, `:1001`) y las acciones son **bidireccionales** (el mismo botón crea y deshace, sin duplicar: `js/modules/pendientes.js:797-802`); `sincronizarComprasFinanzasDe` es idempotente (adopta el movimiento existente y borra los sobrantes, `js/modules/cotizaciones.js:3146-3157`); y varios clics seguidos sobre la misma clave comparten **una** ronda de red (`js/core/guardado.js:382-400`).
 - **Prueba:** `test/smoke.mjs:1617-1628` (el guard de abonos), `:4300-4361` (la coalescencia de rondas).
 - **Estado:** DEFENDIDO.
 
@@ -230,7 +230,8 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 
 ## 23. Dos escrituras de la misma clave al mismo tiempo
 
-- **Qué lo causa:** `reintentarPendientes` (el temporizador de 15 s o el evento de volver la red) lanza su propia escritura de una clave **sin mirar si ya hay una ronda en vuelo** para ella (`js/core/guardado.js:395-418`), mientras que `guardarClave` sí las agrupa (`js/core/guardado.js:371-389`).
-- **Qué pasa:** dos escrituras completas de la misma pestaña pueden entrelazarse (borrar–borrar–escribir–escribir). El resultado final es el mismo estado, pero las dos sellan una revisión y la última en terminar puede dejar a esta pestaña con una revisión distinta de la de la hoja: un **falso conflicto** («Alguien más guardó…») que obliga a recargar.
-- **Prueba:** ninguna.
-- **Estado:** **SIN DEFENSA — baja.** Riesgo **#67-10**.
+- **Qué lo causaba (arreglado, Hallazgo #68):** `reintentarPendientes` (el temporizador de 15 s o el evento de volver la red) lanzaba su propia escritura de una clave **sin mirar si ya había una ronda en vuelo** para ella, y la escritura del reintento tampoco quedaba anotada como «en vuelo», así que un cambio que llegaba mientras tanto lanzaba otra en paralelo.
+- **Qué pasaba:** dos escrituras completas de la misma pestaña podían entrelazarse (borrar–borrar–escribir–escribir). El resultado final era el mismo estado, pero las dos sellaban una revisión y la última en terminar podía dejar a esta pestaña con una revisión distinta de la de la hoja: un **falso conflicto** («Alguien más guardó…») que obligaba a recargar.
+- **Qué lo defiende ahora:** el reintento **espera** la ronda que ya esté en vuelo o agendada para esa clave (`reintentarPendientes`, `js/core/guardado.js:440`), y cuando no la hay escribe con `reintentarClave` (`js/core/guardado.js:406`), que se anota como la ronda en vuelo: un cambio que llegue durante el reintento se agenda tras él, igual que en `guardarClave` (`js/core/guardado.js:382`).
+- **Prueba:** `test/guardado.mjs` (el reintento con una ronda en vuelo no lanza otra escritura; un cambio durante el reintento se agenda; nunca hay dos escrituras de la misma clave a la vez; un conflicto sigue sin reintentarse solo).
+- **Estado:** DEFENDIDO. Riesgo **#67-10**, arreglado en el Hallazgo #68.

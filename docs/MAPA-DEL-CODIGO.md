@@ -18,9 +18,9 @@
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
 | app | 1 | 123 | 6 | 0 | 0 | 0 |
-| core | 28 | 16579 | 607 | 368 | 37 | 45 |
+| core | 28 | 16610 | 609 | 368 | 37 | 45 |
 | modules | 16 | 15338 | 347 | 34 | 368 | 167 |
-| **Total** | 45 | 32040 | 960 | 402 | 405 | 212 |
+| **Total** | 45 | 32071 | 962 | 402 | 405 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -961,7 +961,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_guardado_js"></a>
 
-#### `core/guardado.js` — 426 líneas
+#### `core/guardado.js` — 457 líneas
 
 **Para qué sirve:** Red de seguridad del guardado.
 
@@ -987,12 +987,12 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 | `estadoGuardado()` | core/guardado.js:244 | (sin comentario) | — | core/dom.js |
 | `hayPendientes()` | core/guardado.js:255 | (sin comentario) | — | solo este archivo |
 | `configurarGuardado(opts)` | core/guardado.js:261 | (sin comentario) | — | core/store.js |
-| `guardarClave(clave, json)` | core/guardado.js:371 | Intenta escribir una clave, dejándola encolada si falla. `json` es solo para | — | core/store.js |
-| `reintentarPendientes()` | core/guardado.js:395 | Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver | — | core/dom.js |
+| `guardarClave(clave, json)` | core/guardado.js:382 | Intenta escribir una clave, dejándola encolada si falla. `json` es solo para | — | core/store.js |
+| `reintentarPendientes()` | core/guardado.js:440 | Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver | — | core/dom.js |
 
 </details>
 
-<sub>Funciones internas (no exportadas): 10.</sub>
+<sub>Funciones internas (no exportadas): 12.</sub>
 
 <a id="f-core_icons_js"></a>
 

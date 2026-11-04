@@ -318,6 +318,17 @@ function mensajeDeConflicto(e) {
   return (e && e.message) ? e.message : "Alguien más guardó un cambio distinto mientras tanto.";
 }
 
+// Quita la marca «esta clave está en cola» (la que se anota en disco para poder
+// recuperar si la pestaña muere) SOLO si no queda un cambio más nuevo esperando
+// su propia ronda (`proximaRonda`). Esa ronda va a escribir un estado que la
+// ronda que acaba de terminar NO escribió: si la marca se borrara ahora, y el
+// navegador muriera durante esa segunda ronda, al reabrir no se ofrecería
+// recuperar y el cambio quedaría solo en el espejo (Hallazgo #67-5). La ronda
+// agendada la borra cuando ella misma termina (con esta misma función).
+function liberarMarcaDeCola(clave) {
+  if (!proximaRonda[clave]) delete enCola[clave];
+}
+
 // Una ronda de escritura de verdad para `clave` (relee el estado ACTUAL vía
 // `escritor`, no algo capturado antes — igual que ya hacía el reintento).
 async function escribirRonda(clave) {
@@ -327,7 +338,7 @@ async function escribirRonda(clave) {
   // cambio en pantalla. El único aviso sale al final, y solo si algo falló.
   try {
     await escritor(clave);
-    delete enCola[clave];
+    liberarMarcaDeCola(clave);
     delete pendientes[clave];
     delete conflictos[clave];
     anotarEnDisco();
@@ -388,33 +399,53 @@ export function guardarClave(clave, json) {
   return p;
 }
 
+// Una escritura de reintento de `clave`, anotada como LA ronda en vuelo de esa
+// clave (igual que las de guardarClave) para que un cambio que llegue mientras
+// tanto se agende tras ella en vez de lanzar otra escritura completa en
+// paralelo (Hallazgo #67-10).
+function reintentarClave(clave) {
+  var p = Promise.resolve()
+    .then(function () { return escritor(clave); })
+    .then(function () {
+      delete pendientes[clave];
+      liberarMarcaDeCola(clave);
+      delete conflictos[clave];
+      ultimoOkEl = Date.now();
+    })
+    .catch(function (e) {
+      if (e && e.esConflicto) {
+        conflictos[clave] = true;
+        ultimoError = mensajeDeConflicto(e);
+      } else {
+        ultimoError = mensajeDeError(e);
+      }
+    })
+    .finally(function () {
+      enVuelo--;
+      delete enVueloClave[clave];
+    });
+  enVueloClave[clave] = p;
+  return p;
+}
+
 // Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver
 // hayPendientesReintentables) con el estado de ahora. Devuelve cuántas claves
 // quedaron sin guardar al terminar (conflictos incluidos: siguen sin
 // guardarse, solo que no se les vuelve a insistir solas).
+//
+// Si para una clave YA hay una ronda en vuelo (o agendada tras la actual), el
+// reintento NO lanza otra escritura: espera a esa ronda, que va a escribir el
+// estado de ahora de todos modos. Dos escrituras completas de la misma clave a
+// la vez podían entrelazarse y dejar un falso conflicto (Hallazgo #67-10).
 export async function reintentarPendientes() {
   var claves = Object.keys(pendientes).filter(function (c) { return !conflictos[c]; });
   if (!claves.length || !escritor) return Object.keys(pendientes).length;
-  enVuelo += claves.length;
+  var propias = claves.filter(function (c) { return !enVueloClave[c]; });
+  enVuelo += propias.length;
   marcarPosibleLentitud();
   await Promise.all(claves.map(function (clave) {
-    return Promise.resolve()
-      .then(function () { return escritor(clave); })
-      .then(function () {
-        delete pendientes[clave];
-        delete enCola[clave];
-        delete conflictos[clave];
-        ultimoOkEl = Date.now();
-      })
-      .catch(function (e) {
-        if (e && e.esConflicto) {
-          conflictos[clave] = true;
-          ultimoError = mensajeDeConflicto(e);
-        } else {
-          ultimoError = mensajeDeError(e);
-        }
-      })
-      .finally(function () { enVuelo--; });
+    if (enVueloClave[clave]) return proximaRonda[clave] || enVueloClave[clave];
+    return reintentarClave(clave);
   }));
   limpiarLentitudSiTerminó();
   if (!hayPendientes()) ultimoError = "";

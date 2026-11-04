@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node test/smoke.mjs && node test/descuentos.mjs && node test/cuentas.mjs && node test/salud.mjs && node test/bitacora.mjs && node test/arquitectura.mjs",
+    "test": "node test/smoke.mjs && node test/descuentos.mjs && node test/cuentas.mjs && node test/salud.mjs && node test/bitacora.mjs && node test/guardado.mjs && node test/arquitectura.mjs",
     "mapa": "node tools/mapa.mjs"
   },
   "dependencies": {

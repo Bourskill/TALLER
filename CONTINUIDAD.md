@@ -11,7 +11,8 @@ fecha de abajo (es el único sitio que envejece).
 > dinero, escenarios de falla, reglas), la herramienta `tools/mapa.mjs` (`npm run mapa`) y la prueba
 > `test/arquitectura.mjs`. No cambia la app.
 > **Al integrar cualquier rama que toque `js/`, corre `npm run mapa` y sube los documentos**: la CI
-> falla si quedaron viejos. Los 11 riesgos que encontró están en la sección C2.
+> falla si quedaron viejos. Los 11 riesgos que encontró están en la sección C2 (el #67-5 y el
+> #67-10 ya están arreglados: Hallazgo #68).
 
 ---
 
@@ -22,8 +23,8 @@ no le cause más, que sea rigurosa con el dinero y que **todo lo que se vea sea
 verdad, para que cuadre al peso con sus cuentas bancarias**. Todo lo de abajo
 nació de un análisis de Finanzas pedido por él (2026-10-29).
 
-Todo lo de la tabla está integrado en `main` y publicado en GitHub, con la CI corriendo los
-6 archivos de prueba (`smoke.mjs` incluido). No hay ningún PR en curso.
+Todo lo de la tabla hasta el #67 está integrado en `main` y publicado en GitHub; el #68 está en su
+rama hasta que se integre. La CI corre los 7 archivos de prueba (`smoke.mjs` incluido). No hay ningún PR en curso.
 
 | Hallazgo | Qué es | Dónde se ve en la app | Prueba |
 |---|---|---|---|
@@ -33,11 +34,13 @@ Todo lo de la tabla está integrado en `main` y publicado en GitHub, con la CI c
 | **#64** | Panel «Salud de los datos»: verifica y REPORTA (no repara) 13 cosas, y dice lo que la app corrigió sola al cargar. | Arriba de todo en Configuración (solo admin), insignia roja en el menú | `test/salud.mjs` |
 | **#65** | Bitácora de cambios del dinero y cierre de mes. | Finanzas → 📒 Bitácora y 🔒 Cierre de mes (solo admin) | `test/bitacora.mjs` |
 | **#66** | «Salud de los datos» revisa 8 cosas más (21 en total): nómina del periodo, deudas (`cuotasPagadas` contra sus movimientos), compras «Sí», estimado + compras reales, consignación, total del pedido contra su cotización, papelera, comisión pagada contra la fórmula de hoy; y la fecha de cada abono. | El mismo panel; botones «↗» nuevos a Deuda, Nómina y Papelera | `test/salud.mjs` |
-| **#67** | **Mapa técnico** del código y del dinero, 23 escenarios de falla, 9 reglas de arquitectura que vigila la CI y **11 riesgos encontrados** (sin arreglar). No cambia la app. | Carpeta `docs/` (empieza por `docs/ARQUITECTURA.md`); se regenera con `npm run mapa` | `test/arquitectura.mjs` |
+| **#67** | **Mapa técnico** del código y del dinero, 23 escenarios de falla, 9 reglas de arquitectura que vigila la CI y **11 riesgos encontrados**. No cambia la app. | Carpeta `docs/` (empieza por `docs/ARQUITECTURA.md`); se regenera con `npm run mapa` | `test/arquitectura.mjs` |
+| **#68** | **Cola de guardado** (paquete 1 del plan de corrección): arregla **#67-5** (la marca «pendiente» de disco ya no se borra con un cambio esperando) y **#67-10** (el reintento ya no escribe a la vez que otro guardado de la misma clave). | Invisible cuando todo va bien | `test/guardado.mjs` |
 
-Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#67) y
-el registro de cambios de **`README.md`** (rondas 109–116). **Plan para arreglar los 11
-riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md).**
+Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#68) y
+el registro de cambios de **`README.md`** (rondas 109–117). **Plan para arreglar los 11
+riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md)** (9 paquetes; el 1 ya
+está hecho).
 
 ### Decisiones del dueño que NO hay que volver a preguntar
 - Descuento: lo puede dar **cualquiera** (admin o vendedor); el cliente lo **ve** en
@@ -127,12 +130,12 @@ Orden sugerido (de mayor a menor daño posible, y de más barato a más caro):
    (`js/core/store.js:1209`). Marca «ya migrado» + error visible + prueba nueva.
 2. **#67-2 (alta)** — medir el tamaño de cada clave de `kv` al guardar y avisar al 70 % del
    límite de 50.000 caracteres; después mover `pedidos` y `txPapelera` a pestaña propia.
-3. **#67-5 (media, una línea)** — `if (!proximaRonda[clave]) delete enCola[clave]` en
-   `js/core/guardado.js:330`, con prueba.
+3. ~~**#67-5** (marca «pendiente» de disco)~~ y ~~**#67-10** (reintento en paralelo)~~ — **HECHOS**
+   (Hallazgo #68, `js/core/guardado.js`, `test/guardado.mjs`).
 4. **#67-6 (media)** — lista blanca de claves/campos al aprobar una propuesta.
 5. **#67-3 (media)** — al volver la red, releer las claves que vinieron del espejo antes del primer guardado.
-6. **#67-7, #67-8, #67-9, #67-10 (baja/media-baja)** — fecha obligatoria y válida; consignación en pesos
-   enteros; vistas previas con `calcComisionValor`; reintento con la misma coalescencia que `guardarClave`.
+6. **#67-7, #67-8, #67-9 (baja/media-baja)** — fecha obligatoria y válida; consignación en pesos
+   enteros; vistas previas con `calcComisionValor`.
 7. **#67-4 (media, grande)** — escrituras de varias claves sin transacción: empezar por detectar y
    marcar el hecho «a medias». **#67-11** es el punto D de abajo.
 Al arreglar uno: borrar su entrada de `docs/reglas-baseline.json` (si la tiene), correr
@@ -158,8 +161,9 @@ real es a quién se le da acceso de edición a la Google Sheet.**
 
 - **Antes de tocar dinero, lee `CONTABILIDAD.md`** (principios y reglas por área). Todo
   cambio financiero se documenta ahí como un **Hallazgo nuevo (el siguiente libre es
-  el #68)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 117**).
-  (Ya usados: #66 y ronda 115 = salud de los datos ampliada; #67 y ronda 116 = mapa técnico.)
+  el #69)** y en el registro de cambios de `README.md` (**la siguiente ronda es la 118**).
+  (Ya usados: #66 y ronda 115 = salud de los datos ampliada; #67 y ronda 116 = mapa técnico;
+  #68 y ronda 117 = cola de guardado.)
 - **Pregunta al dueño ANTES de escribir código** cuando haya decisiones de negocio:
   él lo pidió así desde el principio. Habla español, no es técnico: explica en
   palabras simples, con ejemplos en pesos.

@@ -33,10 +33,11 @@ y el [MAPA-DEL-CODIGO.md](docs/MAPA-DEL-CODIGO.md) generado. Si cambias código,
 
 ## Pruebas automáticas
 
-Hay seis pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
+Hay siete pruebas: `test/smoke.mjs` (la de humo, usa jsdom),
 `test/descuentos.mjs` (descuentos y pesos enteros), `test/cuentas.mjs` (cuentas y
 conciliación), `test/salud.mjs` («Salud de los datos»), `test/bitacora.mjs`
-(bitácora de cambios y cierre de mes) y `test/arquitectura.mjs` (reglas de
+(bitácora de cambios y cierre de mes), `test/guardado.mjs` (la cola de guardado y
+sus reintentos) y `test/arquitectura.mjs` (reglas de
 arquitectura y documentos de `docs/` al día; no necesita jsdom). **Corren solas en GitHub** (pestaña Actions, workflow
 "Pruebas") en cada push y cada pull request hacia `main`: si alguna falla, el
 commit o el PR queda en rojo. No hace falta instalar nada para eso.
@@ -291,6 +292,25 @@ independientes) sobre la primera versión de este apartado, ya corregidas:**
   Se corrigió distinguiendo `r.status === "rejected"` (fallo real: sí usa el
   espejo) de `r.status === "fulfilled" && r.value === null` (no hay fila, no
   es un error: se deja vacío, no se toca el espejo).
+
+## Registro de cambios — noviembre 2026 (centésima decimoséptima ronda: la cola de guardado, dos riesgos del mapa arreglados)
+
+- **Primer paquete del plan de corrección** ([docs/PLAN-DE-CORRECCION.md](docs/PLAN-DE-CORRECCION.md)):
+  arregla los riesgos **#67-5** y **#67-10** del mapa técnico, los dos en `js/core/guardado.js`.
+  Cuando todo va bien no se nota nada.
+- **La marca «pendiente» ya no se pierde.** Antes, al terminar bien un guardado se borraba de
+  disco la marca «esto está en cola» aunque ya hubiera un cambio más nuevo esperando su turno:
+  si el navegador se caía justo en ese segundo guardado, al volver a abrir no se ofrecía
+  recuperar y el cambio quedaba solo en la copia de ese computador. Ahora la marca se queda
+  hasta que termina el último guardado.
+- **El reintento ya no escribe a la vez que otro guardado de lo mismo.** El reintento automático
+  (cada 15 s, al volver la red o al volver a la pestaña) y el botón «Reintentar» ahora esperan
+  el guardado que ya esté en marcha para esa clave, y un cambio que llegue durante un reintento
+  se pone en fila detrás de él. Evita un falso «Alguien más guardó un cambio distinto» que
+  obligaba a recargar.
+- Prueba nueva: `node test/guardado.mjs` (47 comprobaciones, sin jsdom); ya corre en la CI.
+  `test/smoke.mjs` no se corrió en este equipo (necesita jsdom); la CI lo corre.
+- Ver CONTABILIDAD.md, Hallazgo #68.
 
 ## Registro de cambios — noviembre 2026 (centésima decimosexta ronda: el mapa técnico de la app y las reglas de arquitectura)
 
@@ -5050,6 +5070,7 @@ test/
   descuentos.mjs       descuentos y pesos enteros (Node solo, sin jsdom)
   cuentas.mjs          cuentas, transferencias y conciliación (Node solo, sin jsdom)
   salud.mjs            «Salud de los datos» y lo corregido al cargar (Node solo, sin jsdom)
+  guardado.mjs         la cola de guardado: marca en disco y reintentos (Node solo, sin jsdom)
 ```
 
 ## Cómo trabajar sobre un área sin romper las demás
