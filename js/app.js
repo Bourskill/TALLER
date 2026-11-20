@@ -14,6 +14,7 @@ import { login, loginSilencioso, restaurarSesion } from "./core/auth.js";
 import { sheetsStorage } from "./core/sheetsStorage.js";
 import { esc } from "./core/utils.js";
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID } from "./core/google-config.js";
+import { alinearCopiasConHoja } from "./core/hojaLocal.js";
 
 var app = document.getElementById("app");
 
@@ -43,6 +44,9 @@ function renderAccesoDenegado(email) {
 }
 
 async function entrarConSesion(session) {
+  // Antes de cargar: si este navegador tiene copias locales de OTRA hoja (se
+  // cambió SPREADSHEET_ID), se borran para que no revivan en la nueva.
+  alinearCopiasConHoja(SPREADSHEET_ID);
   window.storage = sheetsStorage;
   var store = await import("./core/store.js");
   var domMod = await import("./core/dom.js");

@@ -106,16 +106,16 @@ Consecuencias que importan para el riesgo:
 
 | Capa | Archivos | Líneas de JavaScript |
 | --- | --- | --- |
-| `js/app.js` | 1 | 123 |
-| `js/core/` | 28 | 16945 |
+| `js/app.js` | 1 | 127 |
+| `js/core/` | 29 | 16991 |
 | `js/modules/` | 16 | 15353 |
-| **Total** | 45 | 32421 |
+| **Total** | 46 | 32471 |
 
 <!-- GENERADO:fin capas -->
 
 La app son tres capas (detalle archivo por archivo en [`MAPA-DEL-CODIGO.md`](MAPA-DEL-CODIGO.md)):
 
-1. **`js/app.js` — el arranque** (`js/app.js:1`). Primero exige login con Google y resuelve el rol; **solo después** carga el resto con `import()` dinámico (`js/app.js:46-48`). Es a propósito: `store.js` decide una sola vez, al cargarse, si hay dónde guardar (`STORAGE_OK`, `js/core/store.js:37`), así que tiene que cargarse después de poner `window.storage`.
+1. **`js/app.js` — el arranque** (`js/app.js:1`). Primero exige login con Google y resuelve el rol; **solo después** carga el resto con `import()` dinámico (`js/app.js:50-52`). Es a propósito: `store.js` decide una sola vez, al cargarse, si hay dónde guardar (`STORAGE_OK`, `js/core/store.js:37`), así que tiene que cargarse después de poner `window.storage`.
 2. **`js/core/` — el núcleo.** Estado, guardado, cálculos, conexión con Google. Los archivos que más importan para el dinero:
 
 | Archivo | Responsabilidad | Por qué importa |
@@ -380,7 +380,7 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 
 ## 7. Roles y permisos
 
-**Quién es la persona.** Inicia sesión con Google; la app busca su correo en la pestaña `roles` (`js/core/auth.js:317-329`): si no está, «Acceso no autorizado» (`js/app.js:37-43`); si dice `admin`, es admin; **cualquier otro valor es vendedor**. La sesión (correo, rol, token) se guarda en `sessionStorage` (`js/core/auth.js:141-149`) y **al recargar se confía en lo guardado ahí sin volver a consultar `roles`** (`js/core/auth.js:155-168`).
+**Quién es la persona.** Inicia sesión con Google; la app busca su correo en la pestaña `roles` (`js/core/auth.js:317-329`): si no está, «Acceso no autorizado» (`js/app.js:38-44`); si dice `admin`, es admin; **cualquier otro valor es vendedor**. La sesión (correo, rol, token) se guarda en `sessionStorage` (`js/core/auth.js:141-149`) y **al recargar se confía en lo guardado ahí sin volver a consultar `roles`** (`js/core/auth.js:155-168`).
 
 **Qué se hace cumplir de verdad y qué es solo de pantalla.** Verificado en el código:
 
@@ -407,8 +407,8 @@ El código mira el rol del usuario en **26 sitios** (`esAdmin()` o `session.rol`
 
 | Dónde | En |
 | --- | --- |
-| app.js:49 | `entrarConSesion` |
-| app.js:56 | `entrarConSesion` |
+| app.js:53 | `entrarConSesion` |
+| app.js:60 | `entrarConSesion` |
 | core/backup.js:89 | `respaldarSiCorresponde` |
 | core/cierre.js:30 | `esAdmin` |
 | core/cierre.js:32 | `esAdmin` |

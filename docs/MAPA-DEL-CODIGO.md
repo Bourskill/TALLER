@@ -17,10 +17,10 @@
 
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
-| app | 1 | 123 | 6 | 0 | 0 | 0 |
-| core | 28 | 16945 | 627 | 372 | 38 | 45 |
+| app | 1 | 127 | 6 | 0 | 0 | 0 |
+| core | 29 | 16991 | 628 | 373 | 38 | 45 |
 | modules | 16 | 15353 | 348 | 34 | 368 | 167 |
-| **Total** | 45 | 32421 | 981 | 406 | 406 | 212 |
+| **Total** | 46 | 32471 | 982 | 407 | 406 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -32,8 +32,8 @@ Una flecha `A → B` quiere decir «A importa algo de B». Línea punteada = imp
 flowchart LR
   app["app.js"]
   mod["modules/ · 16 pantallas"]
-  core["core/ · 28 archivos"]
-  app -.->|"8 imports"| core
+  core["core/ · 29 archivos"]
+  app -.->|"9 imports"| core
   app -.->|"0 imports"| mod
   mod -->|"106 imports"| core
   mod -->|"10 entre pantallas"| mod
@@ -62,6 +62,7 @@ flowchart LR
   core_googleRest_js["googleRest.js"]
   core_graficas_js["graficas.js"]
   core_guardado_js["guardado.js"]
+  core_hojaLocal_js["hojaLocal.js"]
   core_icons_js["icons.js"]
   core_pdf_js["pdf.js"]
   core_salud_js["salud.js"]
@@ -280,11 +281,11 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-app_js"></a>
 
-#### `app.js` — 123 líneas
+#### `app.js` — 127 líneas
 
 **Para qué sirve:** Punto de entrada. A diferencia de antes, ya no carga los datos de una vez: primero exige login con Google y resuelve el rol (ver core/auth.js) contra la pestaña "roles" de la Google Sheet configurada en core/google-config.js.
 
-- **Depende de:** `core/auth.js`, `core/backup.js`, `core/bitacora.js`, `core/dom.js`, `core/google-config.js`, `core/sheetsStorage.js`, `core/store.js`, `core/utils.js`
+- **Depende de:** `core/auth.js`, `core/backup.js`, `core/bitacora.js`, `core/dom.js`, `core/google-config.js`, `core/hojaLocal.js`, `core/sheetsStorage.js`, `core/store.js`, `core/utils.js`
 - **Lo usan:** nadie (se carga directo desde `index.html`)
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
@@ -294,7 +295,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 ### Núcleo (js/core): estado, guardado, cálculos, hojas, PDF
 
-[core/appIcon.js](#f-core_appIcon_js) · [core/auth.js](#f-core_auth_js) · [core/backup.js](#f-core_backup_js) · [core/bitacora.js](#f-core_bitacora_js) · [core/calc.js](#f-core_calc_js) · [core/calendar.js](#f-core_calendar_js) · [core/cierre.js](#f-core_cierre_js) · [core/components.js](#f-core_components_js) · [core/constants.js](#f-core_constants_js) · [core/contacts.js](#f-core_contacts_js) · [core/dom.js](#f-core_dom_js) · [core/drive.js](#f-core_drive_js) · [core/gmail.js](#f-core_gmail_js) · [core/google-config.js](#f-core_google_config_js) · [core/googleRest.js](#f-core_googleRest_js) · [core/graficas.js](#f-core_graficas_js) · [core/guardado.js](#f-core_guardado_js) · [core/icons.js](#f-core_icons_js) · [core/pdf.js](#f-core_pdf_js) · [core/salud.js](#f-core_salud_js) · [core/seed-data.js](#f-core_seed_data_js) · [core/sheetsEsquemas.js](#f-core_sheetsEsquemas_js) · [core/sheetsStorage.js](#f-core_sheetsStorage_js) · [core/sheetsTabular.js](#f-core_sheetsTabular_js) · [core/stock.js](#f-core_stock_js) · [core/store.js](#f-core_store_js) · [core/teclado.js](#f-core_teclado_js) · [core/utils.js](#f-core_utils_js)
+[core/appIcon.js](#f-core_appIcon_js) · [core/auth.js](#f-core_auth_js) · [core/backup.js](#f-core_backup_js) · [core/bitacora.js](#f-core_bitacora_js) · [core/calc.js](#f-core_calc_js) · [core/calendar.js](#f-core_calendar_js) · [core/cierre.js](#f-core_cierre_js) · [core/components.js](#f-core_components_js) · [core/constants.js](#f-core_constants_js) · [core/contacts.js](#f-core_contacts_js) · [core/dom.js](#f-core_dom_js) · [core/drive.js](#f-core_drive_js) · [core/gmail.js](#f-core_gmail_js) · [core/google-config.js](#f-core_google_config_js) · [core/googleRest.js](#f-core_googleRest_js) · [core/graficas.js](#f-core_graficas_js) · [core/guardado.js](#f-core_guardado_js) · [core/hojaLocal.js](#f-core_hojaLocal_js) · [core/icons.js](#f-core_icons_js) · [core/pdf.js](#f-core_pdf_js) · [core/salud.js](#f-core_salud_js) · [core/seed-data.js](#f-core_seed_data_js) · [core/sheetsEsquemas.js](#f-core_sheetsEsquemas_js) · [core/sheetsStorage.js](#f-core_sheetsStorage_js) · [core/sheetsTabular.js](#f-core_sheetsTabular_js) · [core/stock.js](#f-core_stock_js) · [core/store.js](#f-core_store_js) · [core/teclado.js](#f-core_teclado_js) · [core/utils.js](#f-core_utils_js)
 
 <a id="f-core_appIcon_js"></a>
 
@@ -993,6 +994,29 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 </details>
 
 <sub>Funciones internas (no exportadas): 12.</sub>
+
+<a id="f-core_hojaLocal_js"></a>
+
+#### `core/hojaLocal.js` — 46 líneas
+
+**Para qué sirve:** Copias locales atadas a UNA hoja de Google.
+
+- **Depende de:** nada de este proyecto
+- **Lo usan:** `app.js`
+- **Claves de `state` que escribe:** ninguna
+- **Claves de `state` que solo lee:** ninguna
+- **`persist(...)`:** ninguno
+
+<details>
+<summary>Exportado (3)</summary>
+
+| Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
+| --- | --- | --- | --- | --- |
+| `alinearCopiasConHoja(hojaActual, ls)` | core/hojaLocal.js:25 | Devuelve cuántas claves borró (0 si la hoja es la misma o no hay storage). | — | app.js |
+| `HOJA_LOCAL_KEY` _(valor)_ | core/hojaLocal.js:21 | (dato exportado) | — | nadie |
+| `HOJA_ANTERIOR_CONOCIDA` _(valor)_ | core/hojaLocal.js:22 | (dato exportado) | — | nadie |
+
+</details>
 
 <a id="f-core_icons_js"></a>
 
