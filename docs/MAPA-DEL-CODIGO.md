@@ -17,10 +17,10 @@
 
 | Capa | Archivos | Líneas | Funciones de nivel superior | Exportadas | Acciones de la interfaz | Llamadas a persist |
 | --- | --- | --- | --- | --- | --- | --- |
-| app | 1 | 127 | 6 | 0 | 0 | 0 |
-| core | 29 | 16991 | 628 | 373 | 38 | 45 |
-| modules | 16 | 15353 | 348 | 34 | 368 | 167 |
-| **Total** | 46 | 32471 | 982 | 407 | 406 | 212 |
+| app | 1 | 133 | 6 | 0 | 0 | 0 |
+| core | 30 | 17124 | 633 | 376 | 38 | 45 |
+| modules | 16 | 15390 | 348 | 34 | 369 | 167 |
+| **Total** | 47 | 32647 | 987 | 410 | 407 | 212 |
 
 ## 2. Quién depende de quién
 
@@ -32,12 +32,12 @@ Una flecha `A → B` quiere decir «A importa algo de B». Línea punteada = imp
 flowchart LR
   app["app.js"]
   mod["modules/ · 16 pantallas"]
-  core["core/ · 29 archivos"]
-  app -.->|"9 imports"| core
+  core["core/ · 30 archivos"]
+  app -.->|"10 imports"| core
   app -.->|"0 imports"| mod
-  mod -->|"106 imports"| core
+  mod -->|"108 imports"| core
   mod -->|"10 entre pantallas"| mod
-  core -->|"72 dentro del núcleo"| core
+  core -->|"76 dentro del núcleo"| core
   core -->|"15 imports (dom.js reúne las pantallas)"| mod
 ```
 
@@ -65,6 +65,7 @@ flowchart LR
   core_hojaLocal_js["hojaLocal.js"]
   core_icons_js["icons.js"]
   core_pdf_js["pdf.js"]
+  core_periodo_js["periodo.js"]
   core_salud_js["salud.js"]
   core_seed_data_js["seed-data.js"]
   core_sheetsEsquemas_js["sheetsEsquemas.js"]
@@ -120,6 +121,10 @@ flowchart LR
   core_pdf_js --> core_constants_js
   core_pdf_js --> core_store_js
   core_pdf_js --> core_utils_js
+  core_periodo_js --> core_auth_js
+  core_periodo_js --> core_google_config_js
+  core_periodo_js --> core_googleRest_js
+  core_periodo_js --> core_hojaLocal_js
   core_salud_js --> core_bitacora_js
   core_salud_js --> core_calc_js
   core_salud_js --> core_cierre_js
@@ -281,11 +286,11 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-app_js"></a>
 
-#### `app.js` — 127 líneas
+#### `app.js` — 133 líneas
 
 **Para qué sirve:** Punto de entrada. A diferencia de antes, ya no carga los datos de una vez: primero exige login con Google y resuelve el rol (ver core/auth.js) contra la pestaña "roles" de la Google Sheet configurada en core/google-config.js.
 
-- **Depende de:** `core/auth.js`, `core/backup.js`, `core/bitacora.js`, `core/dom.js`, `core/google-config.js`, `core/hojaLocal.js`, `core/sheetsStorage.js`, `core/store.js`, `core/utils.js`
+- **Depende de:** `core/auth.js`, `core/backup.js`, `core/bitacora.js`, `core/dom.js`, `core/google-config.js`, `core/hojaLocal.js`, `core/periodo.js`, `core/sheetsStorage.js`, `core/store.js`, `core/utils.js`
 - **Lo usan:** nadie (se carga directo desde `index.html`)
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
@@ -295,7 +300,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 ### Núcleo (js/core): estado, guardado, cálculos, hojas, PDF
 
-[core/appIcon.js](#f-core_appIcon_js) · [core/auth.js](#f-core_auth_js) · [core/backup.js](#f-core_backup_js) · [core/bitacora.js](#f-core_bitacora_js) · [core/calc.js](#f-core_calc_js) · [core/calendar.js](#f-core_calendar_js) · [core/cierre.js](#f-core_cierre_js) · [core/components.js](#f-core_components_js) · [core/constants.js](#f-core_constants_js) · [core/contacts.js](#f-core_contacts_js) · [core/dom.js](#f-core_dom_js) · [core/drive.js](#f-core_drive_js) · [core/gmail.js](#f-core_gmail_js) · [core/google-config.js](#f-core_google_config_js) · [core/googleRest.js](#f-core_googleRest_js) · [core/graficas.js](#f-core_graficas_js) · [core/guardado.js](#f-core_guardado_js) · [core/hojaLocal.js](#f-core_hojaLocal_js) · [core/icons.js](#f-core_icons_js) · [core/pdf.js](#f-core_pdf_js) · [core/salud.js](#f-core_salud_js) · [core/seed-data.js](#f-core_seed_data_js) · [core/sheetsEsquemas.js](#f-core_sheetsEsquemas_js) · [core/sheetsStorage.js](#f-core_sheetsStorage_js) · [core/sheetsTabular.js](#f-core_sheetsTabular_js) · [core/stock.js](#f-core_stock_js) · [core/store.js](#f-core_store_js) · [core/teclado.js](#f-core_teclado_js) · [core/utils.js](#f-core_utils_js)
+[core/appIcon.js](#f-core_appIcon_js) · [core/auth.js](#f-core_auth_js) · [core/backup.js](#f-core_backup_js) · [core/bitacora.js](#f-core_bitacora_js) · [core/calc.js](#f-core_calc_js) · [core/calendar.js](#f-core_calendar_js) · [core/cierre.js](#f-core_cierre_js) · [core/components.js](#f-core_components_js) · [core/constants.js](#f-core_constants_js) · [core/contacts.js](#f-core_contacts_js) · [core/dom.js](#f-core_dom_js) · [core/drive.js](#f-core_drive_js) · [core/gmail.js](#f-core_gmail_js) · [core/google-config.js](#f-core_google_config_js) · [core/googleRest.js](#f-core_googleRest_js) · [core/graficas.js](#f-core_graficas_js) · [core/guardado.js](#f-core_guardado_js) · [core/hojaLocal.js](#f-core_hojaLocal_js) · [core/icons.js](#f-core_icons_js) · [core/pdf.js](#f-core_pdf_js) · [core/periodo.js](#f-core_periodo_js) · [core/salud.js](#f-core_salud_js) · [core/seed-data.js](#f-core_seed_data_js) · [core/sheetsEsquemas.js](#f-core_sheetsEsquemas_js) · [core/sheetsStorage.js](#f-core_sheetsStorage_js) · [core/sheetsTabular.js](#f-core_sheetsTabular_js) · [core/stock.js](#f-core_stock_js) · [core/store.js](#f-core_store_js) · [core/teclado.js](#f-core_teclado_js) · [core/utils.js](#f-core_utils_js)
 
 <a id="f-core_appIcon_js"></a>
 
@@ -327,7 +332,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 **Para qué sirve:** Login con Google (Google Identity Services, cargado como script clásico en index.html) + resolución de rol contra la pestaña "roles" de la Google Sheet configurada en google-config.js.
 
 - **Depende de:** `core/google-config.js`, `core/googleRest.js`
-- **Lo usan:** `app.js`, `core/backup.js`, `core/bitacora.js`, `core/calendar.js`, `core/cierre.js`, `core/contacts.js`, `core/dom.js`, `core/drive.js`, `core/gmail.js`, `core/googleRest.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`, `core/store.js`, `modules/catalogo.js`, `modules/clientes.js`, `modules/config.js`, `modules/mis-ventas.js`, `modules/notas.js`, `modules/pedidos.js`, `modules/pendientes.js`, `modules/productos.js`, `modules/resumen.js`
+- **Lo usan:** `app.js`, `core/backup.js`, `core/bitacora.js`, `core/calendar.js`, `core/cierre.js`, `core/contacts.js`, `core/dom.js`, `core/drive.js`, `core/gmail.js`, `core/googleRest.js`, `core/periodo.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`, `core/store.js`, `modules/catalogo.js`, `modules/clientes.js`, `modules/config.js`, `modules/mis-ventas.js`, `modules/notas.js`, `modules/pedidos.js`, `modules/pendientes.js`, `modules/productos.js`, `modules/resumen.js`
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
 - **`persist(...)`:** ninguno
@@ -337,15 +342,15 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `getSession()` | core/auth.js:32 | (sin comentario) | — | core/backup.js, core/bitacora.js, core/cierre.js, core/dom.js, core/drive.js (+10) |
-| `getAccessToken()` | core/auth.js:33 | (sin comentario) | — | core/sheetsStorage.js, core/sheetsTabular.js |
+| `getSession()` | core/auth.js:32 | (sin comentario) | — | core/backup.js, core/bitacora.js, core/cierre.js, core/dom.js, core/drive.js (+11) |
+| `getAccessToken()` | core/auth.js:33 | (sin comentario) | — | core/periodo.js, core/sheetsStorage.js, core/sheetsTabular.js |
 | `haySesionPorVencer()` | core/auth.js:64 | (sin comentario) | — | core/dom.js |
 | `renovarSesionAhora()` | core/auth.js:126 | Renovación manual (botón "Sesión por vencer" en la topbar): mismo refresco | — | core/dom.js |
 | `restaurarSesion()` | core/auth.js:155 | Se llama al arrancar la app, ANTES de mostrar la pantalla de login: si hay | — | app.js |
 | `login()` | core/auth.js:189 | Pide el consentimiento (o lo renueva en silencio si ya fue otorgado antes) | — | app.js |
 | `loginSilencioso()` | core/auth.js:224 | Intento de login SIN mostrar ninguna pantalla, para "entrar directo si ya | — | app.js |
 | `refrescarToken()` | core/auth.js:256 | Pide un token nuevo SIN mostrar ninguna pantalla: como el consentimiento ya | — | solo este archivo |
-| `fetchGoogleConReintento(url, options, tokenInicial)` | core/auth.js:282 | Punto único por el que pasa TODA llamada de la app a una API de Google | — | core/backup.js, core/calendar.js, core/contacts.js, core/drive.js, core/gmail.js (+1) |
+| `fetchGoogleConReintento(url, options, tokenInicial)` | core/auth.js:282 | Punto único por el que pasa TODA llamada de la app a una API de Google | — | core/backup.js, core/calendar.js, core/contacts.js, core/drive.js, core/gmail.js (+2) |
 | `logout()` | core/auth.js:303 | (sin comentario) | — | core/dom.js |
 | `listarEquipoEmail()` | core/auth.js:336 | Correos de TODOS los demás con acceso a la app (admin o vendedor, salvo | — | core/drive.js |
 | `agregarMiembroEquipo(correo, rol, vendedorNombre)` | core/auth.js:352 | Agrega un correo a la pestaña "roles" — antes esto se hacía a mano editando | — | modules/config.js |
@@ -886,7 +891,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 **Para qué sirve:** Configuración de la integración con Google (login + Sheets como base de datos). Ninguno de estos dos valores es secreto: el Client ID de una app web siempre queda visible en el navegador, y el ID de la spreadsheet no da acceso por sí solo (lo controla a quién se le compartió la hoja en Google Drive). Completa ambos después de hacer el setup en Google Cloud Console + crear la Google Sheet (ver README para los pasos e…
 
 - **Depende de:** nada de este proyecto
-- **Lo usan:** `app.js`, `core/auth.js`, `core/backup.js`, `core/drive.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`
+- **Lo usan:** `app.js`, `core/auth.js`, `core/backup.js`, `core/drive.js`, `core/periodo.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
 - **`persist(...)`:** ninguno
@@ -897,7 +902,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
 | `GOOGLE_CLIENT_ID` _(valor)_ | core/google-config.js:11 | (dato exportado) | — | app.js, core/auth.js |
-| `SPREADSHEET_ID` _(valor)_ | core/google-config.js:33 | (dato exportado) | — | app.js, core/auth.js, core/backup.js, core/drive.js, core/sheetsStorage.js (+1) |
+| `SPREADSHEET_ID` _(valor)_ | core/google-config.js:33 | (dato exportado) | — | app.js, core/auth.js, core/backup.js, core/drive.js, core/periodo.js (+2) |
 | `GOOGLE_SCOPES` _(valor)_ | core/google-config.js:57 | (dato exportado) | — | core/auth.js |
 
 </details>
@@ -909,7 +914,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 **Para qué sirve:** Helpers genéricos y sin estado para hablar con la API REST de Google Sheets (v4) usando fetch + un access token ya obtenido. No sabe nada de sesión ni de storage: eso lo resuelven auth.js y sheetsStorage.js, que lo importan (evita una dependencia circular entre ellos dos).
 
 - **Depende de:** `core/auth.js`
-- **Lo usan:** `core/auth.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`
+- **Lo usan:** `core/auth.js`, `core/periodo.js`, `core/sheetsStorage.js`, `core/sheetsTabular.js`
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
 - **`persist(...)`:** ninguno
@@ -919,11 +924,11 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `sheetsValuesGet(accessToken, spreadsheetId, range)` | core/googleRest.js:37 | Lee un rango (ej. "roles!A2:C200") y devuelve values: string[][] (filas x columnas). | — | core/auth.js, core/sheetsStorage.js, core/sheetsTabular.js |
-| `sheetsValuesUpdate(accessToken, spreadsheetId, range, valu…)` | core/googleRest.js:43 | Sobrescribe un rango exacto (ej. "kv!A5:B5") con las filas dadas. | — | core/sheetsStorage.js, core/sheetsTabular.js |
+| `sheetsValuesGet(accessToken, spreadsheetId, range)` | core/googleRest.js:37 | Lee un rango (ej. "roles!A2:C200") y devuelve values: string[][] (filas x columnas). | — | core/auth.js, core/periodo.js, core/sheetsStorage.js, core/sheetsTabular.js |
+| `sheetsValuesUpdate(accessToken, spreadsheetId, range, valu…)` | core/googleRest.js:43 | Sobrescribe un rango exacto (ej. "kv!A5:B5") con las filas dadas. | — | core/periodo.js, core/sheetsStorage.js, core/sheetsTabular.js |
 | `sheetsValuesAppend(accessToken, spreadsheetId, range, valu…)` | core/googleRest.js:52 | Agrega filas al final de la tabla que empieza en el rango dado (ej. "kv!A:B"). | — | core/auth.js, core/sheetsStorage.js, core/sheetsTabular.js |
-| `sheetsValuesClear(accessToken, spreadsheetId, range)` | core/googleRest.js:64 | Borra el contenido de un rango sin borrar la pestaña ni las celdas de | — | core/sheetsTabular.js |
-| `sheetsGetSheetsInfo(accessToken, spreadsheetId)` | core/googleRest.js:76 | Nombre, id NUMÉRICO (el que pide updateSheetProperties, distinto del | — | core/sheetsTabular.js |
+| `sheetsValuesClear(accessToken, spreadsheetId, range)` | core/googleRest.js:64 | Borra el contenido de un rango sin borrar la pestaña ni las celdas de | — | core/periodo.js, core/sheetsTabular.js |
+| `sheetsGetSheetsInfo(accessToken, spreadsheetId)` | core/googleRest.js:76 | Nombre, id NUMÉRICO (el que pide updateSheetProperties, distinto del | — | core/periodo.js, core/sheetsTabular.js |
 | `sheetsAddSheet(accessToken, spreadsheetId, title, colu…)` | core/googleRest.js:87 | Crea una pestaña nueva (vacía) con el nombre dado. `columnCount` opcional | — | core/sheetsTabular.js |
 | `sheetsAgrandarColumnas(accessToken, spreadsheetId, sheetId, co…)` | core/googleRest.js:103 | Agranda (NUNCA achica — quien llama debe pasar ya el máximo entre lo | — | core/sheetsTabular.js |
 
@@ -967,7 +972,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 **Para qué sirve:** Red de seguridad del guardado.
 
 - **Depende de:** nada de este proyecto
-- **Lo usan:** `core/dom.js`, `core/store.js`
+- **Lo usan:** `core/dom.js`, `core/store.js`, `modules/config.js`
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
 - **`persist(...)`:** ninguno
@@ -986,7 +991,7 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 | `pendientesDeSesionAnterior()` | core/guardado.js:228 | Claves que quedaron sin guardar en una sesión ANTERIOR (la pestaña se cerró, | — | core/store.js |
 | `olvidarPendientesDeSesionAnterior()` | core/guardado.js:237 | (sin comentario) | — | core/store.js |
 | `estadoGuardado()` | core/guardado.js:244 | (sin comentario) | — | core/dom.js |
-| `hayPendientes()` | core/guardado.js:255 | (sin comentario) | — | solo este archivo |
+| `hayPendientes()` | core/guardado.js:255 | (sin comentario) | — | modules/config.js |
 | `configurarGuardado(opts)` | core/guardado.js:261 | (sin comentario) | — | core/store.js |
 | `guardarClave(clave, json)` | core/guardado.js:382 | Intenta escribir una clave, dejándola encolada si falla. `json` es solo para | — | core/store.js |
 | `reintentarPendientes()` | core/guardado.js:440 | Vuelve a intentar TODO lo pendiente QUE NO sea un conflicto (ver | — | core/dom.js |
@@ -997,24 +1002,25 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-core_hojaLocal_js"></a>
 
-#### `core/hojaLocal.js` — 46 líneas
+#### `core/hojaLocal.js` — 51 líneas
 
-**Para qué sirve:** Copias locales atadas a UNA hoja de Google.
+**Para qué sirve:** Copias locales atadas a UNA hoja de Google y a UN periodo de datos.
 
 - **Depende de:** nada de este proyecto
-- **Lo usan:** `app.js`
+- **Lo usan:** `app.js`, `core/periodo.js`
 - **Claves de `state` que escribe:** ninguna
 - **Claves de `state` que solo lee:** ninguna
 - **`persist(...)`:** ninguno
 
 <details>
-<summary>Exportado (3)</summary>
+<summary>Exportado (4)</summary>
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `alinearCopiasConHoja(hojaActual, ls)` | core/hojaLocal.js:25 | Devuelve cuántas claves borró (0 si la hoja es la misma o no hay storage). | — | app.js |
-| `HOJA_LOCAL_KEY` _(valor)_ | core/hojaLocal.js:21 | (dato exportado) | — | nadie |
-| `HOJA_ANTERIOR_CONOCIDA` _(valor)_ | core/hojaLocal.js:22 | (dato exportado) | — | nadie |
+| `identidadHoja(hojaId, periodo)` | core/hojaLocal.js:25 | (sin comentario) | — | app.js, core/periodo.js |
+| `alinearCopiasConHoja(identidadActual, ls)` | core/hojaLocal.js:30 | Devuelve cuántas claves borró (0 si la identidad es la misma o no hay storage). | — | app.js, core/periodo.js |
+| `HOJA_LOCAL_KEY` _(valor)_ | core/hojaLocal.js:22 | (dato exportado) | — | nadie |
+| `HOJA_ANTERIOR_CONOCIDA` _(valor)_ | core/hojaLocal.js:23 | (dato exportado) | — | nadie |
 
 </details>
 
@@ -1069,6 +1075,33 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 </details>
 
 <sub>Funciones internas (no exportadas): 31.</sub>
+
+<a id="f-core_periodo_js"></a>
+
+#### `core/periodo.js` — 128 líneas
+
+**Para qué sirve:** Empezar un periodo nuevo: dejar lo de antes archivado y arrancar de cero con pedidos, cotizaciones y dinero, conservando lo que no es «historia» (usuarios y roles, clientes, catálogo, productos con su stock, plantillas, notas, deudas aún pendientes y la configuración del taller).
+
+- **Depende de:** `core/auth.js`, `core/google-config.js`, `core/googleRest.js`, `core/hojaLocal.js`
+- **Lo usan:** `app.js`, `modules/config.js`
+- **Claves de `state` que escribe:** ninguna
+- **Claves de `state` que solo lee:** ninguna
+- **`persist(...)`:** ninguno
+
+<details>
+<summary>Exportado (5)</summary>
+
+| Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
+| --- | --- | --- | --- | --- |
+| `kvParaPeriodoNuevo(filas, periodo, nuevaRev)` | core/periodo.js:46 | Recibe las filas de "kv" (sin el encabezado) y devuelve las nuevas. | — | solo este archivo |
+| `iniciarPeriodoNuevo(opts)` | core/periodo.js:96 | opts: { fecha: "AAAA-MM-DD", folderId, nuevaRev: () => string } | — | modules/config.js |
+| `PERIODO_KEY` _(valor)_ | core/periodo.js:25 | (dato exportado) | — | app.js |
+| `CLAVES_KV_A_VACIAR` _(arreglo)_ | core/periodo.js:31 | (dato exportado) | — | nadie |
+| `PESTANAS_A_VACIAR` _(arreglo)_ | core/periodo.js:42 | (dato exportado) | — | nadie |
+
+</details>
+
+<sub>Funciones internas (no exportadas): 2.</sub>
 
 <a id="f-core_salud_js"></a>
 
@@ -1321,8 +1354,8 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 | --- | --- | --- | --- | --- |
 | `esUrlImagen(valor)` | core/utils.js:10 | `config.logoUrl` (y otros campos "imagen o emoji" del mismo estilo) guardan | — | core/appIcon.js, core/dom.js, modules/config.js |
 | `fechaISOLocal(fecha)` | core/utils.js:20 | Convierte un Date a "YYYY-MM-DD" en hora LOCAL (a diferencia de | — | core/calendar.js |
-| `todayStr()` | core/utils.js:38 | La fecha de HOY según el reloj del usuario. Es la fecha por defecto de todo | — | core/backup.js, core/calc.js, core/cierre.js, core/stock.js, core/store.js (+8) |
-| `uid()` | core/utils.js:42 | (sin comentario) | — | core/bitacora.js, core/seed-data.js, core/stock.js, core/store.js, modules/catalogo.js (+10) |
+| `todayStr()` | core/utils.js:38 | La fecha de HOY según el reloj del usuario. Es la fecha por defecto de todo | — | core/backup.js, core/calc.js, core/cierre.js, core/stock.js, core/store.js (+9) |
+| `uid()` | core/utils.js:42 | (sin comentario) | — | core/bitacora.js, core/seed-data.js, core/stock.js, core/store.js, modules/catalogo.js (+11) |
 | `hashCorto(texto)` | core/utils.js:52 | Id DETERMINÍSTICO a partir de un texto (djb2 → base36): el mismo texto da | — | core/calc.js |
 | `codigoPublico()` | core/utils.js:64 | Código corto NO secuencial para mostrarle al CLIENTE en vez del número | — | core/pdf.js, modules/cotizaciones.js, modules/pedidos.js |
 | `generarNumeroOp(existentes)` | core/utils.js:75 | Número de OP: código corto legible (ej. "OP-4821") para identificar un pedido | — | modules/cotizaciones.js, modules/pedidos.js |
@@ -1448,24 +1481,24 @@ Archivos que se importan unos a otros. Funcionan porque lo que se importa solo s
 
 <a id="f-modules_config_js"></a>
 
-#### `modules/config.js` — 224 líneas
+#### `modules/config.js` — 261 líneas
 
 **Para qué sirve:** Pestaña "Configuración": datos de marca (nombre + ícono, que se reflejan en el PDF), datos de facturación, equipo y respaldo. Los KPIs y el reporte financiero viven en Resumen (ver modules/resumen.js) — acá es donde se configura el taller, no donde se consultan los números del día a día. La nómina, los gastos fijos, la meta y las deudas viven en la pestaña "Pendientes" (ver modules/pendientes.js).
 
-- **Depende de:** `core/auth.js`, `core/backup.js`, `core/calc.js`, `core/components.js`, `core/drive.js`, `core/store.js`, `core/utils.js`, `modules/cuentas.js`, `modules/salud.js`
+- **Depende de:** `core/auth.js`, `core/backup.js`, `core/calc.js`, `core/components.js`, `core/drive.js`, `core/guardado.js`, `core/periodo.js`, `core/store.js`, `core/utils.js`, `modules/cuentas.js`, `modules/salud.js`
 - **Lo usan:** `core/dom.js`
 - **Claves de `state` que escribe:** `config`, `config.logoUrl`, `config.nombre`, `config.pdfPiePaginaImagenUrl`, `configPiePaginaSubiendo`
-- **Claves de `state` que solo lee:** `config.driveFolderId`, `configLogoSubiendo`
+- **Claves de `state` que solo lee:** `config.backupFolderId`, `config.driveFolderId`, `configLogoSubiendo`
 - **`persist(...)`:** config ×5
-- **Acciones de la interfaz:** 7 (tabla en la sección 4)
+- **Acciones de la interfaz:** 8 (tabla en la sección 4)
 
 <details>
 <summary>Exportado (2)</summary>
 
 | Nombre | Dónde | Qué hace (1.ª línea de su comentario) | Guarda | Lo usan |
 | --- | --- | --- | --- | --- |
-| `render()` | modules/config.js:18 | (sin comentario) | — | nadie |
-| `actions` _(objeto)_ | modules/config.js:140 | (dato exportado) | — | core/dom.js |
+| `render()` | modules/config.js:20 | (sin comentario) | — | nadie |
+| `actions` _(objeto)_ | modules/config.js:151 | (dato exportado) | — | core/dom.js |
 
 </details>
 
@@ -1913,17 +1946,18 @@ Cada botón o campo de la pantalla lleva `data-action="nombre"` (o `data-action-
 </details>
 
 <details>
-<summary><b>modules/config.js</b> — 7 acciones</summary>
+<summary><b>modules/config.js</b> — 8 acciones</summary>
 
 | Acción | Dónde | Qué hace | Guarda | Mes cerrado | Rol | Pantalla |
 | --- | --- | --- | --- | --- | --- | --- |
-| `set-config-campo` | modules/config.js:141 | (sin comentario) | config | · | — | 6 |
-| `save-marca` | modules/config.js:149 | El campo de emoji solo manda si tiene algo escrito: dejarlo vacio NO borra | config | · | — | 1 |
-| `quitar-logo` | modules/config.js:157 | (sin comentario) | config | · | — | 2 |
-| `respaldar-ahora` | modules/config.js:161 | (sin comentario) | config | · | sí | 1 |
-| `agregar-miembro-equipo` | modules/config.js:171 | (sin comentario) | — | · | — | 1 |
-| `set-pie-imagen` | modules/config.js:193 | (sin comentario) | config | · | sí | 2 |
-| `quitar-pie-imagen` | modules/config.js:215 | (sin comentario) | config | · | — | 1 |
+| `set-config-campo` | modules/config.js:152 | (sin comentario) | config | · | — | 6 |
+| `save-marca` | modules/config.js:160 | El campo de emoji solo manda si tiene algo escrito: dejarlo vacio NO borra | config | · | — | 1 |
+| `quitar-logo` | modules/config.js:168 | (sin comentario) | config | · | — | 2 |
+| `respaldar-ahora` | modules/config.js:172 | (sin comentario) | config | · | sí | 1 |
+| `iniciar-periodo-nuevo` | modules/config.js:182 | (sin comentario) | — | · | sí | 1 |
+| `agregar-miembro-equipo` | modules/config.js:208 | (sin comentario) | — | · | — | 1 |
+| `set-pie-imagen` | modules/config.js:230 | (sin comentario) | config | · | sí | 2 |
+| `quitar-pie-imagen` | modules/config.js:252 | (sin comentario) | config | · | — | 1 |
 
 </details>
 

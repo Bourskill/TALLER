@@ -106,16 +106,16 @@ Consecuencias que importan para el riesgo:
 
 | Capa | Archivos | Líneas de JavaScript |
 | --- | --- | --- |
-| `js/app.js` | 1 | 127 |
-| `js/core/` | 29 | 16991 |
-| `js/modules/` | 16 | 15353 |
-| **Total** | 46 | 32471 |
+| `js/app.js` | 1 | 133 |
+| `js/core/` | 30 | 17124 |
+| `js/modules/` | 16 | 15390 |
+| **Total** | 47 | 32647 |
 
 <!-- GENERADO:fin capas -->
 
 La app son tres capas (detalle archivo por archivo en [`MAPA-DEL-CODIGO.md`](MAPA-DEL-CODIGO.md)):
 
-1. **`js/app.js` — el arranque** (`js/app.js:1`). Primero exige login con Google y resuelve el rol; **solo después** carga el resto con `import()` dinámico (`js/app.js:50-52`). Es a propósito: `store.js` decide una sola vez, al cargarse, si hay dónde guardar (`STORAGE_OK`, `js/core/store.js:37`), así que tiene que cargarse después de poner `window.storage`.
+1. **`js/app.js` — el arranque** (`js/app.js:1`). Primero exige login con Google y resuelve el rol; **solo después** carga el resto con `import()` dinámico (`js/app.js:48-50`). Es a propósito: `store.js` decide una sola vez, al cargarse, si hay dónde guardar (`STORAGE_OK`, `js/core/store.js:37`), así que tiene que cargarse después de poner `window.storage`.
 2. **`js/core/` — el núcleo.** Estado, guardado, cálculos, conexión con Google. Los archivos que más importan para el dinero:
 
 | Archivo | Responsabilidad | Por qué importa |
@@ -380,7 +380,7 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 
 ## 7. Roles y permisos
 
-**Quién es la persona.** Inicia sesión con Google; la app busca su correo en la pestaña `roles` (`js/core/auth.js:317-329`): si no está, «Acceso no autorizado» (`js/app.js:38-44`); si dice `admin`, es admin; **cualquier otro valor es vendedor**. La sesión (correo, rol, token) se guarda en `sessionStorage` (`js/core/auth.js:141-149`) y **al recargar se confía en lo guardado ahí sin volver a consultar `roles`** (`js/core/auth.js:155-168`).
+**Quién es la persona.** Inicia sesión con Google; la app busca su correo en la pestaña `roles` (`js/core/auth.js:317-329`): si no está, «Acceso no autorizado» (`js/app.js:39-45`); si dice `admin`, es admin; **cualquier otro valor es vendedor**. La sesión (correo, rol, token) se guarda en `sessionStorage` (`js/core/auth.js:141-149`) y **al recargar se confía en lo guardado ahí sin volver a consultar `roles`** (`js/core/auth.js:155-168`).
 
 **Qué se hace cumplir de verdad y qué es solo de pantalla.** Verificado en el código:
 
@@ -394,21 +394,21 @@ Una copia completa de la hoja en el Drive del admin, una vez cada 24 h **si el a
 | Respaldo, carpeta de imágenes, sincronizar con Calendar | `js/core/backup.js:89`, `js/core/drive.js:49`, `:160`, `js/modules/pendientes.js:524`, `:555` | Decide **quién usa su Google**, no un permiso sobre el dinero |
 | Todo el dinero: abonos, movimientos a mano, nómina, deudas… | — | **Sin ninguna comprobación de rol en la acción** |
 
-**Fail-open.** Varias pantallas tratan «no hay sesión» como admin: `!session || session.rol !== "vendedor"` (por ejemplo `js/core/dom.js:785`, `:1100`, `js/modules/config.js:25`). En el uso normal siempre hay sesión; es la razón por la que `test/smoke.mjs` (que nunca hace login) ve todo como admin (`js/core/dom.js:66-71`).
+**Fail-open.** Varias pantallas tratan «no hay sesión» como admin: `!session || session.rol !== "vendedor"` (por ejemplo `js/core/dom.js:785`, `:1100`, `js/modules/config.js:27`). En el uso normal siempre hay sesión; es la razón por la que `test/smoke.mjs` (que nunca hace login) ve todo como admin (`js/core/dom.js:66-71`).
 
 **La protección real** de los datos es **a quién se le da acceso de edición a la Google Sheet** y a la cuenta de Drive: con ese acceso, cualquiera puede leer o editar todo, incluida la bitácora, los cierres y la pestaña `roles`. Es el «punto D» de `CONTINUIDAD.md` (base de datos con permisos por rol), un proyecto grande aparte.
 
 <!-- GENERADO:inicio roles -->
 
-El código mira el rol del usuario en **26 sitios** (`esAdmin()` o `session.rol`). Casi todos deciden **qué se dibuja**; solo unos pocos deciden **qué se permite hacer**. `persist` además desvía a «propuesta» los cambios de un vendedor a `catalogoInsumos` y `catalogoCategorias` (`APPROVAL_REQUIRED_KEYS`).
+El código mira el rol del usuario en **28 sitios** (`esAdmin()` o `session.rol`). Casi todos deciden **qué se dibuja**; solo unos pocos deciden **qué se permite hacer**. `persist` además desvía a «propuesta» los cambios de un vendedor a `catalogoInsumos` y `catalogoCategorias` (`APPROVAL_REQUIRED_KEYS`).
 
 <details>
-<summary>Los 26 sitios donde se mira el rol</summary>
+<summary>Los 28 sitios donde se mira el rol</summary>
 
 | Dónde | En |
 | --- | --- |
-| app.js:53 | `entrarConSesion` |
-| app.js:60 | `entrarConSesion` |
+| app.js:59 | `entrarConSesion` |
+| app.js:66 | `entrarConSesion` |
 | core/backup.js:89 | `respaldarSiCorresponde` |
 | core/cierre.js:30 | `esAdmin` |
 | core/cierre.js:32 | `esAdmin` |
@@ -422,11 +422,13 @@ El código mira el rol del usuario en **26 sitios** (`esAdmin()` o `session.rol`
 | core/dom.js:1100 | `renderCampanita` |
 | core/drive.js:49 | `obtenerCarpetaCompartida` |
 | core/drive.js:160 | `subirImagenReferencia` |
+| core/periodo.js:98 | `iniciarPeriodoNuevo` |
 | core/store.js:2092 | `persist` |
 | modules/bitacora.js:87 | `renderBitacora` |
 | modules/catalogo.js:24 | `renderPropuestasPendientes` |
 | modules/cierres.js:80 | `renderCierre` |
-| modules/config.js:25 | `render` |
+| modules/config.js:27 | `render` |
+| modules/config.js:77 | `render` |
 | modules/pendientes.js:524 | `sincronizarEventoDeuda` |
 | modules/pendientes.js:555 | `sincronizarEventoGastoFijo` |
 | modules/productos.js:48 | `renderPropuestasPendientesProducto` |

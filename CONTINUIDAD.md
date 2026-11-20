@@ -39,6 +39,14 @@ rama (`medir-tamano-claves`) hasta que se integre. La CI corre los 9 archivos de
 | **#69** | **Pestaña propia vacía** (paquete 2): arregla **#67-1**. Una pestaña de movimientos, contactos, cotizaciones o cierres que aparece vacía habiendo tenido datos ya NO se rellena con la foto vieja de «kv»; marca «ya migrado» + copia local + barra roja con botón «Está bien así». | Barra roja arriba solo si pasa | `test/pestanas.mjs` (+ la barra en `test/smoke.mjs`) |
 | **#70** | **Espacio en la hoja** (paquete 3, paso 1 de **#67-2**): la app mide cuánto ocupa cada área en su celda de 50.000 caracteres y cuántas filas usa `kv` (de 5.000), y avisa desde el 70 % (error desde el 90 %). Solo mide y avisa, no mueve datos. Salud de los datos pasa de 21 a **22** verificaciones. | Chip «▲ Hoja al N %» arriba; Configuración → Salud de los datos → «Espacio en la hoja» (siempre visible) | `test/espacio.mjs` (+ el chip y el panel en `test/smoke.mjs`) |
 
+**Periodo nuevo (2026-11-20, rama `claude/vigilant-hypatia-jsys7q`):** botón «Empezar periodo nuevo…»
+en Configuración (solo admin; hay que escribir EMPEZAR). Hace una copia completa de la hoja en la carpeta de
+respaldos («Panel del Taller — ARCHIVO periodo hasta <fecha>») y luego vacía pedidos, cotizaciones,
+movimientos, papeleras, transferencias, cierres, bitácora, deudas pagadas, borradores, Colchón y
+conciliaciones. Conserva roles, clientes, catálogo, productos (stock), plantillas, notas, deudas pendientes y
+configuración. Renueva todas las `__rev__:*` y anota `__periodo__` en `kv`; cada navegador borra sus copias
+locales al ver un periodo distinto (`js/core/hojaLocal.js`). Código: `js/core/periodo.js`. Prueba: `test/periodo.mjs`.
+
 Detalle, decisiones y límites de cada uno: **`CONTABILIDAD.md`** (hallazgos #61–#70) y
 el registro de cambios de **`README.md`** (rondas 109–119). **Plan para arreglar los 11
 riesgos del #67: [`docs/PLAN-DE-CORRECCION.md`](docs/PLAN-DE-CORRECCION.md)** (9 paquetes; el 1, el

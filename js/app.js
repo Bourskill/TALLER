@@ -14,7 +14,8 @@ import { login, loginSilencioso, restaurarSesion } from "./core/auth.js";
 import { sheetsStorage } from "./core/sheetsStorage.js";
 import { esc } from "./core/utils.js";
 import { GOOGLE_CLIENT_ID, SPREADSHEET_ID } from "./core/google-config.js";
-import { alinearCopiasConHoja } from "./core/hojaLocal.js";
+import { alinearCopiasConHoja, identidadHoja } from "./core/hojaLocal.js";
+import { PERIODO_KEY } from "./core/periodo.js";
 
 var app = document.getElementById("app");
 
@@ -44,10 +45,15 @@ function renderAccesoDenegado(email) {
 }
 
 async function entrarConSesion(session) {
-  // Antes de cargar: si este navegador tiene copias locales de OTRA hoja (se
-  // cambió SPREADSHEET_ID), se borran para que no revivan en la nueva.
-  alinearCopiasConHoja(SPREADSHEET_ID);
   window.storage = sheetsStorage;
+  // Antes de cargar: si este navegador tiene copias locales de OTRA hoja o de
+  // un periodo anterior (ver core/periodo.js), se borran para que no revivan.
+  // La lectura de "kv" queda en caché y la reusa store.loadAll(). Si falla
+  // (sin red), no se toca nada: la carga sigue como siempre.
+  try {
+    var marcaPeriodo = await sheetsStorage.get(PERIODO_KEY);
+    alinearCopiasConHoja(identidadHoja(SPREADSHEET_ID, marcaPeriodo && marcaPeriodo.value));
+  } catch (e) { /* sin red: se reintenta en la próxima carga */ }
   var store = await import("./core/store.js");
   var domMod = await import("./core/dom.js");
   if (session.rol === "vendedor") store.state.tab = "mis-ventas";

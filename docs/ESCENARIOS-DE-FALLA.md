@@ -75,7 +75,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 - **Qué ve el dueño:** un aviso breve: «📶 Sin conexión: mostrando la última copia guardada en este dispositivo. **Se actualiza sola en cuanto vuelva la señal**» (`js/core/store.js:1630-1632`). Para Movimientos, Clientes y Cotizaciones, además, un aviso fijo con botón recargar (`js/core/store.js:1417-1422`, `js/core/dom.js:1001`).
 - **Qué lo defiende:** sin lectura completa **no corren** las migraciones ni las reparaciones que reescriben plata (`js/core/store.js:1469`, `:1508-1561`, todas con `!huboFalloDeRed`).
 - **Qué queda abierto (dos cosas verificadas):**
-  1. **La promesa «se actualiza sola» no se cumple para lo que se lee:** `loadAll` se llama una sola vez, al entrar (`js/app.js:54`); al volver la red solo se reintentan escrituras pendientes (`js/core/guardado.js:269`). Los datos siguen siendo la copia local hasta recargar.
+  1. **La promesa «se actualiza sola» no se cumple para lo que se lee:** `loadAll` se llama una sola vez, al entrar (`js/app.js:60`); al volver la red solo se reintentan escrituras pendientes (`js/core/guardado.js:269`). Los datos siguen siendo la copia local hasta recargar.
   2. **Esas claves no tienen revisión conocida:** `fijarRevConocida` solo corre para lo que sí se leyó de la red (`js/core/store.js:1430-1431`) y `verificarConflicto` **deja pasar** una clave sin base (`js/core/store.js:229`). Resultado: si otro computador guardó cambios mientras tanto, **el primer guardado de este los sobrescribe sin aviso**.
 - **Prueba:** `test/smoke.mjs:3417-3503` (la carga cae al espejo y la migración se salta). **Ninguna prueba ejerce la brecha** (arrancar sin red y guardar una clave sin revisión conocida): `test/smoke.mjs:4311` prueba otro caso, el primer guardado tras una carga **normal**, donde sí hay revisión.
 - **Estado:** **PARCIAL — severidad media.** Riesgo **#67-3**.
@@ -198,7 +198,7 @@ Cada afirmación cita `archivo:línea`. Los números de línea se verificaron co
 ## 18. Falla el respaldo, o nadie abre la app
 
 - **Qué lo causa:** permisos, cuota de Drive, la carpeta de respaldos borrada, o un día sin que el admin abra la app.
-- **Qué ve el dueño:** «Último respaldo» en Configuración; el botón **Respaldar ahora** muestra el error real (`js/modules/config.js:161`). El chequeo automático al abrir **no** muestra errores (`js/app.js:68-70`).
+- **Qué ve el dueño:** «Último respaldo» en Configuración; el botón **Respaldar ahora** muestra el error real (`js/modules/config.js:172`). El chequeo automático al abrir **no** muestra errores (`js/app.js:74-76`).
 - **Qué lo defiende:** una carpeta de respaldos borrada se recrea y se reintenta una vez (`js/core/backup.js:96-107`).
 - **Qué queda abierto:** un respaldo fallido automático pasa en silencio; sin que el admin abra la app no hay copia nueva; las copias no se limpian; y una copia tomada justo en el hueco de «borrar y escribir» (escenario 1) puede traer una pestaña vacía.
 - **Prueba:** `test/smoke.mjs:4967`, `:5012`.

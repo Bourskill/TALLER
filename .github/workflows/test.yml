@@ -50,8 +50,8 @@ jobs:
       - name: Prueba de espacio en la hoja (test/espacio.mjs)
         run: node test/espacio.mjs
 
-      - name: Prueba de copias locales atadas a la hoja (test/hojaLocal.mjs)
-        run: node test/hojaLocal.mjs
+      - name: Prueba de periodo nuevo y copias locales (test/periodo.mjs)
+        run: node test/periodo.mjs
 
       # Reglas de arquitectura y documentos al día (docs/). Si falla por «documentos
       # viejos», corre `npm run mapa` en local y sube los documentos.
