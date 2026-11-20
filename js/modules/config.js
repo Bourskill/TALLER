@@ -6,10 +6,12 @@
 // "Pendientes" (ver modules/pendientes.js).
 
 import { state, persist, notify } from "../core/store.js";
-import { esc, fmt, num, esUrlImagen } from "../core/utils.js";
+import { esc, fmt, num, esUrlImagen, uid, todayStr } from "../core/utils.js";
 import { calcBalancePeriodo } from "../core/calc.js";
 import { renderHelp } from "../core/components.js";
 import { respaldarSiCorresponde } from "../core/backup.js";
+import { iniciarPeriodoNuevo } from "../core/periodo.js";
+import { hayPendientes } from "../core/guardado.js";
 import { subirImagenReferencia, compartirRecursosConNuevoMiembro } from "../core/drive.js";
 import { agregarMiembroEquipo, getSession } from "../core/auth.js";
 import { renderConfigCuentas } from "./cuentas.js";
@@ -71,6 +73,15 @@ export function render() {
     '<div class="section-sub" style="margin:0 0 10px;">Último respaldo: <b style="color:var(--ink);">' + (cfg.ultimoBackupISO ? fechaHoraCorta(cfg.ultimoBackupISO) : "Aún no se ha hecho ninguno") + "</b></div>" +
     '<button class="btn ghost small" data-action="respaldar-ahora">Respaldar ahora</button>' +
     "</div>";
+
+  if ((getSession() || {}).rol === "admin") {
+    html += '<div class="card"><div class="section-title small">Empezar un periodo nuevo' +
+      renderHelp("Deja todo lo de antes guardado como una copia completa en tu Drive («Panel del Taller — ARCHIVO periodo hasta <fecha>», en la carpeta de respaldos) y arranca de cero, como si nunca hubiera habido pedidos. SE BORRA: pedidos, cotizaciones, movimientos de Finanzas, papeleras, transferencias, cierres de mes, bitácora, deudas ya pagadas, borradores y el historial del Colchón y de las conciliaciones. SE CONSERVA: usuarios y roles, clientes, catálogo de insumos, productos con su stock, plantillas, notas, deudas aún pendientes y la configuración del taller. Las cuentas (Efectivo, Banco, Nequi) arrancan en $0.") +
+      "</div>" +
+      '<div class="section-sub" style="margin:0 0 10px;">Archiva todo lo de antes y deja la app limpia. Nadie más debe estar usando la app mientras tanto.</div>' +
+      '<button class="btn danger small" data-action="iniciar-periodo-nuevo">Empezar periodo nuevo…</button>' +
+      "</div>";
+  }
 
   var meta = cfg.meta || { label: "Meta", monto: 0, periodo: "mensual" };
   var metaMonto = num(meta.monto);
@@ -166,6 +177,32 @@ export var actions = Object.assign({}, saludActions, {
     } catch (e) {
       notify();
       window.alert("No se pudo hacer el respaldo: " + (e && e.message ? e.message : e));
+    }
+  },
+  "iniciar-periodo-nuevo": async function (el) {
+    if (hayPendientes()) {
+      window.alert("Hay cambios que todavía no terminan de guardarse en la hoja. Espera a que se guarden (o vuelva la conexión) y prueba otra vez.");
+      return;
+    }
+    var escrito = window.prompt(
+      "Esto archiva TODO lo de antes en una copia en tu Drive y deja la app sin pedidos, cotizaciones ni movimientos.\n\n" +
+      "Se conservan usuarios, clientes, catálogo, productos, plantillas, notas, deudas pendientes y configuración.\n\n" +
+      "Asegúrate de que nadie más esté usando la app. Para seguir, escribe EMPEZAR:"
+    );
+    if (escrito == null) return;
+    if (String(escrito).trim().toUpperCase() !== "EMPEZAR") { window.alert("No escribiste EMPEZAR: no se hizo nada."); return; }
+    if (el) { el.disabled = true; el.textContent = "Archivando y limpiando…"; }
+    try {
+      var r = await iniciarPeriodoNuevo({
+        fecha: todayStr(),
+        folderId: state.config.backupFolderId || "",
+        nuevaRev: function () { return uid() + ":" + Date.now(); }
+      });
+      window.alert("Listo. Lo de antes quedó en tu Drive como «" + (r.archivoNombre || "ARCHIVO") + "». La app se recarga ahora, ya limpia.");
+      window.location.reload();
+    } catch (e) {
+      if (el) { el.disabled = false; el.textContent = "Empezar periodo nuevo…"; }
+      window.alert("No se pudo terminar: " + (e && e.message ? e.message : e) + "\n\nSi ya se hizo la copia de archivo, puedes volver a intentarlo sin problema.");
     }
   },
   "agregar-miembro-equipo": async function () {
